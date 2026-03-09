@@ -46,7 +46,7 @@ Carefully read the inbound email and extract any information already provided:
 LTV:
 - Do NOT calculate or confirm LTV in Stage 1 — the accurate LTV will be determined from the completed Loan Application Form in Stage 2.
 - If the broker mentions an LTV figure in their email, acknowledge it as preliminary: e.g., "You've noted approximately 50% LTV — we'll confirm the exact figure once we review the completed application."
-- Do NOT state Franco's LTV limit (75%) unless the broker specifically asks about it.
+- Do NOT state Franco's LTV limit (80%) unless the broker specifically asks about it.
 
 WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - Exit strategy (how the borrower will repay / refinance out)
@@ -209,13 +209,15 @@ Review the email and all attached documents. Determine:
 
 2. HAS_PNW_STATEMENT: Is there a filled-out Personal Net Worth statement? Look for assets, liabilities, net worth totals.
 
-3. OWNERSHIP_TYPE: From the application form, determine:
+3. OWNERSHIP_TYPE: Determine from ALL available info (application form, email body, or any mention):
    - Who is the borrower? (individual or corporation)
    - Who owns the collateral/security property? (individual or corporation)
    - "personal" = individual borrows AND individual owns collateral
    - "corporate" = corporation borrows AND corporation owns collateral
    - "corporate_mixed" = individual borrows BUT corporation owns collateral (requires proof of ownership)
-   - null = cannot determine from available documents
+   - null = ONLY if absolutely no indication from any source
+
+   IMPORTANT: If the broker says "personal loan", "individual", "not corporate", or similar — treat as "personal". Default to "personal" if the borrower appears to be an individual person (not a company/corporation) unless there is explicit mention of corporate ownership.
 
 4. Update the deal summary JSON with any new information from the email and documents.
 
@@ -333,29 +335,50 @@ Private Mortgage Link`,
     }
   },
 
-  // Generate internal escalation notification to admin (LTV 75-95%)
-  generateEscalationNotification: async (dealSummary) => {
+  // Generate internal escalation notification to admin (LTV > 80%)
+  generateEscalationNotification: async (dealSummary, messages, documents) => {
     try {
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
+        max_tokens: 2048,
         messages: [{
           role: 'user',
-          content: `Generate an internal deal review notification email for a private mortgage deal that requires manual review due to a borderline LTV (75-95%).
+          content: `Generate an internal deal review notification email for a private mortgage deal that requires manual review due to LTV exceeding 80%.
 
 This is an internal email — not written as Franco, just a clear summary for review.
 
-Format as HTML with these sections:
-<h2>Deal Review Required — Borderline LTV</h2>
-- Borrower, broker, property address, loan amount, LTV
-- Loan type and purpose
-- Exit strategy
-- Documents received so far
-- Key risks or notes
-- A brief recommendation on what to look for
+IMPORTANT: Do NOT start with raw HTML tags. Start with a clean heading text. Format as clean HTML email.
+
+Sections to include:
+1. Heading: "Deal Review Required — LTV: X%" where X is the actual LTV percentage from the deal summary (e.g. "Deal Review Required — LTV: 90%")
+2. Borrower, broker, property address, loan amount, actual LTV percentage
+3. Loan type and purpose
+4. Exit strategy
+5. Documents received — just mention the count and that they are attached as a zip file to this email
+6. Key risks or notes
+7. A brief recommendation on what to look for
+
+8. FULL EMAIL CONVERSATION — include all broker emails below so Franco can review the full context. Label each with date and direction (inbound/outbound).
+
+Note: All documents are attached to this email as a zip file for Franco's review.
+
+At the bottom, include this action section:
+<hr>
+<h3>Action Required</h3>
+<p>Reply to this email with one of the following:</p>
+<ul>
+<li><strong>APPROVED</strong> — deal will move forward and broker will be asked for full document package</li>
+<li><strong>Any other reply</strong> — your message will be polished and forwarded to the broker as Franco</li>
+</ul>
 
 DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
+
+EMAIL CONVERSATION:
+${messages.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
+
+DOCUMENTS ON FILE:
+${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n') || 'None yet'}
 
 Return only the HTML email body.`,
         }],
@@ -608,9 +631,9 @@ Rate this deal as one of: GREAT, OKAY, or WEAK BUT WORKABLE.
 
 GREAT: Conservative LTV (60% or less), desirable/liquid property, clear exit, consistent file, responsive/transparent borrower. Multiple layers of protection. Moves quickly, prices well.
 
-OKAY: One or two elements are weak but not fatal. Higher LTV (up to 75%), limited debt serviceability, credit issues. Exit strategy still believable. Needs lender-specific structuring.
+OKAY: One or two elements are weak but not fatal. Higher LTV (up to 80%), limited debt serviceability, credit issues. Exit strategy still believable. Needs lender-specific structuring.
 
-WEAK BUT WORKABLE: Multiple risk factors (high LTV 75%+, poor credit, little income) BUT at least one strong compensating factor (exceptional property, additional collateral, forced-sale protection). Highly lender-specific, requires careful storytelling.
+WEAK BUT WORKABLE: Multiple risk factors (high LTV 80%+, poor credit, little income) BUT at least one strong compensating factor (exceptional property, additional collateral, forced-sale protection). Highly lender-specific, requires careful storytelling.
 
 Explain your rating in 2-3 sentences.
 
@@ -644,6 +667,118 @@ Return only the HTML. Do not include a subject line.`,
       return response.content[0].text.trim();
     } catch (error) {
       console.error('Claude lead summary error:', error);
+      throw error;
+    }
+  },
+
+  // Strip quoted/forwarded text from email replies (lines starting with > or "On ... wrote:" blocks)
+  stripQuotedText: (text) => {
+    if (!text) return '';
+    const lines = text.split('\n');
+    const freshLines = [];
+    for (const line of lines) {
+      // Stop at "On <date> ... wrote:" or "---------- Forwarded message" or similar
+      if (/^on .+ wrote:\s*$/i.test(line.trim())) break;
+      if (/^-{3,}\s*(original message|forwarded message)/i.test(line.trim())) break;
+      if (/^from:\s/i.test(line.trim()) && freshLines.length > 0 && /^(sent|to|date|subject):\s/i.test(lines[lines.indexOf(line) + 1]?.trim() || '')) break;
+      // Skip individually quoted lines (> prefix)
+      if (/^\s*>/.test(line)) continue;
+      freshLines.push(line);
+    }
+    return freshLines.join('\n').trim();
+  },
+
+  // Parse admin reply to determine intent using Claude (handles nuanced replies)
+  parseAdminReply: async (replyText) => {
+    const stripped = module.exports.stripQuotedText(replyText);
+    const text = (stripped || replyText || '').trim();
+
+    // Fast path: single-word replies don't need AI
+    if (/^(approved?|yes|go ahead|proceed|accepted?)\s*[.!]?\s*$/i.test(text)) {
+      return { intent: 'approved', message: text };
+    }
+    if (/^(reject(ed)?|decline[d]?|den(y|ied)|pass|kill)\s*[.!]?\s*$/i.test(text)) {
+      return { intent: 'rejected', message: text };
+    }
+
+    // Use Claude for anything ambiguous
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 20,
+        messages: [{
+          role: 'user',
+          content: `You are classifying an admin's email reply about a mortgage deal. The admin is deciding whether to approve, reject, or send conditions/notes to the broker.
+
+Reply with EXACTLY one word: APPROVED, REJECTED, or CONDITIONS.
+
+Rules:
+- APPROVED = the admin clearly wants the deal to move forward with NO caveats or additional requirements
+- REJECTED = the admin clearly wants to turn down/kill/pass on this deal entirely
+- CONDITIONS = anything else — questions, notes, partial approval with conditions, requests for more info, instructions to forward to broker
+
+Examples:
+- "Yes, go ahead but ask about the appraisal" → CONDITIONS (has caveats)
+- "Approved" → APPROVED
+- "I'd like to proceed, but reject the second mortgage portion" → CONDITIONS (mixed intent)
+- "Pass on this one" → REJECTED
+- "Not interested" → REJECTED
+- "Let's do it" → APPROVED
+- "Ask them for updated financials" → CONDITIONS
+
+ADMIN'S REPLY:
+"${text.replace(/"/g, '\\"')}"`,
+        }],
+      });
+
+      const result = response.content[0].text.trim().toLowerCase();
+      if (result.includes('approved')) return { intent: 'approved', message: text };
+      if (result.includes('rejected')) return { intent: 'rejected', message: text };
+      return { intent: 'conditions', message: text };
+    } catch (error) {
+      console.error('Claude intent parsing failed, defaulting to conditions:', error.message);
+      // Safe default: treat as conditions (Franco's message gets forwarded, no irreversible action)
+      return { intent: 'conditions', message: text };
+    }
+  },
+
+  // Generate polished email to broker based on admin's notes/conditions
+  generateAdminResponseEmail: async (dealSummary, adminNotes) => {
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: `You are writing an email on behalf of Franco Maione, a private mortgage lender at Private Mortgage Link.
+
+Franco has reviewed a deal and has the following notes/instructions for the broker:
+
+FRANCO'S NOTES:
+"${adminNotes}"
+
+DEAL DETAILS:
+Borrower: ${dealSummary?.borrower_name || 'Unknown'}
+Broker: ${dealSummary?.broker_name || 'Unknown'}
+LTV: ${dealSummary?.ltv_percent || 'Unknown'}%
+
+Write a professional, concise email to the broker conveying Franco's message. Write as Franco in first person.
+- Keep Franco's intent and key points, but make it professional
+- Do NOT add information Franco didn't mention
+- Use proper HTML formatting with <p> tags
+- Keep it short — Franco does not write long emails
+
+Sign off as:
+Franco Maione
+Private Mortgage Link
+
+Return only the HTML email body.`,
+        }],
+      });
+
+      return response.content[0].text.trim();
+    } catch (error) {
+      console.error('Claude admin response email error:', error);
       throw error;
     }
   },
@@ -714,6 +849,104 @@ IMPORTANT:
       return JSON.parse(text);
     } catch (error) {
       console.error('Claude deal summary update error:', error);
+      throw error;
+    }
+  },
+
+  // Generate document review notification for Franco (when docs are incomplete in Stage 3)
+  generateDocReviewNotification: async (dealSummary, messages, documents, missingDocs) => {
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: `Generate an internal document review email for Franco Maione, a private mortgage lender.
+
+A broker has submitted documents for a deal but some are still missing. Franco needs to review what's been received and decide how to proceed.
+
+IMPORTANT: Do NOT include \`\`\`html, <html>, <head>, <body>, or <!DOCTYPE> tags. Start directly with content.
+
+Sections to include:
+1. Heading: "Document Review Required — ${dealSummary?.borrower_name || 'Unknown'}"
+2. Deal details: borrower, broker, LTV, loan type
+3. Documents received so far (${documents.length} documents attached as zip)
+4. Documents still missing: ${missingDocs.join(', ')}
+5. Full email conversation for context
+
+At the bottom, include this action section:
+<hr>
+<h3>Action Required</h3>
+<p>Reply to this email with one of the following:</p>
+<ul>
+<li><strong>APPROVED</strong> — deal will be marked as complete even with missing documents</li>
+<li><strong>Any other reply</strong> — your message will be polished and forwarded to the broker as Franco</li>
+</ul>
+
+DEAL SUMMARY:
+${JSON.stringify(dealSummary, null, 2)}
+
+EMAIL CONVERSATION:
+${messages.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
+
+DOCUMENTS ON FILE:
+${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n') || 'None yet'}
+
+MISSING DOCUMENTS:
+${missingDocs.join(', ')}
+
+Return only the inner HTML content.`,
+        }],
+      });
+
+      let html = response.content[0].text.trim();
+      html = html.replace(/^```html?\n?/i, '').replace(/\n?```$/i, '');
+      return html.trim();
+    } catch (error) {
+      console.error('Claude doc review notification error:', error);
+      throw error;
+    }
+  },
+
+  // Generate daily summary email for Franco
+  generateDailySummary: async (summaryData) => {
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        messages: [{
+          role: 'user',
+          content: `Generate a daily summary email for Franco Maione, a private mortgage lender.
+
+This is an internal operations email — clean, scannable, and actionable.
+
+Format as clean HTML. Include these sections:
+
+1. **Overview** — Total active deals, total emails received in the past 24 hours.
+
+2. **Deals Requiring Your Action** — List any deals with status "ltv_escalated" that need Franco's approval/rejection. Include borrower name, LTV, and how long it's been waiting.
+
+3. **Emails Received (Past 24 Hours)** — ONLY inbound emails from brokers. For each, show: borrower name, subject, time, and a brief summary of the email content. Do NOT include outbound/sent emails.
+
+4. **All Current Deals** — List ALL active deals with: borrower name, broker email, status, LTV if known, and days since last update.
+
+5. **Stale Deals** — Flag any deals with no activity for 3+ days.
+
+Keep it concise. Use tables or bullet points. No fluff.
+
+IMPORTANT: Do NOT include \`\`\`html, <html>, <head>, <body>, or <!DOCTYPE> tags. Start directly with content like <h2>. Return only inner HTML.
+
+DATA:
+${JSON.stringify(summaryData, null, 2)}`,
+        }],
+      });
+
+      let html = response.content[0].text.trim();
+      html = html.replace(/^```html?\n?/i, '').replace(/\n?```$/i, '');
+      html = html.replace(/<!DOCTYPE[^>]*>/i, '').replace(/<\/?html[^>]*>/gi, '').replace(/<\/?head>[\s\S]*?<\/head>/gi, '').replace(/<\/?body[^>]*>/gi, '');
+      return html.trim();
+    } catch (error) {
+      console.error('Claude daily summary error:', error);
       throw error;
     }
   },

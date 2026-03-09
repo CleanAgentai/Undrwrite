@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 
+const DELAY_MS = 2.5 * 60 * 1000; // 2 minutes 30 seconds
+
 module.exports = {
   sendEmail: async (to, subject, textBody, htmlBody = null, attachments = []) => {
     try {
@@ -22,6 +24,27 @@ module.exports = {
     }
   },
 
+  // Send email with delay (fire-and-forget, saves message ID via onSent callback)
+  sendEmailDelayed: (to, subject, textBody, htmlBody = null, attachments = [], onSent = null) => {
+    console.log(`Email to ${to} queued — will send in 2m 30s`);
+    setTimeout(async () => {
+      try {
+        const result = await postmarkClient.sendEmail({
+          From: config.postmark.senderEmail,
+          To: to,
+          Subject: subject,
+          TextBody: textBody,
+          HtmlBody: htmlBody || textBody,
+          Attachments: attachments,
+        });
+        console.log('Delayed email sent:', result.MessageID);
+        if (onSent) await onSent(result);
+      } catch (error) {
+        console.error('Failed to send delayed email:', error);
+      }
+    }, DELAY_MS);
+  },
+
   getFormAttachments: () => {
     const formsDir = path.join(__dirname, '../../forms');
     const formFiles = [
@@ -38,6 +61,11 @@ module.exports = {
   },
 
   parseInboundEmail: (payload) => {
+    // Extract In-Reply-To from Postmark Headers array
+    const headers = payload.Headers || [];
+    const inReplyToHeader = headers.find(h => h.Name === 'In-Reply-To');
+    const referencesHeader = headers.find(h => h.Name === 'References');
+
     return {
       from: payload.From,
       fromName: payload.FromName,
@@ -47,6 +75,8 @@ module.exports = {
       htmlBody: payload.HtmlBody,
       attachments: payload.Attachments || [],
       messageId: payload.MessageID,
+      inReplyTo: inReplyToHeader ? inReplyToHeader.Value.trim() : null,
+      references: referencesHeader ? referencesHeader.Value.trim().split(/\s+/) : [],
       date: payload.Date,
     };
   },

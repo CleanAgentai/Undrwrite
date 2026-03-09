@@ -35,4 +35,7 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(config.port, () => {
   console.log(`Server running on port ${config.port} in ${config.nodeEnv} mode`);
+
+  // Start cron jobs
+  require('./cron/dailySummary');
 });

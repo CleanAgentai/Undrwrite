@@ -105,15 +105,43 @@ module.exports = {
   },
 
   // Save a message (inbound or outbound) linked to a deal
-  saveMessage: async (dealId, direction, subject, body) => {
+  saveMessage: async (dealId, direction, subject, body, externalMessageId = null) => {
+    const row = { deal_id: dealId, direction, subject, body };
+    if (externalMessageId) row.external_message_id = externalMessageId;
+
     const { data, error } = await supabase
       .from('messages')
-      .insert({ deal_id: dealId, direction, subject, body })
+      .insert(row)
       .select()
       .single();
 
     if (error) throw error;
     return data;
+  },
+
+  // Find deal by outbound message ID (for thread matching via In-Reply-To)
+  findByMessageId: async (messageId) => {
+    if (!messageId) return null;
+
+    // Extract the Postmark UUID from various formats:
+    // "41be2245-..." or "<41be2245-...@mtasv.net>" or "<41be2245-...>"
+    const cleaned = messageId.replace(/^</, '').replace(/>$/, '').split('@')[0];
+    console.log('findByMessageId — raw:', messageId, '→ cleaned:', cleaned);
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('deal_id')
+      .eq('external_message_id', cleaned)
+      .eq('direction', 'outbound')
+      .limit(1)
+      .single();
+
+    if (error && error.code === 'PGRST116') return null;
+    if (error) throw error;
+    if (!data) return null;
+
+    // Fetch the full deal
+    return module.exports.get(data.deal_id);
   },
 
   // Get all messages for a deal
@@ -284,5 +312,30 @@ module.exports = {
     }
     console.log(`Saved ${results.length}/${attachments.length} documents for deal ${dealId}`);
     return results;
+  },
+
+  // Get all active deals (not completed or rejected)
+  getActiveDeals: async () => {
+    const { data, error } = await supabase
+      .from('deals')
+      .select('*')
+      .not('status', 'in', '("completed","rejected")')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Get all messages from the past N hours
+  getRecentMessages: async (hours = 24) => {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*, deals(borrower_name, email, status)')
+      .gte('created_at', since)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return data || [];
   },
 };

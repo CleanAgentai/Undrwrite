@@ -3,6 +3,7 @@ require('dotenv').config();
 module.exports = {
   port: process.env.PORT || 3000,
   nodeEnv: process.env.NODE_ENV || 'development',
+  adminEmail: process.env.ADMIN_EMAIL,
   postmark: {
     apiToken: process.env.POSTMARK_API_TOKEN,
     senderEmail: process.env.POSTMARK_SENDER_EMAIL,
