@@ -156,6 +156,22 @@ module.exports = {
     return data;
   },
 
+  // Get the most recent inbound message for a deal
+  getLastInboundMessage: async (dealId) => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('created_at')
+      .eq('deal_id', dealId)
+      .eq('direction', 'inbound')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code === 'PGRST116') return null;
+    if (error) throw error;
+    return data;
+  },
+
   // Upload attachment to Supabase Storage and save record to documents table
   saveDocument: async (dealId, attachment) => {
     const buffer = Buffer.from(attachment.Content, 'base64');

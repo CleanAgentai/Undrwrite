@@ -4,11 +4,92 @@ const dealsService = require('../services/deals');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
 
+const FOLLOW_UP_AFTER_DAYS = 2;
+const MAX_REMINDERS = 3;
+
+// Send follow-up reminders to brokers who haven't replied
+const runFollowUpReminders = async () => {
+  console.log('\n--- Checking for stale deals needing follow-up ---');
+
+  const activeDeals = await dealsService.getActiveDeals();
+  // Only follow up on deals waiting for the broker (not Franco)
+  const brokerWaiting = activeDeals.filter(d =>
+    d.status === 'documents_requested' || d.status === 'pending_documents'
+  );
+
+  let remindersSent = 0;
+  const remindersLog = []; // Track which deals got reminders for the daily summary
+
+  for (const deal of brokerWaiting) {
+    const reminderCount = deal.reminder_count || 0;
+    if (reminderCount >= MAX_REMINDERS) {
+      console.log(`Deal ${deal.id} (${deal.borrower_name}) — max reminders reached (${reminderCount}), skipping`);
+      continue;
+    }
+
+    const lastInbound = await dealsService.getLastInboundMessage(deal.id);
+    if (!lastInbound) continue;
+
+    const daysSilent = (Date.now() - new Date(lastInbound.created_at).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSilent < FOLLOW_UP_AFTER_DAYS) continue;
+
+    // Check that we haven't already sent a reminder today (avoid double-sends on CRON overlap)
+    const lastOutbound = await dealsService.getMessages(deal.id);
+    const lastOut = lastOutbound.filter(m => m.direction === 'outbound').pop();
+    if (lastOut) {
+      const hoursSinceLastOut = (Date.now() - new Date(lastOut.created_at).getTime()) / (1000 * 60 * 60);
+      if (hoursSinceLastOut < 20) {
+        console.log(`Deal ${deal.id} (${deal.borrower_name}) — outbound sent ${Math.round(hoursSinceLastOut)}h ago, skipping`);
+        continue;
+      }
+    }
+
+    const newReminderNumber = reminderCount + 1;
+    console.log(`Deal ${deal.id} (${deal.borrower_name}) — ${Math.round(daysSilent)} days silent, sending reminder #${newReminderNumber}`);
+
+    try {
+      const reminderEmail = await aiService.generateFollowUpReminder(
+        deal.extracted_data,
+        daysSilent,
+        newReminderNumber,
+        deal.status
+      );
+
+      const borrowerName = deal.extracted_data?.borrower_name || deal.borrower_name;
+      const result = await emailService.sendEmail(
+        deal.email,
+        `Re: ${borrowerName || 'Your Loan Inquiry'}`,
+        reminderEmail.replace(/<[^>]*>/g, ''),
+        reminderEmail
+      );
+
+      await dealsService.saveMessage(deal.id, 'outbound', `Re: ${borrowerName || 'Your Loan Inquiry'}`, reminderEmail, result.MessageID);
+      await dealsService.update(deal.id, { reminder_count: newReminderNumber });
+      remindersSent++;
+      remindersLog.push({
+        borrower: deal.borrower_name,
+        email: deal.email,
+        daysSilent: Math.round(daysSilent),
+        reminderNumber: newReminderNumber,
+      });
+      console.log(`Reminder #${newReminderNumber} sent to ${deal.email}`);
+    } catch (err) {
+      console.error(`Failed to send reminder for deal ${deal.id}:`, err.message);
+    }
+  }
+
+  console.log(`Follow-up reminders sent: ${remindersSent}`);
+  return remindersLog;
+};
+
 const runDailySummary = async () => {
   console.log('\n========== DAILY SUMMARY CRON ==========');
   console.log('Timestamp:', new Date().toISOString());
 
   try {
+    // Send follow-up reminders first and capture which deals got them
+    const remindersLog = await runFollowUpReminders();
+
     const activeDeals = await dealsService.getActiveDeals();
     const recentMessages = await dealsService.getRecentMessages(24);
 
@@ -56,9 +137,16 @@ const runDailySummary = async () => {
         email: d.email,
         status: d.status,
         ltv: d.ltv,
+        reminderCount: d.reminder_count || 0,
         created: d.created_at,
         updated: d.updated_at,
       })),
+      automatedReminders: {
+        sentToday: remindersLog,
+        dealsAtMaxReminders: activeDeals
+          .filter(d => (d.reminder_count || 0) >= MAX_REMINDERS)
+          .map(d => ({ borrower: d.borrower_name, email: d.email, status: d.status })),
+      },
     };
 
     const summaryEmail = await aiService.generateDailySummary(summaryData);

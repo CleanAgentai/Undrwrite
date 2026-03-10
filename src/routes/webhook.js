@@ -256,8 +256,11 @@ router.post('/inbound', async (req, res) => {
       // EXISTING CLIENT - follow-up email
       console.log('Existing deal found:', existingDeal.id, 'Status:', existingDeal.status);
 
-      // Save inbound message
+      // Save inbound message and reset reminder count (broker replied)
       await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody);
+      if (existingDeal.reminder_count > 0) {
+        await dealsService.update(existingDeal.id, { reminder_count: 0 });
+      }
 
       // Save attachments first — extracts text once, stores in Supabase
       let savedDocs = [];

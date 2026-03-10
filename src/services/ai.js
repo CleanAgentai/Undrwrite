@@ -507,6 +507,51 @@ Return only the HTML email body. Do not include a subject line.`,
     }
   },
 
+  // Generate follow-up reminder email for stale deals (broker hasn't replied)
+  generateFollowUpReminder: async (dealSummary, daysSilent, reminderNumber, dealStatus) => {
+    try {
+      const whatWeNeed = dealStatus === 'documents_requested'
+        ? 'the completed Loan Application Form and PNW Statement, along with any missing information (LTV details, ownership type)'
+        : 'the outstanding documents listed in our previous email';
+
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: `You are Vienna, the assistant to Franco Maione, a private mortgage lender at Private Mortgage Link. Write a short, friendly follow-up email to a broker who hasn't replied.
+
+It has been ${Math.round(daysSilent)} days since we last heard from them. This is follow-up reminder #${reminderNumber}.
+
+We are still waiting for: ${whatWeNeed}
+
+DEAL DETAILS:
+Borrower: ${dealSummary?.borrower_name || 'Unknown'}
+Broker: ${dealSummary?.broker_name || 'Unknown'}
+
+TONE:
+- Reminder #1: Friendly nudge — "Just following up" / "Wanted to check in"
+- Reminder #2: Slightly more direct — "We'd love to keep this moving" / "Please let us know if you're still interested"
+- Reminder #3: Final follow-up — "If we don't hear back, we'll close this file for now. You're welcome to reach out again anytime."
+
+EMAIL RULES:
+- Write as Vienna in first person
+- Keep it SHORT — 2-3 sentences max
+- Do NOT re-list every document needed — just reference "the items we previously requested"
+- Use proper HTML formatting with <p> tags
+- Sign off as: Vienna\\nPrivate Mortgage Link
+
+Return only the HTML email body.`,
+        }],
+      });
+
+      return response.content[0].text.trim();
+    } catch (error) {
+      console.error('Claude follow-up reminder error:', error);
+      throw error;
+    }
+  },
+
   // Classify an image using Claude vision (for images that couldn't be classified by filename)
   classifyImage: async (base64Content, contentType, fileName) => {
     try {
@@ -931,6 +976,8 @@ Format as clean HTML. Include these sections:
 4. **All Current Deals** — List ALL active deals with: borrower name, broker email, status, LTV if known, and days since last update.
 
 5. **Stale Deals** — Flag any deals with no activity for 3+ days.
+
+6. **Automated Follow-Up Reminders** — If any automated reminders were sent today by Vienna, list them (borrower name, broker email, which reminder # it was, and how many days silent). Also flag any deals that have hit the maximum 3 reminders with no response — these need your personal attention or a decision to close.
 
 Keep it concise. Use tables or bullet points. No fluff.
 
