@@ -6,16 +6,18 @@ const config = require('../config');
 const DELAY_MS = 2.5 * 60 * 1000; // 2 minutes 30 seconds
 
 module.exports = {
-  sendEmail: async (to, subject, textBody, htmlBody = null, attachments = []) => {
+  sendEmail: async (to, subject, textBody, htmlBody = null, attachments = [], headers = []) => {
     try {
-      const result = await postmarkClient.sendEmail({
+      const emailData = {
         From: config.postmark.senderEmail,
         To: to,
         Subject: subject,
         TextBody: textBody,
         HtmlBody: htmlBody || textBody,
         Attachments: attachments,
-      });
+      };
+      if (headers.length > 0) emailData.Headers = headers;
+      const result = await postmarkClient.sendEmail(emailData);
       console.log('Email sent:', result.MessageID);
       return result;
     } catch (error) {

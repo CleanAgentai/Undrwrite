@@ -164,12 +164,12 @@ const runDailySummary = async () => {
   }
 };
 
-// Run every day at 5:00 PM MST
-cron.schedule('0 17 * * *', runDailySummary, {
+// Run every day at 9:00 PM MST
+cron.schedule('0 21 * * *', runDailySummary, {
   timezone: 'America/Edmonton',
 });
 
-console.log('Daily summary cron scheduled — runs at 5:00 PM MST');
+console.log('Daily summary cron scheduled — runs at 9:00 PM MST');
 
 // Export for manual triggering/testing
 module.exports = { runDailySummary };

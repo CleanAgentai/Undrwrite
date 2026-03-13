@@ -788,6 +788,79 @@ ADMIN'S REPLY:
     }
   },
 
+  // Parse admin's reply to a draft preview — is it a confirmation to send, or edit instructions?
+  parseDraftReply: async (replyText) => {
+    const stripped = module.exports.stripQuotedText(replyText);
+    const text = (stripped || replyText || '').trim();
+
+    // Use Claude to classify Franco's reply
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 20,
+        messages: [{
+          role: 'user',
+          content: `You are classifying an admin's reply to a draft email preview. The admin was asked to reply "SEND" to confirm or reply with edits.
+
+Reply with EXACTLY one word: SEND or EDIT.
+
+Rules:
+- SEND = the admin is confirming/approving the draft to be sent as-is (e.g. "looks good", "send it", "yes", "ok", "perfect", "go ahead", "👍", "approved")
+- EDIT = the admin wants changes to the draft (e.g. "make it shorter", "change the part about...", "add something about...", any specific instructions)
+
+ADMIN'S REPLY:
+"${text.replace(/"/g, '\\"')}"`,
+        }],
+      });
+
+      const result = response.content[0].text.trim().toLowerCase();
+      if (result.includes('send')) return { action: 'send' };
+      return { action: 'edit', editInstructions: text };
+    } catch (error) {
+      console.error('Claude draft reply parsing failed, defaulting to edit:', error.message);
+      return { action: 'edit', editInstructions: text };
+    }
+  },
+
+  // Revise a draft email based on Franco's edit instructions
+  reviseEmailWithEdits: async (originalDraft, editInstructions, dealSummary) => {
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: `You are Vienna, the assistant to Franco Maione, a private mortgage lender at Private Mortgage Link.
+
+You previously drafted an email to a broker. Franco has reviewed it and wants changes.
+
+ORIGINAL DRAFT:
+${originalDraft}
+
+FRANCO'S EDIT INSTRUCTIONS:
+"${editInstructions}"
+
+DEAL DETAILS:
+Borrower: ${dealSummary?.borrower_name || 'Unknown'}
+Broker: ${dealSummary?.broker_name || 'Unknown'}
+
+Rewrite the email incorporating Franco's changes. Keep the same warm, friendly tone.
+- Apply Franco's edits precisely
+- Do NOT add information Franco didn't mention
+- Keep the same HTML formatting
+- Sign off as: Vienna\\nPrivate Mortgage Link
+
+Return only the revised HTML email body.`,
+        }],
+      });
+
+      return response.content[0].text.trim();
+    } catch (error) {
+      console.error('Claude email revision error:', error);
+      throw error;
+    }
+  },
+
   // Generate polished email to broker based on admin's notes/conditions
   generateAdminResponseEmail: async (dealSummary, adminNotes) => {
     try {

@@ -84,13 +84,100 @@ router.post('/inbound', async (req, res) => {
       console.log('Admin reply detected for deal:', existingDeal.id, 'Status:', existingDeal.status);
       await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody);
 
+      const borrowerSubject = `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`;
+
+      // --- DRAFT REVIEW HANDLING ---
+      // If draft_action is set, Franco is reviewing a draft preview
+      if (existingDeal.draft_action && (existingDeal.status === 'ltv_escalated' || existingDeal.status === 'under_review')) {
+        console.log('Draft pending — checking if Franco wants to send or edit');
+        const { action, editInstructions } = await aiService.parseDraftReply(email.textBody);
+
+        // Helper: send draft to broker and advance deal
+        const executeDraft = async (draftEmail, draftSubject, draftAction) => {
+          emailService.sendEmailDelayed(
+            existingDeal.email,
+            draftSubject,
+            draftEmail.replace(/<[^>]*>/g, ''),
+            draftEmail,
+            [],
+            async (result) => {
+              await dealsService.saveMessage(existingDeal.id, 'outbound', draftSubject, draftEmail, result.MessageID);
+              console.log('Draft sent to broker');
+            }
+          );
+
+          // Advance status based on action
+          if (draftAction === 'approval_doc_request') {
+            await dealsService.update(existingDeal.id, { status: 'pending_documents', draft_email: null, draft_subject: null, draft_action: null });
+            console.log('Deal status: pending_documents');
+          } else if (draftAction === 'rejection') {
+            await dealsService.update(existingDeal.id, { status: 'rejected', draft_email: null, draft_subject: null, draft_action: null });
+            console.log('Deal status: rejected');
+          } else if (draftAction === 'approval_completed') {
+            await dealsService.update(existingDeal.id, { status: 'completed', draft_email: null, draft_subject: null, draft_action: null });
+            console.log('Deal status: completed');
+          } else {
+            // conditions — status stays, just clear draft
+            await dealsService.update(existingDeal.id, { draft_email: null, draft_subject: null, draft_action: null });
+            console.log('Conditions sent to broker, status unchanged');
+          }
+        };
+
+        if (action === 'send') {
+          console.log('Franco confirmed — sending draft as-is');
+          await executeDraft(existingDeal.draft_email, existingDeal.draft_subject, existingDeal.draft_action);
+        } else {
+          console.log('Franco wants edits — revising and sending immediately');
+          const revisedEmail = await aiService.reviseEmailWithEdits(
+            existingDeal.draft_email,
+            editInstructions,
+            existingDeal.extracted_data
+          );
+          await executeDraft(revisedEmail, existingDeal.draft_subject, existingDeal.draft_action);
+        }
+        return;
+      }
+
+      // --- FIRST REPLY HANDLING (no draft pending) ---
+      // Helper: save draft and send preview to Franco (replies in same thread)
+      const saveDraftAndPreview = async (draftEmail, draftSubject, draftAction) => {
+        await dealsService.update(existingDeal.id, {
+          draft_email: draftEmail,
+          draft_subject: draftSubject,
+          draft_action: draftAction,
+        });
+
+        const borrowerName = existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name;
+        const previewHtml = `<h3>Draft Email Preview — ${borrowerName}</h3>
+<p>Here's what Vienna will send to <strong>${existingDeal.email}</strong>:</p>
+<hr>
+${draftEmail}
+<hr>
+<p><strong>Reply SEND to confirm, or reply with your edits.</strong></p>`;
+
+        // Reply in the same thread as Franco's message
+        const threadHeaders = email.messageId
+          ? [{ Name: 'In-Reply-To', Value: `<${email.messageId}>` }]
+          : [];
+
+        const previewResult = await emailService.sendEmail(
+          config.adminEmail,
+          `Re: ${email.subject}`,
+          previewHtml.replace(/<[^>]*>/g, ''),
+          previewHtml,
+          [],
+          threadHeaders
+        );
+        await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, previewHtml, previewResult.MessageID);
+        console.log('Draft saved and preview sent to Franco (same thread)');
+      };
+
       if (existingDeal.status === 'ltv_escalated') {
         const { intent, message } = await aiService.parseAdminReply(email.textBody);
         console.log('Admin intent:', intent);
 
         if (intent === 'approved') {
-          // Approved — move to pending_documents, send broker doc request
-          console.log('Deal approved by admin — advancing to pending_documents');
+          console.log('Deal approved by admin — generating draft doc request');
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
           const docRequestEmail = await aiService.generateDocumentRequestEmail(
             existingDeal.extracted_data,
@@ -99,89 +186,33 @@ router.post('/inbound', async (req, res) => {
             existingDeal.has_pnw_statement,
             existingDocs
           );
-          await dealsService.update(existingDeal.id, { status: 'pending_documents' });
-          emailService.sendEmailDelayed(
-            existingDeal.email,
-            `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`,
-            docRequestEmail.replace(/<[^>]*>/g, ''),
-            docRequestEmail,
-            [],
-            async (result) => {
-              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`, docRequestEmail, result.MessageID);
-              console.log('Document request sent to broker, deal status: pending_documents');
-            }
-          );
+          await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
         } else if (intent === 'rejected') {
-          // Rejected — update status and send rejection email to broker
-          console.log('Deal rejected by admin');
+          console.log('Deal rejected by admin — generating draft rejection');
           const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data);
-          await dealsService.update(existingDeal.id, { status: 'rejected' });
-          emailService.sendEmailDelayed(
-            existingDeal.email,
-            `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`,
-            rejectionEmail.replace(/<[^>]*>/g, ''),
-            rejectionEmail,
-            [],
-            async (result) => {
-              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`, rejectionEmail, result.MessageID);
-              console.log('Rejection email sent to broker, deal status: rejected');
-            }
-          );
+          await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
-          // Conditions/notes — AI polishes Franco's reply and sends to broker
-          console.log('Admin sent conditions/notes — forwarding to broker');
+          console.log('Admin sent conditions/notes — generating draft response');
           const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message);
-          emailService.sendEmailDelayed(
-            existingDeal.email,
-            `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`,
-            polishedEmail.replace(/<[^>]*>/g, ''),
-            polishedEmail,
-            [],
-            async (result) => {
-              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`, polishedEmail, result.MessageID);
-              console.log('Polished admin response sent to broker, deal stays in ltv_escalated');
-            }
-          );
+          await saveDraftAndPreview(polishedEmail, borrowerSubject, 'conditions');
         }
       } else if (existingDeal.status === 'under_review') {
         const { intent, message } = await aiService.parseAdminReply(email.textBody);
         console.log('Admin intent for under_review deal:', intent);
 
         if (intent === 'approved') {
-          // Franco approves despite missing docs — mark completed
-          console.log('Deal approved by admin despite missing docs — marking completed');
-          await dealsService.update(existingDeal.id, { status: 'completed' });
-          console.log('Deal status: completed');
+          // No email to broker for approval — just complete. But still draft it for confirmation.
+          console.log('Deal approved by admin despite missing docs — confirming via draft');
+          const approvalNotice = `<p>Hi there! Just a quick note — Franco has reviewed your file and we're good to move forward. We'll be in touch if we need anything else!</p><p>Vienna<br>Private Mortgage Link</p>`;
+          await saveDraftAndPreview(approvalNotice, borrowerSubject, 'approval_completed');
         } else if (intent === 'rejected') {
-          console.log('Deal rejected by admin');
+          console.log('Deal rejected by admin — generating draft rejection');
           const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data);
-          await dealsService.update(existingDeal.id, { status: 'rejected' });
-          emailService.sendEmailDelayed(
-            existingDeal.email,
-            `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`,
-            rejectionEmail.replace(/<[^>]*>/g, ''),
-            rejectionEmail,
-            [],
-            async (result) => {
-              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`, rejectionEmail, result.MessageID);
-              console.log('Rejection email sent to broker, deal status: rejected');
-            }
-          );
+          await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
-          // Conditions/notes — forward to broker
-          console.log('Admin sent conditions/notes for under_review deal — forwarding to broker');
+          console.log('Admin sent conditions/notes for under_review deal — generating draft');
           const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message);
-          emailService.sendEmailDelayed(
-            existingDeal.email,
-            `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`,
-            polishedEmail.replace(/<[^>]*>/g, ''),
-            polishedEmail,
-            [],
-            async (result) => {
-              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`, polishedEmail, result.MessageID);
-              console.log('Polished admin response sent to broker, deal stays in under_review');
-            }
-          );
+          await saveDraftAndPreview(polishedEmail, borrowerSubject, 'conditions');
         }
       } else {
         console.log(`Admin replied to deal in status ${existingDeal.status} — no escalation action taken`);
