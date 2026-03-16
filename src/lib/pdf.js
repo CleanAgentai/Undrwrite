@@ -18,6 +18,12 @@ const isFormLikeText = (text) => {
   return shortRatio > 0.7 && !hasMoneyAmounts && !hasParagraphs;
 };
 
+// Check if filename indicates a high-value document that should get both text + base64
+const isDualPathDocument = (fileName) => {
+  const name = fileName.toLowerCase();
+  return /application|summary|appraisal/.test(name);
+};
+
 // Build Claude content blocks from raw attachments + already-extracted text from savedDocs
 // savedDocs is the array returned by dealsService.saveAttachments (may be empty for existing client if no attachments)
 const buildContentBlocks = async (attachments, savedDocs = []) => {
@@ -30,12 +36,20 @@ const buildContentBlocks = async (attachments, savedDocs = []) => {
 
     if (att.ContentType === 'application/pdf') {
       if (preExtractedText && preExtractedText.length >= MIN_TEXT_LENGTH && !isFormLikeText(preExtractedText)) {
-        // Use already-extracted text — no need to re-run pdf-parse
+        // Use already-extracted text
         console.log(`  [PDF] ${att.Name}: using pre-extracted ${preExtractedText.length} chars (~${Math.round(preExtractedText.length / 4)} tokens)`);
         blocks.push({
           type: 'text',
           text: `=== Document: ${att.Name} ===\n${preExtractedText}`,
         });
+        // Dual path: also send base64 for application/summary/appraisal docs so Claude sees the full layout
+        if (isDualPathDocument(att.Name)) {
+          console.log(`  [PDF] ${att.Name}: dual-path — also sending base64 for full visual analysis`);
+          blocks.push({
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: att.Content },
+          });
+        }
       } else if (preExtractedText && isFormLikeText(preExtractedText)) {
         // Form-like PDF (AcroForm) — pdf-parse only gets template labels, not filled values
         console.log(`  [PDF] ${att.Name}: form-like document detected, sending as base64 for full field reading`);

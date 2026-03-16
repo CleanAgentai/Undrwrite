@@ -13,9 +13,7 @@ const runFollowUpReminders = async () => {
 
   const activeDeals = await dealsService.getActiveDeals();
   // Only follow up on deals waiting for the broker (not Franco)
-  const brokerWaiting = activeDeals.filter(d =>
-    d.status === 'documents_requested' || d.status === 'pending_documents'
-  );
+  const brokerWaiting = activeDeals.filter(d => d.status === 'active');
 
   let remindersSent = 0;
   const remindersLog = []; // Track which deals got reminders for the daily summary
@@ -51,8 +49,7 @@ const runFollowUpReminders = async () => {
       const reminderEmail = await aiService.generateFollowUpReminder(
         deal.extracted_data,
         daysSilent,
-        newReminderNumber,
-        deal.status
+        newReminderNumber
       );
 
       const borrowerName = deal.extracted_data?.borrower_name || deal.borrower_name;

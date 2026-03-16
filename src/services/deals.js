@@ -70,7 +70,7 @@ module.exports = {
   create: async ({ email, borrower_name }) => {
     const { data, error } = await supabase
       .from('deals')
-      .insert({ email, borrower_name, status: 'new' })
+      .insert({ email, borrower_name, status: 'active' })
       .select()
       .single();
 

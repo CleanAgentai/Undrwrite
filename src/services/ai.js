@@ -57,15 +57,12 @@ WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - Loan amount (only if not stated)
 - LTV (only if you cannot calculate it)
 
-FORMS & DOCUMENTS — ALWAYS REQUEST THESE:
-- You are attaching three blank forms that the broker MUST fill out and return:
-  1. Loan Application Form — must be completed by the borrower/broker
-  2. PNW (Personal Net Worth) Statement Form — must be completed by the borrower
-  3. Union Borrower Intake Form — outlines all documents we will require as we move along in the process
-- ALWAYS ask the broker to fill out and return the Loan Application and PNW Statement, even if they sent other documents
-- If the broker already sent their OWN application or PNW on a different format, that is acceptable — mention that our forms are attached as an alternative if they prefer to use ours
-- The intake form is for their reference so they know what documents to gather
-- If the sender attached other documents (credit bureau, appraisal, AML, etc.), acknowledge receipt of those — but still request the Application and PNW forms be completed
+FORMS & DOCUMENTS:
+- PNW (Personal Net Worth) Statement Form is attached — ask the broker to have the borrower fill it out and return it.
+- If the sender attached other documents (credit bureau, appraisal, AML, etc.), acknowledge receipt of those.
+- Do NOT mention the Borrower Intake Form — it is not attached in this initial email.
+
+{{APPLICATION_FORM_INSTRUCTIONS}}
 
 EXAMPLE EMAILS FOR REFERENCE (adapt these to Vienna's voice):
 
@@ -129,7 +126,7 @@ You MUST return your response in this EXACT format with these exact delimiters:
 
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
-  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = []) => {
+  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -138,9 +135,15 @@ module.exports = {
         ? `\n\nThe sender attached ${attachments.length} file(s): ${attachmentNames}\nThe supported attachments have been provided above for you to review.`
         : '\n\nNo attachments were included with this email.';
 
+      const appFormInstructions = hasOwnApplication
+        ? 'LOAN APPLICATION FORM:\n- The broker has ALREADY submitted their own loan application form. Do NOT ask them to fill out ours. Acknowledge that you received their application.'
+        : 'LOAN APPLICATION FORM:\n- The Loan Application Form is attached — ask the broker to have the borrower fill it out and return it. If they already have their own application form filled out, that is acceptable too.';
+
+      const prompt = INITIAL_EMAIL_PROMPT.replace('{{APPLICATION_FORM_INSTRUCTIONS}}', appFormInstructions);
+
       content.push({
         type: 'text',
-        text: `${INITIAL_EMAIL_PROMPT}
+        text: `${prompt}
 
 The sender's name is: ${senderName || 'Unknown'}
 
@@ -182,8 +185,8 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
     }
   },
 
-  // Stage 2: Analyze broker's reply — check if required forms are present, extract ownership type, update summary
-  analyzeStage2Submission: async (emailBody, attachments = [], savedDocs = [], existingSummary) => {
+  // Conversational broker response — reads full context and responds naturally
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = []) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -191,76 +194,105 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
         ? attachments.map(a => a.Name).join(', ')
         : 'none';
 
+      const docsList = documentsOnFile.length > 0
+        ? documentsOnFile.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n')
+        : 'None yet';
+
+      const convoText = conversationHistory.length > 0
+        ? conversationHistory.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\n${m.body}`).join('\n\n---\n\n')
+        : 'No previous messages';
+
+      // Standard doc checklist
+      const standardDocs = [
+        'Government-Issued ID',
+        'Property Appraisal',
+        'Property Tax Assessment',
+        'Notice of Assessments (NOAs)',
+        'Current Mortgage Balance Statement',
+        'Income Verification',
+        'Loan Application Form (ours or broker\'s own)',
+        'PNW Statement (ours or broker\'s own)',
+      ];
+
       content.push({
         type: 'text',
-        text: `You are analyzing a broker's reply email for Private Mortgage Link, a private mortgage lender.
+        text: `You are Vienna, the assistant to Franco Maione, a private mortgage lender at Private Mortgage Link. You are having an email conversation with a broker about a mortgage deal.
 
-The broker was previously sent a welcome email with three forms to fill out:
-1. Loan Application Form — captures borrower info, property details, loan request, and collateral ownership
-2. PNW Statement Form (Personal Net Worth) — captures borrower's assets, liabilities, and net worth
-3. Union Borrower Intake Form — document checklist only, does not need to be filled
+You have TWO tasks. Return both using the exact format at the bottom.
 
-You have TWO tasks. Return both in the exact format at the bottom.
+=== TASK 1: RESPOND TO THE BROKER ===
 
-=== TASK 1: ANALYZE SUBMISSION ===
+Read the FULL conversation history and the broker's latest email. Then write a natural, conversational response.
 
-Review the email and all attached documents. Determine:
+PRIORITY ORDER — handle these in order:
+1. ANSWER any questions the broker asked — this is your #1 job. Never ignore a question.
+2. ADDRESS any concerns, pushback, or frustration — acknowledge it, apologize if Vienna made a mistake, and fix it.
+3. ACKNOWLEDGE any new documents or information received — be specific about what you got.
+4. ONLY THEN, if appropriate, mention what's still needed — but keep it brief and natural, not a checklist dump.
 
-1. HAS_APPLICATION_FORM: Is there a filled-out loan application form? Look for fields like borrower name, property address, loan amount requested, existing mortgage details, borrower/guarantor signatures.
+CONVERSATIONAL RULES:
+- Be a helpful colleague, not a form processor. Read the room — if the broker is frustrated, don't respond with a document checklist.
+- If the broker sent info that contradicts what you previously said → correct yourself naturally and apologize.
+- Do NOT repeat information already discussed in the conversation.
+- Do NOT ask for documents that have already been received (check the documents on file list).
+- Do NOT rush to "approve" or move forward — focus on the current conversation. If the broker has questions, answer them first.
+- Do NOT dump the entire missing document list at once — mention 2-3 items max per email, prioritizing the most important ones.
+- If the broker already provided an appraisal dated within the last 6 months, it is current — do NOT ask if it needs to be updated.
+- Be warm, friendly, and concise — use exclamation marks naturally to sound upbeat.
+- Use HTML with <p> tags.
+- Sign off as: Vienna\\nPrivate Mortgage Link
 
-2. HAS_PNW_STATEMENT: Is there a filled-out Personal Net Worth statement? Look for assets, liabilities, net worth totals.
+STANDARD DOCUMENT CHECKLIST (only ask for what's NOT already received):
+${standardDocs.map(d => `- ${d}`).join('\n')}
 
-3. OWNERSHIP_TYPE: Determine from ALL available info (application form, email body, or any mention):
-   - Who is the borrower? (individual or corporation)
-   - Who owns the collateral/security property? (individual or corporation)
+For the Application Form and PNW Statement — if the broker already submitted their own version, do NOT ask for ours. Only mention our forms if they haven't provided any application or net worth statement at all.
+
+=== TASK 2: UPDATE DEAL ANALYSIS ===
+
+Based on the latest email and any new attachments, update the deal analysis:
+
+1. Update the deal summary JSON with any new information
+2. Determine ownership type if possible:
    - "personal" = individual borrows AND individual owns collateral
    - "corporate" = corporation borrows AND corporation owns collateral
-   - "corporate_mixed" = individual borrows BUT corporation owns collateral (requires proof of ownership)
-   - null = ONLY if absolutely no indication from any source
-
-   IMPORTANT: If the broker says "personal loan", "individual", "not corporate", or similar — treat as "personal". Default to "personal" if the borrower appears to be an individual person (not a company/corporation) unless there is explicit mention of corporate ownership.
-
-4. Update the deal summary JSON with any new information from the email and documents.
+   - "corporate_mixed" = individual borrows BUT corporation owns collateral
+   - null = cannot determine yet
+   Default to "personal" if the borrower appears to be an individual person.
+3. Check if a loan application form was included (broker's own counts too)
+4. Check if a PNW statement was included (broker's own counts too)
 
 EXISTING DEAL SUMMARY:
 ${JSON.stringify(existingSummary, null, 2)}
 
-BROKER'S EMAIL:
+CONVERSATION HISTORY:
+${convoText}
+
+DOCUMENTS ALREADY ON FILE:
+${docsList}
+
+BROKER'S LATEST EMAIL:
 ---
 ${emailBody}
 ---
 
-Attached files: ${attachmentNames}
-The supported attachments have been provided above for review.
-
-=== TASK 2: REMINDER EMAIL (only if LTV or ownership type cannot be determined) ===
-
-If you CANNOT determine the LTV (not enough info to calculate) OR you CANNOT determine the ownership type (personal vs corporate), write a short email as Vienna (Franco's assistant) asking the broker for the missing information. Be concise and direct.
-
-If you CAN determine both LTV and ownership type, skip Task 2 entirely — do not generate a reminder email.
-
-EMAIL FORMATTING:
-- Write as Vienna in first person
-- Use HTML with <p> tags
-- Sign off as: Vienna\\nPrivate Mortgage Link
+New attachments: ${attachmentNames}
+${attachments.length > 0 ? 'The supported attachments have been provided above for review.' : ''}
 
 === RESPONSE FORMAT ===
 
+---EMAIL---
+(your HTML response email to the broker)
+---END_EMAIL---
 ---ANALYSIS---
 {
+  "updated_summary": { ...full updated deal summary JSON... },
+  "ownership_type": "personal | corporate | corporate_mixed | null",
   "has_application_form": boolean,
   "has_pnw_statement": boolean,
-  "forms_complete": boolean,
-  "missing_forms": ["list of missing form names, empty if complete"],
-  "ownership_type": "personal | corporate | corporate_mixed | null",
-  "borrower_entity_type": "individual | corporation | null",
-  "collateral_owner_type": "individual | corporation | null",
-  "updated_summary": { ...full updated deal summary JSON using same structure as existing... }
+  "ltv_percent": number or null,
+  "all_docs_received": boolean
 }
----END_ANALYSIS---
----REMINDER_EMAIL---
-(HTML reminder email body — ONLY include this section if forms_complete is false)
----END_REMINDER_EMAIL---`,
+---END_ANALYSIS---`,
       });
 
       const response = await callClaude({
@@ -271,32 +303,32 @@ EMAIL FORMATTING:
 
       const text = response.content[0].text;
 
-      // Parse analysis JSON
-      const analysisMatch = text.match(/---ANALYSIS---([\s\S]*?)---END_ANALYSIS---/);
-      if (!analysisMatch) throw new Error('Could not parse Stage 2 analysis response');
-      let jsonText = analysisMatch[1].trim();
-      if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
-      }
-      const analysis = JSON.parse(jsonText);
+      // Parse email
+      const emailMatch = text.match(/---EMAIL---([\s\S]*?)---END_EMAIL---/);
+      const responseEmail = emailMatch ? emailMatch[1].trim() : null;
 
-      // Parse reminder email (only present if forms incomplete)
-      const reminderMatch = text.match(/---REMINDER_EMAIL---([\s\S]*?)---END_REMINDER_EMAIL---/);
-      const reminderEmail = reminderMatch ? reminderMatch[1].trim() : null;
+      // Parse analysis
+      const analysisMatch = text.match(/---ANALYSIS---([\s\S]*?)---END_ANALYSIS---/);
+      let analysis = {};
+      if (analysisMatch) {
+        let jsonText = analysisMatch[1].trim();
+        if (jsonText.startsWith('```')) {
+          jsonText = jsonText.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+        }
+        analysis = JSON.parse(jsonText);
+      }
 
       return {
-        formsComplete: analysis.forms_complete,
-        hasApplicationForm: analysis.has_application_form,
-        hasPnwStatement: analysis.has_pnw_statement,
-        missingForms: analysis.missing_forms || [],
-        ownershipType: analysis.ownership_type,
-        borrowerEntityType: analysis.borrower_entity_type,
-        collateralOwnerType: analysis.collateral_owner_type,
-        updatedSummary: analysis.updated_summary,
-        reminderEmail,
+        responseEmail,
+        updatedSummary: analysis.updated_summary || existingSummary,
+        ownershipType: analysis.ownership_type || null,
+        hasApplicationForm: analysis.has_application_form || false,
+        hasPnwStatement: analysis.has_pnw_statement || false,
+        ltvPercent: analysis.ltv_percent || null,
+        allDocsReceived: analysis.all_docs_received || false,
       };
     } catch (error) {
-      console.error('Claude Stage 2 analysis error:', error);
+      console.error('Claude broker response error:', error);
       throw error;
     }
   },
@@ -355,7 +387,7 @@ Sections to include:
 2. Borrower, broker, property address, loan amount, actual LTV percentage
 3. Loan type and purpose
 4. Exit strategy
-5. Documents received — just mention the count and that they are attached as a zip file to this email
+5. Documents received — list EACH document by name and classification. Note that all documents are also attached as a zip file.
 6. Key risks or notes
 7. A brief recommendation on what to look for
 
@@ -509,11 +541,9 @@ Return only the HTML email body. Do not include a subject line.`,
   },
 
   // Generate follow-up reminder email for stale deals (broker hasn't replied)
-  generateFollowUpReminder: async (dealSummary, daysSilent, reminderNumber, dealStatus) => {
+  generateFollowUpReminder: async (dealSummary, daysSilent, reminderNumber) => {
     try {
-      const whatWeNeed = dealStatus === 'documents_requested'
-        ? 'the completed Loan Application Form and PNW Statement, along with any missing information (LTV details, ownership type)'
-        : 'the outstanding documents listed in our previous email';
+      const whatWeNeed = 'the outstanding documents and information we previously requested';
 
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
@@ -590,8 +620,33 @@ File name: ${fileName}`,
     }
   },
 
+  // Map classification keys to readable names
+  DOC_DISPLAY_NAMES: {
+    government_id: 'Government-Issued ID',
+    appraisal: 'Property Appraisal',
+    property_tax: 'Property Tax Assessment',
+    noa: 'Notice of Assessment (NOA)',
+    mortgage_statement: 'Current Mortgage Balance Statement',
+    income_proof: 'Proof of Income',
+    loan_application: 'Loan Application Form',
+    pnw_statement: 'Personal Net Worth Statement',
+    credit_report: 'Credit Report',
+    aml: 'AML Report',
+    pep: 'PEP Report',
+    financial_statement: 'Financial Statement',
+    corporate_financials: 'Corporate Financial Statements',
+    tax_return: 'Tax Return',
+    borrower_resume: 'Borrower Resume',
+    insurance: 'Insurance',
+    title_search: 'Title Search',
+    survey: 'Survey',
+    environmental: 'Environmental Report',
+    intake_form: 'Borrower Intake Form',
+    other: 'Other',
+  },
+
   // Generate comprehensive lead summary for Franco — reads all documents + deal data
-  generateLeadSummary: async (dealSummary, ownershipType, documents, missingDocs) => {
+  generateLeadSummary: async (dealSummary, ownershipType, documents, missingDocs, messages = []) => {
     try {
       // Build document text sections from extracted data
       const docSections = documents
@@ -686,9 +741,21 @@ Explain your rating in 2-3 sentences.
 === SECTION 9: DOCUMENTS INCLUDED ===
 A checklist showing what has been received and what is missing:
 ${receivedFiles.map(f => `- [RECEIVED] ${f}`).join('\n')}
-${missingDocs.map(d => `- [MISSING] ${d}`).join('\n')}
+${missingDocs.map(d => `- [MISSING] ${module.exports.DOC_DISPLAY_NAMES[d] || d}`).join('\n')}
 
-${!isComplete ? `\nIMPORTANT: This file is NOT yet complete. The following documents are still outstanding: ${missingDocs.join(', ')}. Clearly note this at the top of the summary with a status indicator.` : 'This file is COMPLETE — all required documents have been received.'}
+${!isComplete ? `\nIMPORTANT: This file is pending approval. The following documents are still outstanding: ${missingDocs.map(d => module.exports.DOC_DISPLAY_NAMES[d] || d).join(', ')}. Start the summary with: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"` : 'This file is COMPLETE — all required documents have been received.'}
+
+=== SECTION 10: EMAIL CONVERSATION ===
+Include the full email conversation so Franco can review all broker communications. Label each with date and direction (inbound/outbound).
+
+At the bottom, include this action section:
+<hr>
+<h3>Action Required</h3>
+<p>Reply to this email with one of the following:</p>
+<ul>
+<li><strong>APPROVED</strong> — preliminary approval granted, Vienna will request remaining documents from the broker</li>
+<li><strong>Any other reply</strong> — your message will be polished and forwarded to the broker by Vienna</li>
+</ul>
 
 === INPUT DATA ===
 
@@ -698,13 +765,16 @@ ${JSON.stringify(dealSummary, null, 2)}
 EXTRACTED DOCUMENT TEXT:
 ${docSections || 'No extracted text available from documents.'}
 
+EMAIL CONVERSATION:
+${messages.length > 0 ? messages.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n') : 'No messages yet.'}
+
 === INSTRUCTIONS ===
 - Read EVERYTHING — the deal summary AND all document text
 - Cross-reference documents against each other for consistency
 - If information conflicts between documents, note the discrepancy
 - Use underwriting language, not marketing language
 - Be thorough but scannable — a lender should understand the deal from this summary alone
-- ${!isComplete ? 'Start the summary with a clear banner: "FILE STATUS: INCOMPLETE — Outstanding items listed below"' : 'Start the summary with: "FILE STATUS: COMPLETE — Ready for Review"'}
+- ${!isComplete ? 'Start the summary with a clear banner: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"' : 'Start the summary with: "FILE STATUS: COMPLETE — Ready for Review"'}
 
 Return only the HTML. Do not include a subject line.`,
         }],
