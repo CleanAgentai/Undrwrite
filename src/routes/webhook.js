@@ -368,8 +368,13 @@ ${draftEmail}
           has_pnw_statement: hasPnw,
         });
 
-        // Send Vienna's conversational response to broker
-        if (result.responseEmail) {
+        // Check if LTV triggers escalation or preliminary review
+        // If so, Vienna stays silent — Franco decides first
+        const willEscalate = ltv && ltv > 80 && existingDeal.status !== 'ltv_escalated';
+        const willReview = ltv && ltv <= 80 && existingDeal.status === 'active';
+
+        if (!willEscalate && !willReview && result.responseEmail) {
+          // Only send Vienna's reply if deal stays in conversation mode
           emailService.sendEmailDelayed(
             email.from,
             `Re: ${email.subject}`,
@@ -381,10 +386,11 @@ ${draftEmail}
               console.log('Conversational response sent to broker');
             }
           );
+        } else if (willEscalate || willReview) {
+          console.log('LTV confirmed — skipping broker reply, sending to Franco for review');
         }
 
-        // Check if LTV triggers escalation or preliminary review
-        if (ltv && ltv > 80 && existingDeal.status !== 'ltv_escalated') {
+        if (willEscalate) {
           // LTV > 80% — escalate to Franco for approval
           console.log(`LTV ${ltv}% > 80 — escalating to admin for approval`);
           const dealMessages = await dealsService.getMessages(existingDeal.id);
@@ -413,7 +419,7 @@ ${draftEmail}
           await dealsService.saveMessage(existingDeal.id, 'outbound', `ACTION REQUIRED: LTV Over 80% — ${result.updatedSummary?.borrower_name || existingDeal.borrower_name}`, escalationEmail, escalateResult.MessageID);
           await dealsService.update(existingDeal.id, { status: 'ltv_escalated' });
           console.log('Escalation email sent to admin, deal status: ltv_escalated');
-        } else if (ltv && ltv <= 80 && existingDeal.status === 'active') {
+        } else if (willReview) {
           // LTV ≤ 80% confirmed — send Franco preliminary review with docs
           console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco`);
           const dealDocs = await dealsService.getDocumentsWithText(existingDeal.id);

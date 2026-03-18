@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 
-const DELAY_MS = 2.5 * 60 * 1000; // 2 minutes 30 seconds
+const DELAY_MS = 90 * 1000; // 90 seconds
 
 module.exports = {
   sendEmail: async (to, subject, textBody, htmlBody = null, attachments = [], headers = []) => {
@@ -28,7 +28,7 @@ module.exports = {
 
   // Send email with delay (fire-and-forget, saves message ID via onSent callback)
   sendEmailDelayed: (to, subject, textBody, htmlBody = null, attachments = [], onSent = null) => {
-    console.log(`Email to ${to} queued — will send in 2m 30s`);
+    console.log(`Email to ${to} queued — will send in 90s`);
     setTimeout(async () => {
       try {
         const result = await postmarkClient.sendEmail({

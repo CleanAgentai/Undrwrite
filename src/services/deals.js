@@ -298,9 +298,7 @@ module.exports = {
         }
 
         const buffer = Buffer.from(await data.arrayBuffer());
-        // Use classification prefix for organized folder naming
-        const prefix = doc.classification || 'other';
-        archive.append(buffer, { name: `${prefix}/${doc.file_name}` });
+        archive.append(buffer, { name: doc.file_name });
       } catch (err) {
         console.error(`Error downloading ${doc.file_name}:`, err.message);
       }
