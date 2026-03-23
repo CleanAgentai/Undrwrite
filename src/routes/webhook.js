@@ -181,6 +181,9 @@ ${draftEmail}
         const { intent, message } = await aiService.parseAdminReply(email.textBody);
         console.log('Admin intent:', intent);
 
+        // Get conversation history for contextual draft generation
+        const dealMessages = await dealsService.getMessages(existingDeal.id);
+
         if (intent === 'approved') {
           console.log('Deal approved by admin — generating draft doc request');
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
@@ -189,7 +192,8 @@ ${draftEmail}
             existingDeal.ownership_type,
             existingDeal.has_application_form,
             existingDeal.has_pnw_statement,
-            existingDocs
+            existingDocs,
+            dealMessages
           );
           await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
         } else if (intent === 'rejected') {
@@ -198,12 +202,15 @@ ${draftEmail}
           await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes — generating draft response');
-          const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message);
+          const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message, dealMessages);
           await saveDraftAndPreview(polishedEmail, borrowerSubject, 'conditions');
         }
       } else if (existingDeal.status === 'under_review') {
         const { intent, message } = await aiService.parseAdminReply(email.textBody);
         console.log('Admin intent for under_review deal:', intent);
+
+        // Get conversation history for contextual draft generation
+        const dealMessages = await dealsService.getMessages(existingDeal.id);
 
         if (intent === 'approved') {
           // Preliminary approval — generate doc request email for remaining items
@@ -214,7 +221,8 @@ ${draftEmail}
             existingDeal.ownership_type,
             existingDeal.has_application_form,
             existingDeal.has_pnw_statement,
-            existingDocs
+            existingDocs,
+            dealMessages
           );
           await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
         } else if (intent === 'rejected') {
@@ -223,7 +231,7 @@ ${draftEmail}
           await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes for under_review deal — generating draft');
-          const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message);
+          const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message, dealMessages);
           await saveDraftAndPreview(polishedEmail, borrowerSubject, 'conditions');
         }
       } else {
@@ -426,7 +434,7 @@ ${draftEmail}
           const allDocsList = await dealsService.getDocumentsByDeal(existingDeal.id);
           const classifications = allDocsList.map(d => d.classification).filter(Boolean);
 
-          const baseRequired = ['government_id', 'appraisal', 'property_tax', 'noa', 'mortgage_statement', 'income_proof'];
+          const baseRequired = ['government_id', 'appraisal', 'property_tax', 'noa', 'mortgage_statement', 'income_proof', 'credit_report'];
           const missingDocs = baseRequired.filter(req => !classifications.includes(req));
 
           const dealMessages = await dealsService.getMessages(existingDeal.id);

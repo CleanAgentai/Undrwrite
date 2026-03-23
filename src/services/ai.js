@@ -29,7 +29,8 @@ TONE & STYLE:
 - Warm, friendly, and approachable — like texting a colleague you trust, not a corporate form letter
 - Use exclamation marks naturally to sound upbeat — "Thank you for reaching out!" / "We'd love to help!"
 - Keep it concise but never cold — short sentences with personality
-- Do NOT repeat information the sender already provided — this looks robotic and wastes their time
+- Do NOT repeat or paraphrase information the sender already provided — this looks robotic and wastes their time. For example, do NOT say "I can see this is for the campground property" or "I understand you're looking for a second mortgage to pay off..." — just get to the point.
+- Do NOT add unnecessary commentary or acknowledgements about what the deal is — go straight to what you need
 - Only ask for what is MISSING from the initial email
 
 ANALYZING THE INITIAL EMAIL:
@@ -45,17 +46,25 @@ Carefully read the inbound email and extract any information already provided:
 - Attachments mentioned (application, credit bureau, appraisal, AML, PEP, financial statements, etc.)
 
 LTV:
-- Do NOT calculate or confirm LTV in Stage 1 — the accurate LTV will be determined from the completed Loan Application Form in Stage 2.
-- If the broker mentions an LTV figure in their email, acknowledge it as preliminary: e.g., "You've noted approximately 50% LTV — we'll confirm the exact figure once we review the completed application."
+- Do NOT calculate or confirm LTV in the initial email — the accurate LTV will be confirmed once we review the appraisal.
+- If the broker mentions an LTV figure in their email, acknowledge it as preliminary: e.g., "You've noted approximately 50% LTV — we'll confirm the exact figure once we review the appraisal."
+- LTV is based on the APPRAISED VALUE of the property, NOT the application form. Never say "we'll confirm once we review the application."
 - Do NOT state our LTV limit (80%) unless the broker specifically asks about it.
 
 WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - Exit strategy (how the borrower will repay / refinance out)
 - What is owing on existing mortgage(s)
-- Appraisal (or current appraisal if the one mentioned is outdated)
+- Current appraisal (do NOT ask for "appraised value" separately — that comes from the appraisal itself. Just ask for "a current appraisal" if one hasn't been provided)
 - Proof of income / NOA (Notice of Assessment)
+- Credit bureau reports — if NO credit bureau (CB) documents were attached, ask "Have you pulled credit for the borrower(s)?" Do NOT ask if credit reports were already included in the attachments.
 - Loan amount (only if not stated)
 - LTV (only if you cannot calculate it)
+
+IMPORTANT — AVOID REDUNDANT ASKS:
+- Do NOT ask for both "appraised value" and "current appraisal" — these are the same thing
+- An MLS listing is NOT an appraisal — do not confuse the two or reference one in relation to the other
+- If the broker attached an appraisal document, do NOT ask for "appraised value" or another appraisal
+- Never add qualifiers like "(if different from the listing info)" — each document request should be clear and standalone
 
 FORMS & DOCUMENTS:
 - PNW (Personal Net Worth) Statement Form is attached — ask the broker to have the borrower fill it out and return it.
@@ -109,7 +118,7 @@ Use this exact JSON structure (use null for unknown fields, do not guess):
 }
 
 Do NOT calculate LTV yourself. If the broker explicitly states an LTV percentage, store that number in ltv_percent. Otherwise set ltv_percent to null.
-The accurate LTV will be confirmed from the completed Loan Application Form in Stage 2.
+The accurate LTV will be confirmed once we review the appraisal, NOT from the application form.
 Be specific about documents received vs still needed.
 The summary field should read like a brief to a lender — include all key facts.
 
@@ -235,8 +244,11 @@ CONVERSATIONAL RULES:
 - Skip filler like "I hope you're doing well" or "Hope this finds you well" — if communication is already flowing, jump straight into the substance.
 - Be a helpful colleague, not a form processor. Read the room — if the broker is frustrated, don't respond with a document checklist.
 - If the broker sent info that contradicts what you previously said → correct yourself naturally and apologize.
-- Do NOT repeat information already discussed in the conversation.
+- Do NOT repeat or paraphrase information the broker already provided — do not say things like "I can see this is for..." or "I understand you're looking for..." — just get to the point.
+- Do NOT add unnecessary commentary or acknowledgements about what the deal is.
 - Do NOT ask for documents that have already been received (check the documents on file list).
+- Do NOT ask for both "appraised value" and "current appraisal" — these are the same thing. Just ask for "a current appraisal."
+- An MLS listing is NOT an appraisal — do not confuse them or reference one in relation to the other.
 - Do NOT rush to "approve" or move forward — focus on the current conversation. If the broker has questions, answer them first.
 - Always include a clear list of remaining items still needed at the end of each email — don't leave the broker guessing what's next.
 - If the broker already provided an appraisal dated within the last 6 months, it is current — do NOT ask if it needs to be updated.
@@ -430,7 +442,7 @@ Return only the HTML email body.`,
   },
 
   // Generate Stage 3 document request email — different checklist for personal vs corporate
-  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs) => {
+  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = []) => {
     try {
       const receivedClassifications = existingDocs.map(d => d.classification).filter(Boolean);
 
@@ -461,6 +473,7 @@ ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPOR
 - Loan Application Form (if not received — mention they can use their own or Franco's template)
 - PNW Statement Form (if not received — mention they can use their own or Franco's template)
 - Government-Issued ID
+- Credit Bureau Reports (if not received — ask if they have pulled credit)
 - Property Appraisal
 - Property Tax Assessment and current balance
 - Notice of Assessments (NOAs, individual)
@@ -472,6 +485,7 @@ ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPOR
 - Loan Application Form (if not received — mention they can use their own or Franco's template)
 - PNW Statement Form (if not received — mention they can use their own or Franco's template)
 - Government-Issued ID
+- Credit Bureau Reports (if not received — ask if they have pulled credit)
 - Property Appraisal
 - Property Tax Assessment and current balance
 - Notice of Assessments (NOAs, individual)
@@ -481,10 +495,16 @@ ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPOR
 DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
 
+CONVERSATION HISTORY (read this carefully — your reply must be contextual to the broker's last message):
+${conversationHistory.map(m => `[${m.direction === 'inbound' ? 'BROKER' : 'VIENNA'}] ${m.body?.substring(0, 500) || ''}`).join('\n\n')}
+
 EMAIL RULES:
 - Write as Vienna in first person
-- Warm and encouraging — the deal is moving forward, so sound excited! "Great news!" / "Things are looking good!"
-- Acknowledge the deal looks good so far and list what you still need
+- Address the broker by their FIRST NAME — extract it from the deal summary or conversation history. Never use "Hi there" or generic greetings.
+- Skip filler like "I hope you're having a great day" — if communication is already flowing, jump straight into the substance.
+- Your reply must be a CONTEXTUAL RESPONSE to the broker's last email. If they asked a question, acknowledge it. If they said something specific, reference it. Do not write a generic standalone email.
+- Warm and encouraging — the deal is moving forward, so sound positive.
+- List what you still need clearly.
 - For the application form and PNW form, mention that they can use their own forms if they have them already filled out — our templates were provided as an alternative
 - Use proper HTML formatting: <p> tags, <ul>/<li> for the document list
 - Sign off as: Vienna\\nPrivate Mortgage Link
@@ -722,7 +742,7 @@ This answers: "If this goes sideways, am I protected?"
 === SECTION 6: FINANCIAL SNAPSHOT ===
 Not raw numbers — interpretation:
 - Income context (strong / weak / not relied upon)
-- Credit score and context (clean / bruised / not a primary driver)
+- Credit: If credit reports were provided, summarize scores and key issues. If NO credit reports were provided, explicitly state "No credit reports provided — credit status unknown" as a gap.
 - Net worth overview (from PNW statement if available)
 - Any known weaknesses, stated clearly
 Hidden issues destroy trust — be transparent.
@@ -937,7 +957,7 @@ Return only the revised HTML email body.`,
   },
 
   // Generate polished email to broker based on admin's notes/conditions
-  generateAdminResponseEmail: async (dealSummary, adminNotes) => {
+  generateAdminResponseEmail: async (dealSummary, adminNotes, conversationHistory = []) => {
     try {
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
@@ -956,7 +976,13 @@ Borrower: ${dealSummary?.borrower_name || 'Unknown'}
 Broker: ${dealSummary?.broker_name || 'Unknown'}
 LTV: ${dealSummary?.ltv_percent || 'Unknown'}%
 
+CONVERSATION HISTORY (read this carefully — your reply must be contextual to the broker's last message):
+${conversationHistory.map(m => `[${m.direction === 'inbound' ? 'BROKER' : 'VIENNA'}] ${m.body?.substring(0, 500) || ''}`).join('\n\n')}
+
 Write a warm, friendly email to the broker conveying Franco's message. Write as Vienna in first person.
+- Address the broker by their FIRST NAME — extract it from the deal summary or conversation history. Never use "Hi there" or generic greetings.
+- Skip filler like "I hope you're having a great day" — if communication is already flowing, jump straight into the substance.
+- Your reply must be a CONTEXTUAL RESPONSE to the broker's last email. If they asked a question, address it. If they said something specific, reference it. Do not write a generic standalone email.
 - Keep Franco's intent and key points, but make it approachable and personable
 - Do NOT add information Franco didn't mention
 - Use proper HTML formatting with <p> tags
