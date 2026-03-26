@@ -284,9 +284,12 @@ ${draftEmail}
       );
       console.log('Welcome email + deal summary generated');
 
-      // Get form attachments — skip Application Form if broker sent their own, no Intake Form in initial email
-      const formAttachments = emailService.getFormAttachments({ skipApplicationForm: hasOwnApplication });
-      console.log('Attaching', formAttachments.length, 'forms', hasOwnApplication ? '(skipping Application Form — broker sent their own)' : '');
+      // Get form attachments
+      // Borrowers always get both forms. Brokers skip Application Form if they sent their own.
+      const isBorrower = dealSummary?.sender_type === 'borrower';
+      const skipApp = isBorrower ? false : hasOwnApplication;
+      const formAttachments = emailService.getFormAttachments({ skipApplicationForm: skipApp });
+      console.log('Attaching', formAttachments.length, 'forms', isBorrower ? '(borrower — always attach both)' : (hasOwnApplication ? '(skipping Application Form — broker sent their own)' : ''));
 
       // Send the AI-generated response with forms attached (HTML formatted)
       emailService.sendEmailDelayed(
