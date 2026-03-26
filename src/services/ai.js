@@ -619,22 +619,25 @@ Return only the HTML email body. Do not include a subject line.`,
         max_tokens: 512,
         messages: [{
           role: 'user',
-          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. Write a short, friendly follow-up email to a broker who hasn't replied.
+          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. Write a short, friendly follow-up email to someone who hasn't replied.
 
 It has been ${Math.round(daysSilent)} days since we last heard from them. This is follow-up reminder #${reminderNumber}.
 
 We are still waiting for: ${whatWeNeed}
 
 DEAL DETAILS:
+Sender type: ${dealSummary?.sender_type || 'broker'}
+Sender name: ${dealSummary?.sender_name || dealSummary?.broker_name || 'Unknown'}
 Borrower: ${dealSummary?.borrower_name || 'Unknown'}
-Broker: ${dealSummary?.broker_name || 'Unknown'}
 
 TONE:
-- Reminder #1: Friendly and casual — "Hey! Just wanted to check in" / "Hope you're having a great week!"
+- Reminder #1: Friendly and casual — "Hey [first name]! Just wanted to check in" / "Hope you're having a great week!"
 - Reminder #2: Still warm but a little more direct — "We'd love to keep this moving!" / "Just wanted to make sure this didn't slip through the cracks!"
 - Reminder #3: Kind but clear — "We'll go ahead and close this file for now, but no worries at all — feel free to reach out anytime and we'd be happy to pick it back up!"
 
 EMAIL RULES:
+- ALWAYS address the person by their FIRST NAME — use the sender name above. Never use "Hi there" or generic greetings.
+- If sender is a borrower, use simple language — no industry jargon.
 - Write as Vienna in first person
 - Keep it SHORT — 2-3 sentences max
 - Do NOT re-list every document needed — just reference "the items we previously requested"
