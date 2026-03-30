@@ -52,15 +52,16 @@ const runFollowUpReminders = async () => {
         newReminderNumber
       );
 
-      const borrowerName = deal.extracted_data?.borrower_name || deal.borrower_name;
+      const originalSubject = lastInbound.subject || deal.extracted_data?.borrower_name || 'Your Loan Inquiry';
+      const reminderSubject = originalSubject.startsWith('Re:') ? originalSubject : `Re: ${originalSubject}`;
       const result = await emailService.sendEmail(
         deal.email,
-        `Re: ${borrowerName || 'Your Loan Inquiry'}`,
+        reminderSubject,
         reminderEmail.replace(/<[^>]*>/g, ''),
         reminderEmail
       );
 
-      await dealsService.saveMessage(deal.id, 'outbound', `Re: ${borrowerName || 'Your Loan Inquiry'}`, reminderEmail, result.MessageID);
+      await dealsService.saveMessage(deal.id, 'outbound', reminderSubject, reminderEmail, result.MessageID);
       await dealsService.update(deal.id, { reminder_count: newReminderNumber });
       remindersSent++;
       remindersLog.push({

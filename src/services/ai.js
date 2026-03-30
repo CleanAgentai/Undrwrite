@@ -627,7 +627,7 @@ We are still waiting for: ${whatWeNeed}
 
 DEAL DETAILS:
 Sender type: ${dealSummary?.sender_type || 'broker'}
-Sender name: ${dealSummary?.sender_name || dealSummary?.broker_name || 'Unknown'}
+Sender name: ${dealSummary?.sender_type === 'borrower' ? (dealSummary?.sender_name || dealSummary?.borrower_name || 'Unknown') : (dealSummary?.sender_name || dealSummary?.broker_name || 'Unknown')} (USE THEIR FIRST NAME ONLY — e.g. if "Franco Maione", address them as "Franco")
 Borrower: ${dealSummary?.borrower_name || 'Unknown'}
 
 TONE:
