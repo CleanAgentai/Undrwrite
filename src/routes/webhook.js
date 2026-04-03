@@ -240,9 +240,70 @@ ${draftEmail}
       return; // Admin reply handled, stop processing
     }
 
-    // If admin sends a new email (no thread match), ignore — don't create a deal for them
+    // If admin sends a new email (no thread match), treat as a referral
     if (isAdmin && !existingDeal) {
-      console.log('Admin sent new email with no thread match — ignoring');
+      console.log('Admin sent new email with no thread match — treating as referral');
+
+      // Parse referral details from Franco's email
+      const referral = await aiService.parseReferralEmail(email.textBody);
+      console.log('Referral parsed:', JSON.stringify(referral));
+
+      if (!referral.referred_email) {
+        console.log('No email address found in referral — ignoring');
+        return;
+      }
+
+      // Create a new deal for the referred person
+      const deal = await dealsService.create({
+        email: referral.referred_email,
+        borrower_name: referral.referred_name || 'Unknown',
+      });
+      console.log('Referral deal created:', deal.id);
+
+      // Save Franco's referral email as the first message
+      await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
+
+      // Save any attachments Franco included
+      let savedDocs = [];
+      if (email.attachments.length > 0) {
+        console.log('Saving referral attachments to Supabase...');
+        savedDocs = await dealsService.saveAttachments(deal.id, email.attachments);
+      }
+
+      // Generate welcome email for the referred person
+      const welcomeEmail = await aiService.generateReferralWelcomeEmail(referral);
+      console.log('Referral welcome email generated');
+
+      // Referrals always get both forms regardless of broker or borrower
+      const formAttachments = emailService.getFormAttachments({ skipApplicationForm: false });
+      console.log('Attaching', formAttachments.length, 'forms for referral');
+
+      // Send welcome email to referred person, CC Franco
+      const result = await emailService.sendEmail(
+        referral.referred_email,
+        `Private Mortgage Link — ${referral.referred_name || 'Your Loan Inquiry'}`,
+        welcomeEmail.replace(/<[^>]*>/g, ''),
+        welcomeEmail,
+        formAttachments,
+        [],
+        config.adminEmail
+      );
+      await dealsService.saveMessage(deal.id, 'outbound', `Private Mortgage Link — ${referral.referred_name || 'Your Loan Inquiry'}`, welcomeEmail, result.MessageID);
+
+      // Save deal summary
+      await dealsService.update(deal.id, {
+        status: 'active',
+        extracted_data: {
+          sender_type: referral.sender_type,
+          sender_name: referral.referred_name,
+          borrower_name: referral.referred_name,
+          referred_by: 'Franco Maione',
+          deal_details: referral.deal_details,
+          notes: referral.notes,
+        },
+      });
+
+      console.log('Referral welcome email sent to', referral.referred_email, '(CC:', config.adminEmail, ')');
       return;
     }
 

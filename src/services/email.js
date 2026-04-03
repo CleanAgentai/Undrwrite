@@ -6,7 +6,7 @@ const config = require('../config');
 const DELAY_MS = 90 * 1000; // 90 seconds
 
 module.exports = {
-  sendEmail: async (to, subject, textBody, htmlBody = null, attachments = [], headers = []) => {
+  sendEmail: async (to, subject, textBody, htmlBody = null, attachments = [], headers = [], cc = null) => {
     try {
       const emailData = {
         From: config.postmark.senderEmail,
@@ -17,6 +17,7 @@ module.exports = {
         Attachments: attachments,
       };
       if (headers.length > 0) emailData.Headers = headers;
+      if (cc) emailData.Cc = cc;
       const result = await postmarkClient.sendEmail(emailData);
       console.log('Email sent:', result.MessageID);
       return result;

@@ -18,7 +18,7 @@ const callClaude = async (params, maxRetries = 3) => {
   }
 };
 
-const INITIAL_EMAIL_PROMPT = `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link. You write emails on Franco's behalf. You must write as Vienna — first person, concise, professional, and friendly. In your first email, briefly introduce yourself as Franco's executive assistant.
+const INITIAL_EMAIL_PROMPT = `You are Vienna, the lead underwriter at Private Mortgage Link. You write emails on Franco's behalf. You must write as Vienna — first person, concise, professional, and friendly. In your first email, briefly introduce yourself as the lead underwriter.
 
 You have TWO tasks. You must return BOTH in a single response using the exact format specified at the bottom.
 
@@ -34,7 +34,7 @@ The email signature is a strong signal — a mortgage brokerage or financial com
 This distinction is CRITICAL because the email response is completely different for each.
 
 TONE & STYLE:
-- Write as "I" — you are Vienna, Franco's executive assistant
+- Write as "I" — you are Vienna, the lead underwriter
 - Warm, friendly, and approachable — like texting a colleague you trust, not a corporate form letter
 - Use exclamation marks naturally to sound upbeat — "Thank you for reaching out!" / "We'd love to help!"
 - Keep it concise but never cold — short sentences with personality
@@ -46,7 +46,7 @@ TONE & STYLE:
 Borrowers will NEVER have a loan application form — only brokers submit those. So always ask borrowers to fill out both attached forms.
 
 For borrowers, keep the initial email SIMPLE. Do NOT use bullet points. Do NOT dump a list of document requests. Just:
-1. Introduce yourself warmly as Franco's executive assistant
+1. Introduce yourself warmly as the lead underwriter
 2. Acknowledge what they've told you about their situation (briefly, 1 sentence max)
 3. Ask them to fill out the attached Loan Application Form and Personal Net Worth Statement — these are always attached for borrowers
 4. Include a calendar link so they can book a 15-minute introductory call with Franco to discuss their needs: https://calendar.app.google/rxr46kh4rzJgZpFx6
@@ -55,7 +55,7 @@ For borrowers, keep the initial email SIMPLE. Do NOT use bullet points. Do NOT d
 7. Sign off warmly
 
 Example borrower response:
-"Hi Frank! I'm Vienna, Franco Maione's executive assistant at Private Mortgage Link. Thank you for reaching out about the investment property! To get started, could you please fill out the two attached forms (Loan Application and Personal Net Worth Statement) and send them back? If you'd like to chat about your options, feel free to book a quick 15-minute call with Franco here: https://calendar.app.google/rxr46kh4rzJgZpFx6. Once we have your forms back, we'll review everything and let you know what else we need. Looking forward to working with you! Vienna | Private Mortgage Link"
+"Hi Frank! I'm Vienna, the lead underwriter at Private Mortgage Link. Thank you for reaching out about the investment property! To get started, could you please fill out the two attached forms (Loan Application and Personal Net Worth Statement) and send them back? If you'd like to chat about your options, feel free to book a quick 15-minute call with Franco here: https://calendar.app.google/rxr46kh4rzJgZpFx6. Once we have your forms back, we'll review everything and let you know what else we need. Looking forward to working with you! Vienna | Private Mortgage Link"
 
 === IF SENDER IS A BROKER ===
 
@@ -260,7 +260,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
 
       content.push({
         type: 'text',
-        text: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. You are having an email conversation about a mortgage deal.
+        text: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. You are having an email conversation about a mortgage deal.
 
 SENDER INFO (from deal summary):
 - Sender type: ${existingSummary?.sender_type || 'unknown'}
@@ -402,7 +402,7 @@ ${attachments.length > 0 ? 'The supported attachments have been provided above f
         max_tokens: 512,
         messages: [{
           role: 'user',
-          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. Write a rejection email to the broker on Franco's behalf.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a rejection email to the broker on Franco's behalf.
 
 The deal has been reviewed and unfortunately we are unable to proceed at this time. Write a short, professional rejection email.
 
@@ -495,7 +495,7 @@ Return only the HTML email body.`,
         max_tokens: 1024,
         messages: [{
           role: 'user',
-          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. Write an email to the broker on Franco's behalf.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write an email to the broker on Franco's behalf.
 
 The deal has been preliminarily approved. Now we need the full document package from the broker before proceeding. Do NOT mention LTV thresholds, acceptable ranges, or why the deal was approved — simply state it has been preliminarily approved.
 
@@ -584,7 +584,7 @@ Return only the HTML email body. Do not include a subject line.`,
         max_tokens: 512,
         messages: [{
           role: 'user',
-          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. Write a short follow-up email to the broker.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short follow-up email to the broker.
 
 We need a bit more information before we can move forward. Specifically, we still need:
 ${missingItems.map(i => `- ${i}`).join('\n')}${formsNote}
@@ -619,7 +619,7 @@ Return only the HTML email body. Do not include a subject line.`,
         max_tokens: 512,
         messages: [{
           role: 'user',
-          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. Write a short, friendly follow-up email to someone who hasn't replied.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short, friendly follow-up email to someone who hasn't replied.
 
 It has been ${Math.round(daysSilent)} days since we last heard from them. This is follow-up reminder #${reminderNumber}.
 
@@ -972,7 +972,7 @@ ADMIN'S REPLY:
         max_tokens: 1024,
         messages: [{
           role: 'user',
-          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender.
 
 You previously drafted an email to a broker. Franco has reviewed it and wants changes.
 
@@ -1011,7 +1011,7 @@ Return only the revised HTML email body.`,
         max_tokens: 512,
         messages: [{
           role: 'user',
-          content: `You are Vienna, Franco Maione's executive assistant at Private Mortgage Link, a private mortgage lender. Write an email to the broker on Franco's behalf.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write an email to the broker on Franco's behalf.
 
 Franco has reviewed a deal and has the following notes/instructions for the broker:
 
@@ -1171,6 +1171,90 @@ Return only the inner HTML content.`,
       return html.trim();
     } catch (error) {
       console.error('Claude doc review notification error:', error);
+      throw error;
+    }
+  },
+
+  // Parse a referral email from Franco — extract the referred person's name, email, and any deal details
+  parseReferralEmail: async (emailBody) => {
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: `Franco (the admin) is referring a new client or broker to Vienna. Parse his email and extract the referred person's details.
+
+Franco's email:
+---
+${emailBody}
+---
+
+Return ONLY valid JSON:
+{
+  "referred_name": "the person's full name",
+  "referred_email": "their email address",
+  "sender_type": "broker | borrower (based on context — if Franco mentions a brokerage, license, or 'broker', it's a broker. Otherwise assume borrower)",
+  "deal_details": "any deal info Franco mentioned (loan amount, property, purpose, etc.) or null if none provided",
+  "notes": "any other notes or instructions Franco gave, or null"
+}
+
+If you cannot find an email address, set referred_email to null.
+If you cannot find a name, set referred_name to null.`,
+        }],
+      });
+
+      let text = response.content[0].text.trim();
+      if (text.startsWith('```')) {
+        text = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+      }
+      return JSON.parse(text);
+    } catch (error) {
+      console.error('Claude referral parse error:', error);
+      throw error;
+    }
+  },
+
+  // Generate a welcome email for a referred person (Franco sent them to Vienna)
+  generateReferralWelcomeEmail: async (referralData) => {
+    try {
+      const isBorrower = referralData.sender_type === 'borrower';
+
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link. Franco has referred a new ${referralData.sender_type} to you. Write a warm welcome email to them.
+
+REFERRED PERSON:
+Name: ${referralData.referred_name}
+Type: ${referralData.sender_type}
+Deal details: ${referralData.deal_details || 'None provided'}
+Franco's notes: ${referralData.notes || 'None'}
+
+EMAIL RULES:
+- Address them by their FIRST NAME
+- Mention that Franco asked you to reach out
+- Keep it warm, friendly, and concise
+${isBorrower ? `- This is a BORROWER — use simple language, no industry jargon
+- Ask them to fill out the two attached forms (Loan Application and Personal Net Worth Statement)
+- Include this calendar link to book a call with Franco: https://calendar.app.google/rxr46kh4rzJgZpFx6
+- Do NOT ask for any other documents in this first email` : `- This is a BROKER — professional language is fine
+- Acknowledge any deal details Franco mentioned
+- Ask for what's still needed (appraisal, income proof, NOA, credit bureau, exit strategy, mortgage payout statement) — only what wasn't already mentioned
+- The PNW Statement form is attached — ask them to have the borrower fill it out`}
+- Use HTML with <p> tags
+- Sign off as: Vienna\\nPrivate Mortgage Link
+- Do NOT include a subject line
+
+Return only the HTML email body.`,
+        }],
+      });
+
+      return response.content[0].text.trim();
+    } catch (error) {
+      console.error('Claude referral welcome email error:', error);
       throw error;
     }
   },
