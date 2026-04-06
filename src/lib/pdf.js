@@ -44,11 +44,17 @@ const buildContentBlocks = async (attachments, savedDocs = []) => {
         });
         // Dual path: also send base64 for application/summary/appraisal docs so Claude sees the full layout
         if (isDualPathDocument(att.Name)) {
-          console.log(`  [PDF] ${att.Name}: dual-path — also sending base64 for full visual analysis`);
-          blocks.push({
-            type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: att.Content },
-          });
+          const isAppraisal = /appraisal/i.test(att.Name);
+          // Skip base64 for appraisals with 50K+ chars of extracted text — redundant and eats tokens
+          if (isAppraisal && preExtractedText.length >= 50000) {
+            console.log(`  [PDF] ${att.Name}: skipping base64 — text extraction already got ${preExtractedText.length} chars, sufficient for analysis`);
+          } else {
+            console.log(`  [PDF] ${att.Name}: dual-path — also sending base64 for full visual analysis`);
+            blocks.push({
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: att.Content },
+            });
+          }
         }
       } else if (preExtractedText && isFormLikeText(preExtractedText)) {
         // Form-like PDF (AcroForm) — pdf-parse only gets template labels, not filled values
