@@ -94,10 +94,7 @@ router.post('/inbound', async (req, res) => {
 
         // Helper: send draft to broker and advance deal
         const executeDraft = async (draftEmail, draftSubject, draftAction) => {
-          // Attach Intake Form when sending approval doc request
-          const draftAttachments = draftAction === 'approval_doc_request'
-            ? emailService.getFormAttachments({ skipApplicationForm: true, includeIntakeForm: true }).filter(f => f.Name.includes('Intake'))
-            : [];
+          const draftAttachments = [];
 
           emailService.sendEmailDelayed(
             existingDeal.email,
