@@ -28,18 +28,20 @@ module.exports = {
   },
 
   // Send email with delay (fire-and-forget, saves message ID via onSent callback)
-  sendEmailDelayed: (to, subject, textBody, htmlBody = null, attachments = [], onSent = null) => {
+  sendEmailDelayed: (to, subject, textBody, htmlBody = null, attachments = [], headers = [], onSent = null) => {
     console.log(`Email to ${to} queued — sending immediately`);
     setTimeout(async () => {
       try {
-        const result = await postmarkClient.sendEmail({
+        const emailData = {
           From: config.postmark.senderEmail,
           To: to,
           Subject: subject,
           TextBody: textBody,
           HtmlBody: htmlBody || textBody,
           Attachments: attachments,
-        });
+        };
+        if (headers.length > 0) emailData.Headers = headers;
+        const result = await postmarkClient.sendEmail(emailData);
         console.log('Delayed email sent:', result.MessageID);
         if (onSent) await onSent(result);
       } catch (error) {

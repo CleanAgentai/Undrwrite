@@ -1251,7 +1251,7 @@ ${isBorrower ? `- This is a BORROWER — use simple language, no industry jargon
 - Acknowledge any deal details Franco mentioned
 - ${referralData.deal_details ? 'Franco already provided a story/overview of the deal, so do NOT ask for one again' : 'Ask for a brief write-up or "story" about the deal — a high-level overview of what the client is looking for, how much they want to borrow and for how long, and a bit of background on the borrowers.'}
 - Ask for what's still needed (appraisal, income proof, NOA, credit bureau, exit strategy, mortgage payout statement) — only what wasn't already mentioned
-- The PNW Statement form is attached — ask them to have the borrower fill it out`}
+- Both the Loan Application Form and PNW Statement Form are attached — ask them to have the borrower fill them out and return them. Mention that if they already have their own application or net worth statement filled out, that works too — our templates are just provided as an alternative.`}
 - Use HTML with <p> tags
 - Sign off as: Vienna\\nPrivate Mortgage Link
 - Do NOT include a subject line

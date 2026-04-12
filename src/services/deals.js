@@ -160,7 +160,7 @@ module.exports = {
   getLastInboundMessage: async (dealId) => {
     const { data, error } = await supabase
       .from('messages')
-      .select('created_at')
+      .select('created_at, subject, external_message_id')
       .eq('deal_id', dealId)
       .eq('direction', 'inbound')
       .order('created_at', { ascending: false })
@@ -170,6 +170,23 @@ module.exports = {
     if (error && error.code === 'PGRST116') return null;
     if (error) throw error;
     return data;
+  },
+
+  // Get the most recent outbound message ID for threading (In-Reply-To header)
+  getLastOutboundMessageId: async (dealId) => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('external_message_id')
+      .eq('deal_id', dealId)
+      .eq('direction', 'outbound')
+      .not('external_message_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code === 'PGRST116') return null;
+    if (error) throw error;
+    return data?.external_message_id || null;
   },
 
   // Upload attachment to Supabase Storage and save record to documents table

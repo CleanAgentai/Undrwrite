@@ -54,11 +54,20 @@ const runFollowUpReminders = async () => {
 
       const originalSubject = lastInbound.subject || deal.extracted_data?.borrower_name || 'Your Loan Inquiry';
       const reminderSubject = originalSubject.startsWith('Re:') ? originalSubject : `Re: ${originalSubject}`;
+
+      // Thread with the last outbound message so the reminder appears in the same conversation
+      const lastOutboundId = await dealsService.getLastOutboundMessageId(deal.id);
+      const reminderHeaders = lastOutboundId
+        ? [{ Name: 'In-Reply-To', Value: `<${lastOutboundId}>` }]
+        : [];
+
       const result = await emailService.sendEmail(
         deal.email,
         reminderSubject,
         reminderEmail.replace(/<[^>]*>/g, ''),
-        reminderEmail
+        reminderEmail,
+        [],
+        reminderHeaders
       );
 
       await dealsService.saveMessage(deal.id, 'outbound', reminderSubject, reminderEmail, result.MessageID);

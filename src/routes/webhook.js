@@ -102,6 +102,7 @@ router.post('/inbound', async (req, res) => {
             draftEmail.replace(/<[^>]*>/g, ''),
             draftEmail,
             draftAttachments,
+            [],
             async (result) => {
               await dealsService.saveMessage(existingDeal.id, 'outbound', draftSubject, draftEmail, result.MessageID);
               console.log('Draft sent to broker');
@@ -356,6 +357,7 @@ ${draftEmail}
         welcomeEmail.replace(/<[^>]*>/g, ''),
         welcomeEmail,
         formAttachments,
+        [],
         async (result) => {
           await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject}`, welcomeEmail, result.MessageID);
         }
@@ -449,6 +451,7 @@ ${draftEmail}
             `Re: ${email.subject}`,
             result.responseEmail.replace(/<[^>]*>/g, ''),
             result.responseEmail,
+            [],
             [],
             async (sendResult) => {
               await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, result.responseEmail, sendResult.MessageID);
