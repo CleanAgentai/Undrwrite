@@ -391,7 +391,7 @@ ${draftEmail}
       }
 
       if (existingDeal.status === 'ltv_escalated' || existingDeal.status === 'under_review') {
-        // Broker replied while Franco is reviewing — save docs and forward to Franco
+        // Broker replied while Franco is reviewing — save docs, forward to Franco, and send acknowledgment to broker
         const statusLabel = existingDeal.status === 'ltv_escalated' ? 'Awaiting Your Approval' : 'Under Your Review';
         console.log(`Broker replied while deal is ${existingDeal.status} — saving docs and forwarding to admin`);
 
@@ -405,6 +405,55 @@ ${draftEmail}
         );
         await dealsService.saveMessage(existingDeal.id, 'outbound', `[Broker Update] ${borrowerName}`, forwardBody, fwdResult.MessageID);
         console.log('Broker update forwarded to admin');
+
+        // Run the conversational handler so Vienna can reply with full deal context,
+        // answer questions, and acknowledge docs — even while Franco is reviewing.
+        // We intentionally do NOT re-trigger LTV escalation/review here because Franco
+        // is already in the loop via the [Broker Update] notification above.
+        console.log('Generating conversational response during review...');
+
+        const reviewConversationHistory = await dealsService.getMessages(existingDeal.id);
+        const reviewDocumentsOnFile = await dealsService.getDocumentsByDeal(existingDeal.id);
+
+        const reviewResult = await aiService.generateBrokerResponse(
+          email.textBody,
+          email.attachments,
+          savedDocs,
+          existingDeal.extracted_data,
+          reviewConversationHistory,
+          reviewDocumentsOnFile
+        );
+
+        // Merge form booleans — once received, always true
+        const reviewHasApp = reviewResult.hasApplicationForm || existingDeal.has_application_form;
+        const reviewHasPnw = reviewResult.hasPnwStatement || existingDeal.has_pnw_statement;
+        const reviewLtv = reviewResult.ltvPercent ?? existingDeal.ltv;
+        const reviewOwnership = reviewResult.ownershipType || existingDeal.ownership_type;
+
+        // Update deal with latest info (but keep the existing status — Franco is still reviewing)
+        await dealsService.update(existingDeal.id, {
+          extracted_data: reviewResult.updatedSummary,
+          ltv: reviewLtv,
+          ownership_type: reviewOwnership,
+          borrower_name: reviewResult.updatedSummary?.borrower_name || existingDeal.borrower_name,
+          has_application_form: reviewHasApp,
+          has_pnw_statement: reviewHasPnw,
+        });
+
+        if (reviewResult.responseEmail) {
+          emailService.sendEmailDelayed(
+            email.from,
+            `Re: ${email.subject}`,
+            reviewResult.responseEmail.replace(/<[^>]*>/g, ''),
+            reviewResult.responseEmail,
+            [],
+            [],
+            async (sendResult) => {
+              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, reviewResult.responseEmail, sendResult.MessageID);
+              console.log('Conversational response sent to broker (during review)');
+            }
+          );
+        }
       } else if (existingDeal.status === 'active') {
         // CONVERSATIONAL HANDLER — respond to broker contextually
         console.log('Generating conversational response...');

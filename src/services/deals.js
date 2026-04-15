@@ -13,7 +13,7 @@ const classifyDocument = (fileName, extractedText) => {
   if (/application|loan.?app/i.test(name)) return 'loan_application';
   if (/pnw|personal.?net.?worth|net.?worth/i.test(name)) return 'pnw_statement';
   if (/appraisal/i.test(name)) return 'appraisal';
-  if (/credit.?bureau|credit.?report|equifax|transunion|experian/i.test(name)) return 'credit_report';
+  if (/credit.?bureau|credit.?report|credit.?check|credit.?score|\bcb\b|beacon|fico/i.test(name)) return 'credit_report';
   if (/noa|notice.?of.?assessment/i.test(name)) return 'noa';
   if (/aml|anti.?money/i.test(name)) return 'aml';
   if (/pep|politically.?exposed/i.test(name)) return 'pep';

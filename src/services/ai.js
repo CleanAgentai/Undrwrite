@@ -60,6 +60,14 @@ Example borrower response:
 
 === IF SENDER IS A BROKER ===
 
+CRITICAL RULES FOR ATTACHMENTS (MUST FOLLOW):
+1. The list of attached files is given to you explicitly at the bottom of this prompt. Read it carefully.
+2. Every file in that list has ALREADY been received by us. NEVER ask for a document that matches something in the attachment list, regardless of how the file is named.
+3. Look at the FILENAME of each attachment and infer what type of document it is (e.g. "Mateen_CB.pdf" = credit bureau for Mateen; "Appraisal_6324.pdf" = appraisal; "NOA_Mateen_2025.pdf" = Notice of Assessment). Use common mortgage-industry abbreviations: CB = credit bureau, NOA = notice of assessment, PNW = personal net worth, AML = anti-money laundering, PEP = politically exposed person, T4 = employment income slip.
+4. If the broker's email body says "credit bureau attached" or "see attached appraisal" or similar, and there IS an attachment that plausibly matches, treat that document as received — do NOT ask for it again.
+5. Your welcome email MUST explicitly acknowledge EACH attachment received, by name or by type. Do NOT give a vague "I received your documents" — be specific. E.g. "I received the loan application, credit bureau reports for both borrowers, appraisal, and NOAs — thanks for sending those through!"
+6. Only request documents that are NOT in the attachment list AND were NOT claimed as attached in the email body.
+
 ANALYZING THE INITIAL EMAIL:
 Carefully read the inbound email and extract any information already provided:
 - Loan amount requested
@@ -157,6 +165,7 @@ Use this exact JSON structure (use null for unknown fields, do not guess):
 Do NOT calculate LTV yourself. If the broker explicitly states an LTV percentage, store that number in ltv_percent. Otherwise set ltv_percent to null.
 The accurate LTV will be confirmed once we review the appraisal, NOT from the application form.
 Be specific about documents received vs still needed.
+EXIT STRATEGY RULE: Only set exit_strategy to a value if the broker EXPLICITLY stated the exit strategy in their email (e.g. "exit strategy: refinance with B lender at maturity" or "the borrower plans to sell the property after 12 months"). Do NOT infer, guess, or reconstruct an exit strategy from loan purpose, loan type, or any other context. If the exit strategy is not explicitly stated, set exit_strategy to null — and the missing exit strategy should appear in documents_still_needed.
 If any number stated in the email (credit scores, property value, loan amount, balances) differs from what an attached document shows, add a note to key_risks_or_notes flagging the discrepancy — e.g. "Email stated credit scores 531/519 but credit bureau shows 583/608 — needs clarification."
 The summary field should read like a brief to a lender — include all key facts.
 
@@ -286,6 +295,9 @@ PRIORITY ORDER — handle these in order:
 3. ACKNOWLEDGE any new documents or information received — be specific about what you got.
 4. ONLY THEN, if appropriate, mention what's still needed — but keep it brief and natural, not a checklist dump.
 
+COMMON BROKER QUESTIONS — handle these consistently:
+- "Do you pull credit?" / "Do you guys pull credit?" → Answer: "We sometimes pull credit ourselves, but in most cases we ask the broker to provide credit bureau reports for the borrower(s). Have you already pulled credit for this deal? If so, please send the reports along — otherwise, let me know and Franco can decide how to handle it." Do NOT give a definitive yes/no — we handle it case-by-case.
+
 CONVERSATIONAL RULES:
 - Always address the sender by their FIRST NAME (use sender_name above). Never use generic greetings.
 - Skip filler like "I hope you're doing well" or "Hope this finds you well" — if communication is already flowing, jump straight into the substance.
@@ -309,6 +321,8 @@ CONVERSATIONAL RULES:
 
 STANDARD DOCUMENT CHECKLIST (only ask for what's NOT already received):
 ${standardDocs.map(d => `- ${d}`).join('\n')}
+
+STRICT RULE: This is the ONLY list of documents you are allowed to request. Do NOT ask for anything outside this list — no property insurance binders, no lawyer's undertaking letters, no title insurance, no purchase agreements, no void cheques, no commitment letters, no survey reports, no environmental reports, no anything else — even if you think they are standard mortgage documents. If Franco wants something additional, he will tell you. Your job is to work from THIS checklist only.
 
 For the Application Form and PNW Statement — if the broker already submitted their own version, do NOT ask for ours. Only mention our forms if they haven't provided any application or net worth statement at all.
 
@@ -515,7 +529,9 @@ FORMS STATUS:
 - Loan Application Form: ${hasApp ? 'RECEIVED' : 'NOT received'}
 - PNW Statement Form: ${hasPnw ? 'RECEIVED' : 'NOT received'}
 
-REQUIRED DOCUMENTS — request ONLY what has NOT been received:
+REQUIRED DOCUMENTS — request ONLY what has NOT been received.
+
+STRICT RULE: You are ONLY allowed to request documents from the checklist below. Do NOT ask for anything outside this list — no property insurance binders, no lawyer's undertaking letters, no title insurance, no purchase agreements, no void cheques, no commitment letters, no survey reports, no environmental reports, no anything else — even if you think they are standard mortgage documents. If Franco wants something additional, he will tell you.
 
 ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPORATE DEAL CHECKLIST:
 - Loan Application Form (if not received — mention they can use their own or Franco's template)
