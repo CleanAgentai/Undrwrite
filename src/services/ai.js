@@ -319,6 +319,15 @@ CONVERSATIONAL RULES:
 - Use HTML with <p> tags.
 - Sign off as: Vienna\\nPrivate Mortgage Link
 
+WHEN ALL DOCUMENTS HAVE BEEN RECEIVED:
+If you determine that all required documents are now on file (based on the documents on file list and any new attachments), your email should:
+- Acknowledge the final document(s) received
+- Let them know we will be sending the file for final review
+- Do NOT say "we now have all the documentation needed" — the lender may request additional documents after review. Instead say something like "I believe we have everything we need to send the file for review."
+- Do NOT list or recap all the documents received — no "the complete package includes..." summaries. Just acknowledge what they just sent and move forward.
+- Keep it short — 2-3 sentences max
+- Sign off warmly
+
 STANDARD DOCUMENT CHECKLIST (only ask for what's NOT already received):
 ${standardDocs.map(d => `- ${d}`).join('\n')}
 
@@ -443,6 +452,46 @@ Private Mortgage Link`,
       return response.content[0].text.trim();
     } catch (error) {
       console.error('Claude rejection email error:', error);
+      throw error;
+    }
+  },
+
+  // Generate completion email to broker — deal has been fully reviewed and approved
+  generateCompletionEmail: async (dealSummary, conversationHistory = []) => {
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short, warm email to the broker letting them know the file has been fully reviewed and everything looks good.
+
+DEAL DETAILS:
+Borrower: ${dealSummary?.borrower_name || 'Unknown'}
+Broker: ${dealSummary?.broker_name || dealSummary?.sender_name || 'Unknown'}
+
+CONVERSATION HISTORY:
+${conversationHistory.map(m => `[${m.direction === 'inbound' ? 'BROKER' : 'VIENNA'}] ${m.body?.substring(0, 300) || ''}`).join('\n\n')}
+
+EMAIL RULES:
+- Write as Vienna in first person
+- Address the broker by their FIRST NAME
+- Let them know the file has been reviewed and everything is in order
+- Thank them for their work getting the documents together
+- Keep it SHORT — 3-4 sentences max
+- Warm and positive tone — this is good news
+- Do NOT list or recap documents received
+- Do NOT mention specific terms, rates, or next steps beyond "we'll be in touch with next steps"
+- Use proper HTML formatting with <p> tags
+- Sign off as: Vienna\\nPrivate Mortgage Link
+
+Return only the HTML email body. Do not include a subject line.`,
+        }],
+      });
+
+      return response.content[0].text.trim();
+    } catch (error) {
+      console.error('Claude completion email error:', error);
       throw error;
     }
   },

@@ -211,18 +211,30 @@ ${draftEmail}
         const dealMessages = await dealsService.getMessages(existingDeal.id);
 
         if (intent === 'approved') {
-          // Preliminary approval — generate doc request email for remaining items
-          console.log('Preliminary approval by admin — generating draft doc request for remaining items');
+          // Check if all docs are already received — if so, this is a final completion, not a doc request
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
-          const docRequestEmail = await aiService.generateDocumentRequestEmail(
-            existingDeal.extracted_data,
-            existingDeal.ownership_type,
-            existingDeal.has_application_form,
-            existingDeal.has_pnw_statement,
-            existingDocs,
-            dealMessages
-          );
-          await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
+          const docClassifications = existingDocs.map(d => d.classification).filter(Boolean);
+          const requiredDocs = ['government_id', 'appraisal', 'property_tax', 'noa', 'income_proof', 'credit_report'];
+          const stillMissing = requiredDocs.filter(req => !docClassifications.includes(req));
+
+          if (stillMissing.length === 0) {
+            // FINAL COMPLETION — all docs received, Franco confirms the file is good
+            console.log('Final approval by admin — all docs received, generating completion email');
+            const completionEmail = await aiService.generateCompletionEmail(existingDeal.extracted_data, dealMessages);
+            await saveDraftAndPreview(completionEmail, borrowerSubject, 'approval_completed');
+          } else {
+            // PRELIMINARY APPROVAL — still missing docs, generate doc request
+            console.log('Preliminary approval by admin — generating draft doc request for remaining items');
+            const docRequestEmail = await aiService.generateDocumentRequestEmail(
+              existingDeal.extracted_data,
+              existingDeal.ownership_type,
+              existingDeal.has_application_form,
+              existingDeal.has_pnw_statement,
+              existingDocs,
+              dealMessages
+            );
+            await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
+          }
         } else if (intent === 'rejected') {
           console.log('Deal rejected by admin — generating draft rejection');
           const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data);
@@ -588,6 +600,49 @@ ${draftEmail}
             await dealsService.update(existingDeal.id, { status: 'active' });
           }
           console.log('Conversation continues — waiting for more docs/info');
+        }
+
+        // ALL DOCS RECEIVED — send Franco a final complete review
+        if (result.allDocsReceived && !willEscalate && !willReview && existingDeal.status === 'active') {
+          console.log('All documents received — sending final review to Franco');
+          const finalDocs = await dealsService.getDocumentsWithText(existingDeal.id);
+          const finalDocsList = await dealsService.getDocumentsByDeal(existingDeal.id);
+          const finalClassifications = finalDocsList.map(d => d.classification).filter(Boolean);
+
+          const finalBaseRequired = ['government_id', 'appraisal', 'property_tax', 'noa', 'income_proof', 'credit_report'];
+          const finalMissing = finalBaseRequired.filter(req => !finalClassifications.includes(req));
+
+          const finalMessages = await dealsService.getMessages(existingDeal.id);
+          const finalSummary = await aiService.generateLeadSummary(
+            result.updatedSummary,
+            ownershipType,
+            finalDocs,
+            finalMissing,
+            finalMessages
+          );
+
+          let finalAttachments = [];
+          if (finalDocs.length > 0) {
+            const zipBase64 = await dealsService.downloadDocsAsZip(existingDeal.id, finalDocs);
+            const safeName = (result.updatedSummary?.borrower_name || existingDeal.borrower_name || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+            finalAttachments = [{
+              Name: `${safeName}_Complete_Documents.zip`,
+              Content: zipBase64,
+              ContentType: 'application/zip',
+            }];
+          }
+
+          const borrowerName = result.updatedSummary?.borrower_name || existingDeal.borrower_name;
+          const finalReviewResult = await emailService.sendEmail(
+            config.adminEmail,
+            `FINAL REVIEW: All Documents Received — ${borrowerName}`,
+            finalSummary.replace(/<[^>]*>/g, ''),
+            finalSummary,
+            finalAttachments
+          );
+          await dealsService.saveMessage(existingDeal.id, 'outbound', `FINAL REVIEW: All Documents Received — ${borrowerName}`, finalSummary, finalReviewResult.MessageID);
+          await dealsService.update(existingDeal.id, { status: 'under_review' });
+          console.log('Final review sent to Franco — deal status: under_review');
         }
       } else {
         console.log(`Deal status is ${existingDeal.status} — no action taken`);
