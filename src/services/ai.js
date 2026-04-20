@@ -93,7 +93,7 @@ WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - Exit strategy (how the borrower will repay / refinance out)
 - Current mortgage payout statement (do NOT ask "what is owing" as a question — request the actual payout statement document)
 - Current appraisal (do NOT ask for "appraised value" separately — that comes from the appraisal itself. Just ask for "a current appraisal" if one hasn't been provided)
-- Proof of income / NOA (Notice of Assessment)
+- Proof of income — ask for "proof of income (an NOA works — or pay stubs / T4 / employment letter)" as a SINGLE item. Do NOT list NOA and Proof of Income as two separate asks — they're interchangeable for our initial review. We may follow up for additional income docs later (especially for self-employed borrowers where the NOA shows low income).
 - Credit bureau reports — if NO credit bureau (CB) documents were attached, ask "Have you pulled credit for the borrower(s)?" Do NOT ask if credit reports were already included in the attachments.
 - Loan amount (only if not stated)
 - LTV (only if you cannot calculate it)
@@ -258,14 +258,14 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
         ? conversationHistory.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\n${m.body}`).join('\n\n---\n\n')
         : 'No previous messages';
 
-      // Standard doc checklist
+      // Standard doc checklist — NOA and Proof of Income are combined into one item
+      // (interchangeable for initial review; we follow up for more if needed)
       const standardDocs = [
         'Government-Issued ID',
         'Property Appraisal',
         'Property Tax Assessment',
-        'Notice of Assessments (NOAs)',
+        'Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine)',
         'Current Mortgage Balance Statement',
-        'Income Verification',
         'Loan Application Form (ours or broker\'s own)',
         'PNW Statement (ours or broker\'s own)',
       ];
@@ -456,7 +456,7 @@ Private Mortgage Link`,
     }
   },
 
-  // Generate completion email to broker — deal has been fully reviewed and approved
+  // Generate closing email to broker — file has been reviewed, we'll follow up if more is needed
   generateCompletionEmail: async (dealSummary, conversationHistory = []) => {
     try {
       const response = await callClaude({
@@ -464,7 +464,7 @@ Private Mortgage Link`,
         max_tokens: 512,
         messages: [{
           role: 'user',
-          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short, warm email to the broker letting them know the file has been fully reviewed and everything looks good.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short, warm closing email to the broker letting them know the file has been reviewed and we will be in touch shortly if anything else is required.
 
 DEAL DETAILS:
 Borrower: ${dealSummary?.borrower_name || 'Unknown'}
@@ -473,15 +473,21 @@ Broker: ${dealSummary?.broker_name || dealSummary?.sender_name || 'Unknown'}
 CONVERSATION HISTORY:
 ${conversationHistory.map(m => `[${m.direction === 'inbound' ? 'BROKER' : 'VIENNA'}] ${m.body?.substring(0, 300) || ''}`).join('\n\n')}
 
+CRITICAL WORDING RULES:
+- Do NOT say the file is "approved" or has been "approved"
+- Do NOT say "everything looks good" or "everything is in order"
+- Do NOT imply the deal has been finalized — the lender's underwriters may still request additional documentation after their own review
+- The correct message is: we have everything we were asking for, and we will reach out shortly if anything else is needed
+
 EMAIL RULES:
 - Write as Vienna in first person
 - Address the broker by their FIRST NAME
-- Let them know the file has been reviewed and everything is in order
 - Thank them for their work getting the documents together
+- State that we will be in touch shortly if we require anything else
 - Keep it SHORT — 3-4 sentences max
-- Warm and positive tone — this is good news
+- Warm and professional tone — but not triumphant or celebratory
 - Do NOT list or recap documents received
-- Do NOT mention specific terms, rates, or next steps beyond "we'll be in touch with next steps"
+- Do NOT mention specific terms, rates, or timelines
 - Use proper HTML formatting with <p> tags
 - Sign off as: Vienna\\nPrivate Mortgage Link
 
@@ -589,9 +595,8 @@ ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPOR
 - Credit Bureau Reports (if not received — ask if they have pulled credit)
 - Property Appraisal
 - Property Tax Assessment and current balance
-- Notice of Assessments (NOAs, individual)
+- Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine. Do NOT list NOA and Proof of Income as separate items)
 - Current Mortgage Payout Statement (do NOT ask "what is currently owing" as a question — just request the actual payout statement document)
-- Income Verification
 - Corporate Financial Statements ('24, '23, '25)
 - T1s for key principals ('24, '23)
 - Borrower Resume and Building/Development Experience (if applicable)` : `PERSONAL DEAL CHECKLIST:
@@ -601,9 +606,8 @@ ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPOR
 - Credit Bureau Reports (if not received — ask if they have pulled credit)
 - Property Appraisal
 - Property Tax Assessment and current balance
-- Notice of Assessments (NOAs, individual)
-- Current Mortgage Payout Statement (do NOT ask "what is currently owing" as a question — just request the actual payout statement document)
-- Income Verification`}
+- Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine. Do NOT list NOA and Proof of Income as separate items)
+- Current Mortgage Payout Statement (do NOT ask "what is currently owing" as a question — just request the actual payout statement document)`}
 
 DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
