@@ -2,93 +2,85 @@ const fs = require('fs');
 const path = require('path');
 const pdfParse = require('pdf-parse');
 const claude = require('./src/lib/claude');
+const { buildContentBlocks } = require('./src/lib/pdf');
 
 const TEST_PDF = process.argv[2] || 'Candice Marcotte - Application and Summary.pdf';
 
-const MIN_TEXT_LENGTH = 200;
-
-const isFormLikeText = (text) => {
-  const lines = text.split('\n').filter(l => l.trim().length > 0);
-  if (lines.length === 0) return true;
-  const shortLines = lines.filter(l => l.trim().length < 40).length;
-  const shortRatio = shortLines / lines.length;
-  const hasMoneyAmounts = /\$[\d,]+/.test(text);
-  const hasParagraphs = lines.some(l => l.trim().length > 120);
-  return shortRatio > 0.7 && !hasMoneyAmounts && !hasParagraphs;
-};
-
 (async () => {
-  const filePath = path.join(__dirname, 'forms', TEST_PDF);
+  // Resolve path — check forms/ first, then treat as absolute/relative path
+  let filePath = path.join(__dirname, 'forms', TEST_PDF);
   if (!fs.existsSync(filePath)) {
-    console.error(`File not found: ${filePath}`);
+    filePath = path.isAbsolute(TEST_PDF) ? TEST_PDF : path.join(process.cwd(), TEST_PDF);
+  }
+  if (!fs.existsSync(filePath)) {
+    console.error(`File not found: ${TEST_PDF}`);
     process.exit(1);
   }
 
+  const fileName = path.basename(filePath);
   const buffer = fs.readFileSync(filePath);
   const base64 = buffer.toString('base64');
 
-  // Step 1: Try pdf-parse (same as workflow)
+  console.log(`\n=== TEST: ${fileName} ===`);
+  console.log(`Size: ${(buffer.length / 1024).toFixed(1)} KB\n`);
+
+  // Step 1: pdf-parse text extraction (mirrors dealsService.saveDocument)
   let extractedText = null;
   try {
     const parsed = await pdfParse(buffer);
-    console.log('=== PDF-PARSE RESULTS ===');
-    console.log('Pages:', parsed.numpages);
-    console.log('Total chars:', parsed.text ? parsed.text.trim().length : 0);
-    console.log('Info:', JSON.stringify(parsed.info, null, 2));
-    console.log('Metadata:', JSON.stringify(parsed.metadata, null, 2));
-    console.log('\n=== FULL EXTRACTED TEXT ===');
-    console.log(parsed.text ? parsed.text.trim() : '(no text)');
-    console.log('=== END TEXT ===\n');
     if (parsed.text && parsed.text.trim().length > 0) {
       extractedText = parsed.text.trim();
+      console.log(`pdf-parse: extracted ${extractedText.length} chars (${parsed.numpages} pages)`);
+    } else {
+      console.log('pdf-parse: no text extracted (likely scanned)');
     }
   } catch (err) {
     console.log('pdf-parse failed:', err.message);
   }
 
-  // Step 2: Decide which path to take (same logic as pdf.js buildContentBlocks)
-  let contentBlock;
-  if (extractedText && extractedText.length >= MIN_TEXT_LENGTH && !isFormLikeText(extractedText)) {
-    console.log(`Path: TEXT EXTRACTION (${extractedText.length} chars, ~${Math.round(extractedText.length / 4)} tokens)`);
-    console.log('---');
-    console.log(extractedText.substring(0, 500));
-    console.log('---\n');
-    contentBlock = {
-      type: 'text',
-      text: `=== Document: ${TEST_PDF} ===\n${extractedText}`,
-    };
-  } else if (extractedText && isFormLikeText(extractedText)) {
-    console.log(`Path: BASE64 FALLBACK (form-like document detected, pdf-parse got ${extractedText.length} chars but looks like field labels)`);
-    contentBlock = {
-      type: 'document',
-      source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-    };
-  } else {
-    console.log('Path: BASE64 FALLBACK (scanned/no text extracted)');
-    contentBlock = {
-      type: 'document',
-      source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-    };
-  }
+  // Step 2: build the same attachment + savedDocs shape that production uses
+  const attachments = [{
+    Name: fileName,
+    ContentType: 'application/pdf',
+    Content: base64,
+  }];
 
-  // Step 3: Send to Claude (same as workflow)
-  console.log(`Sending ${TEST_PDF} to Claude...\n`);
+  const savedDocs = extractedText
+    ? [{ file_name: fileName, extracted_data: { text: extractedText } }]
+    : [];
 
+  // Step 3: invoke production buildContentBlocks — same as webhook.js
+  console.log('\n--- buildContentBlocks (production logic) ---');
+  const contentBlocks = await buildContentBlocks(attachments, savedDocs);
+  console.log(`Returned ${contentBlocks.length} content block(s)`);
+  contentBlocks.forEach((b, i) => {
+    if (b.type === 'text') {
+      console.log(`  Block ${i + 1}: text (${b.text.length} chars, ~${Math.round(b.text.length / 4)} tokens)`);
+    } else if (b.type === 'document') {
+      const kb = (b.source.data.length * 3 / 4) / 1024;
+      console.log(`  Block ${i + 1}: document base64 (~${kb.toFixed(0)} KB)`);
+    } else if (b.type === 'image') {
+      console.log(`  Block ${i + 1}: image base64`);
+    }
+  });
+
+  // Step 4: send to Claude — same model as production
+  console.log(`\n--- Sending to Claude ---`);
   const response = await claude.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 2048,
     messages: [{
       role: 'user',
       content: [
-        contentBlock,
+        ...contentBlocks,
         {
           type: 'text',
           text: `Analyze this document. Return JSON:
 {
-  "document_type": "what kind of document this is",
+  "document_type": "what kind of document this is (e.g. loan application, appraisal, credit bureau, NOA, etc.)",
   "primary_borrower_name": "name if found, or null",
   "loan_type": "personal | corporate | null",
-  "key_info": "brief summary of what this document contains",
+  "key_info": "brief summary of what this document contains — include any extracted numbers (loan amount, property value, credit scores, etc.)",
   "reasoning": "one sentence explaining your classification"
 }`,
         },
@@ -96,5 +88,9 @@ const isFormLikeText = (text) => {
     }],
   });
 
+  console.log('\n=== Claude response ===');
   console.log(response.content[0].text);
+  console.log('\n=== Usage ===');
+  console.log(`Input tokens:  ${response.usage.input_tokens}`);
+  console.log(`Output tokens: ${response.usage.output_tokens}`);
 })();

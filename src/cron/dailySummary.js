@@ -55,11 +55,18 @@ const runFollowUpReminders = async () => {
       const originalSubject = lastInbound.subject || deal.extracted_data?.borrower_name || 'Your Loan Inquiry';
       const reminderSubject = originalSubject.startsWith('Re:') ? originalSubject : `Re: ${originalSubject}`;
 
-      // Thread with the last outbound message so the reminder appears in the same conversation
+      // Thread with the last outbound message so the reminder appears in the same conversation.
+      // Set BOTH In-Reply-To (for Apple Mail / strict clients) AND References (full chain for Gmail / Outlook).
       const lastOutboundId = await dealsService.getLastOutboundMessageId(deal.id);
-      const reminderHeaders = lastOutboundId
-        ? [{ Name: 'In-Reply-To', Value: `<${lastOutboundId}>` }]
-        : [];
+      const allMessageIds = await dealsService.getAllMessageIdsForThread(deal.id);
+      const reminderHeaders = [];
+      if (lastOutboundId) {
+        reminderHeaders.push({ Name: 'In-Reply-To', Value: `<${lastOutboundId}>` });
+      }
+      if (allMessageIds.length > 0) {
+        const referencesValue = allMessageIds.map(id => `<${id}>`).join(' ');
+        reminderHeaders.push({ Name: 'References', Value: referencesValue });
+      }
 
       const result = await emailService.sendEmail(
         deal.email,

@@ -189,6 +189,20 @@ module.exports = {
     return data?.external_message_id || null;
   },
 
+  // Get every message ID on the deal in chronological order — used to build the References header
+  // so the full conversation chain is preserved for Gmail / Outlook threading
+  getAllMessageIdsForThread: async (dealId) => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('external_message_id')
+      .eq('deal_id', dealId)
+      .not('external_message_id', 'is', null)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return (data || []).map(row => row.external_message_id).filter(Boolean);
+  },
+
   // Upload attachment to Supabase Storage and save record to documents table
   saveDocument: async (dealId, attachment) => {
     const buffer = Buffer.from(attachment.Content, 'base64');
