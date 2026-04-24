@@ -57,14 +57,18 @@ const runFollowUpReminders = async () => {
 
       // Thread with the last outbound message so the reminder appears in the same conversation.
       // Set BOTH In-Reply-To (for Apple Mail / strict clients) AND References (full chain for Gmail / Outlook).
+      // Postmark sets outbound Message-IDs as <uuid@mtasv.net> — verified from actual email source.
+      // We store just the UUID in external_message_id, so we must append the @mtasv.net suffix
+      // when constructing threading headers so they match what recipient clients actually cached.
+      const formatMessageId = (id) => (id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
       const lastOutboundId = await dealsService.getLastOutboundMessageId(deal.id);
       const allMessageIds = await dealsService.getAllMessageIdsForThread(deal.id);
       const reminderHeaders = [];
       if (lastOutboundId) {
-        reminderHeaders.push({ Name: 'In-Reply-To', Value: `<${lastOutboundId}>` });
+        reminderHeaders.push({ Name: 'In-Reply-To', Value: formatMessageId(lastOutboundId) });
       }
       if (allMessageIds.length > 0) {
-        const referencesValue = allMessageIds.map(id => `<${id}>`).join(' ');
+        const referencesValue = allMessageIds.map(formatMessageId).join(' ');
         reminderHeaders.push({ Name: 'References', Value: referencesValue });
       }
 

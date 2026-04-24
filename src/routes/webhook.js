@@ -158,10 +158,19 @@ ${draftEmail}
 <hr>
 <p><strong>Reply SEND to confirm, or reply with your edits.</strong></p>`;
 
-        // Reply in the same thread as Franco's message
-        const threadHeaders = email.messageId
-          ? [{ Name: 'In-Reply-To', Value: `<${email.messageId}>` }]
-          : [];
+        // Reply in the same thread as Franco's message.
+        // HITL email subjects vary across the flow (ACTION REQUIRED: ... -> Re: ACTION REQUIRED:
+        // -> Draft Email Preview ...), so subject-based threading breaks. We must set explicit
+        // In-Reply-To + References headers to keep the conversation grouped in Franco's inbox.
+        // Postmark outbound Message-IDs are <uuid@mtasv.net>; inbound IDs may already have a domain
+        // (Gmail / Outlook), so only append @mtasv.net if there's no @ in the raw value.
+        const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+        const threadHeaders = [];
+        if (email.messageId) {
+          threadHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(email.messageId) });
+          const chain = [...(email.references || []), email.messageId].filter(Boolean);
+          threadHeaders.push({ Name: 'References', Value: chain.map(formatThreadId).join(' ') });
+        }
 
         const previewResult = await emailService.sendEmail(
           config.adminEmail,
