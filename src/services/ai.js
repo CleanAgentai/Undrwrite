@@ -131,6 +131,11 @@ EMAIL FORMATTING RULES:
 - Keep the email SHORT — 3-6 sentences plus a list of what's needed (brokers only)
 - Make sure there is clear visual separation between sections
 
+CRITICAL — NO INVENTED CONTACT INFO:
+- Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
+- If the sender asks to speak with Franco, wants to schedule a call, or asks for a phone number, redirect them to the calendar link: https://calendar.app.google/rxr46kh4rzJgZpFx6
+- Never invent phone numbers, email addresses, or any contact details that are not explicitly provided to you in this prompt.
+
 === TASK 2: GENERATE DEAL SUMMARY ===
 
 Produce a structured JSON summary of all deal information extracted from the email and attachments.
@@ -297,6 +302,12 @@ PRIORITY ORDER — handle these in order:
 
 COMMON BROKER QUESTIONS — handle these consistently:
 - "Do you pull credit?" / "Do you guys pull credit?" → Answer: "We sometimes pull credit ourselves, but in most cases we ask the broker to provide credit bureau reports for the borrower(s). Have you already pulled credit for this deal? If so, please send the reports along — otherwise, let me know and Franco can decide how to handle it." Do NOT give a definitive yes/no — we handle it case-by-case.
+- "Can I speak with Franco?" / "What's Franco's number?" / "How do I reach Franco?" → Redirect them to the calendar link: "Absolutely! You can book a quick call with Franco here: https://calendar.app.google/rxr46kh4rzJgZpFx6". Do NOT share a phone number, do NOT invent one, do NOT say "call him at...".
+
+CRITICAL — NO INVENTED CONTACT INFO:
+- Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
+- If someone asks to speak with Franco, wants to schedule a call, or asks for a phone number, always redirect them to the calendar link: https://calendar.app.google/rxr46kh4rzJgZpFx6
+- Never invent phone numbers, email addresses, or any contact details that are not explicitly provided to you in this prompt.
 
 CONVERSATIONAL RULES:
 - Always address the sender by their FIRST NAME (use sender_name above). Never use generic greetings.
@@ -1066,6 +1077,11 @@ Rewrite the email incorporating Franco's changes. Keep the same warm, friendly t
 - Keep the same HTML formatting
 - Sign off as: Vienna\\nPrivate Mortgage Link
 
+CRITICAL — NO INVENTED CONTACT INFO:
+- Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
+- If Franco's edits ask you to tell the broker to call or reach out, redirect them to the calendar link: https://calendar.app.google/rxr46kh4rzJgZpFx6
+- Never invent phone numbers, email addresses, or any contact details that are not explicitly provided in Franco's edits or the original draft.
+
 Return only the revised HTML email body.`,
         }],
       });
@@ -1108,6 +1124,11 @@ Write a warm, friendly email to the broker conveying Franco's message. Write as 
 - Do NOT add information Franco didn't mention
 - Use proper HTML formatting with <p> tags
 - Keep it short
+
+CRITICAL — NO INVENTED CONTACT INFO:
+- Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
+- If Franco's notes mention wanting the broker to call or reach out, redirect them to the calendar link: https://calendar.app.google/rxr46kh4rzJgZpFx6
+- Never invent phone numbers, email addresses, or any contact details that are not explicitly provided in Franco's notes.
 
 Sign off as:
 Vienna
@@ -1324,6 +1345,11 @@ ${isBorrower ? `- This is a BORROWER — use simple language, no industry jargon
 - Use HTML with <p> tags
 - Sign off as: Vienna\\nPrivate Mortgage Link
 - Do NOT include a subject line
+
+CRITICAL — NO INVENTED CONTACT INFO:
+- Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
+- If they want to speak with Franco or book a call, use the calendar link above — never provide a phone number.
+- Never invent phone numbers, email addresses, or any contact details that are not explicitly provided to you in this prompt.
 
 Return only the HTML email body.`,
         }],
