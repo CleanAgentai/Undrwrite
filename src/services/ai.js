@@ -93,7 +93,12 @@ LTV:
 - Do NOT calculate or confirm LTV in the initial email — the accurate LTV will be confirmed once we review the appraisal.
 - If the broker mentions an LTV figure in their email, acknowledge it as preliminary: e.g., "You've noted approximately 50% LTV — we'll confirm the exact figure once we review the appraisal."
 - LTV is based on the APPRAISED VALUE of the property, NOT the application form. Never say "we'll confirm once we review the application."
-- Do NOT state our LTV limit (80%) unless the broker specifically asks about it.
+- Do NOT state our LTV limit (80%) unless the broker specifically asks about it OR the deal is over 80%.
+
+HIGH LTV (over 80%) — when the broker has stated an LTV above 80%, OR when our calculation shows above 80%:
+- Acknowledge directly that the LTV is outside our usual 80% threshold.
+- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
+- Do NOT reject the deal. Do NOT promise it will be approved either. Just flag the threshold and ask about collateral options. Franco will make the final call.
 
 WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - A brief write-up or "story" about the deal — a high-level overview of what the client is looking for, how much they want to borrow and for how long, a bit of background on the borrowers, etc. If the broker already provided this kind of overview in their email, do NOT ask again. Only ask if the email is thin on context (e.g. just "here are the docs" with no explanation).
@@ -286,6 +291,15 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
       const dealLoanType = (existingSummary?.loan_type || '').toLowerCase();
       const dealPurpose = (existingSummary?.purpose || '').toLowerCase();
       const isPurchaseDeal = /purchas/.test(dealLoanType) || /purchas/.test(dealPurpose);
+      // AML/PEP forms only apply to broker submissions (brokers fill these for compliance).
+      // Borrowers don't submit these; lender / broker can pull them later if needed.
+      const senderIsBroker = existingSummary?.sender_type === 'broker';
+      const complianceDocs = senderIsBroker
+        ? [
+            'AML form (Anti-Money Laundering — broker compliance)',
+            'PEP form (Politically Exposed Person — broker compliance)',
+          ]
+        : [];
       const standardDocs = isPurchaseDeal
         ? [
             'Government-Issued ID',
@@ -294,8 +308,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
             'Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine)',
             'Purchase Contract / Agreement of Purchase and Sale',
             'Proof of Down Payment Source',
-            'AML form (Anti-Money Laundering — compliance)',
-            'PEP form (Politically Exposed Person — compliance)',
+            ...complianceDocs,
             'Loan Application Form (ours or broker\'s own)',
             'PNW Statement (ours or broker\'s own)',
           ]
@@ -305,8 +318,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
             'Property Tax Assessment',
             'Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine)',
             'Current Mortgage Payout Statement',
-            'AML form (Anti-Money Laundering — compliance)',
-            'PEP form (Politically Exposed Person — compliance)',
+            ...complianceDocs,
             'Loan Application Form (ours or broker\'s own)',
             'PNW Statement (ours or broker\'s own)',
           ];
@@ -345,6 +357,11 @@ CRITICAL — RECIPIENT NAME RULE (READ CAREFULLY):
 COMMON BROKER QUESTIONS — handle these consistently:
 - "Do you pull credit?" / "Do you guys pull credit?" → Answer: "We sometimes pull credit ourselves, but in most cases we ask the broker to provide credit bureau reports for the borrower(s). Have you already pulled credit for this deal? If so, please send the reports along — otherwise, let me know and Franco can decide how to handle it." Do NOT give a definitive yes/no — we handle it case-by-case.
 - "Can I speak with Franco?" / "What's Franco's number?" / "How do I reach Franco?" → Redirect them to the calendar link: "Absolutely! You can book a quick call with Franco here: https://calendar.app.google/rxr46kh4rzJgZpFx6". Do NOT share a phone number, do NOT invent one, do NOT say "call him at...".
+
+HIGH LTV (over 80%) — when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:
+- Acknowledge directly that the LTV is outside our usual 80% threshold. Be honest about it.
+- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
+- Do NOT reject the deal, do NOT promise it will be approved. Just flag the threshold and ask about collateral options. Franco will make the final call.
 
 CRITICAL — NO INVENTED CONTACT INFO:
 - Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
@@ -641,6 +658,12 @@ Return only the HTML email body.`,
         ? `- Purchase Contract / Agreement of Purchase and Sale (required for purchase transactions)
 - Proof of Down Payment Source`
         : `- Current Mortgage Payout Statement (do NOT ask "what is currently owing" as a question — just request the actual payout statement document)`;
+      // AML/PEP only apply when the SUBMITTER is a broker (broker compliance documents).
+      // For borrower-direct submissions, skip — lender or broker can pull these later.
+      const reqSenderIsBroker = dealSummary?.sender_type === 'broker';
+      const complianceDocs = reqSenderIsBroker
+        ? `\n- AML form (Anti-Money Laundering — broker compliance, required)\n- PEP form (Politically Exposed Person — broker compliance, required)`
+        : '';
 
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
@@ -677,9 +700,7 @@ ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPOR
 - Property Appraisal
 - Property Tax Assessment and current balance
 - Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine. Do NOT list NOA and Proof of Income as separate items)
-${propertySpecificDoc}
-- AML form (Anti-Money Laundering — required compliance document)
-- PEP form (Politically Exposed Person — required compliance document)
+${propertySpecificDoc}${complianceDocs}
 - Corporate Financial Statements ('24, '23, '25)
 - T1s for key principals ('24, '23)
 - Borrower Resume and Building/Development Experience (if applicable)` : `PERSONAL DEAL CHECKLIST:
@@ -690,9 +711,7 @@ ${propertySpecificDoc}
 - Property Appraisal
 - Property Tax Assessment and current balance
 - Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine. Do NOT list NOA and Proof of Income as separate items)
-${propertySpecificDoc}
-- AML form (Anti-Money Laundering — required compliance document)
-- PEP form (Politically Exposed Person — required compliance document)`}
+${propertySpecificDoc}${complianceDocs}`}
 
 DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}

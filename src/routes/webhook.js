@@ -510,19 +510,20 @@ ${draftEmail}
         });
 
         // Gate the HITL review: only trigger once there's enough to actually evaluate.
-        // Require at least ONE of: proof of income, NOA, or appraisal on file.
-        // Just the application + PNW isn't enough to gauge the deal yet.
+        // For LTV ≤ 80% (preliminary review), require at least ONE of: proof of income, NOA, or appraisal.
+        // For LTV > 80% (escalation), do NOT wait for any of those — Franco wants to see high-LTV deals
+        // immediately so he can decide if there's room to work with additional collateral, etc.
         const docsForGate = await dealsService.getDocumentsByDeal(existingDeal.id);
         const classificationsForGate = docsForGate.map(d => d.classification).filter(Boolean);
         const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => classificationsForGate.includes(c));
 
         // Check if LTV triggers escalation or preliminary review
-        // If so, Vienna stays silent — Franco decides first
-        const willEscalate = ltv && ltv > 80 && existingDeal.status !== 'ltv_escalated' && hasReviewableDoc;
+        // High-LTV escalation fires immediately; preliminary review waits for a reviewable doc
+        const willEscalate = ltv && ltv > 80 && existingDeal.status !== 'ltv_escalated';
         const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc;
 
-        if (ltv && !hasReviewableDoc) {
-          console.log('LTV available but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
+        if (ltv && ltv <= 80 && !hasReviewableDoc) {
+          console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
         }
 
         // Always send Vienna's conversational reply — the prompt prevents her from making
