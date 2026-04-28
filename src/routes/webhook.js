@@ -525,8 +525,11 @@ ${draftEmail}
           console.log('LTV available but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
         }
 
-        if (!willEscalate && !willReview && result.responseEmail) {
-          // Only send Vienna's reply if deal stays in conversation mode
+        // Always send Vienna's conversational reply — the prompt prevents her from making
+        // approval/terms commitments, so it's safe to let her acknowledge docs and answer
+        // questions even when the LTV gate is about to fire. The HITL email to Franco still
+        // triggers below; Franco still owns the actual approval decision.
+        if (result.responseEmail) {
           emailService.sendEmailDelayed(
             email.from,
             `Re: ${email.subject}`,
@@ -539,8 +542,9 @@ ${draftEmail}
               console.log('Conversational response sent to broker');
             }
           );
-        } else if (willEscalate || willReview) {
-          console.log('LTV confirmed — skipping broker reply, sending to Franco for review');
+        }
+        if (willEscalate || willReview) {
+          console.log('LTV gate active — Vienna replied conversationally AND sending HITL to Franco');
         }
 
         if (willEscalate) {
@@ -579,7 +583,14 @@ ${draftEmail}
           const allDocsList = await dealsService.getDocumentsByDeal(existingDeal.id);
           const classifications = allDocsList.map(d => d.classification).filter(Boolean);
 
-          const baseRequired = ['government_id', 'appraisal', 'property_tax', 'noa', 'mortgage_statement', 'income_proof', 'credit_report'];
+          // Branch the required-doc list on deal type: purchase deals don't have an existing
+          // mortgage on the subject property, so no mortgage payout is needed; instead a purchase
+          // contract and proof of down payment apply. Refinance/2nd mortgage need the payout.
+          const loanType = (result.updatedSummary?.loan_type || '').toLowerCase();
+          const isPurchase = /purchas/.test(loanType) || /purchas/.test(result.updatedSummary?.purpose || '');
+          const baseRequired = isPurchase
+            ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
+            : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
           const missingDocs = baseRequired.filter(req => !classifications.includes(req));
 
           const dealMessages = await dealsService.getMessages(existingDeal.id);
@@ -629,7 +640,12 @@ ${draftEmail}
           const finalDocsList = await dealsService.getDocumentsByDeal(existingDeal.id);
           const finalClassifications = finalDocsList.map(d => d.classification).filter(Boolean);
 
-          const finalBaseRequired = ['government_id', 'appraisal', 'property_tax', 'noa', 'income_proof', 'credit_report'];
+          // Same purchase/refinance branch for the final review checklist
+          const finalLoanType = (result.updatedSummary?.loan_type || '').toLowerCase();
+          const finalIsPurchase = /purchas/.test(finalLoanType) || /purchas/.test(result.updatedSummary?.purpose || '');
+          const finalBaseRequired = finalIsPurchase
+            ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
+            : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
           const finalMissing = finalBaseRequired.filter(req => !finalClassifications.includes(req));
 
           const finalMessages = await dealsService.getMessages(existingDeal.id);

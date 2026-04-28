@@ -1,6 +1,7 @@
 const supabase = require('../lib/supabase');
 const pdfParse = require('pdf-parse');
 const archiver = require('archiver');
+const { extractFormValues } = require('../lib/pdfFormExtract');
 
 const IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
 
@@ -30,6 +31,8 @@ const classifyDocument = (fileName, extractedText) => {
   if (/corporate.?financial|corp.?financ/i.test(name)) return 'corporate_financials';
   if (/t1.?general|tax.?return/i.test(name)) return 'tax_return';
   if (/resume|cv|experience/i.test(name)) return 'borrower_resume';
+  if (/purchase.?contract|purchase.?agreement|agreement.?of.?purchase|aps\b|sale.?agreement/i.test(name)) return 'purchase_contract';
+  if (/down.?payment|deposit.?proof|proof.?of.?down/i.test(name)) return 'down_payment_proof';
 
   // Fall back to content analysis
   if (text) {
@@ -44,6 +47,7 @@ const classifyDocument = (fileName, extractedText) => {
     if (/corporate financial|balance sheet.*income statement|fiscal year/i.test(text) && /corporation|inc\.|ltd\.|corp\./i.test(text)) return 'corporate_financials';
     if (/t1 general|tax return|taxable income.*federal/i.test(text)) return 'tax_return';
     if (/resume|curriculum vitae|professional experience|building experience|development experience/i.test(text)) return 'borrower_resume';
+    if (/agreement of purchase and sale|purchase price.*vendor|offer to purchase|purchase contract/i.test(text)) return 'purchase_contract';
   }
 
   return 'other';
@@ -210,17 +214,32 @@ module.exports = {
     const safeName = attachment.Name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storagePath = `${dealId}/${Date.now()}-${safeName}`;
 
-    // Extract text from PDF before uploading
+    // Extract text from PDF before uploading.
+    // Two-step extraction: pdf-parse for the static text layer, pdf-lib for AcroForm field
+    // values and annotation contents (which pdf-parse can't see). Combining both means a
+    // filled fillable PDF or an annotation-marked PDF won't look "blank" to Claude.
     let extractedText = null;
     if (attachment.ContentType === 'application/pdf') {
+      let baseText = '';
+      let formText = '';
       try {
         const parsed = await pdfParse(buffer);
         if (parsed.text && parsed.text.trim().length > 0) {
-          extractedText = parsed.text.trim();
-          console.log(`  Extracted ${extractedText.length} chars from ${attachment.Name}`);
+          baseText = parsed.text.trim();
         }
       } catch (err) {
-        console.log(`  Could not extract text from ${attachment.Name}:`, err.message);
+        console.log(`  pdf-parse failed for ${attachment.Name}:`, err.message);
+      }
+      try {
+        formText = await extractFormValues(buffer);
+      } catch (err) {
+        console.log(`  pdf-lib form extraction failed for ${attachment.Name}:`, err.message);
+      }
+      const combined = (baseText + formText).trim();
+      if (combined.length > 0) {
+        extractedText = combined;
+        const formNote = formText.length > 0 ? ` (incl. ${formText.length} chars of form fields/annotations)` : '';
+        console.log(`  Extracted ${extractedText.length} chars from ${attachment.Name}${formNote}`);
       }
     }
 

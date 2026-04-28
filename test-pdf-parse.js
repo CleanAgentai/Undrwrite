@@ -3,6 +3,7 @@ const path = require('path');
 const pdfParse = require('pdf-parse');
 const claude = require('./src/lib/claude');
 const { buildContentBlocks } = require('./src/lib/pdf');
+const { extractFormValues } = require('./src/lib/pdfFormExtract');
 
 const TEST_PDF = process.argv[2] || 'Candice Marcotte - Application and Summary.pdf';
 
@@ -25,18 +26,33 @@ const TEST_PDF = process.argv[2] || 'Candice Marcotte - Application and Summary.
   console.log(`Size: ${(buffer.length / 1024).toFixed(1)} KB\n`);
 
   // Step 1: pdf-parse text extraction (mirrors dealsService.saveDocument)
-  let extractedText = null;
+  let baseText = '';
   try {
     const parsed = await pdfParse(buffer);
     if (parsed.text && parsed.text.trim().length > 0) {
-      extractedText = parsed.text.trim();
-      console.log(`pdf-parse: extracted ${extractedText.length} chars (${parsed.numpages} pages)`);
+      baseText = parsed.text.trim();
+      console.log(`pdf-parse: extracted ${baseText.length} chars (${parsed.numpages} pages)`);
     } else {
       console.log('pdf-parse: no text extracted (likely scanned)');
     }
   } catch (err) {
     console.log('pdf-parse failed:', err.message);
   }
+
+  // Step 1b: pdf-lib for AcroForm field values + annotation contents (mirrors saveDocument)
+  let formText = '';
+  try {
+    formText = await extractFormValues(buffer);
+    if (formText.length > 0) {
+      console.log(`pdf-lib: extracted ${formText.length} chars of form fields / annotations`);
+    } else {
+      console.log('pdf-lib: no form fields or annotations found');
+    }
+  } catch (err) {
+    console.log('pdf-lib failed:', err.message);
+  }
+
+  const extractedText = (baseText + formText).trim() || null;
 
   // Step 2: build the same attachment + savedDocs shape that production uses
   const attachments = [{

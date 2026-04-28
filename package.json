@@ -19,6 +19,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
     "postmark": "^4.0.5"
   },
