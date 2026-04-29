@@ -52,8 +52,16 @@ const runFollowUpReminders = async () => {
         newReminderNumber
       );
 
-      const originalSubject = lastInbound.subject || deal.extracted_data?.borrower_name || 'Your Loan Inquiry';
-      const reminderSubject = originalSubject.startsWith('Re:') ? originalSubject : `Re: ${originalSubject}`;
+      // Use the LAST OUTBOUND subject (what the recipient actually has in their inbox)
+      // as the basis for the reminder — NOT the last inbound subject. For referrals, the
+      // last inbound is Franco's email to Vienna, which the referred person never saw —
+      // using that subject breaks thread continuity in their inbox.
+      const reminderBaseSubject =
+        lastOut?.subject ||
+        lastInbound.subject ||
+        deal.extracted_data?.borrower_name ||
+        'Your Loan Inquiry';
+      const reminderSubject = reminderBaseSubject.startsWith('Re:') ? reminderBaseSubject : `Re: ${reminderBaseSubject}`;
 
       // Thread with the last outbound message so the reminder appears in the same conversation.
       // Set BOTH In-Reply-To (for Apple Mail / strict clients) AND References (full chain for Gmail / Outlook).
