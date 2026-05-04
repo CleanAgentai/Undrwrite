@@ -798,6 +798,75 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group M adversarial smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP J — adversarial live Claude smoke for closing-email package recap
+    // ════════════════════════════════════════════════════════════════
+    // Bugs 6.7 (Kevin Tran, 9 docs re-listed) + 7.4 (Ethan Broussard, 8 docs).
+    // Vienna's closing email enumerated every document received throughout the file.
+    // Post-fix: closing email may name at most the LATEST batch (typically 1-3 items
+    // from the broker's most recent message). Threshold: response containing 4+
+    // distinct doc-name patterns = full-package recap = FAIL.
+    console.log('\n========== GROUP J — closing email package-recap adversarial ==========');
+
+    // Doc-name regexes — each matches one document type. Tight enough to avoid
+    // false positives (e.g. "ID number" not matched, only "gov ID" / "Government ID").
+    const docNamePatterns = [
+      [/\bappraisal\b/i, 'appraisal'],
+      [/\bNOA\b|\bnotice\s+of\s+assessment\b/i, 'NOA'],
+      [/\b(?:government|gov)[\s-]+(?:issued[\s-]+)?id\b/i, 'gov ID'],
+      [/\bcredit\s+(?:report|bureau|score)\b/i, 'credit report'],
+      [/\bAML\b/, 'AML'],
+      [/\bPEP\b/, 'PEP'],
+      [/\bloan\s+application\b/i, 'loan application'],
+      [/\bPNW\b|\bpersonal\s+net[\s-]+worth\b/i, 'PNW'],
+      [/\bproperty\s+tax\s+(?:bill|assessment)\b/i, 'property tax'],
+      [/\b(?:mortgage\s+)?payout\s+statement\b|\bmortgage\s+(?:balance|statement)\b/i, 'mortgage statement'],
+    ];
+
+    const checkPackageRecap = (label, html, threshold = 4) => {
+      const named = [];
+      for (const [re, name] of docNamePatterns) {
+        if (re.test(html || '')) named.push(name);
+      }
+      if (named.length >= threshold) {
+        throw new Error(`FAIL [${label}]: closing email enumerated ${named.length} doc names (full-package recap, threshold ${threshold}). Named: ${named.join(', ')}`);
+      }
+      console.log(`  PASS [${label}]: closing email named ${named.length} doc(s) [${named.join(', ') || 'none'}] — under threshold ${threshold}`);
+    };
+
+    // Adversarial: docs-on-file has 7 items (full package). Conversation history shows
+    // the broker just sent the last 3 (gov ID, tax assessment, payout statement) in
+    // their most recent message. Vienna must NOT re-enumerate the earlier 4.
+    try {
+      const groupJResult = await realAi.generateCompletionEmail(
+        {
+          borrower_name: 'Kevin Tran',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+        },
+        [
+          { direction: 'outbound', body: 'Thanks Jason — I have the appraisal, NOA, credit bureau, and loan application on file. Still need: Government-Issued ID, Property Tax Assessment, and the CIBC mortgage payout statement.', created_at: new Date(Date.now() - 172800000).toISOString() },
+          { direction: 'inbound', body: 'Here are the last three — gov ID, tax assessment, and the CIBC payout statement attached. Thanks!', created_at: new Date(Date.now() - 3600000).toISOString() },
+        ],
+        // documentsOnFile — full package, 7 items. Only the last 3 are the latest batch.
+        [
+          { file_name: 'Appraisal_Tran.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Tran_2024.pdf', classification: 'noa' },
+          { file_name: 'Credit_Report_Tran.pdf', classification: 'credit_report' },
+          { file_name: 'Loan_Application_Tran.pdf', classification: 'loan_application' },
+          { file_name: 'Government_ID_Tran.pdf', classification: 'government_id' },
+          { file_name: 'Property_Tax_Tran.pdf', classification: 'property_tax' },
+          { file_name: 'CIBC_Payout_Tran.pdf', classification: 'mortgage_statement' },
+        ]
+      );
+      console.log('Group J adversarial output (first 500 chars):');
+      console.log(`  ${(groupJResult || '').slice(0, 500).replace(/\n/g, ' ')}`);
+      checkPackageRecap('generateCompletionEmail — full file on hand', groupJResult);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group J adversarial smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
