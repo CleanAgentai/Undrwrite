@@ -482,6 +482,31 @@ ${draftEmail}
       });
 
       console.log('Welcome email sent, deal status: active');
+
+      // Same HITL gate as the existing-deal `active` branch: if the broker submitted
+      // an explicit LTV in the very first email, route Franco's escalation (>80%) or
+      // preliminary review (≤80%) immediately. The welcome email to the broker still
+      // goes — both fire in parallel.
+      //
+      // Predicate matches Bradley's commit e93f657: high-LTV escalation does NOT require
+      // a reviewable doc (Franco wants to see those deals immediately); preliminary
+      // review for ≤80% still requires at least one of income_proof / NOA / appraisal.
+      const initialDocsForGate = await dealsService.getDocumentsByDeal(deal.id);
+      const initialClassifications = initialDocsForGate.map(d => d.classification).filter(Boolean);
+      const initialHasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => initialClassifications.includes(c));
+      const initialLtv = dealSummary?.ltv_percent;
+
+      if (initialLtv && initialLtv > 80) {
+        console.log(`Initial submission LTV ${initialLtv}% > 80 — escalating immediately`);
+        await sendEscalationToAdmin(deal, dealSummary, initialLtv);
+      } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
+        console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately`);
+        // TODO: ownership_type is null on initial submission (only set later by generateBrokerResponse).
+        // generateLeadSummary will render "Ownership Type: null" in the deal snapshot until then.
+        // Tracked separately — fix is to either extract ownership_type in INITIAL_EMAIL_PROMPT
+        // or have generateLeadSummary render "TBD" when null.
+        await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv);
+      }
     } else {
       // EXISTING CLIENT - follow-up email
       console.log('Existing deal found:', existingDeal.id, 'Status:', existingDeal.status);
@@ -706,3 +731,4 @@ ${draftEmail}
 });
 
 module.exports = router;
+module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin };
