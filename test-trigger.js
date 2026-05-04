@@ -520,6 +520,84 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  generateCompletionEmail smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP I — adversarial live Claude smoke for document-receipt fabrication
+    // ════════════════════════════════════════════════════════════════
+    // Scenario 6 Bug 6: broker's email body claimed Government ID was enclosed,
+    // but no Gov ID was actually saved to the file. Vienna pre-fix acknowledged
+    // it as received. Post-fix: Vienna must check the on-file list and treat
+    // unverified docs as missing.
+    console.log('\n========== GROUP I — fabrication-prevention adversarial ==========');
+
+    // Patterns that indicate Vienna FALSELY claimed receipt of a never-submitted doc.
+    // Each entry: phrase that suggests acknowledgement-of-receipt followed by the doc name
+    // within a short window (no sentence boundary between them).
+    const fabricationRegexes = {
+      'Government ID': [
+        /thanks?\s+for\s+(?:the\s+|sending\s+(?:the\s+)?|your\s+)?gov(?:ernment)?[\s-]*id/i,
+        /received\s+(?:the\s+|your\s+)?gov(?:ernment)?[\s-]*id/i,
+        /\bgot\s+(?:the\s+|your\s+)?gov(?:ernment)?[\s-]*id/i,
+        /\bhave\s+(?:the\s+|your\s+)?gov(?:ernment)?[\s-]*id\s+(?:in\s+hand|on\s+file|now)/i,
+      ],
+      'Property Tax Bill / Assessment': [
+        /thanks?\s+for\s+(?:the\s+|sending\s+(?:the\s+)?|your\s+)?(?:property\s+)?tax\s+(?:bill|assessment)/i,
+        /received\s+(?:the\s+|your\s+)?(?:property\s+)?tax\s+(?:bill|assessment)/i,
+        /\bgot\s+(?:the\s+|your\s+)?(?:property\s+)?tax\s+(?:bill|assessment)/i,
+        /\bhave\s+(?:the\s+|your\s+)?(?:property\s+)?tax\s+(?:bill|assessment)\s+(?:in\s+hand|on\s+file|now)/i,
+      ],
+    };
+
+    const checkFabrication = (label, html, fabRegexes) => {
+      const failures = [];
+      for (const [docName, patterns] of Object.entries(fabRegexes)) {
+        for (const re of patterns) {
+          const m = (html || '').match(re);
+          if (m) {
+            failures.push(`${docName}: matched "${m[0]}"`);
+          }
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: Vienna fabricated receipt of unsubmitted docs:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no fabricated receipt of unsubmitted docs`);
+    };
+
+    // Adversarial: broker's email body claims Gov ID + Property Tax bill enclosed.
+    // attachments=[] (the claim is a lie — nothing actually attached).
+    // documentsOnFile contains NEITHER. Vienna must NOT acknowledge them; she must
+    // ask the broker to re-send.
+    try {
+      const groupIResult = await realAi.generateBrokerResponse(
+        `Hi! Sending through the Government ID and the property tax bill — both should be attached.\n\nThanks!\nJason Mercer`,
+        [], // Postmark attachments — empty (broker claim is unfulfilled)
+        [], // savedDocs — empty
+        {
+          borrower_name: 'Kevin Tran',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+          sender_type: 'broker',
+          ltv_percent: 58.8,
+        },
+        [
+          { direction: 'outbound', body: 'Thanks for the package! I have the appraisal, NOA, and credit bureau on file. Still need: government ID, property tax assessment, and the CIBC mortgage payout statement.', created_at: new Date().toISOString() },
+        ],
+        // documentsOnFile — what we ACTUALLY have saved. NO Gov ID, NO Tax bill.
+        [
+          { file_name: 'Appraisal_Tran.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Tran_2024.pdf', classification: 'noa' },
+          { file_name: 'Credit_Report_Tran.pdf', classification: 'credit_report' },
+        ]
+      );
+      const responseHtml = groupIResult?.responseEmail || '';
+      console.log('Group I adversarial output (first 400 chars):');
+      console.log(`  ${responseHtml.slice(0, 400).replace(/\n/g, ' ')}`);
+      checkFabrication('generateBrokerResponse — broker claims attached but nothing on file', responseHtml, fabricationRegexes);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group I adversarial smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }

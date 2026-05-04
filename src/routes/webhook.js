@@ -356,7 +356,8 @@ ${draftEmail}
           if (stillMissing.length === 0) {
             // FINAL COMPLETION — all docs received, Franco confirms the file is good
             console.log('Final approval by admin — all docs received, generating completion email');
-            const completionEmail = await aiService.generateCompletionEmail(existingDeal.extracted_data, dealMessages);
+            // Group I: pass docs-on-file so the closing email can't fabricate receipt of a doc not actually saved.
+            const completionEmail = await aiService.generateCompletionEmail(existingDeal.extracted_data, dealMessages, existingDocs);
             await saveDraftAndPreview(completionEmail, borrowerSubject, 'approval_completed');
           } else {
             // PRELIMINARY APPROVAL — still missing docs, generate doc request

@@ -376,6 +376,7 @@ CONVERSATIONAL RULES:
 - Do NOT repeat or paraphrase information the broker already provided — do not say things like "I can see this is for..." or "I understand you're looking for..." — just get to the point.
 - Do NOT add unnecessary commentary or acknowledgements about what the deal is.
 - Do NOT ask for documents that have already been received (check the documents on file list).
+- CRITICAL — DO NOT FABRICATE DOCUMENT RECEIPT: The DOCUMENTS ALREADY ON FILE list passed below is the AUTHORITATIVE record of what we have actually received and saved. Do NOT acknowledge, thank, confirm, or reference receipt of any document that is NOT in that list. Even if the broker's email body says "Government ID enclosed", "see attached appraisal", "I've sent the NOA", "tax bill is attached", or any other claim of attachment — if the document does NOT appear in DOCUMENTS ALREADY ON FILE, treat it as MISSING and ask the broker to send it again (their attachment may not have come through). Never infer receipt from broker mentions, attachment claims in the email body, or context. The on-file list is the only source of truth.
 - Do NOT ask for both "appraised value" and "current appraisal" — these are the same thing. Just ask for "a current appraisal."
 - An MLS listing is NOT an appraisal — do not confuse them or reference one in relation to the other.
 - Do NOT rush to "approve" or move forward — focus on the current conversation. If the broker has questions, answer them first.
@@ -546,8 +547,11 @@ Private Mortgage Link`,
   },
 
   // Generate closing email to broker — file has been reviewed, we'll follow up if more is needed
-  generateCompletionEmail: async (dealSummary, conversationHistory = []) => {
+  generateCompletionEmail: async (dealSummary, conversationHistory = [], documentsOnFile = []) => {
     try {
+      const docsList = documentsOnFile.length > 0
+        ? documentsOnFile.map(d => `- ${d.file_name}${d.classification ? ` (${d.classification})` : ''}`).join('\n')
+        : '(none on file)';
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 512,
@@ -559,8 +563,16 @@ DEAL DETAILS:
 Borrower: ${dealSummary?.borrower_name || 'Unknown'}
 Broker: ${dealSummary?.broker_name || dealSummary?.sender_name || 'Unknown'}
 
+DOCUMENTS ALREADY ON FILE (authoritative — only what we've actually received):
+${docsList}
+
 CONVERSATION HISTORY:
 ${conversationHistory.map(m => `[${m.direction === 'inbound' ? 'BROKER' : 'VIENNA'}] ${m.body?.substring(0, 300) || ''}`).join('\n\n')}
+
+CRITICAL — DO NOT FABRICATE DOCUMENT RECEIPT:
+- The DOCUMENTS ALREADY ON FILE list above is the AUTHORITATIVE record of what we have actually received and saved.
+- Do NOT acknowledge, thank, confirm, or reference receipt of any document that is NOT in that list — even if the conversation history mentions it. The conversation history may include broker promises ("I'll send the gov ID") that were never actually fulfilled, or prior Vienna messages that themselves fabricated receipt.
+- If you reference any specific document by name in this closing email, that document MUST appear in DOCUMENTS ALREADY ON FILE. Otherwise, refer generically to "the final documents" or "everything you sent through" without naming specifics.
 
 CRITICAL WORDING RULES:
 - Do NOT say the file is "approved" or has been "approved"
