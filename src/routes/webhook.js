@@ -8,6 +8,45 @@ const dealsService = require('../services/deals');
 // Track processed message IDs to prevent duplicate processing
 const processedMessages = new Set();
 
+// Bug B Layer A — broker-name extraction rescue (defense in depth on top of
+// Bradley's prompt-side RECIPIENT NAME RULE blocks). Catches the case where
+// Claude returns sender_name=null/'Unknown', or where Claude has been confused
+// by an inbound body addressed to "Hi Franco" and extracts "Franco" as the
+// sender. Fallback: the Postmark From-header display name.
+//
+// Admin's first name is parsed from config.adminEmail so the guard tracks if
+// the admin email ever changes. Comparing against the FIRST WORD of the
+// extracted name (case-insensitive) avoids false positives on substring
+// matches like "Frank" or "Johnson".
+const ADMIN_FIRST_NAME = (() => {
+  const local = (config.adminEmail || '').split('@')[0] || '';
+  return local.split(/[.+]/)[0].toLowerCase().trim();
+})();
+
+const firstNameOf = (name) => String(name || '').trim().split(/\s+/)[0].toLowerCase();
+
+const isUnreliableName = (name) => {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return true;
+  if (trimmed.toLowerCase() === 'unknown') return true;
+  if (ADMIN_FIRST_NAME && firstNameOf(trimmed) === ADMIN_FIRST_NAME) return true;
+  return false;
+};
+
+const normalizeSenderName = (dealSummary, fromName) => {
+  if (!dealSummary) return dealSummary;
+  const fallback = (fromName || '').trim() || null;
+  if (!fallback) return dealSummary;
+  const normalized = { ...dealSummary };
+  if (isUnreliableName(normalized.sender_name)) {
+    normalized.sender_name = fallback;
+  }
+  if (normalized.sender_type === 'broker' && isUnreliableName(normalized.broker_name)) {
+    normalized.broker_name = fallback;
+  }
+  return normalized;
+};
+
 // Helper: send LTV escalation email to admin and flip deal status to ltv_escalated.
 // Body is line-for-line equivalent to the previous inline block in the existing-deal branch
 // (only `existingDeal` → `deal` and `result.updatedSummary` → `dealSummary`).
@@ -443,13 +482,17 @@ ${draftEmail}
       // Passes pre-extracted text from savedDocs — no second pdf-parse run
       console.log('Processing initial email with Claude...');
       console.log('Passing', email.attachments.length, 'attachments for analysis');
-      const { welcomeEmail, dealSummary } = await aiService.processInitialEmail(
+      // eslint-disable-next-line prefer-const
+      let { welcomeEmail, dealSummary } = await aiService.processInitialEmail(
         email.fromName,
         email.textBody,
         email.attachments,
         savedDocs,
         hasOwnApplication
       );
+      // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
+      // when Claude's extraction is null/Unknown/Franco-collision.
+      dealSummary = normalizeSenderName(dealSummary, email.fromName);
       console.log('Welcome email + deal summary generated');
 
       // Get form attachments
@@ -549,14 +592,18 @@ ${draftEmail}
         const reviewConversationHistory = await dealsService.getMessages(existingDeal.id);
         const reviewDocumentsOnFile = await dealsService.getDocumentsByDeal(existingDeal.id);
 
+        // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
+        const reviewSummaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);
         const reviewResult = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
           savedDocs,
-          existingDeal.extracted_data,
+          reviewSummaryIn,
           reviewConversationHistory,
           reviewDocumentsOnFile
         );
+        // Normalize the freshly-updated summary on the way back, before persisting.
+        reviewResult.updatedSummary = normalizeSenderName(reviewResult.updatedSummary, email.fromName);
 
         // Merge form booleans — once received, always true
         const reviewHasApp = reviewResult.hasApplicationForm || existingDeal.has_application_form;
@@ -595,14 +642,18 @@ ${draftEmail}
         const conversationHistory = await dealsService.getMessages(existingDeal.id);
         const documentsOnFile = await dealsService.getDocumentsByDeal(existingDeal.id);
 
+        // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
+        const summaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);
         const result = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
           savedDocs,
-          existingDeal.extracted_data,
+          summaryIn,
           conversationHistory,
           documentsOnFile
         );
+        // Normalize the freshly-updated summary on the way back, before persisting.
+        result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);
 
         // Merge form booleans — once received, always true
         const hasApp = result.hasApplicationForm || existingDeal.has_application_form;
@@ -731,4 +782,4 @@ ${draftEmail}
 });
 
 module.exports = router;
-module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin };
+module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, ADMIN_FIRST_NAME };

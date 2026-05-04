@@ -83,7 +83,13 @@ emailService.sendEmail = async (to, subject, text, html, attachments) => {
 
 // 3) Now require webhook — picks up the stubbed singletons.
 const webhookRouter = require('./src/routes/webhook');
-const { sendEscalationToAdmin, sendPreliminaryReviewToAdmin } = webhookRouter.__test__;
+const {
+  sendEscalationToAdmin,
+  sendPreliminaryReviewToAdmin,
+  normalizeSenderName,
+  isUnreliableName,
+  ADMIN_FIRST_NAME,
+} = webhookRouter.__test__;
 
 // 4) Predicate evaluator — mirrors the new-client branch gate verbatim.
 // Per Bradley's commit e93f657: high-LTV escalation does NOT require hasReviewableDoc
@@ -275,6 +281,164 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   fmt('willEscalate', negGate2.willEscalate);
   if (negGate2.willReview || negGate2.willEscalate) throw new Error('NEGATIVE assertion failed: gate fired without LTV');
   console.log('Negative case: GATE CORRECTLY DID NOT FIRE');
+
+  // ════════════════════════════════════════════════════════════════
+  // BUG B: broker-name extraction / "Franco" greeting regression
+  // ════════════════════════════════════════════════════════════════
+
+  console.log('\n========== BUG B — normalizeSenderName unit cases ==========');
+  console.log(`ADMIN_FIRST_NAME parsed from config.adminEmail: "${ADMIN_FIRST_NAME}"`);
+
+  const bugBCases = [
+    {
+      name: 'Claude returned null → From-header rescue',
+      input: { sender_type: 'broker', sender_name: null, broker_name: null },
+      fromName: 'Jason Mercer',
+      expect: { sender_name: 'Jason Mercer', broker_name: 'Jason Mercer' },
+    },
+    {
+      name: 'Claude returned "Franco" (the actual regression) → override',
+      input: { sender_type: 'broker', sender_name: 'Franco', broker_name: 'Franco' },
+      fromName: 'Jason Mercer',
+      expect: { sender_name: 'Jason Mercer', broker_name: 'Jason Mercer' },
+    },
+    {
+      name: 'Claude returned "Franco Maione" → override (first-word match)',
+      input: { sender_type: 'broker', sender_name: 'Franco Maione', broker_name: 'Franco Maione' },
+      fromName: 'Jason Mercer',
+      expect: { sender_name: 'Jason Mercer', broker_name: 'Jason Mercer' },
+    },
+    {
+      name: 'Claude returned "Unknown" → From-header rescue',
+      input: { sender_type: 'broker', sender_name: 'Unknown', broker_name: 'Unknown' },
+      fromName: 'Jason Mercer',
+      expect: { sender_name: 'Jason Mercer', broker_name: 'Jason Mercer' },
+    },
+    {
+      name: 'Claude got it right → leave alone',
+      input: { sender_type: 'broker', sender_name: 'Jason Mercer', broker_name: 'Jason Mercer' },
+      fromName: 'Jason Mercer',
+      expect: { sender_name: 'Jason Mercer', broker_name: 'Jason Mercer' },
+    },
+    {
+      name: '"Frank Smith" is NOT Franco — first-word check passes',
+      input: { sender_type: 'broker', sender_name: 'Frank Smith', broker_name: 'Frank Smith' },
+      fromName: 'Anyone Else',
+      expect: { sender_name: 'Frank Smith', broker_name: 'Frank Smith' },
+    },
+    {
+      name: 'borrower flow — sender_type=borrower leaves broker_name alone',
+      input: { sender_type: 'borrower', sender_name: 'Patricia Simmons', broker_name: null },
+      fromName: 'Patricia Simmons',
+      expect: { sender_name: 'Patricia Simmons', broker_name: null },
+    },
+    {
+      name: 'no fromName fallback → input unchanged',
+      input: { sender_type: 'broker', sender_name: 'Franco', broker_name: 'Franco' },
+      fromName: '',
+      expect: { sender_name: 'Franco', broker_name: 'Franco' },
+    },
+    {
+      name: 'null dealSummary → null returned (no crash)',
+      input: null,
+      fromName: 'Jason Mercer',
+      expect: null,
+    },
+  ];
+
+  let bugBPassed = 0;
+  for (const tc of bugBCases) {
+    const out = normalizeSenderName(tc.input, tc.fromName);
+    if (tc.expect === null) {
+      if (out === null) { console.log(`  PASS: ${tc.name}`); bugBPassed++; }
+      else { throw new Error(`FAIL [${tc.name}]: expected null, got ${JSON.stringify(out)}`); }
+      continue;
+    }
+    const sOk = out.sender_name === tc.expect.sender_name;
+    const bOk = ('broker_name' in tc.expect) ? out.broker_name === tc.expect.broker_name : true;
+    if (sOk && bOk) {
+      console.log(`  PASS: ${tc.name}`);
+      bugBPassed++;
+    } else {
+      throw new Error(
+        `FAIL [${tc.name}]: expected sender_name=${JSON.stringify(tc.expect.sender_name)} ` +
+        `broker_name=${JSON.stringify(tc.expect.broker_name)}, got sender_name=${JSON.stringify(out.sender_name)} ` +
+        `broker_name=${JSON.stringify(out.broker_name)}`
+      );
+    }
+  }
+  console.log(`Bug B unit cases: ${bugBPassed}/${bugBCases.length} passed`);
+
+  // Spot checks on isUnreliableName for completeness
+  const unreliableExpect = [
+    [null, true], [undefined, true], ['', true], ['  ', true],
+    ['Unknown', true], ['unknown', true], ['UNKNOWN', true],
+    ['Franco', true], ['Franco Maione', true], ['franco', true],
+    ['Jason Mercer', false], ['Patricia', false], ['Frank Smith', false],
+  ];
+  for (const [input, expected] of unreliableExpect) {
+    const got = isUnreliableName(input);
+    if (got !== expected) {
+      throw new Error(`FAIL isUnreliableName(${JSON.stringify(input)}): expected ${expected}, got ${got}`);
+    }
+  }
+  console.log(`isUnreliableName spot checks: ${unreliableExpect.length}/${unreliableExpect.length} passed`);
+
+  // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
+  // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
+  const realKey = process.env.CLAUDE_API_KEY && !process.env.CLAUDE_API_KEY.startsWith('sk-test');
+  if (realKey) {
+    console.log('\n========== BUG B — live Claude smoke (CLAUDE_API_KEY present) ==========');
+    // Restore the real aiService method that we stubbed earlier — we want the real call.
+    delete require.cache[require.resolve('./src/services/ai')];
+    const realAi = require('./src/services/ai');
+
+    const adversarialBody = `Hi Franco,
+
+Please review the attached file for my client. I'd appreciate your feedback on the deal.
+
+Kind regards,
+Jason Mercer
+Mercer Mortgage Group
+License #M12001505`;
+
+    try {
+      const { welcomeEmail, dealSummary } = await realAi.processInitialEmail(
+        'Jason Mercer',
+        adversarialBody,
+        [],
+        [],
+        false
+      );
+      console.log('Live extraction:');
+      fmt('sender_name', dealSummary?.sender_name);
+      fmt('broker_name', dealSummary?.broker_name);
+      fmt('sender_type', dealSummary?.sender_type);
+
+      const senderLooksFranco = isUnreliableName(dealSummary?.sender_name);
+      const brokerLooksFranco = isUnreliableName(dealSummary?.broker_name);
+      if (senderLooksFranco) console.warn('  WARN: live extraction returned Franco/Unknown for sender_name — Layer A will rescue');
+      if (brokerLooksFranco) console.warn('  WARN: live extraction returned Franco/Unknown for broker_name — Layer A will rescue');
+
+      // Apply Layer A as the webhook would, then check the welcome-email greeting.
+      const normalized = normalizeSenderName(dealSummary, 'Jason Mercer');
+      console.log('After Layer A normalization:');
+      fmt('sender_name', normalized?.sender_name);
+      fmt('broker_name', normalized?.broker_name);
+
+      // Welcome email content check — should NOT contain "Hi Franco" / "Hello Franco"
+      const greetingBad = /\b(?:hi|hello|hey|dear)\s+franco\b/i.test(welcomeEmail || '');
+      if (greetingBad) {
+        throw new Error(`FAIL: live welcome email greeted broker as Franco. Body: ${welcomeEmail?.slice(0, 200)}`);
+      }
+      console.log('  PASS: live welcome email did NOT greet broker as Franco');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Bug B live smoke skipped due to API error: ${e.message}`);
+    }
+  } else {
+    console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
+  }
 
   console.log('\n────────────────────────────────────────');
   console.log('HARNESS COMPLETE — all checks passed');
