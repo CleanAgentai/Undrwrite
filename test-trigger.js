@@ -283,6 +283,68 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log('Negative case: GATE CORRECTLY DID NOT FIRE');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP L: suppress Vienna's broker reply when FINAL REVIEW will fire
+  // ════════════════════════════════════════════════════════════════
+  // Mirrors webhook.js exactly: a deal where allDocsReceived=true AND no LTV gate fires
+  // AND the deal is currently active triggers the FINAL REVIEW HITL — at that moment
+  // Vienna's broker-facing conversational reply is suppressed. Bradley's "always send"
+  // stays for everything else.
+
+  console.log('\n========== GROUP L — willFireFinalReview truth table ==========');
+  const computeWillFireFinalReview = (allDocsReceived, willEscalate, willReview, status) =>
+    !!(allDocsReceived && !willEscalate && !willReview && status === 'active');
+
+  const groupLCases = [
+    {
+      name: 'all docs in, no LTV gate, status=active → SUPPRESS reply, FINAL REVIEW fires',
+      allDocsReceived: true, willEscalate: false, willReview: false, status: 'active',
+      expect: true,
+    },
+    {
+      name: 'all docs in but willEscalate fires → DO NOT suppress (Bradley parallel send)',
+      allDocsReceived: true, willEscalate: true, willReview: false, status: 'active',
+      expect: false,
+    },
+    {
+      name: 'all docs in but willReview fires → DO NOT suppress (Bradley parallel send)',
+      allDocsReceived: true, willEscalate: false, willReview: true, status: 'active',
+      expect: false,
+    },
+    {
+      name: 'all docs in but status=under_review → DO NOT suppress (already in HITL flow)',
+      allDocsReceived: true, willEscalate: false, willReview: false, status: 'under_review',
+      expect: false,
+    },
+    {
+      name: 'all docs in but status=ltv_escalated → DO NOT suppress',
+      allDocsReceived: true, willEscalate: false, willReview: false, status: 'ltv_escalated',
+      expect: false,
+    },
+    {
+      name: 'allDocsReceived=false (normal conversation) → DO NOT suppress',
+      allDocsReceived: false, willEscalate: false, willReview: false, status: 'active',
+      expect: false,
+    },
+    {
+      name: 'allDocsReceived=false, willReview fires → DO NOT suppress',
+      allDocsReceived: false, willEscalate: false, willReview: true, status: 'active',
+      expect: false,
+    },
+  ];
+
+  let groupLPassed = 0;
+  for (const tc of groupLCases) {
+    const got = computeWillFireFinalReview(tc.allDocsReceived, tc.willEscalate, tc.willReview, tc.status);
+    if (got === tc.expect) {
+      console.log(`  PASS: ${tc.name}`);
+      groupLPassed++;
+    } else {
+      throw new Error(`FAIL [Group L]: ${tc.name} — expected ${tc.expect}, got ${got}`);
+    }
+  }
+  console.log(`Group L truth table: ${groupLPassed}/${groupLCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG B: broker-name extraction / "Franco" greeting regression
   // ════════════════════════════════════════════════════════════════
 

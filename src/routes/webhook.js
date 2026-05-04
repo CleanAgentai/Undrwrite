@@ -687,15 +687,22 @@ ${draftEmail}
         const willEscalate = ltv && ltv > 80 && existingDeal.status !== 'ltv_escalated';
         const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc;
 
+        // Group L: when the FINAL REVIEW HITL is about to fire (all docs in, no LTV gate
+        // active, deal currently active), Vienna goes silent on the broker side. Per Franco:
+        // "When all docs are in, Vienna should silently trigger the preliminary review to
+        // admin and wait. No broker reply at this stage. The admin-approved closing draft
+        // is the one and only broker-facing message." Bradley's "always send" stays for
+        // willEscalate / willReview (deliberate parallel send per his commit e93f657).
+        const willFireFinalReview = result.allDocsReceived && !willEscalate && !willReview && existingDeal.status === 'active';
+
         if (ltv && ltv <= 80 && !hasReviewableDoc) {
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
         }
 
-        // Always send Vienna's conversational reply — the prompt prevents her from making
-        // approval/terms commitments, so it's safe to let her acknowledge docs and answer
-        // questions even when the LTV gate is about to fire. The HITL email to Franco still
-        // triggers below; Franco still owns the actual approval decision.
-        if (result.responseEmail) {
+        // Send Vienna's conversational reply unless the FINAL REVIEW is about to fire —
+        // in that case we suppress and let Franco's eventual closing draft be the only
+        // broker-facing message at this stage.
+        if (result.responseEmail && !willFireFinalReview) {
           emailService.sendEmailDelayed(
             email.from,
             `Re: ${email.subject}`,
@@ -708,6 +715,8 @@ ${draftEmail}
               console.log('Conversational response sent to broker');
             }
           );
+        } else if (willFireFinalReview) {
+          console.log('All docs received — suppressing Vienna broker reply; FINAL REVIEW will fire silently to Franco');
         }
         if (willEscalate || willReview) {
           console.log('LTV gate active — Vienna replied conversationally AND sending HITL to Franco');
@@ -726,7 +735,7 @@ ${draftEmail}
         }
 
         // ALL DOCS RECEIVED — send Franco a final complete review
-        if (result.allDocsReceived && !willEscalate && !willReview && existingDeal.status === 'active') {
+        if (willFireFinalReview) {
           console.log('All documents received — sending final review to Franco');
           const finalDocs = await dealsService.getDocumentsWithText(existingDeal.id);
           const finalDocsList = await dealsService.getDocumentsByDeal(existingDeal.id);
