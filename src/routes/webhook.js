@@ -8,6 +8,94 @@ const dealsService = require('../services/deals');
 // Track processed message IDs to prevent duplicate processing
 const processedMessages = new Set();
 
+// Helper: send LTV escalation email to admin and flip deal status to ltv_escalated.
+// Body is line-for-line equivalent to the previous inline block in the existing-deal branch
+// (only `existingDeal` → `deal` and `result.updatedSummary` → `dealSummary`).
+const sendEscalationToAdmin = async (deal, dealSummary, ltv) => {
+  // LTV > 80% — escalate to Franco for approval
+  console.log(`LTV ${ltv}% > 80 — escalating to admin for approval`);
+  const dealMessages = await dealsService.getMessages(deal.id);
+  const dealDocs = await dealsService.getDocumentsWithText(deal.id);
+  const escalationEmail = await aiService.generateEscalationNotification(dealSummary, dealMessages, dealDocs);
+
+  let escalationAttachments = [];
+  if (dealDocs.length > 0) {
+    console.log('Downloading documents for escalation zip...');
+    const zipBase64 = await dealsService.downloadDocsAsZip(deal.id, dealDocs);
+    const safeName = (dealSummary?.borrower_name || deal.borrower_name || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+    escalationAttachments = [{
+      Name: `${safeName}_Documents.zip`,
+      Content: zipBase64,
+      ContentType: 'application/zip',
+    }];
+  }
+
+  const escalateResult = await emailService.sendEmail(
+    config.adminEmail,
+    `ACTION REQUIRED: LTV Over 80% — ${dealSummary?.borrower_name || deal.borrower_name}`,
+    escalationEmail.replace(/<[^>]*>/g, ''),
+    escalationEmail,
+    escalationAttachments
+  );
+  await dealsService.saveMessage(deal.id, 'outbound', `ACTION REQUIRED: LTV Over 80% — ${dealSummary?.borrower_name || deal.borrower_name}`, escalationEmail, escalateResult.MessageID);
+  await dealsService.update(deal.id, { status: 'ltv_escalated' });
+  console.log('Escalation email sent to admin, deal status: ltv_escalated');
+};
+
+// Helper: send preliminary review email to admin and flip deal status to under_review.
+// Body is line-for-line equivalent to the previous inline block in the existing-deal branch.
+// Includes Bradley's purchase-vs-refinance branching for the required-doc list.
+const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv) => {
+  // LTV ≤ 80% confirmed — send Franco preliminary review with docs
+  console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco`);
+  const dealDocs = await dealsService.getDocumentsWithText(deal.id);
+  const allDocsList = await dealsService.getDocumentsByDeal(deal.id);
+  const classifications = allDocsList.map(d => d.classification).filter(Boolean);
+
+  // Branch the required-doc list on deal type: purchase deals don't have an existing
+  // mortgage on the subject property, so no mortgage payout is needed; instead a purchase
+  // contract and proof of down payment apply. Refinance/2nd mortgage need the payout.
+  const loanType = (dealSummary?.loan_type || '').toLowerCase();
+  const isPurchase = /purchas/.test(loanType) || /purchas/.test(dealSummary?.purpose || '');
+  const baseRequired = isPurchase
+    ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
+    : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
+  const missingDocs = baseRequired.filter(req => !classifications.includes(req));
+
+  const dealMessages = await dealsService.getMessages(deal.id);
+  const leadSummary = await aiService.generateLeadSummary(
+    dealSummary,
+    ownershipType,
+    dealDocs,
+    missingDocs,
+    dealMessages
+  );
+
+  let reviewAttachments = [];
+  if (dealDocs.length > 0) {
+    const zipBase64 = await dealsService.downloadDocsAsZip(deal.id, dealDocs);
+    const safeName = (dealSummary?.borrower_name || deal.borrower_name || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+    reviewAttachments = [{
+      Name: `${safeName}_Documents.zip`,
+      Content: zipBase64,
+      ContentType: 'application/zip',
+    }];
+  }
+
+  const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
+  const statusFlag = missingDocs.length > 0 ? 'PRELIMINARY' : 'COMPLETE';
+  const reviewResult = await emailService.sendEmail(
+    config.adminEmail,
+    `ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`,
+    leadSummary.replace(/<[^>]*>/g, ''),
+    leadSummary,
+    reviewAttachments
+  );
+  await dealsService.saveMessage(deal.id, 'outbound', `ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`, leadSummary, reviewResult.MessageID);
+  await dealsService.update(deal.id, { status: 'under_review' });
+  console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing)`);
+};
+
 // POST /webhook/inbound - receives incoming emails from Postmark
 router.post('/inbound', async (req, res) => {
   // Respond immediately so Postmark doesn't retry
@@ -549,83 +637,9 @@ ${draftEmail}
         }
 
         if (willEscalate) {
-          // LTV > 80% — escalate to Franco for approval
-          console.log(`LTV ${ltv}% > 80 — escalating to admin for approval`);
-          const dealMessages = await dealsService.getMessages(existingDeal.id);
-          const dealDocs = await dealsService.getDocumentsWithText(existingDeal.id);
-          const escalationEmail = await aiService.generateEscalationNotification(result.updatedSummary, dealMessages, dealDocs);
-
-          let escalationAttachments = [];
-          if (dealDocs.length > 0) {
-            console.log('Downloading documents for escalation zip...');
-            const zipBase64 = await dealsService.downloadDocsAsZip(existingDeal.id, dealDocs);
-            const safeName = (result.updatedSummary?.borrower_name || existingDeal.borrower_name || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
-            escalationAttachments = [{
-              Name: `${safeName}_Documents.zip`,
-              Content: zipBase64,
-              ContentType: 'application/zip',
-            }];
-          }
-
-          const escalateResult = await emailService.sendEmail(
-            config.adminEmail,
-            `ACTION REQUIRED: LTV Over 80% — ${result.updatedSummary?.borrower_name || existingDeal.borrower_name}`,
-            escalationEmail.replace(/<[^>]*>/g, ''),
-            escalationEmail,
-            escalationAttachments
-          );
-          await dealsService.saveMessage(existingDeal.id, 'outbound', `ACTION REQUIRED: LTV Over 80% — ${result.updatedSummary?.borrower_name || existingDeal.borrower_name}`, escalationEmail, escalateResult.MessageID);
-          await dealsService.update(existingDeal.id, { status: 'ltv_escalated' });
-          console.log('Escalation email sent to admin, deal status: ltv_escalated');
+          await sendEscalationToAdmin(existingDeal, result.updatedSummary, ltv);
         } else if (willReview) {
-          // LTV ≤ 80% confirmed — send Franco preliminary review with docs
-          console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco`);
-          const dealDocs = await dealsService.getDocumentsWithText(existingDeal.id);
-          const allDocsList = await dealsService.getDocumentsByDeal(existingDeal.id);
-          const classifications = allDocsList.map(d => d.classification).filter(Boolean);
-
-          // Branch the required-doc list on deal type: purchase deals don't have an existing
-          // mortgage on the subject property, so no mortgage payout is needed; instead a purchase
-          // contract and proof of down payment apply. Refinance/2nd mortgage need the payout.
-          const loanType = (result.updatedSummary?.loan_type || '').toLowerCase();
-          const isPurchase = /purchas/.test(loanType) || /purchas/.test(result.updatedSummary?.purpose || '');
-          const baseRequired = isPurchase
-            ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
-            : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
-          const missingDocs = baseRequired.filter(req => !classifications.includes(req));
-
-          const dealMessages = await dealsService.getMessages(existingDeal.id);
-          const leadSummary = await aiService.generateLeadSummary(
-            result.updatedSummary,
-            ownershipType,
-            dealDocs,
-            missingDocs,
-            dealMessages
-          );
-
-          let reviewAttachments = [];
-          if (dealDocs.length > 0) {
-            const zipBase64 = await dealsService.downloadDocsAsZip(existingDeal.id, dealDocs);
-            const safeName = (result.updatedSummary?.borrower_name || existingDeal.borrower_name || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
-            reviewAttachments = [{
-              Name: `${safeName}_Documents.zip`,
-              Content: zipBase64,
-              ContentType: 'application/zip',
-            }];
-          }
-
-          const borrowerName = result.updatedSummary?.borrower_name || existingDeal.borrower_name;
-          const statusFlag = missingDocs.length > 0 ? 'PRELIMINARY' : 'COMPLETE';
-          const reviewResult = await emailService.sendEmail(
-            config.adminEmail,
-            `ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`,
-            leadSummary.replace(/<[^>]*>/g, ''),
-            leadSummary,
-            reviewAttachments
-          );
-          await dealsService.saveMessage(existingDeal.id, 'outbound', `ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`, leadSummary, reviewResult.MessageID);
-          await dealsService.update(existingDeal.id, { status: 'under_review' });
-          console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing)`);
+          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv);
         } else {
           // Deal already under_review or no LTV yet — keep conversation going
           if (existingDeal.status !== 'active' && existingDeal.status !== 'under_review') {
