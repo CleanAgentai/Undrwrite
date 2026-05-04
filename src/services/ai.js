@@ -381,6 +381,7 @@ CONVERSATIONAL RULES:
 - An MLS listing is NOT an appraisal — do not confuse them or reference one in relation to the other.
 - Do NOT rush to "approve" or move forward — focus on the current conversation. If the broker has questions, answer them first.
 - Always include a clear list of remaining items still needed at the end of each email — don't leave the broker guessing what's next.
+- CRITICAL — ENUMERATE MISSING ITEMS BY NAME: when you reference outstanding documents, you MUST list each one by its specific name (e.g. "Government-Issued ID", "Property Tax Assessment", "Current Mortgage Payout Statement"). Do NOT use vague references like "the final documents", "the missing documents", "the outstanding items", "the rest of the package", or "the remaining paperwork" without naming which documents you mean. The broker can't act on a vague request — every missing item must be spelled out.
 - If the broker already provided an appraisal dated within the last 6 months, it is current — do NOT ask if it needs to be updated.
 - If the broker sends back blank or unfilled forms, name the SPECIFIC forms that are blank (e.g., "the PNW Statement and Loan Application Form came back blank"). Never say vaguely "some forms came back blank."
 - If attachments appear to be blank PDFs or contain no meaningful data, mention it specifically by name — don't just accept them silently.
@@ -1291,6 +1292,7 @@ Write a warm, friendly email to the broker conveying Franco's message. Write as 
 - Do NOT add information Franco didn't mention
 - Use proper HTML formatting with <p> tags
 - Keep it short
+- CRITICAL — ENUMERATE MISSING ITEMS BY NAME: if Franco's notes or the conversation history reference outstanding documents, you MUST list each one by its specific name in your email (e.g. "Government-Issued ID", "Property Tax Assessment", "Current Mortgage Payout Statement"). Pull the names from Vienna's prior preliminary-review email (in the conversation history) or from Franco's notes. Do NOT use vague references like "the final documents", "the missing documents", "the outstanding items", "the rest of the package", or "the remaining paperwork" without naming which documents you mean. The broker can't act on a vague request.
 
 CRITICAL — RECIPIENT NAME RULE:
 - The recipient is the BROKER. Their first name comes from the deal summary's broker_name field above.

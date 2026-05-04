@@ -730,6 +730,74 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group H adversarial smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP M — adversarial live Claude smoke for vague missing-doc list
+    // ════════════════════════════════════════════════════════════════
+    // Bug 8.5 (Sandra Fletcher): Vienna polished Franco's notes into
+    // "I'll need you to request the final documents from Sandra" without
+    // naming any of the outstanding items. Post-fix: Vienna must enumerate
+    // each missing doc by its specific name.
+    console.log('\n========== GROUP M — vague missing-doc list adversarial ==========');
+
+    // Forbidden vague phrasings when missing docs are referenced.
+    const vaguePhrases = [
+      [/\bthe\s+final\s+documents\b/i, '"the final documents"'],
+      [/\bthe\s+missing\s+documents\b/i, '"the missing documents"'],
+      [/\bthe\s+outstanding\s+(?:items|documents|paperwork)\b/i, '"the outstanding items/documents/paperwork"'],
+      [/\bthe\s+rest\s+of\s+the\s+(?:package|documents|paperwork)\b/i, '"the rest of the package/documents"'],
+      [/\bthe\s+remaining\s+(?:paperwork|documents|items)\b/i, '"the remaining paperwork/documents/items"'],
+      [/\bthe\s+final\s+items\b/i, '"the final items"'],
+    ];
+
+    const checkVagueness = (label, html, expectedDocNames) => {
+      const failures = [];
+      // Fail if any vague phrase appears
+      for (const [re, desc] of vaguePhrases) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 20), m.index + m[0].length + 30);
+          failures.push(`vague phrase ${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      // Soft-check: at least one of the expected doc names should appear (Vienna actually enumerated)
+      const namedAny = expectedDocNames.some(name => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(html || ''));
+      if (!namedAny) {
+        failures.push(`none of the expected doc names appeared in the email: ${JSON.stringify(expectedDocNames)}`);
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: vague missing-doc reference:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: enumerated missing docs by name, no vague phrases`);
+    };
+
+    // Adversarial: Franco's notes flag missing docs by name; conversation history includes
+    // Vienna's prior prelim-review email enumerating them. Vienna must enumerate by name
+    // in the polished broker reply.
+    try {
+      const groupMResult = await realAi.generateAdminResponseEmail(
+        {
+          borrower_name: 'Sandra Fletcher',
+          broker_name: 'David Park',
+          sender_name: 'David Park',
+          ltv_percent: 62.6,
+        },
+        'Looking good — please ask David for the remaining items: Government-Issued ID, Property Tax Assessment, and the Current Mortgage Payout Statement.',
+        [
+          { direction: 'inbound', body: 'Hi Vienna, here is Sandra Fletcher\'s file for review. Attached is the appraisal, NOA, application, and credit report.', created_at: new Date(Date.now() - 172800000).toISOString() },
+          { direction: 'outbound', body: 'Thanks David! I have the appraisal, NOA, application, and credit report on file. Still outstanding: Government-Issued ID, Property Tax Assessment, Current Mortgage Payout Statement.', created_at: new Date(Date.now() - 86400000).toISOString() },
+        ]
+      );
+      console.log('Group M adversarial output (first 500 chars):');
+      console.log(`  ${(groupMResult || '').slice(0, 500).replace(/\n/g, ' ')}`);
+      checkVagueness('generateAdminResponseEmail — missing docs referenced',
+        groupMResult,
+        ['Government', 'Tax', 'Mortgage Payout']
+      );
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group M adversarial smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
