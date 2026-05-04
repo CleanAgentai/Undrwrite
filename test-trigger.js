@@ -867,6 +867,70 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group J adversarial smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP N — adversarial live Claude smoke for wrong doc-flow direction
+    // ════════════════════════════════════════════════════════════════
+    // Bug 8.7 (Sandra Fletcher): Vienna told the broker to "request the final
+    // documents from Sandra" — naming the borrower as source. Per Franco: brokers
+    // provide docs directly to Vienna; Vienna stays neutral on sourcing.
+    // Hardest test: Franco's notes themselves phrase it as "ask broker to request
+    // from borrower" — Vienna must NOT carry that framing forward.
+    console.log('\n========== GROUP N — doc-flow direction adversarial ==========');
+
+    const directionForbidden = (borrowerFirstName) => [
+      // Naming borrower as source via "from"
+      [new RegExp(`(?:request|requesting|get|getting|collect|collecting|gather|gathering)[^.!?\\n]{0,40}from\\s+(?:${borrowerFirstName}|the\\s+borrower|her|him|them)\\b`, 'i'),
+        `request/collect/get from ${borrowerFirstName}/the borrower`],
+      // "Have X send/provide/forward"
+      [new RegExp(`\\bhave\\s+(?:${borrowerFirstName}|the\\s+borrower|her|him|them)\\s+(?:send|provide|forward|share|submit)`, 'i'),
+        `have ${borrowerFirstName}/borrower send/provide/forward`],
+      // "Ask X for/to send/to provide"
+      [new RegExp(`\\bask\\s+(?:${borrowerFirstName}|the\\s+borrower|her|him|them)\\s+(?:for|to\\s+send|to\\s+provide|to\\s+forward)`, 'i'),
+        `ask ${borrowerFirstName}/borrower for/to send`],
+      // "Chase X" / "follow up with X" for docs
+      [new RegExp(`\\b(?:chase|follow\\s+up\\s+with|reach\\s+out\\s+to)\\s+(?:${borrowerFirstName}|the\\s+borrower|her|him|them)\\b`, 'i'),
+        `chase/follow up with ${borrowerFirstName}/borrower`],
+    ];
+
+    const checkDirection = (label, html, borrowerFirstName) => {
+      const failures = [];
+      for (const [re, desc] of directionForbidden(borrowerFirstName)) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 25), m.index + m[0].length + 30);
+          failures.push(`${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: Vienna instructed broker to source docs from borrower:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: doc requests phrased neutrally (no borrower-as-source)`);
+    };
+
+    // Adversarial: Franco's own notes phrase it as "ask broker to request from
+    // Sandra" — Vienna must reframe neutrally in the broker reply.
+    try {
+      const groupNResult = await realAi.generateAdminResponseEmail(
+        {
+          borrower_name: 'Sandra Fletcher',
+          broker_name: 'David Park',
+          sender_name: 'David Park',
+          ltv_percent: 62.6,
+        },
+        'Looking good — please ask David to request the Government-Issued ID, Property Tax Assessment, and Current Mortgage Payout Statement from Sandra.',
+        [
+          { direction: 'inbound', body: 'Hi Vienna, here is Sandra Fletcher\'s file.', created_at: new Date(Date.now() - 172800000).toISOString() },
+          { direction: 'outbound', body: 'Thanks David! I have the appraisal, NOA, application, and credit report on file. Still outstanding: Government-Issued ID, Property Tax Assessment, Current Mortgage Payout Statement.', created_at: new Date(Date.now() - 86400000).toISOString() },
+        ]
+      );
+      console.log('Group N adversarial output (first 500 chars):');
+      console.log(`  ${(groupNResult || '').slice(0, 500).replace(/\n/g, ' ')}`);
+      checkDirection('generateAdminResponseEmail — Franco notes phrase it as from-borrower', groupNResult, 'Sandra');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group N adversarial smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
