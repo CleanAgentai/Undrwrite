@@ -436,6 +436,90 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Bug B live smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // BUG C — adversarial live Claude smoke for approval-language + internal-routing
+    // ════════════════════════════════════════════════════════════════
+    console.log('\n========== BUG C — live Claude smoke (adversarial) ==========');
+
+    // Forbidden phrases that should never appear in any broker-facing email post-Bug-C.
+    // Each entry is [pattern, description]. /\bword\b/i is the safe shape — substring would
+    // false-positive on legitimate words inside other words.
+    const forbiddenPhrases = [
+      [/\bapprov(ed|al|ing)\b/i, 'approval/approved/approving'],
+      [/passed\s+review/i, '"passed review"'],
+      [/looks\s+good/i, '"looks good"'],
+      [/everything\s+is\s+in\s+order/i, '"everything is in order"'],
+      [/thanks\s+for\s+confirming\s+(the\s+)?approval/i, '"thanks for confirming approval"'],
+      [/for\s+final\s+assessment/i, '"for final assessment"'],
+      [/going\s+to\s+underwriting/i, '"going to underwriting"'],
+      [/final\s+approval\s+and\s+terms/i, '"final approval and terms"'],
+      [/the\s+underwriters\b/i, '"the underwriters"'],
+      [/our\s+team\b/i, '"our team"'],
+      [/i'?ll\s+(get|send)\s+this\s+over\s+to/i, '"I\'ll get/send this over to"'],
+      [/passing\s+(this|it)\s+along/i, '"passing it along"'],
+      [/forwarding\s+(this|it)\s+to/i, '"forwarding to"'],
+      [/\bfranco\b/i, '"Franco" — should never appear in broker-facing email'],
+    ];
+
+    const checkBugC = (label, html) => {
+      const failures = [];
+      for (const [re, desc] of forbiddenPhrases) {
+        const m = (html || '').match(re);
+        if (m) failures.push(`${desc} — matched at "...${(html || '').slice(Math.max(0, m.index - 20), m.index + m[0].length + 20)}..."`);
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: forbidden Bug C phrases in output:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no forbidden Bug C phrases`);
+    };
+
+    // Adversarial 1: generateAdminResponseEmail — Franco notes "please proceed"; broker's last
+    // message was "yes I'll send the AML/PEP today". This is the exact Scenario 3 shape that
+    // produced "Hi Jason! Perfect — thanks for confirming the approval!" pre-fix.
+    try {
+      const adminEmail = await realAi.generateAdminResponseEmail(
+        {
+          borrower_name: 'Derek Olsen',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+          sender_type: 'broker',
+          ltv_percent: 62,
+        },
+        'Please proceed — looks like a solid deal at 62% LTV.',
+        [
+          { direction: 'inbound', body: 'Yes, I will have the borrower complete the AML and PEP forms and send back today. Thanks!' },
+        ]
+      );
+      console.log('generateAdminResponseEmail output (first 300 chars):');
+      console.log(`  ${(adminEmail || '').slice(0, 300).replace(/\n/g, ' ')}`);
+      checkBugC('generateAdminResponseEmail', adminEmail);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  generateAdminResponseEmail smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Adversarial 2: generateCompletionEmail — final closing email. The Scenario 3 shape that
+    // produced "Thanks for confirming approval, Jason!" + "I'll get this over to Franco".
+    try {
+      const completionEmail = await realAi.generateCompletionEmail(
+        {
+          borrower_name: 'Derek Olsen',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+        },
+        [
+          { direction: 'inbound', body: 'Here are the last few documents — gov ID, tax assessment, and payout statement attached.' },
+          { direction: 'outbound', body: 'Thanks for sending those through!' },
+        ]
+      );
+      console.log('generateCompletionEmail output (first 300 chars):');
+      console.log(`  ${(completionEmail || '').slice(0, 300).replace(/\n/g, ' ')}`);
+      checkBugC('generateCompletionEmail', completionEmail);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  generateCompletionEmail smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
