@@ -660,6 +660,76 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group I adversarial smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP H — adversarial live Claude smoke for completeness self-consistency
+    // ════════════════════════════════════════════════════════════════
+    // Bugs 6.5 (Kevin Tran) + 8.6 (Sandra Fletcher): Vienna wrote "complete file /
+    // package, ready to start working" while still listing missing docs in the same
+    // email. Post-fix: when ANY item from the standard checklist is missing, none of
+    // the completeness phrases may appear in the reply.
+    console.log('\n========== GROUP H — completeness self-consistency adversarial ==========');
+
+    const completenessForbidden = [
+      [/\bcomplete\s+(?:file|package|documentation|set)\b/i, '"complete file/package/documentation/set"'],
+      [/\bthe\s+full\s+package\b/i, '"the full package"'],
+      [/\ball\s+the\s+(?:necessary|required)\s+(?:documents|documentation)\b/i, '"all the necessary/required documents/documentation"'],
+      [/\bwe\s+have\s+everything\s+we\s+need\b/i, '"we have everything we need"'],
+      [/\bready\s+to\s+start\s+working\b/i, '"ready to start working"'],
+      [/\bthe\s+(?:file|package)\s+is\s+complete\b/i, '"the file/package is complete"'],
+      [/\bputting\s+together\s+a\s+complete\b/i, '"putting together a complete"'],
+    ];
+
+    const checkCompletenessConsistency = (label, html) => {
+      const failures = [];
+      for (const [re, desc] of completenessForbidden) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 20), m.index + m[0].length + 30);
+          failures.push(`${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: completeness phrases used while items still missing:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no completeness phrases despite missing docs`);
+    };
+
+    // Adversarial: broker just sent appraisal + NOA. Most of the standard checklist
+    // (gov ID, property_tax, mortgage_statement, AML, PEP, loan_application, pnw)
+    // is still missing. Vienna must NOT use any "complete" / "we have everything"
+    // / "ready to start working" language.
+    try {
+      const groupHResult = await realAi.generateBrokerResponse(
+        `Hi! Just sent through the appraisal and NOA for Kevin's file. The rest will follow next week.\n\nThanks,\nJason Mercer`,
+        [],
+        [],
+        {
+          borrower_name: 'Kevin Tran',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+          sender_type: 'broker',
+          ltv_percent: 58.8,
+          loan_type: 'second mortgage',
+        },
+        [
+          { direction: 'inbound', body: 'Hi Vienna, looking to submit a 2nd mortgage for Kevin Tran. Will send docs shortly.', created_at: new Date(Date.now() - 86400000).toISOString() },
+          { direction: 'outbound', body: 'Thanks Jason — please send through the standard package when you can.', created_at: new Date(Date.now() - 80000000).toISOString() },
+        ],
+        // documentsOnFile — only 2 items. Most of the standard checklist is missing.
+        [
+          { file_name: 'Appraisal_Tran.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Tran_2024.pdf', classification: 'noa' },
+        ]
+      );
+      const groupHHtml = groupHResult?.responseEmail || '';
+      console.log('Group H adversarial output (first 500 chars):');
+      console.log(`  ${groupHHtml.slice(0, 500).replace(/\n/g, ' ')}`);
+      checkCompletenessConsistency('generateBrokerResponse — most of checklist missing', groupHHtml);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group H adversarial smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
