@@ -546,6 +546,60 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`getFormAttachments skip flags: ${formAttachPassed}/${formAttachCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // SCENARIO 13: dailySummary timezone handling (Bug 13.1)
+  // ════════════════════════════════════════════════════════════════
+  // Bug 13.1: cron fires at 21:00 America/Edmonton. On Render's UTC runtime,
+  // 9 PM MDT May 4 = 03:00 UTC May 5, so toLocaleDateString() with no timeZone
+  // option rendered "Tuesday May 5" in the email Franco received at 9 PM Monday.
+  // Post-fix: formatAdminDate uses timeZone: 'America/Edmonton' so the date
+  // matches Franco's wall clock. Tests cover both DST (May, MDT = UTC-6) and
+  // standard time (January, MST = UTC-7).
+  console.log('\n========== SCENARIO 13 — formatAdminDate truth table ==========');
+
+  const { formatAdminDate, ADMIN_TIMEZONE } = require('./src/cron/dailySummary');
+
+  const dateCases = [
+    {
+      name: '9 PM MDT May 4, 2026 (cron fire moment) → Monday May 4',
+      input: new Date('2026-05-05T03:00:00Z'),
+      expect: 'Monday, May 4, 2026',
+    },
+    {
+      name: '9:59 PM MDT May 4 (just before midnight wrap) → Monday May 4',
+      input: new Date('2026-05-05T03:59:00Z'),
+      expect: 'Monday, May 4, 2026',
+    },
+    {
+      name: '12:01 AM MDT May 5 (wrapped to next day) → Tuesday May 5',
+      input: new Date('2026-05-05T06:01:00Z'),
+      expect: 'Tuesday, May 5, 2026',
+    },
+    {
+      name: '9 PM MST Jan 14, 2026 (winter, MST = UTC-7) → Wednesday Jan 14',
+      input: new Date('2026-01-15T04:00:00Z'),
+      expect: 'Wednesday, January 14, 2026',
+    },
+    {
+      name: 'noon UTC mid-day → no wrap concern, day matches',
+      input: new Date('2026-05-04T18:00:00Z'),
+      expect: 'Monday, May 4, 2026',
+    },
+  ];
+
+  let datePassed = 0;
+  for (const tc of dateCases) {
+    const got = formatAdminDate(tc.input);
+    if (got === tc.expect) {
+      console.log(`  PASS: ${tc.name} → "${got}"`);
+      datePassed++;
+    } else {
+      throw new Error(`FAIL [${tc.name}]: expected "${tc.expect}", got "${got}"`);
+    }
+  }
+  console.log(`Scenario 13 date formatting: ${datePassed}/${dateCases.length} passed`);
+  console.log(`  ADMIN_TIMEZONE = "${ADMIN_TIMEZONE}" (single source of truth for cron schedule + date header)`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG B: broker-name extraction / "Franco" greeting regression
   // ════════════════════════════════════════════════════════════════
 

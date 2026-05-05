@@ -7,6 +7,24 @@ const aiService = require('../services/ai');
 const FOLLOW_UP_AFTER_DAYS = 2;
 const MAX_REMINDERS = 3;
 
+// Single source of truth for "Franco's timezone." Used by both the cron
+// schedule (so we fire at 9 PM Edmonton wall time regardless of DST) and the
+// date formatter in the summary header (so the header shows the date Franco
+// is sitting in, not the runtime container's UTC date). Bug 13.1 fix.
+const ADMIN_TIMEZONE = 'America/Edmonton';
+
+// Format a Date as "Monday, May 4, 2026" in the admin's timezone. Pre-fix this
+// inline call had no timeZone option and rendered in the runtime TZ (UTC on
+// Render), so a 9 PM MDT May 4 cron fire produced a "Tuesday May 5" header
+// because 9 PM MDT = 03:00 UTC May 5. Now deterministic in ADMIN_TIMEZONE.
+const formatAdminDate = (date) => date.toLocaleDateString('en-US', {
+  weekday: 'long',
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: ADMIN_TIMEZONE,
+});
+
 // Send follow-up reminders to brokers who haven't replied
 const runFollowUpReminders = async () => {
   console.log('\n--- Checking for stale deals needing follow-up ---');
@@ -136,7 +154,7 @@ const runDailySummary = async () => {
 
     // Build summary data for AI
     const summaryData = {
-      date: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+      date: formatAdminDate(new Date()),
       totalActiveDeals: activeDeals.length,
       dealsByStatus,
       recentActivity: {
@@ -190,12 +208,14 @@ const runDailySummary = async () => {
   }
 };
 
-// Run every day at 9:00 PM MST
+// Run every day at 9:00 PM in the admin's timezone (handles DST automatically
+// via IANA TZ — 9 PM MST in winter, 9 PM MDT in summer).
 cron.schedule('0 21 * * *', runDailySummary, {
-  timezone: 'America/Edmonton',
+  timezone: ADMIN_TIMEZONE,
 });
 
-console.log('Daily summary cron scheduled — runs at 9:00 PM MST');
+console.log(`Daily summary cron scheduled — runs at 9:00 PM ${ADMIN_TIMEZONE}`);
 
-// Export for manual triggering/testing
-module.exports = { runDailySummary };
+// Export for manual triggering/testing. formatAdminDate is exposed for the
+// harness to pin Bug 13.1 (timezone wrap on date header).
+module.exports = { runDailySummary, formatAdminDate, ADMIN_TIMEZONE };

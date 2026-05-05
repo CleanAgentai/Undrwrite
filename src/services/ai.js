@@ -1654,7 +1654,10 @@ Return only the HTML email body.`,
     try {
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
+        // Bug 13.2 fix: 2048 tokens was truncating the All Current Deals table to
+        // ~1 row when the active-deals count grew to 49. ~50 rows × ~100 tokens
+        // per HTML row + the other 5 sections needs ~6-8K tokens of headroom.
+        max_tokens: 8192,
         messages: [{
           role: 'user',
           content: `Generate a daily summary email for Franco Maione, a private mortgage lender.
@@ -1669,13 +1672,13 @@ Format as clean HTML. Include these sections:
 
 3. **Emails Received (Past 24 Hours)** — ONLY inbound emails from brokers. For each, show: borrower name, subject, time, and a brief summary of the email content. Do NOT include outbound/sent emails.
 
-4. **All Current Deals** — List ALL active deals with: borrower name, broker email, status, LTV if known, and days since last update.
+4. **All Current Deals** — List ALL active deals with: borrower name, broker email, status, LTV if known, and days since last update. CRITICAL: render every single deal in the activeDeals data array. Do NOT truncate, summarize, omit, or sample rows. If the data has 49 deals, render 49 rows; if it has 200, render 200. The "concise" guidance below applies to per-row content (keep each cell short), NOT to row count. Truncating this table breaks Franco's daily ops review.
 
 5. **Stale Deals** — Flag any deals with no activity for 3+ days.
 
 6. **Automated Follow-Up Reminders** — If any automated reminders were sent today by Vienna, list them (borrower name, broker email, which reminder # it was, and how many days silent). Also flag any deals that have hit the maximum 3 reminders with no response — these need your personal attention or a decision to close.
 
-Keep it concise. Use tables or bullet points. No fluff.
+Keep per-row content concise (short fields, no fluff). Use tables for sections 2, 4, 5, 6 (anything with multiple entries) — bullet points are fine for shorter sections.
 
 IMPORTANT: Do NOT include \`\`\`html, <html>, <head>, <body>, or <!DOCTYPE> tags. Start directly with content like <h2>. Return only inner HTML.
 
