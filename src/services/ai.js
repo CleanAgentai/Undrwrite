@@ -890,7 +890,10 @@ Return only the HTML email body. Do not include a subject line.`,
     }
   },
 
-  // Generate info request email when LTV or ownership type can't be determined
+  // UNUSED — DO NOT CALL WITHOUT AUDITING AGAINST CURRENT RULE SET.
+  // No webhook or cron consumer as of 2026-05-05. Lacks Bug C / Group T / Group O / Group P
+  // hardening present in the active prompts. If you wire it up, mirror the FORBIDDEN
+  // APPROVAL/ROUTING + DO NOT NAME UNSTATED LENDERS + TONE & BREVITY blocks first.
   generateInfoRequestEmail: async (dealSummary, missing, hasApp = false, hasPnw = false) => {
     try {
       const missingItems = [];
@@ -1473,7 +1476,10 @@ Return only the HTML email body.`,
     }
   },
 
-  // Update deal summary with new info from follow-up emails
+  // UNUSED — DO NOT CALL WITHOUT AUDITING AGAINST CURRENT RULE SET.
+  // No webhook or cron consumer as of 2026-05-05; superseded by generateBrokerResponse
+  // TASK 2 (which returns updated_summary alongside the response email). If you wire
+  // this back up, ensure it cannot drift from generateBrokerResponse's analysis schema.
   updateDealSummary: async (emailBody, attachments = [], existingSummary, savedDocs = []) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
@@ -1543,7 +1549,10 @@ IMPORTANT:
     }
   },
 
-  // Generate document review notification for Franco (when docs are incomplete in Stage 3)
+  // UNUSED — DO NOT CALL WITHOUT AUDITING AGAINST CURRENT RULE SET.
+  // No webhook or cron consumer as of 2026-05-05; superseded by generateLeadSummary
+  // (which has fuller Section 1-10 structure + Group Q parameterized labels). If you
+  // wire this back up, mirror generateLeadSummary's ATTRIBUTION RULE block.
   generateDocReviewNotification: async (dealSummary, messages, documents, missingDocs) => {
     try {
       // Group Q: parameterize message labels with broker name (Bug 9.6 fix). Same
