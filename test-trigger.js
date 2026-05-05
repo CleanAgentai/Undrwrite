@@ -1364,6 +1364,80 @@ License #M12001505`;
     }
 
     // ════════════════════════════════════════════════════════════════
+    // GROUP V — adversarial live Claude smoke for referral re-ask removal
+    // ════════════════════════════════════════════════════════════════
+    // Bug 11.1 (David referral): broker referred an existing client to Vienna
+    // (via Franco) with full deal context. Vienna asked David "Could you briefly
+    // describe your situation in your own words?" — re-asking despite full context
+    // creates a poor borrower experience. Per Porter's hard reversal: when
+    // deal_details is populated, NEVER ask the borrower to describe.
+    console.log('\n========== GROUP V — referral re-ask adversarial ==========');
+
+    // Forbidden re-ask patterns when deal_details is populated.
+    const reAskForbidden = [
+      [/\bdescribe\s+your\s+(?:situation|circumstances)\b/i, '"describe your situation"'],
+      [/\bquick\s+rundown\b/i, '"quick rundown"'],
+      [/\b(?:give|share|tell)\s+(?:me|us|me\s+a\s+)?(?:a\s+)?(?:bit|brief|quick|short)\s+(?:rundown|overview|background|description)\s+of\s+(?:your|what)/i, '"give me a [bit/brief/quick/short] [rundown/overview] of your..."'],
+      [/\bin\s+your\s+own\s+words\b/i, '"in your own words"'],
+      [/\bcould\s+you\s+(?:briefly\s+)?describe\b/i, '"could you (briefly) describe"'],
+      [/\bcould\s+you\s+(?:briefly\s+)?(?:share|tell|walk\s+me)\b/i, '"could you (briefly) share/tell/walk me through"'],
+      [/\bwrite[\s-]?up\s+(?:about|of|on)\s+(?:your|what)/i, '"write-up about/of your..."'],
+      [/\b(?:tell|share)\s+(?:me|us)\s+(?:a\s+bit\s+)?about\s+(?:your\s+(?:situation|deal)|what\s+you'?re\s+looking)/i, '"tell/share us about your situation / what you\'re looking for"'],
+    ];
+
+    const checkNoReAsk = (label, html) => {
+      const failures = [];
+      for (const [re, desc] of reAskForbidden) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 25), m.index + m[0].length + 30);
+          failures.push(`${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: Vienna asked the borrower to describe their situation despite full deal context being provided:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no re-ask patterns when deal context is full`);
+    };
+
+    // Adversarial: full deal context provided in referralData.deal_details.
+    // Vienna must NOT re-ask the borrower.
+    try {
+      const groupVResult = await realAi.generateReferralWelcomeEmail({
+        referred_name: 'David Thompson',
+        referred_email: 'david.thompson@example.com',
+        sender_type: 'borrower',
+        deal_details: 'David owns an investment property in North York valued at $700,000 with an existing first mortgage of $280,000 at TD. He is looking to take out a $90,000 second mortgage to fund a kitchen renovation. Closing target is mid-November.',
+        notes: null,
+      });
+      console.log('Group V adversarial output (first 600 chars):');
+      console.log(`  ${(groupVResult || '').slice(0, 600).replace(/\n/g, ' ')}`);
+      checkNoReAsk('generateReferralWelcomeEmail — full deal context, no re-ask', groupVResult);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group V adversarial smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Positive control: NO deal_details provided. Vienna SHOULD ask for a write-up.
+    // (We don't assert this strictly — just log the output for visibility.)
+    try {
+      const groupVControl = await realAi.generateReferralWelcomeEmail({
+        referred_name: 'Maria Lopez',
+        referred_email: 'maria.lopez@example.com',
+        sender_type: 'borrower',
+        deal_details: null,
+        notes: null,
+      });
+      console.log('\nGroup V positive control (no deal_details, write-up ask expected):');
+      console.log(`  ${(groupVControl || '').slice(0, 400).replace(/\n/g, ' ')}`);
+      // Soft check: the asking-pattern should appear here, since context is missing.
+      const asksForRundown = /(?:rundown|describe|tell\s+(?:me|us)|share\s+(?:a|some))/i.test(groupVControl);
+      console.log(`  ${asksForRundown ? 'OK' : 'NOTE'}: positive-control ${asksForRundown ? 'asks' : 'does NOT ask'} for a write-up — Vienna ${asksForRundown ? 'correctly' : 'unexpectedly silent'} when no context provided`);
+    } catch (e) {
+      console.warn(`  Group V positive control skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // GROUP R — live Claude smoke for parseDraftReply SEND/EDIT classification
     // ════════════════════════════════════════════════════════════════
     // The REPLACE path is heuristic-only (no Claude — covered by deterministic tests
