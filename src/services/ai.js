@@ -280,8 +280,12 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
         ? documentsOnFile.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n')
         : 'None yet';
 
+      // Group Q: parameterize message labels with broker name so Claude can't attribute
+      // inbound bodies to "Franco" (the failure mode 9.6 in the admin-facing path; same
+      // shape risk here in the conversational handler).
+      const inboundSenderLabel = existingSummary?.broker_name || existingSummary?.sender_name || 'Broker';
       const convoText = conversationHistory.length > 0
-        ? conversationHistory.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\n${m.body}`).join('\n\n---\n\n')
+        ? conversationHistory.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\n${m.body}`).join('\n\n---\n\n')
         : 'No previous messages';
 
       // Standard doc checklist — branched by deal type:
@@ -633,6 +637,11 @@ Return only the HTML email body. Do not include a subject line.`,
   // Generate internal escalation notification to admin (LTV > 80%)
   generateEscalationNotification: async (dealSummary, messages, documents) => {
     try {
+      // Group Q: parameterize message labels with broker name (Bug 9.6 fix). The
+      // EMAIL CONVERSATION block goes to Franco; without explicit attribution, Claude
+      // has rendered inbound bodies as if from Franco himself when broker emails open
+      // with "Hi Franco". Belt-and-suspenders with the prompt rule below.
+      const inboundSenderLabel = dealSummary?.broker_name || dealSummary?.sender_name || 'Broker';
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2048,
@@ -670,10 +679,15 @@ DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
 
 EMAIL CONVERSATION:
-${messages.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
+${messages.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
 
 DOCUMENTS ON FILE:
 ${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n') || 'None yet'}
+
+ATTRIBUTION RULE (CRITICAL for the EMAIL CONVERSATION above):
+- INBOUND messages are FROM the broker (named in the labels: "INBOUND from ${inboundSenderLabel}"). NEVER attribute INBOUND content to "Franco" or anyone else, even if the body opens with "Hi Franco" — that's the broker addressing Franco, not Franco speaking. The broker is the SENDER.
+- OUTBOUND messages are FROM Vienna (the labels say so explicitly). Franco is the RECIPIENT of this notification email — he is not a sender in this conversation.
+- When the rendered conversation log appears in your output, preserve the "INBOUND from ${inboundSenderLabel}" / "OUTBOUND from Vienna" attribution exactly as labeled.
 
 Return only the HTML email body.`,
         }],
@@ -978,6 +992,13 @@ File name: ${fileName}`,
       const receivedFiles = documents.map(d => `${d.file_name} (${d.classification || 'unclassified'})`);
       const isComplete = missingDocs.length === 0;
 
+      // Group Q: parameterize message labels with broker name (Bug 9.6 fix). The
+      // EMAIL CONVERSATION block in this admin-facing summary previously labeled
+      // messages just [INBOUND]/[OUTBOUND], and Claude attributed inbound bodies
+      // to "Franco Maione" when they opened with "Hi Franco". Belt-and-suspenders
+      // with the prompt rule below.
+      const inboundSenderLabel = dealSummary?.broker_name || dealSummary?.sender_name || 'Broker';
+
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
@@ -1067,7 +1088,12 @@ ${missingDocs.map(d => `- [MISSING] ${module.exports.DOC_DISPLAY_NAMES[d] || d}`
 ${!isComplete ? `\nIMPORTANT: This file is pending approval. The following documents are still outstanding: ${missingDocs.map(d => module.exports.DOC_DISPLAY_NAMES[d] || d).join(', ')}. Start the summary with: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"` : 'This file is COMPLETE — all required documents have been received.'}
 
 === SECTION 10: EMAIL CONVERSATION ===
-Include the full email conversation so Franco can review all broker communications. Label each with date and direction (inbound/outbound).
+Include the full email conversation so Franco can review all broker communications. Each entry in the input data below is labeled with its direction AND sender (e.g. "INBOUND from ${inboundSenderLabel}" or "OUTBOUND from Vienna"). Preserve those attributions exactly — they are deterministic, not your inference.
+
+ATTRIBUTION RULE (CRITICAL):
+- INBOUND messages are FROM the broker (${inboundSenderLabel}). NEVER attribute INBOUND content to "Franco" / "Franco Maione" or anyone else, even if the body opens with "Hi Franco" — that's the broker addressing Franco, not Franco speaking. The broker is the SENDER.
+- OUTBOUND messages are FROM Vienna. Franco is the RECIPIENT of this summary email — he is not a sender in this conversation.
+- When you render the conversation log in your output, use the exact sender names from the input labels. Do NOT relabel, paraphrase, or substitute Franco for the broker.
 
 At the bottom, include this action section:
 <hr>
@@ -1087,7 +1113,7 @@ EXTRACTED DOCUMENT TEXT:
 ${docSections || 'No extracted text available from documents.'}
 
 EMAIL CONVERSATION:
-${messages.length > 0 ? messages.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n') : 'No messages yet.'}
+${messages.length > 0 ? messages.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n') : 'No messages yet.'}
 
 === INSTRUCTIONS ===
 - Read EVERYTHING — the deal summary AND all document text
@@ -1442,6 +1468,10 @@ IMPORTANT:
   // Generate document review notification for Franco (when docs are incomplete in Stage 3)
   generateDocReviewNotification: async (dealSummary, messages, documents, missingDocs) => {
     try {
+      // Group Q: parameterize message labels with broker name (Bug 9.6 fix). Same
+      // shape as generateLeadSummary / generateEscalationNotification — admin-facing
+      // conversation log must attribute INBOUND to the broker, never to Franco.
+      const inboundSenderLabel = dealSummary?.broker_name || dealSummary?.sender_name || 'Broker';
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2048,
@@ -1473,7 +1503,12 @@ DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
 
 EMAIL CONVERSATION:
-${messages.map(m => `[${m.direction.toUpperCase()}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
+${messages.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
+
+ATTRIBUTION RULE (CRITICAL for the EMAIL CONVERSATION above):
+- INBOUND messages are FROM the broker (named in the labels: "INBOUND from ${inboundSenderLabel}"). NEVER attribute INBOUND content to "Franco" or anyone else, even if the body opens with "Hi Franco" — that's the broker addressing Franco, not Franco speaking. The broker is the SENDER.
+- OUTBOUND messages are FROM Vienna. Franco is the RECIPIENT of this email — he is not a sender in this conversation.
+- Preserve the "INBOUND from ${inboundSenderLabel}" / "OUTBOUND from Vienna" attribution exactly when rendering.
 
 DOCUMENTS ON FILE:
 ${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n') || 'None yet'}
