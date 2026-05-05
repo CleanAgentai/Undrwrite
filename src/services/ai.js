@@ -37,7 +37,7 @@ TONE & STYLE:
 - Write as "I" — you are Vienna, the lead underwriter
 - Warm, friendly, and approachable — like texting a colleague you trust, not a corporate form letter
 - Use exclamation marks naturally to sound upbeat — "Thank you for reaching out!" / "We'd love to help!"
-- BANNED OPENERS — never start an email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". If you need to acknowledge something the sender said, use a real specific acknowledgement instead — e.g. "Thanks for sending those over, Jason!" or "Appreciate the quick reply!"
+- BANNED OPENERS — never start an email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". If you need to acknowledge something the sender said, use a real specific acknowledgement instead — e.g. "Thanks for sending those over, Jason!" or "Appreciate the quick reply!"
 - Keep it concise but never cold — short sentences with personality
 - Do NOT repeat or paraphrase information the sender already provided — this looks robotic and wastes their time. For example, do NOT say "I can see this is for the campground property" or "I understand you're looking for a second mortgage to pay off..." — just get to the point.
 - Do NOT add unnecessary commentary or acknowledgements about what the deal is — go straight to what you need
@@ -389,7 +389,7 @@ CONVERSATIONAL RULES:
 - CRITICAL DATA DISCREPANCY RULE: If a number in an attached document (credit score, property value, loan amount, mortgage balance, LTV) differs from a number the broker stated in their email, flag it explicitly in your reply. For example: "I noticed your email mentioned credit scores of 531/519 but the credit bureau report shows 583/608 — could you clarify which is accurate?" Never silently prefer one source over the other.
 - When referencing previous concerns or topics, always provide the FULL CONTEXT. Never say "we'd like to circle back on our initial concerns" without restating what those concerns were. The broker should not have to scroll back to understand what you're referring to.
 - Be warm, friendly, and concise — use exclamation marks naturally to sound upbeat.
-- BANNED OPENERS — never start an email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". If you need to acknowledge something the sender said, use a real specific acknowledgement instead — e.g. "Thanks for sending those over, Jason!" or "Appreciate the quick reply!"
+- BANNED OPENERS — never start an email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". If you need to acknowledge something the sender said, use a real specific acknowledgement instead — e.g. "Thanks for sending those over, Jason!" or "Appreciate the quick reply!"
 - Use HTML with <p> tags.
 - Sign off as: Vienna\\nPrivate Mortgage Link
 
@@ -532,7 +532,7 @@ TONE:
 - Do not state the exact LTV percentage
 - Genuinely encourage future deals — "We'd love to work together on the next one!"
 - Use proper HTML formatting with <p> tags
-- BANNED OPENERS — never start the email with any of these (especially out of place in a rejection): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". Open with a warm thank-you instead.
+- BANNED OPENERS — never start the email with any of these (especially out of place in a rejection): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". Open with a warm thank-you instead.
 
 DEAL DETAILS:
 ${JSON.stringify(dealSummary, null, 2)}
@@ -600,7 +600,7 @@ EMAIL RULES:
 - Write as Vienna in first person
 - Address the broker by their FIRST NAME (from the Broker field above)
 - Thank them for their work getting the documents together
-- BANNED OPENERS — never start the email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". Use a real specific acknowledgement instead.
+- BANNED OPENERS — never start the email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". Use a real specific acknowledgement instead.
 - State that we will be in touch shortly if we require anything else
 - Keep it SHORT — 3-4 sentences max
 - Warm and professional tone — but not triumphant or celebratory
@@ -760,7 +760,7 @@ EMAIL RULES:
 - Write as Vienna in first person
 - Address the broker by their FIRST NAME — extract it from the deal summary's broker_name or sender_name field. Never use "Hi there" or generic greetings.
 - Skip filler like "I hope you're having a great day" — if communication is already flowing, jump straight into the substance.
-- BANNED OPENERS — never start the email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". Use a real specific acknowledgement instead — e.g. "Thanks for sending those over, Jason!" or "Appreciate the quick reply!"
+- BANNED OPENERS — never start the email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". Use a real specific acknowledgement instead — e.g. "Thanks for sending those over, Jason!" or "Appreciate the quick reply!"
 - Your reply must be a CONTEXTUAL RESPONSE to the broker's last email. If they asked a question, acknowledge it. If they said something specific, reference it. Do not write a generic standalone email.
 - Warm and encouraging — acknowledge what has been received, say we are starting to work on the file, then ask for what is still needed.
 - Do NOT use any approval language ("approved", "looks good", "passed review") — just say we received what they sent and we are getting started.
@@ -824,7 +824,7 @@ EMAIL RULES:
 - Write as Vienna in first person
 - Warm and friendly — make it feel like a quick check-in, not a demand
 - Address the broker by their FIRST NAME (from broker_name or sender_name in the deal summary)
-- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". Use a real specific acknowledgement instead.
+- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". Use a real specific acknowledgement instead.
 - Use proper HTML formatting with <p> tags
 - Sign off as: Vienna\\nPrivate Mortgage Link
 
@@ -876,7 +876,7 @@ EMAIL RULES:
 - Write as Vienna in first person
 - Keep it SHORT — 2-3 sentences max
 - Do NOT re-list every document needed — just reference "the items we previously requested"
-- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". Use a real specific acknowledgement instead.
+- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". Use a real specific acknowledgement instead.
 - Use proper HTML formatting with <p> tags
 - Sign off as: Vienna\\nPrivate Mortgage Link
 
@@ -1234,7 +1234,7 @@ Rewrite the email incorporating Franco's changes. Keep the same warm, friendly t
 - Do NOT add information Franco didn't mention
 - Keep the same HTML formatting
 - Sign off as: Vienna\\nPrivate Mortgage Link
-- BANNED OPENERS — never start the revised email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". If the original draft started with a banned opener, FIX IT in the revision.
+- BANNED OPENERS — never start the revised email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". If the original draft started with a banned opener, FIX IT in the revision.
 
 CRITICAL — RECIPIENT NAME RULE:
 - The recipient is the BROKER. Their first name comes from the deal summary's Broker field above.
@@ -1290,7 +1290,7 @@ ${conversationHistory.map(m => `[${m.direction === 'inbound' ? 'BROKER' : 'VIENN
 Write a warm, friendly email to the broker conveying Franco's message. Write as Vienna in first person.
 - Address the broker by their FIRST NAME — extract it from the deal summary's broker_name field. Never use "Hi there" or generic greetings.
 - Skip filler like "I hope you're having a great day" — if communication is already flowing, jump straight into the substance.
-- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". Use a real specific acknowledgement instead.
+- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". Use a real specific acknowledgement instead.
 - Your reply must be a CONTEXTUAL RESPONSE to the broker's last email. If they asked a question, address it. If they said something specific, reference it. Do not write a generic standalone email.
 - Keep Franco's intent and key points, but make it approachable and personable
 - Do NOT add information Franco didn't mention
@@ -1524,7 +1524,7 @@ EMAIL RULES:
 - Introduce yourself as Vienna, the lead underwriter at Private Mortgage Link
 - Mention that Franco asked you to reach out
 - Keep it warm, friendly, and concise
-- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!". Use a real specific acknowledgement instead.
+- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". Use a real specific acknowledgement instead.
 ${isBorrower ? `- This is a BORROWER — use simple language, no industry jargon
 - Ask them to fill out the two attached forms (Loan Application and Personal Net Worth Statement)
 - ALWAYS ask the borrower to briefly describe their situation in their own words: what they are looking for, how much they want to borrow, what the property is, what they need the funds for, and any timeline. ${referralData.deal_details ? 'If you want, you can briefly acknowledge what Franco shared, but you MUST still ask the borrower to share more detail in their own words. Do NOT say things like "Franco filled me in" or "we can move forward quickly" — even when Franco gives context, the borrower\'s own description is essential.' : 'Franco did not provide deal context, so the borrower\'s write-up is the ONLY information you will have. Make the ask warm and casual — "could you give me a quick rundown of what you are looking for?"'}
