@@ -519,7 +519,7 @@ License #M12001505`;
       [/the\s+underwriters\b/i, '"the underwriters"'],
       [/our\s+team\b/i, '"our team"'],
       [/i'?ll\s+(get|send)\s+this\s+over\s+to/i, '"I\'ll get/send this over to"'],
-      [/passing\s+(this|it)\s+along/i, '"passing it along"'],
+      [/passing\s+(?:\S+\s+){1,4}along\b/i, '"passing X along" (any 1-4 word variant — covers "passing it/this/everything/the file along")'],
       [/forwarding\s+(this|it)\s+to/i, '"forwarding to"'],
       [/\bfranco\b/i, '"Franco" — should never appear in broker-facing email'],
     ];
