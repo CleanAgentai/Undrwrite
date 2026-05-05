@@ -629,13 +629,16 @@ ${draftEmail}
 
         // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
         const reviewSummaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);
+        // Items 3+4: pass deal status so Vienna's reply is state-aware (no future-tense
+        // forwarding language when the file has already been sent to admin).
         const reviewResult = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
           savedDocs,
           reviewSummaryIn,
           reviewConversationHistory,
-          reviewDocumentsOnFile
+          reviewDocumentsOnFile,
+          existingDeal.status
         );
         // Normalize the freshly-updated summary on the way back, before persisting.
         reviewResult.updatedSummary = normalizeSenderName(reviewResult.updatedSummary, email.fromName);
@@ -679,13 +682,16 @@ ${draftEmail}
 
         // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
         const summaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);
+        // Items 3+4: pass deal status (active here, since this is the active branch).
+        // Status drives the FILE STATE block in the prompt — gates state-aware forwarding rules.
         const result = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
           savedDocs,
           summaryIn,
           conversationHistory,
-          documentsOnFile
+          documentsOnFile,
+          existingDeal.status
         );
         // Normalize the freshly-updated summary on the way back, before persisting.
         result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);

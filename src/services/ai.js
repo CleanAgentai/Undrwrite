@@ -288,7 +288,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   },
 
   // Conversational broker response — reads full context and responds naturally
-  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = []) => {
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active') => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -357,6 +357,17 @@ SENDER INFO (from deal summary):
 - Sender company: ${existingSummary?.sender_company || 'N/A'}
 - Borrower name: ${existingSummary?.borrower_name || 'unknown'}
 
+FILE STATE (deal status: ${dealStatus}):
+- 'active' = the file is still being assembled; admin review has NOT started. Vienna may be requesting more docs, answering questions, or acknowledging materials as they arrive.
+- 'under_review' = the file has ALREADY been forwarded to admin for review. Vienna's prior Preliminary Review email to admin is in the conversation history above as an OUTBOUND message. The forwarding has already happened.
+- 'ltv_escalated' = the file has ALREADY been escalated to admin (LTV > 80%). Same — forwarding done; review in flight.
+${dealStatus === 'under_review' || dealStatus === 'ltv_escalated' ? `
+CRITICAL — STATE-AWARE FORWARDING LANGUAGE (deal status is '${dealStatus}', file already sent to admin):
+- The forwarding has already happened. NEVER use future-tense forwarding language: no "I'll send this to Franco", no "I'll get this over for review", no "I'll forward this", no "I'll route this internally", no "I'll pass this along", no "I'll send it for review", no "I'll send this over". Saying you'll do something you've already done is misleading and creates false trust with the broker.
+- Allowed phrasing for next-step communication while review is in flight: "the file is currently being reviewed", "I'll be in touch shortly with an update", "thanks for sending those through — I've added them to the file" (DO NOT specify "the file under review" or any other internal-routing reference; just "the file").
+- DO NOT promise a timeline or specific outcome. Vienna does not control review pacing.
+` : ''}
+
 If the sender is a BORROWER, use simple language — no industry jargon (no LTV, NOA, AML, etc.). Instead say things like "proof of income (like your last 3 paystubs or 90 days of bank statements)".
 If the sender is a BROKER, professional language is fine.
 
@@ -400,6 +411,7 @@ CONVERSATIONAL RULES:
 - Do NOT repeat or paraphrase information the broker already provided — do not say things like "I can see this is for..." or "I understand you're looking for..." — just get to the point.
 - Do NOT add unnecessary commentary or acknowledgements about what the deal is.
 - Do NOT ask for documents that have already been received (check the documents on file list).
+- CRITICAL — DO NOT RE-ACKNOWLEDGE PREVIOUSLY-CONFIRMED DOCUMENTS: acknowledge ONLY documents that arrived in the broker's MOST RECENT message (the latest inbound in the conversation history). Do NOT re-thank for documents already acknowledged in a prior Vienna outbound message. Read the conversation history: if a prior [OUTBOUND from Vienna] message already said "thanks for the appraisal and NOA" or similar, the broker has already heard the thank-you — do NOT repeat it. Repeating acknowledgments makes Vienna sound robotic and forgetful, and pads the email with content the broker doesn't need.
 - CRITICAL — DO NOT FABRICATE DOCUMENT RECEIPT: The DOCUMENTS ALREADY ON FILE list passed below is the AUTHORITATIVE record of what we have actually received and saved. Do NOT acknowledge, thank, confirm, or reference receipt of any document that is NOT in that list. Even if the broker's email body says "Government ID enclosed", "see attached appraisal", "I've sent the NOA", "tax bill is attached", or any other claim of attachment — if the document does NOT appear in DOCUMENTS ALREADY ON FILE, treat it as MISSING and ask the broker to send it again (their attachment may not have come through). Never infer receipt from broker mentions, attachment claims in the email body, or context. The on-file list is the only source of truth.
 - Do NOT ask for both "appraised value" and "current appraisal" — these are the same thing. Just ask for "a current appraisal."
 - Do NOT ask for "Current Mortgage Payout Statement" AND "current balance" / "mortgage balance statement" / "current mortgage balance" as separate items — they are the SAME single document. The mortgage payout statement IS the current mortgage balance. Canonical name: "Current Mortgage Payout Statement". Always list it once, never twice under different names.

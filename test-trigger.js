@@ -1497,6 +1497,154 @@ License #M12001505`;
     }
 
     // ════════════════════════════════════════════════════════════════
+    // ITEMS 3 + 4 — conversational handler state awareness
+    // ════════════════════════════════════════════════════════════════
+    // Item 3: don't re-thank for documents already acknowledged in a prior Vienna
+    //         outbound message (cross-message acknowledgment dedup).
+    // Item 4: when status is under_review or ltv_escalated, the file has already
+    //         been forwarded — no future-tense "I'll send to Franco" language.
+
+    console.log('\n========== ITEM 3 — no re-thanking confirmed docs ==========');
+
+    const reThankForbidden = (alreadyThankedDocNames) => {
+      // Build patterns matching "thanks for the/your X" / "received the X" /
+      // "got the X" / "appreciate you sending X" for each doc Vienna already
+      // acknowledged. If any of these appear in the turn-2 reply, that's
+      // re-thanking.
+      return alreadyThankedDocNames.flatMap(doc => [
+        new RegExp(`\\bthanks?\\s+for\\s+(?:the\\s+|your\\s+|sending\\s+(?:the\\s+|your\\s+)?)?${doc}`, 'i'),
+        new RegExp(`\\b(?:received|got|have)\\s+(?:the\\s+|your\\s+)?${doc}`, 'i'),
+        new RegExp(`\\bappreciate\\s+(?:you\\s+sending\\s+)?(?:the\\s+|your\\s+)?${doc}`, 'i'),
+      ]);
+    };
+
+    const checkNoReThank = (label, html, alreadyThankedDocNames) => {
+      const patterns = reThankForbidden(alreadyThankedDocNames);
+      const failures = [];
+      for (let i = 0; i < patterns.length; i++) {
+        const re = patterns[i];
+        const m = (html || '').match(re);
+        if (m) {
+          const docHint = alreadyThankedDocNames[Math.floor(i / 3)];
+          const ctx = (html || '').slice(Math.max(0, m.index - 25), m.index + m[0].length + 30);
+          failures.push(`re-thanked for ${docHint}: matched "${m[0]}" at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: Vienna re-acknowledged previously-confirmed documents:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no re-thanking patterns for previously-acknowledged docs`);
+    };
+
+    // Adversarial: turn 1 already thanked for appraisal + NOA. Turn 2 broker sends
+    // Government ID. Vienna's turn-2 reply must mention the Gov ID (newly arrived)
+    // but NOT re-thank for appraisal/NOA.
+    try {
+      const item3Result = await realAi.generateBrokerResponse(
+        `Hi Vienna, sending the Government ID for Patricia now. Thanks!\n\nJason`,
+        [], [],
+        {
+          borrower_name: 'Patricia Wilson',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+          sender_type: 'broker',
+          ltv_percent: 65,
+          loan_type: 'second mortgage',
+        },
+        [
+          { direction: 'inbound', body: 'Hi Vienna, submitting a refi for Patricia. Attached: appraisal and NOA.', created_at: new Date(Date.now() - 86400000).toISOString() },
+          { direction: 'outbound', body: 'Hi Jason! Thanks for sending those over — I have the appraisal and NOA on file. Still need: Government-Issued ID, Property Tax Assessment, Current Mortgage Payout Statement, AML, PEP. Vienna | Private Mortgage Link', created_at: new Date(Date.now() - 80000000).toISOString() },
+          { direction: 'inbound', body: 'Hi Vienna, sending the Government ID for Patricia now. Thanks!', created_at: new Date().toISOString() },
+        ],
+        [
+          { file_name: 'Appraisal_Wilson.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Wilson_2024.pdf', classification: 'noa' },
+          { file_name: 'Government_ID_Wilson.pdf', classification: 'government_id' },
+        ],
+        'active'
+      );
+      const item3Html = item3Result?.responseEmail || '';
+      console.log('Item 3 adversarial output (first 500 chars):');
+      console.log(`  ${item3Html.slice(0, 500).replace(/\n/g, ' ')}`);
+      checkNoReThank('generateBrokerResponse turn 2 — gov ID arrived, must not re-thank appraisal/NOA',
+        item3Html,
+        ['appraisal', 'NOA', 'notice\\s+of\\s+assessment']
+      );
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Item 3 adversarial smoke skipped due to API error: ${e.message}`);
+    }
+
+    console.log('\n========== ITEM 4 — state-aware forwarding language ==========');
+
+    // Forbidden future-tense forwarding patterns when status is post-forward.
+    const forwardingForbidden = [
+      [/\bi'?ll\s+send\s+(?:this|it|the\s+file|everything)?\s*(?:over\s+)?to\s+(?:franco|admin|the\s+(?:lender|underwrit))/i, 'I\'ll send to Franco/admin'],
+      [/\bi'?ll\s+(?:get|put|move)\s+(?:this|it)\s+(?:over|in\s+front)\s+of\s+(?:franco|admin)/i, 'I\'ll get this over to Franco/admin'],
+      [/\bi'?ll\s+forward\s+(?:this|it|the\s+file)/i, 'I\'ll forward'],
+      [/\bi'?ll\s+route\s+(?:this|it)/i, 'I\'ll route'],
+      [/\bi'?ll\s+pass\s+(?:this|it|the\s+file)\s+(?:along|on|over)/i, 'I\'ll pass along'],
+      [/\bi'?ll\s+send\s+(?:this|it)\s+(?:for|to)\s+review/i, 'I\'ll send for review'],
+      [/\bi'?ll\s+get\s+(?:this|it)\s+over\s+for\s+review/i, 'I\'ll get this over for review'],
+      [/\bsending\s+(?:this|it|the\s+file)\s+(?:over\s+)?to\s+(?:franco|admin|the\s+lender)/i, 'sending this to Franco/admin'],
+    ];
+
+    const checkNoFutureForwarding = (label, html) => {
+      const failures = [];
+      for (const [re, desc] of forwardingForbidden) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 25), m.index + m[0].length + 30);
+          failures.push(`"${desc}" — matched "${m[0]}" at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: Vienna used future-tense forwarding language despite status indicating file is already forwarded:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no future-tense forwarding language`);
+    };
+
+    // Adversarial: status='under_review', conversation history shows Vienna already
+    // sent a Preliminary Review email to admin. Broker now replies with one more doc.
+    // Vienna must NOT say "I'll send this to Franco" — the file IS Franco.
+    try {
+      const item4Result = await realAi.generateBrokerResponse(
+        `Hi Vienna, sending the property tax assessment as well. Anything else?\n\nJason`,
+        [], [],
+        {
+          borrower_name: 'Patricia Wilson',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+          sender_type: 'broker',
+          ltv_percent: 65,
+          loan_type: 'second mortgage',
+        },
+        [
+          { direction: 'inbound', body: 'Submitting refi for Patricia. Attached: appraisal, NOA, gov ID, credit bureau, application.', created_at: new Date(Date.now() - 172800000).toISOString() },
+          { direction: 'outbound', body: 'Thanks Jason — file received. Vienna | Private Mortgage Link', created_at: new Date(Date.now() - 170000000).toISOString() },
+          { direction: 'outbound', body: 'ACTION REQUIRED: PRELIMINARY Review — Patricia Wilson — 65% LTV (this was the prelim review email Vienna sent to admin)', created_at: new Date(Date.now() - 169000000).toISOString() },
+          { direction: 'inbound', body: 'Hi Vienna, sending the property tax assessment as well. Anything else?', created_at: new Date().toISOString() },
+        ],
+        [
+          { file_name: 'Appraisal_Wilson.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Wilson_2024.pdf', classification: 'noa' },
+          { file_name: 'Government_ID_Wilson.pdf', classification: 'government_id' },
+          { file_name: 'Credit_Wilson.pdf', classification: 'credit_report' },
+          { file_name: 'Application_Wilson.pdf', classification: 'loan_application' },
+          { file_name: 'Property_Tax_Wilson.pdf', classification: 'property_tax' },
+        ],
+        'under_review'   // ← key signal: file already forwarded
+      );
+      const item4Html = item4Result?.responseEmail || '';
+      console.log('Item 4 adversarial output (first 500 chars):');
+      console.log(`  ${item4Html.slice(0, 500).replace(/\n/g, ' ')}`);
+      checkNoFutureForwarding('generateBrokerResponse status=under_review — file already forwarded', item4Html);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Item 4 adversarial smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // GROUP R — live Claude smoke for parseDraftReply SEND/EDIT classification
     // ════════════════════════════════════════════════════════════════
     // The REPLACE path is heuristic-only (no Claude — covered by deterministic tests
