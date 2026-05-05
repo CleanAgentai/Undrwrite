@@ -378,6 +378,7 @@ CONVERSATIONAL RULES:
 - Do NOT ask for documents that have already been received (check the documents on file list).
 - CRITICAL — DO NOT FABRICATE DOCUMENT RECEIPT: The DOCUMENTS ALREADY ON FILE list passed below is the AUTHORITATIVE record of what we have actually received and saved. Do NOT acknowledge, thank, confirm, or reference receipt of any document that is NOT in that list. Even if the broker's email body says "Government ID enclosed", "see attached appraisal", "I've sent the NOA", "tax bill is attached", or any other claim of attachment — if the document does NOT appear in DOCUMENTS ALREADY ON FILE, treat it as MISSING and ask the broker to send it again (their attachment may not have come through). Never infer receipt from broker mentions, attachment claims in the email body, or context. The on-file list is the only source of truth.
 - Do NOT ask for both "appraised value" and "current appraisal" — these are the same thing. Just ask for "a current appraisal."
+- Do NOT ask for "Current Mortgage Payout Statement" AND "current balance" / "mortgage balance statement" / "current mortgage balance" as separate items — they are the SAME single document. The mortgage payout statement IS the current mortgage balance. Canonical name: "Current Mortgage Payout Statement". Always list it once, never twice under different names.
 - An MLS listing is NOT an appraisal — do not confuse them or reference one in relation to the other.
 - Do NOT rush to "approve" or move forward — focus on the current conversation. If the broker has questions, answer them first.
 - Always include a clear list of remaining items still needed at the end of each email — don't leave the broker guessing what's next.
@@ -729,6 +730,8 @@ REQUIRED DOCUMENTS — request ONLY what has NOT been received.
 
 STRICT RULE: You are ONLY allowed to request documents from the checklist below. Do NOT ask for anything outside this list — no property insurance binders, no lawyer's undertaking letters, no title insurance, no purchase agreements, no void cheques, no commitment letters, no survey reports, no environmental reports, no anything else — even if you think they are standard mortgage documents. If Franco wants something additional, he will tell you.
 
+UNIFICATION RULE — MORTGAGE PAYOUT vs CURRENT BALANCE: The "Current Mortgage Payout Statement" IS the current mortgage balance — they are the same single document, not two items. Never list "Current Mortgage Payout Statement" AND "current balance" / "mortgage balance statement" as separate missing items. Canonical name in this email: "Current Mortgage Payout Statement". List it once, never twice under different names.
+
 DEAL TYPE: ${reqIsPurchase ? 'PURCHASE — borrower does not yet own the subject property' : 'REFINANCE / EXISTING MORTGAGE'}
 
 ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPORATE DEAL CHECKLIST:
@@ -942,7 +945,7 @@ File name: ${fileName}`,
     appraisal: 'Property Appraisal',
     property_tax: 'Property Tax Assessment',
     noa: 'Notice of Assessment (NOA)',
-    mortgage_statement: 'Current Mortgage Balance Statement',
+    mortgage_statement: 'Current Mortgage Payout Statement',
     income_proof: 'Proof of Income',
     loan_application: 'Loan Application Form',
     pnw_statement: 'Personal Net Worth Statement',

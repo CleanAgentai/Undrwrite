@@ -1004,6 +1004,80 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group O adversarial smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP K — adversarial live Claude smoke for mortgage-doc terminology unification
+    // ════════════════════════════════════════════════════════════════
+    // Bug 6.8 (Kevin Tran): Vienna treated "CIBC Payout Statement" and "current balance"
+    // as two separate missing items. Pre-fix DOC_DISPLAY_NAMES used "Current Mortgage
+    // Balance Statement" while every other prompt used "Current Mortgage Payout
+    // Statement" — Vienna saw two distinct phrasings and listed both.
+    //
+    // Post-fix: canonical name is "Current Mortgage Payout Statement" everywhere; an
+    // explicit unification rule tells Vienna these are the same single document.
+    console.log('\n========== GROUP K — mortgage-doc terminology adversarial ==========');
+
+    const checkMortgageUnification = (label, html) => {
+      const stripped = stripHtml(html);
+      const failures = [];
+
+      // (1) The old DOC_DISPLAY_NAMES phrasing must NEVER appear in the response.
+      if (/\bcurrent\s+mortgage\s+balance\s+statement\b/i.test(stripped)) {
+        failures.push('"Current Mortgage Balance Statement" — old DOC_DISPLAY_NAMES phrasing leaked into response');
+      }
+
+      // (2) Two-items pattern: "current (mortgage) balance" mentioned as a standalone
+      // item (not attached to "statement") AND "payout statement" mentioned separately.
+      // That's the bug shape — Vienna treating them as two distinct missing items.
+      const sentences = stripped.split(/[.!?]+/);
+      const hasStandaloneBalance = sentences.some(s =>
+        /\bcurrent\s+(?:mortgage\s+)?balance\b/i.test(s) &&
+        !/\bbalance\s+statement\b/i.test(s)
+      );
+      const hasPayoutMention = /\bpayout\s+statement\b/i.test(stripped);
+      if (hasStandaloneBalance && hasPayoutMention) {
+        failures.push('"current balance" mentioned as a standalone item alongside "payout statement" — Vienna treating same doc as two items');
+      }
+
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: mortgage-doc terminology violations:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: mortgage-doc terminology unified (no old phrasing, no two-item split)`);
+    };
+
+    // Adversarial: refinance with no mortgage statement on file. Vienna must ask for
+    // ONE mortgage doc by canonical name, not two.
+    try {
+      const groupKResult = await realAi.generateBrokerResponse(
+        `Hi Vienna,\n\nSending the appraisal and NOA for Kevin's refi. Working on the rest.\n\nThanks,\nJason`,
+        [],
+        [],
+        {
+          borrower_name: 'Kevin Tran',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+          sender_type: 'broker',
+          ltv_percent: 58.8,
+          loan_type: 'refinance',
+          existing_mortgage_balance: 320000,
+        },
+        [
+          { direction: 'inbound', body: 'Hi Vienna, refi for Kevin Tran — first mortgage with CIBC, looking to refinance with you.', created_at: new Date(Date.now() - 86400000).toISOString() },
+        ],
+        // documentsOnFile — refinance with no mortgage statement yet.
+        [
+          { file_name: 'Appraisal_Tran.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Tran_2024.pdf', classification: 'noa' },
+        ]
+      );
+      const groupKHtml = groupKResult?.responseEmail || '';
+      console.log('Group K adversarial output (first 600 chars):');
+      console.log(`  ${groupKHtml.slice(0, 600).replace(/\n/g, ' ')}`);
+      checkMortgageUnification('generateBrokerResponse — refi missing mortgage doc', groupKHtml);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group K adversarial smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
