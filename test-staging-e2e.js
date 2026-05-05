@@ -102,9 +102,15 @@ async function fireWebhook() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2) Poll Postmark outbound API for the PRELIMINARY Review email to Franco.
+//
+// We MUST scope matches to messages received AFTER this run started. Earlier
+// test runs (re-using the "Patricia Simmons" subject) would otherwise
+// false-positive a match in <1s while the deployed webhook is still mid-Claude
+// call — which produced a misleading "pass" during the audit (F12).
 // ─────────────────────────────────────────────────────────────────────────────
-async function pollPostmarkOutbound(timeoutMs = 90000) {
+async function pollPostmarkOutbound(runStartMs, timeoutMs = 90000) {
   console.log(`\n[2/3] Polling Postmark outbound for "PRELIMINARY Review — Patricia Simmons" email...`);
+  console.log(`     Run started: ${new Date(runStartMs).toISOString()} (only matching messages received after this)`);
   console.log(`     Timeout: ${timeoutMs / 1000}s`);
   const expectedSubjectFragment = 'PRELIMINARY Review';
   const start = Date.now();
@@ -126,9 +132,13 @@ async function pollPostmarkOutbound(timeoutMs = 90000) {
       continue;
     }
     const data = await res.json();
-    const matches = (data.Messages || []).filter(m =>
-      m.Subject && m.Subject.includes(expectedSubjectFragment) && m.Subject.includes('Patricia Simmons')
-    );
+    const matches = (data.Messages || []).filter(m => {
+      if (!m.Subject || !m.Subject.includes(expectedSubjectFragment) || !m.Subject.includes('Patricia Simmons')) return false;
+      // Scope to messages received after this run started — Postmark ReceivedAt
+      // is ISO-8601 with millisecond precision; Date.parse handles the offset.
+      const receivedMs = Date.parse(m.ReceivedAt);
+      return Number.isFinite(receivedMs) && receivedMs >= runStartMs;
+    });
     if (matches.length > 0) {
       const m = matches[0];
       console.log(`     ✓ FOUND after ${attempts} attempts (${Math.round((Date.now() - start) / 1000)}s)`);
@@ -195,8 +205,11 @@ async function checkSupabase() {
 
 (async () => {
   try {
+    // Capture run start before firing — pollPostmarkOutbound filters out any
+    // earlier test run's PRELIMINARY-Review-Patricia-Simmons messages.
+    const runStartMs = Date.now();
     await fireWebhook();
-    const message = await pollPostmarkOutbound();
+    const message = await pollPostmarkOutbound(runStartMs);
     const deal = await checkSupabase();
 
     console.log(`\n${'─'.repeat(50)}`);
