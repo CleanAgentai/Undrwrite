@@ -1180,11 +1180,41 @@ ADMIN'S REPLY:
   },
 
   // Parse admin's reply to a draft preview — is it a confirmation to send, or edit instructions?
+  // Heuristic: long multi-paragraph reply = full alternative draft (REPLACE intent).
+  // Group R fix for Bug 9.9 (Franco rewrote the draft; Claude classified as SEND;
+  // Vienna's original shipped instead of Franco's version). Threshold: 50 words AND
+  // 2+ paragraphs. Below threshold goes through Claude SEND/EDIT classification.
+  // Exposed for the harness so the deterministic predicate can be unit-tested
+  // without a live Claude call.
+  isFullAlternativeDraft: (text) => {
+    if (!text) return false;
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const paragraphCount = text.split(/\n\s*\n+/).filter(p => p.trim().length > 0).length;
+    return wordCount >= 50 && paragraphCount >= 2;
+  },
+
   parseDraftReply: async (replyText) => {
     const stripped = module.exports.stripQuotedText(replyText);
     const text = (stripped || replyText || '').trim();
+    if (!text) return { action: 'edit', editInstructions: '' };
 
-    // Use Claude to classify Franco's reply
+    // Group R: heuristic REPLACE path. Long multi-paragraph replies are treated as
+    // full alternative drafts — Franco's text is used VERBATIM (no Claude rewriting),
+    // because the 9.9 failure mode was Claude classifying a full rewrite as SEND and
+    // dropping Franco's content. Heuristic-only routing here is deliberate: we don't
+    // trust the model on this dispatch decision when both miscategorization directions
+    // exist. False positives (long edit instructions misclassified as REPLACE) just
+    // mean Franco's words go to broker as-is — visible weirdness, easily resent.
+    // False negatives (the 9.9 case) silently drop Franco's intent — unacceptable.
+    if (module.exports.isFullAlternativeDraft(text)) {
+      return { action: 'replace', replacementText: text };
+    }
+
+    // Use Claude to classify the SHORT/single-paragraph residual — SEND vs EDIT.
+    // STRICT rule: SEND only for unambiguous short approvals. Anything with
+    // substantive content (even mixed with approval phrases) is EDIT. When in doubt,
+    // choose EDIT — safer to over-classify as EDIT than to ship Franco's unintended
+    // approval of a draft he wanted changed.
     try {
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
@@ -1195,9 +1225,10 @@ ADMIN'S REPLY:
 
 Reply with EXACTLY one word: SEND or EDIT.
 
-Rules:
-- SEND = the admin is confirming/approving the draft to be sent as-is (e.g. "looks good", "send it", "yes", "ok", "perfect", "go ahead", "👍", "approved")
-- EDIT = the admin wants changes to the draft (e.g. "make it shorter", "change the part about...", "add something about...", any specific instructions)
+STRICT RULES:
+- SEND only if the reply is a SHORT, unambiguous approval phrase: "send it", "looks good", "yes", "ok", "approved", "go ahead", "lgtm", "👍", "ship it", "perfect", "great". The reply must contain NO new content, instructions, or edits — only the approval phrase itself (possibly with brief politeness like "thanks!" or "send when you can").
+- EDIT for ANY reply that contains substantive content beyond pure approval: specific changes ("make it shorter"), instructions ("remove the praise paragraph"), alternative wording, new content of any kind. Even if the reply STARTS with "looks good" but then continues with "but please also...", that is EDIT.
+- When in doubt, choose EDIT. It is safer to over-classify as EDIT (Franco's instructions get applied) than to over-classify as SEND (Franco's intent dropped, Vienna's original shipped against his wishes).
 
 ADMIN'S REPLY:
 "${text.replace(/"/g, '\\"')}"`,

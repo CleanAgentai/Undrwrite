@@ -47,6 +47,20 @@ const normalizeSenderName = (dealSummary, fromName) => {
   return normalized;
 };
 
+// Group R: convert Franco's plain-text REPLACE-intent reply into HTML for the
+// broker-facing send. If the text already contains HTML (any tag), use as-is —
+// some email clients send HTML in the body. Otherwise wrap each \n\n-separated
+// paragraph in a <p> tag, with single \n inside a paragraph becoming <br>.
+const textToHtml = (text) => {
+  if (!text) return '';
+  if (/<[a-z][^>]*>/i.test(text)) return text;
+  return text
+    .split(/\n\s*\n+/)
+    .filter(p => p.trim().length > 0)
+    .map(p => `<p>${p.trim().replace(/\n/g, '<br>')}</p>`)
+    .join('\n');
+};
+
 // Helper: send LTV escalation email to admin and flip deal status to ltv_escalated.
 // Body is line-for-line equivalent to the previous inline block in the existing-deal branch
 // (only `existingDeal` → `deal` and `result.updatedSummary` → `dealSummary`).
@@ -216,8 +230,8 @@ router.post('/inbound', async (req, res) => {
       // --- DRAFT REVIEW HANDLING ---
       // If draft_action is set, Franco is reviewing a draft preview
       if (existingDeal.draft_action && (existingDeal.status === 'ltv_escalated' || existingDeal.status === 'under_review')) {
-        console.log('Draft pending — checking if Franco wants to send or edit');
-        const { action, editInstructions } = await aiService.parseDraftReply(email.textBody);
+        console.log('Draft pending — checking if Franco wants to send, edit, or replace');
+        const { action, editInstructions, replacementText } = await aiService.parseDraftReply(email.textBody);
 
         // Helper: send draft to broker and advance deal
         const executeDraft = async (draftEmail, draftSubject, draftAction) => {
@@ -256,6 +270,14 @@ router.post('/inbound', async (req, res) => {
         if (action === 'send') {
           console.log('Franco confirmed — sending draft as-is');
           await executeDraft(existingDeal.draft_email, existingDeal.draft_subject, existingDeal.draft_action);
+        } else if (action === 'replace') {
+          // Group R: Franco sent a full alternative draft. Use his text VERBATIM —
+          // no Claude rewriting, no tone wrapper. Convert plain text to HTML for
+          // the broker-facing send (executeDraft expects HTML). Status flow stays
+          // identical to SEND/EDIT — the draft_action code drives the state advance.
+          console.log('Franco sent a full corrected draft — using verbatim, no Claude rewrite');
+          const replacementHtml = textToHtml(replacementText);
+          await executeDraft(replacementHtml, existingDeal.draft_subject, existingDeal.draft_action);
         } else {
           console.log('Franco wants edits — revising and sending immediately');
           const revisedEmail = await aiService.reviseEmailWithEdits(
@@ -792,4 +814,4 @@ ${draftEmail}
 });
 
 module.exports = router;
-module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, ADMIN_FIRST_NAME };
+module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, ADMIN_FIRST_NAME, textToHtml };

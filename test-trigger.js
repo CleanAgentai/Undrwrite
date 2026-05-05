@@ -89,7 +89,10 @@ const {
   normalizeSenderName,
   isUnreliableName,
   ADMIN_FIRST_NAME,
+  textToHtml,
 } = webhookRouter.__test__;
+// Group R: parseDraftReply heuristic predicate exposed for deterministic testing.
+const { isFullAlternativeDraft, parseDraftReply } = aiService;
 
 // 4) Predicate evaluator — mirrors the new-client branch gate verbatim.
 // Per Bradley's commit e93f657: high-LTV escalation does NOT require hasReviewableDoc
@@ -343,6 +346,140 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     }
   }
   console.log(`Group L truth table: ${groupLPassed}/${groupLCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP R: HITL corrected-draft handling (Bug 9.9)
+  // ════════════════════════════════════════════════════════════════
+  // Deterministic block — exercises the isFullAlternativeDraft heuristic and the
+  // textToHtml helper directly. No Claude calls, runs without an API key.
+
+  console.log('\n========== GROUP R — isFullAlternativeDraft heuristic truth table ==========');
+  // Threshold: 50 words AND 2+ paragraphs → REPLACE. Fixtures crafted with clear
+  // margin above/below the threshold; actual word/para counts printed at runtime
+  // for visibility.
+  const wordsOf = (t) => t.split(/\s+/).filter(Boolean).length;
+  const parasOf = (t) => t.split(/\n\s*\n+/).filter(p => p.trim().length > 0).length;
+
+  const groupRHeuristicCases = [
+    {
+      name: 'short pure approval → not REPLACE',
+      text: 'Looks good, send it!',
+      expect: false,
+    },
+    {
+      name: 'short edit instruction → not REPLACE',
+      text: 'Make it shorter and remove the praise.',
+      expect: false,
+    },
+    {
+      name: 'short multi-paragraph edit (well under 50w threshold) → not REPLACE',
+      text: 'Couple of changes:\n\n1) Remove praise.\n2) Add AML deadline.',
+      expect: false,
+    },
+    {
+      name: 'long single-paragraph instruction (≥50w but only 1 para) → not REPLACE',
+      text: 'Could you please make this email significantly shorter, remove the praise paragraph entirely, change the closing to mention we will be in touch within 48 hours about next steps, add a brief line acknowledging the AML form is needed by Friday at the latest, and also adjust the opening to be less effusive about the deal quality, just stick to the practical points please.',
+      expect: false,
+    },
+    {
+      name: 'full corrected draft (≥50w + 2+ paras with greeting + signoff) → REPLACE',
+      text: 'Hi Michael,\n\nThanks for getting the AML and PEP forms over. Quick note from our side: we will need the gov ID, property tax assessment, and the CIBC payout statement to wrap things up properly on this file. Once those land, we will be in good shape.\n\nI will be in touch shortly with an update once the file moves forward through the next stage.\n\nThanks,\nVienna\nPrivate Mortgage Link',
+      expect: true,
+    },
+    {
+      name: 'empty text → not REPLACE',
+      text: '',
+      expect: false,
+    },
+    {
+      name: 'short reply with too few words but 2 paras → not REPLACE (word threshold guards)',
+      text: 'Hi Michael, looks good.\n\nThanks, Vienna.',
+      expect: false,
+    },
+    {
+      name: 'CALIBRATION RISK — 50w+ multi-paragraph edit instructions → REPLACE (false positive shape)',
+      // This is the documented false-positive direction Porter accepted: long
+      // multi-paragraph edit instructions trip the heuristic. Test asserts the
+      // current calibration's behavior (REPLACE) so future tightening is visible.
+      text: 'Couple of changes I want to flag on this draft.\n\nFirst, please remove the praise paragraph entirely — the tone is too florid for the broker and we want to stay neutral throughout.\n\nSecond, change the closing to mention we will be in touch within 48 hours about next steps rather than the current vague language about timing.',
+      expect: true,
+    },
+  ];
+
+  let groupRPassed = 0;
+  for (const tc of groupRHeuristicCases) {
+    const got = isFullAlternativeDraft(tc.text);
+    const wc = wordsOf(tc.text);
+    const pc = parasOf(tc.text);
+    if (got === tc.expect) {
+      console.log(`  PASS: ${tc.name} (${wc}w, ${pc}p → ${got})`);
+      groupRPassed++;
+    } else {
+      throw new Error(`FAIL [${tc.name}]: expected ${tc.expect}, got ${got} (${wc} words, ${pc} paragraphs)`);
+    }
+  }
+  console.log(`Group R heuristic: ${groupRPassed}/${groupRHeuristicCases.length} passed`);
+
+  console.log('\n========== GROUP R — textToHtml unit cases ==========');
+  const textToHtmlCases = [
+    {
+      name: 'plain single paragraph wraps in <p>',
+      input: 'Hi Michael, thanks for the package.',
+      expectMatch: /^<p>Hi Michael, thanks for the package\.<\/p>$/,
+    },
+    {
+      name: 'two paragraphs separated by blank line wrap separately',
+      input: 'Hi Michael,\n\nThanks for the package.',
+      expectMatch: /^<p>Hi Michael,<\/p>\s*<p>Thanks for the package\.<\/p>$/,
+    },
+    {
+      name: 'single \\n inside paragraph becomes <br>',
+      input: 'Hi Michael,\nThanks!',
+      expectMatch: /<p>Hi Michael,<br>Thanks!<\/p>/,
+    },
+    {
+      name: 'already-HTML input passes through unchanged',
+      input: '<p>Hi Michael,</p><p>Thanks!</p>',
+      expectMatch: /^<p>Hi Michael,<\/p><p>Thanks!<\/p>$/,
+    },
+    {
+      name: 'empty input → empty string',
+      input: '',
+      expectMatch: /^$/,
+    },
+  ];
+  let textToHtmlPassed = 0;
+  for (const tc of textToHtmlCases) {
+    const got = textToHtml(tc.input);
+    if (tc.expectMatch.test(got)) {
+      console.log(`  PASS: ${tc.name}`);
+      textToHtmlPassed++;
+    } else {
+      throw new Error(`FAIL [${tc.name}]: expected match ${tc.expectMatch}, got ${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`textToHtml: ${textToHtmlPassed}/${textToHtmlCases.length} passed`);
+
+  // End-to-end deterministic test: parseDraftReply on a full-corrected-draft input
+  // returns { action: 'replace', replacementText: ... } — bypasses Claude entirely.
+  // Reuses the same 70-word fixture from the heuristic truth table above.
+  console.log('\n========== GROUP R — parseDraftReply REPLACE path (no Claude) ==========');
+  const fullDraft = 'Hi Michael,\n\nThanks for getting the AML and PEP forms over. Quick note from our side: we will need the gov ID, property tax assessment, and the CIBC payout statement to wrap things up properly on this file. Once those land, we will be in good shape.\n\nI will be in touch shortly with an update once the file moves forward through the next stage.\n\nThanks,\nVienna\nPrivate Mortgage Link';
+  const replaceResult = await parseDraftReply(fullDraft);
+  if (replaceResult.action !== 'replace') {
+    throw new Error(`FAIL [Group R parseDraftReply REPLACE]: expected action='replace', got '${replaceResult.action}'`);
+  }
+  if (!replaceResult.replacementText || !replaceResult.replacementText.includes('Hi Michael')) {
+    throw new Error(`FAIL [Group R parseDraftReply REPLACE]: replacementText missing or wrong: ${JSON.stringify(replaceResult.replacementText)?.slice(0, 100)}`);
+  }
+  console.log(`  PASS: parseDraftReply on 70-word 3-para input → action='replace', replacementText preserved verbatim`);
+
+  // Empty-reply edge case
+  const emptyResult = await parseDraftReply('');
+  if (emptyResult.action !== 'edit' || emptyResult.editInstructions !== '') {
+    throw new Error(`FAIL [Group R parseDraftReply empty]: expected {action:'edit', editInstructions:''}, got ${JSON.stringify(emptyResult)}`);
+  }
+  console.log(`  PASS: parseDraftReply on empty input → action='edit' (safe default)`);
 
   // ════════════════════════════════════════════════════════════════
   // BUG B: broker-name extraction / "Franco" greeting regression
@@ -1077,6 +1214,43 @@ License #M12001505`;
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group K adversarial smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP R — live Claude smoke for parseDraftReply SEND/EDIT classification
+    // ════════════════════════════════════════════════════════════════
+    // The REPLACE path is heuristic-only (no Claude — covered by deterministic tests
+    // above). The SEND/EDIT path runs Claude on short replies. Bug 9.9's misclassification
+    // would have looked like: a polite long reply classified as SEND. Post-fix, the
+    // heuristic catches that before Claude is asked. But we still want to verify the
+    // STRICT classification rules hold for the residual SHORT-reply cases.
+    console.log('\n========== GROUP R — live parseDraftReply SEND/EDIT classification ==========');
+
+    // Restore real parseDraftReply (we never stubbed it, but realAi is the same module
+    // re-required after cache delete — safe).
+    const realParseDraftReply = realAi.parseDraftReply;
+
+    const draftReplyClassificationCases = [
+      { name: 'pure short approval "Looks good, send it!"',  reply: 'Looks good, send it!',                expectAction: 'send' },
+      { name: '"Send it"',                                    reply: 'Send it',                            expectAction: 'send' },
+      { name: '"approved"',                                   reply: 'approved',                           expectAction: 'send' },
+      { name: 'short edit "make it shorter"',                 reply: 'Make it shorter and remove the praise paragraph.', expectAction: 'edit' },
+      { name: 'mixed approval+edit "looks good but..."',      reply: 'Looks good, but please remove the AML reference.', expectAction: 'edit' },
+      { name: 'short instruction with no approval',           reply: 'Change the closing to mention 48 hours.', expectAction: 'edit' },
+    ];
+
+    for (const tc of draftReplyClassificationCases) {
+      try {
+        const result = await realParseDraftReply(tc.reply);
+        if (result.action === tc.expectAction) {
+          console.log(`  PASS [${tc.name}]: classified as '${tc.expectAction}'`);
+        } else {
+          throw new Error(`FAIL [${tc.name}]: expected '${tc.expectAction}', got '${result.action}' (full result: ${JSON.stringify(result)})`);
+        }
+      } catch (e) {
+        if (e.message.startsWith('FAIL')) throw e;
+        console.warn(`  [${tc.name}] skipped due to API error: ${e.message}`);
+      }
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
