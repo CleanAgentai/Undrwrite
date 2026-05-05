@@ -217,7 +217,7 @@ You MUST return your response in this EXACT format with these exact delimiters:
 
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
-  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false) => {
+  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -239,6 +239,20 @@ module.exports = {
         ? 'PNW STATEMENT FORM:\n- The broker has ALREADY submitted their own PNW (Personal Net Worth) statement. Do NOT ask them to fill out ours. Do NOT mention or reference our blank PNW Statement Form in the email — it was NOT attached. Acknowledge that you received their PNW.'
         : 'PNW STATEMENT FORM:\n- The PNW (Personal Net Worth) Statement Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our PNW Statement Form for the borrower to complete"). Ask the broker to have the borrower fill it out and return it. If they already have their own PNW or net worth statement filled out, that is acceptable too — they can send theirs instead of using ours.';
 
+      // F2 — Both-Franco collision branch. When the sender's first name matches
+      // the admin's first name (Franco), Vienna can't reliably distinguish
+      // "broker actually named Franco" from "Claude misextracted the lender
+      // name." Either way, greeting the recipient by first name in the welcome
+      // email body would produce "Hi Franco!" — which collides with the rule
+      // that says Franco is the LENDER, not the recipient. Render an explicit
+      // generic-greeting instruction only when the collision is detected.
+      const nameCollisionInstructions = nameCollidesWithAdmin
+        ? `\n\nCRITICAL — NAME COLLISION DETECTED (READ BEFORE GREETING):
+- The sender's first name (provided as "${senderName || 'Unknown'}") matches the admin's first name (Franco). This may be because the broker is actually named Franco (a real broker — e.g. Franco Vieanna), or because the From-header display is itself "Franco". Either way, you cannot reliably greet by first name in this email.
+- Use a GENERIC greeting in the welcome email body: "Hi there!" or "Hello!" — NO first name. Do NOT write "Hi Franco!", "Hello Franco!", "Dear Franco", or any variation, even though the sender's name field appears to be Franco-something.
+- This applies to the email body greeting only. The deal summary JSON should still populate sender_name / broker_name from any fuller name visible in the email signature (e.g. "Franco Vieanna" if his signature spells it out). The collision rule only governs how you address the recipient in the welcome email body.`
+        : '';
+
       const prompt = INITIAL_EMAIL_PROMPT
         .replace('{{APPLICATION_FORM_INSTRUCTIONS}}', appFormInstructions)
         .replace('{{PNW_FORM_INSTRUCTIONS}}', pnwFormInstructions);
@@ -247,7 +261,7 @@ module.exports = {
         type: 'text',
         text: `${prompt}
 
-The sender's name is: ${senderName || 'Unknown'}
+The sender's name is: ${senderName || 'Unknown'}${nameCollisionInstructions}
 
 Their initial email says:
 ---
@@ -347,6 +361,16 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
             'PNW Statement (ours or broker\'s own)',
           ];
 
+      // F2 — Both-Franco collision flag passed forward from webhook's
+      // normalizeSenderName. When set, Vienna must use a generic greeting
+      // even though sender_name appears to be Franco-something.
+      const nameCollisionBlock = existingSummary?.name_collides_with_admin
+        ? `\n\nCRITICAL — NAME COLLISION DETECTED (READ BEFORE GREETING):
+- The sender's first name in the deal summary collides with the admin's first name (Franco). This may be because the broker is actually named Franco (e.g. Franco Vieanna), or because Claude was unable to disambiguate. Either way, you cannot reliably greet by first name.
+- Use a GENERIC greeting in your reply: "Hi there!" or "Hello!" — NO first name. Do NOT write "Hi Franco!", "Hello Franco!", "Dear Franco", or any variation, even though sender_name appears to be Franco-something.
+- This applies to the email body greeting only. The deal summary fields stay as-is in the analysis JSON; the collision rule only governs how you address the recipient.`
+        : '';
+
       content.push({
         type: 'text',
         text: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. You are having an email conversation about a mortgage deal.
@@ -355,7 +379,7 @@ SENDER INFO (from deal summary):
 - Sender type: ${existingSummary?.sender_type || 'unknown'}
 - Sender name: ${existingSummary?.sender_name || 'unknown'}
 - Sender company: ${existingSummary?.sender_company || 'N/A'}
-- Borrower name: ${existingSummary?.borrower_name || 'unknown'}
+- Borrower name: ${existingSummary?.borrower_name || 'unknown'}${nameCollisionBlock}
 
 FILE STATE (deal status: ${dealStatus}):
 - 'active' = the file is still being assembled; admin review has NOT started. Vienna may be requesting more docs, answering questions, or acknowledging materials as they arrive.

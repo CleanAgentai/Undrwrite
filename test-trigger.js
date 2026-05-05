@@ -706,6 +706,103 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   }
   console.log(`isUnreliableName spot checks: ${unreliableExpect.length}/${unreliableExpect.length} passed`);
 
+  // ════════════════════════════════════════════════════════════════
+  // F2 — Both-Franco collision branch in normalizeSenderName
+  // ════════════════════════════════════════════════════════════════
+  // Bug B Layer A originally rescued sender_name from the From-header when
+  // Claude returned 'Franco'/'Unknown'. But when the From-header ALSO starts
+  // with Franco (e.g. broker is Franco Vieanna at vimarealty.com), the rescue
+  // is a no-op and Vienna ends up greeting "Hi Franco!" anyway. F2 detects
+  // this case and sets a name_collides_with_admin flag instead — keeping raw
+  // values intact while signaling downstream prompts to use a generic greeting.
+  console.log('\n========== F2 — both-Franco collision flag ==========');
+
+  const collisionCases = [
+    {
+      name: 'both Franco (extracted=Franco Maione, fromName=Franco Vieanna) → flag set, raw values preserved',
+      input: { sender_type: 'broker', sender_name: 'Franco Maione', broker_name: 'Franco Maione' },
+      fromName: 'Franco Vieanna',
+      expectFlag: true,
+      expectSender: 'Franco Maione',
+      expectBroker: 'Franco Maione',
+    },
+    {
+      name: 'extracted=Franco, fromName=Franco → flag set',
+      input: { sender_type: 'broker', sender_name: 'Franco', broker_name: 'Franco' },
+      fromName: 'Franco',
+      expectFlag: true,
+      expectSender: 'Franco',
+      expectBroker: 'Franco',
+    },
+    {
+      name: 'extracted=null, fromName=Franco → flag set (both unreliable, can\'t rescue)',
+      input: { sender_type: 'broker', sender_name: null, broker_name: null },
+      fromName: 'Franco Vieanna',
+      expectFlag: true,
+      expectSender: null,
+      expectBroker: null,
+    },
+    {
+      name: 'extracted=Unknown, fromName=Franco → flag set (Unknown is unreliable, fromName is too)',
+      input: { sender_type: 'broker', sender_name: 'Unknown', broker_name: 'Unknown' },
+      fromName: 'Franco',
+      expectFlag: true,
+      expectSender: 'Unknown',
+      expectBroker: 'Unknown',
+    },
+    {
+      name: 'single-Franco (extracted=Franco, fromName=Jason Mercer) → existing rescue path, NO flag',
+      input: { sender_type: 'broker', sender_name: 'Franco', broker_name: 'Franco' },
+      fromName: 'Jason Mercer',
+      expectFlag: undefined,
+      expectSender: 'Jason Mercer',
+      expectBroker: 'Jason Mercer',
+    },
+    {
+      name: 'no collision (extracted=Jason Mercer, fromName=Jason Mercer) → no flag, no change',
+      input: { sender_type: 'broker', sender_name: 'Jason Mercer', broker_name: 'Jason Mercer' },
+      fromName: 'Jason Mercer',
+      expectFlag: undefined,
+      expectSender: 'Jason Mercer',
+      expectBroker: 'Jason Mercer',
+    },
+    {
+      name: 'borrower path with both-Franco → only sender_name considered (broker_name=null), still flag',
+      input: { sender_type: 'borrower', sender_name: 'Franco Vieanna', broker_name: null },
+      fromName: 'Franco Vieanna',
+      expectFlag: true,
+      expectSender: 'Franco Vieanna',
+      expectBroker: null,
+    },
+    {
+      name: 'borrower path, extracted reliable but fromName Franco → no flag, no change (extracted is fine)',
+      input: { sender_type: 'borrower', sender_name: 'Patricia Simmons', broker_name: null },
+      fromName: 'Franco',
+      expectFlag: undefined,
+      expectSender: 'Patricia Simmons',
+      expectBroker: null,
+    },
+  ];
+
+  let collisionPassed = 0;
+  for (const tc of collisionCases) {
+    const out = normalizeSenderName(tc.input, tc.fromName);
+    const flagOk = out.name_collides_with_admin === tc.expectFlag;
+    const senderOk = out.sender_name === tc.expectSender;
+    const brokerOk = out.broker_name === tc.expectBroker;
+    if (flagOk && senderOk && brokerOk) {
+      console.log(`  PASS: ${tc.name}`);
+      collisionPassed++;
+    } else {
+      throw new Error(
+        `FAIL [${tc.name}]: ` +
+        `expected flag=${JSON.stringify(tc.expectFlag)} sender=${JSON.stringify(tc.expectSender)} broker=${JSON.stringify(tc.expectBroker)}, ` +
+        `got flag=${JSON.stringify(out.name_collides_with_admin)} sender=${JSON.stringify(out.sender_name)} broker=${JSON.stringify(out.broker_name)}`
+      );
+    }
+  }
+  console.log(`F2 collision flag: ${collisionPassed}/${collisionCases.length} passed`);
+
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
   const realKey = process.env.CLAUDE_API_KEY && !process.env.CLAUDE_API_KEY.startsWith('sk-test');
@@ -1812,6 +1909,123 @@ License #M12001505`;
         if (e.message.startsWith('FAIL')) throw e;
         console.warn(`  [${tc.name}] skipped due to API error: ${e.message}`);
       }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // F2 — both-Franco generic-greeting adversarials
+    // ════════════════════════════════════════════════════════════════
+    // Production observation: deal 5e5dfee1 (broker franco@vimarealty.com,
+    // display name "Franco Vieanna") greeted broker as "Hi Franco!" across 4
+    // outbound messages. Bug B Layer A's rescue can't disambiguate because
+    // both extracted name and From-header start with "Franco". F2 sets a
+    // collision flag and the prompt instructs Vienna to use a generic greeting.
+    //
+    // These two smokes run real Claude calls with the collision flag set and
+    // assert the greeting in the outbound email body is NOT "Hi Franco!" /
+    // "Hello Franco!" / etc.
+    console.log('\n========== F2 — initial-email both-Franco generic greeting ==========');
+
+    const francoGreetingForbidden = [
+      [/(?:^|>|\n)\s*Hi\s+Franco\b/i, '"Hi Franco" greeting'],
+      [/(?:^|>|\n)\s*Hello\s+Franco\b/i, '"Hello Franco" greeting'],
+      [/(?:^|>|\n)\s*Hey\s+Franco\b/i, '"Hey Franco" greeting'],
+      [/(?:^|>|\n)\s*Dear\s+Franco\b/i, '"Dear Franco" greeting'],
+    ];
+
+    const checkNoFrancoGreeting = (label, html) => {
+      const failures = [];
+      for (const [re, desc] of francoGreetingForbidden) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 25), m.index + m[0].length + 30).replace(/\s+/g, ' ');
+          failures.push(`${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: Vienna greeted recipient as Franco despite collision flag:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no Franco-greeting; generic greeting used as instructed`);
+    };
+
+    // Adversarial 1: processInitialEmail with nameCollidesWithAdmin=true.
+    // Mirrors the Franco Vieanna QA submission shape — broker email sender
+    // whose display name starts with "Franco". Vienna must NOT greet "Hi Franco".
+    try {
+      const initialBody = `Hello Franco,
+
+Submitting a second mortgage opportunity for one of my clients. Property in Toronto, ~62% LTV.
+
+Borrower: Marcus Webb, employed at Stantec for 8 years.
+Property value: $890,000
+Existing first: $318,000 (Scotiabank)
+Loan requested: $90,000
+
+I've attached the appraisal and NOA. Will follow up with the rest of the package shortly.
+
+Thanks,
+Franco Vieanna
+Vima Realty
+License #M11892`;
+
+      const { welcomeEmail: f2InitialEmail } = await realAi.processInitialEmail(
+        'Franco Vieanna',     // senderName (From-header display)
+        initialBody,
+        [],                    // attachments
+        [],                    // savedDocs
+        false,                 // hasOwnApplication
+        false,                 // hasOwnPnw
+        true                   // nameCollidesWithAdmin — F2 flag
+      );
+      console.log('F2 initial-email output (first 400 chars):');
+      console.log(`  ${(f2InitialEmail || '').slice(0, 400).replace(/\n/g, ' ')}`);
+      checkNoFrancoGreeting('processInitialEmail with collision flag', f2InitialEmail);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  F2 initial-email smoke skipped due to API error: ${e.message}`);
+    }
+
+    console.log('\n========== F2 — broker-response both-Franco generic greeting ==========');
+
+    // Adversarial 2: generateBrokerResponse where existingSummary has the
+    // collision flag set. Conversation continues with the broker on a follow-up.
+    try {
+      const f2FollowUpBody = `Hi Vienna, sending the Government ID and credit bureau report for Marcus now. Anything else?
+
+Thanks,
+Franco Vieanna`;
+
+      const f2Result = await realAi.generateBrokerResponse(
+        f2FollowUpBody,
+        [], [],
+        {
+          borrower_name: 'Marcus Webb',
+          broker_name: 'Franco Vieanna',
+          sender_name: 'Franco Vieanna',
+          sender_type: 'broker',
+          ltv_percent: 62,
+          loan_type: 'second mortgage',
+          name_collides_with_admin: true,   // ← F2 flag from normalizeSenderName
+        },
+        [
+          { direction: 'inbound', body: 'Hello Franco, submitting Marcus Webb. Attached: appraisal, NOA.', created_at: new Date(Date.now() - 86400000).toISOString() },
+          { direction: 'outbound', body: 'Hi there! Thanks for sending those over — I have the appraisal and NOA on file. Vienna | Private Mortgage Link', created_at: new Date(Date.now() - 80000000).toISOString() },
+          { direction: 'inbound', body: f2FollowUpBody, created_at: new Date().toISOString() },
+        ],
+        [
+          { file_name: 'Appraisal_Webb.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Webb.pdf', classification: 'noa' },
+          { file_name: 'Government_ID_Webb.pdf', classification: 'government_id' },
+          { file_name: 'Credit_Webb.pdf', classification: 'credit_report' },
+        ],
+        'active'
+      );
+      const f2Html = f2Result?.responseEmail || '';
+      console.log('F2 broker-response output (first 400 chars):');
+      console.log(`  ${f2Html.slice(0, 400).replace(/\n/g, ' ')}`);
+      checkNoFrancoGreeting('generateBrokerResponse with collision flag', f2Html);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  F2 broker-response smoke skipped due to API error: ${e.message}`);
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');

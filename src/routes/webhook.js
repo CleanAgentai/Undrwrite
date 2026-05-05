@@ -38,6 +38,25 @@ const normalizeSenderName = (dealSummary, fromName) => {
   const fallback = (fromName || '').trim() || null;
   if (!fallback) return dealSummary;
   const normalized = { ...dealSummary };
+
+  // F2 — Both-Franco collision branch. When BOTH Claude's extracted name AND
+  // the From-header fallback look like Franco (admin-first-name match), we
+  // can't reliably distinguish "broker actually named Franco" (e.g. Franco
+  // Vieanna) from "Claude misextracted the lender name." Layer A's rescue
+  // would no-op (replacing Franco with Franco), so we flag the collision and
+  // keep the raw values intact. Prompts read this flag and use a generic
+  // greeting instead of trying to greet the recipient by name.
+  const fallbackUnreliable = isUnreliableName(fallback);
+  const senderUnreliable = isUnreliableName(normalized.sender_name);
+  const brokerUnreliable = normalized.sender_type === 'broker' && isUnreliableName(normalized.broker_name);
+
+  if (fallbackUnreliable && (senderUnreliable || brokerUnreliable)) {
+    normalized.name_collides_with_admin = true;
+    return normalized;
+  }
+
+  // Single-Franco rescue (existing path) — extracted name is unreliable but
+  // the From-header is fine, so use it.
   if (isUnreliableName(normalized.sender_name)) {
     normalized.sender_name = fallback;
   }
@@ -506,10 +525,17 @@ ${draftEmail}
         /pnw|personal.?net.?worth|net.?worth/i.test(a.Name)
       );
 
+      // F2 — Detect Franco-collision in the From-header BEFORE calling Claude.
+      // If the broker's display name matches the admin's first name (Franco),
+      // Layer A can't rescue sender_name/broker_name (would no-op Franco→Franco),
+      // so we tell processInitialEmail upfront to greet generically.
+      const initialFromCollision = isUnreliableName(email.fromName);
+
       // Single Claude call: generate welcome email + deal summary together
       // Passes pre-extracted text from savedDocs — no second pdf-parse run
       console.log('Processing initial email with Claude...');
       console.log('Passing', email.attachments.length, 'attachments for analysis');
+      if (initialFromCollision) console.log('From-header collides with admin first name — instructing generic greeting');
       // eslint-disable-next-line prefer-const
       let { welcomeEmail, dealSummary } = await aiService.processInitialEmail(
         email.fromName,
@@ -517,10 +543,13 @@ ${draftEmail}
         email.attachments,
         savedDocs,
         hasOwnApplication,
-        hasOwnPnw
+        hasOwnPnw,
+        initialFromCollision
       );
       // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
-      // when Claude's extraction is null/Unknown/Franco-collision.
+      // when Claude's extraction is null/Unknown/Franco-collision. F2 adds the
+      // both-Franco branch — sets name_collides_with_admin: true on the summary
+      // for downstream prompts (generateBrokerResponse) to read.
       dealSummary = normalizeSenderName(dealSummary, email.fromName);
       console.log('Welcome email + deal summary generated');
 
