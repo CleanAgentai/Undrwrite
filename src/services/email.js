@@ -50,12 +50,12 @@ module.exports = {
     }, DELAY_MS);
   },
 
-  getFormAttachments: ({ skipApplicationForm = false, includeIntakeForm = false } = {}) => {
+  getFormAttachments: ({ skipApplicationForm = false, skipPnwForm = false, includeIntakeForm = false } = {}) => {
     const formsDir = path.join(__dirname, '../../forms');
     const formFiles = [];
 
     if (!skipApplicationForm) formFiles.push('Loan Application Form (1).pdf');
-    formFiles.push('PNW Statement Form.pdf');
+    if (!skipPnwForm) formFiles.push('PNW Statement Form.pdf');
     if (includeIntakeForm) formFiles.push('Union Borrower Intake Form.pdf');
 
     return formFiles.map((fileName) => ({

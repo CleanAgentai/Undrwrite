@@ -496,9 +496,14 @@ ${draftEmail}
         savedDocs = await dealsService.saveAttachments(deal.id, email.attachments);
       }
 
-      // Check if broker already sent a loan application form
+      // Check if broker already sent a loan application form / PNW statement.
+      // Group S+W: detect own-PNW alongside own-application — pre-fix the PNW form
+      // was always attached even when the broker submitted their own (Bug 9.2).
       const hasOwnApplication = email.attachments.some(a =>
         /application|loan.?app|summary/i.test(a.Name)
+      );
+      const hasOwnPnw = email.attachments.some(a =>
+        /pnw|personal.?net.?worth|net.?worth/i.test(a.Name)
       );
 
       // Single Claude call: generate welcome email + deal summary together
@@ -511,19 +516,25 @@ ${draftEmail}
         email.textBody,
         email.attachments,
         savedDocs,
-        hasOwnApplication
+        hasOwnApplication,
+        hasOwnPnw
       );
       // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
       // when Claude's extraction is null/Unknown/Franco-collision.
       dealSummary = normalizeSenderName(dealSummary, email.fromName);
       console.log('Welcome email + deal summary generated');
 
-      // Get form attachments
-      // Borrowers always get both forms. Brokers skip Application Form if they sent their own.
+      // Get form attachments.
+      // Borrowers always get both forms (they don't have their own).
+      // Brokers skip whichever form they already provided.
       const isBorrower = dealSummary?.sender_type === 'borrower';
       const skipApp = isBorrower ? false : hasOwnApplication;
-      const formAttachments = emailService.getFormAttachments({ skipApplicationForm: skipApp });
-      console.log('Attaching', formAttachments.length, 'forms', isBorrower ? '(borrower — always attach both)' : (hasOwnApplication ? '(skipping Application Form — broker sent their own)' : ''));
+      const skipPnw = isBorrower ? false : hasOwnPnw;
+      const formAttachments = emailService.getFormAttachments({ skipApplicationForm: skipApp, skipPnwForm: skipPnw });
+      const skipNote = isBorrower
+        ? '(borrower — always attach both)'
+        : [hasOwnApplication && 'skipping Application Form', hasOwnPnw && 'skipping PNW Form'].filter(Boolean).join(', ') || '';
+      console.log('Attaching', formAttachments.length, 'forms', skipNote ? `(${skipNote})` : '');
 
       // Send the AI-generated response with forms attached (HTML formatted)
       emailService.sendEmailDelayed(
@@ -545,6 +556,7 @@ ${draftEmail}
         ltv: dealSummary ? dealSummary.ltv_percent : null,
         borrower_name: dealSummary?.borrower_name || email.fromName,
         has_application_form: hasOwnApplication || false,
+        has_pnw_statement: hasOwnPnw || false,
       });
 
       console.log('Welcome email sent, deal status: active');

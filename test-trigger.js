@@ -482,6 +482,70 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`  PASS: parseDraftReply on empty input → action='edit' (safe default)`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP S+W: forms attachment hygiene — webhook detection + email.js skip flags
+  // ════════════════════════════════════════════════════════════════
+  // Bugs 9.2 (PNW attached when broker sent own), 15.2/15.3/15.4 (silent attach,
+  // no own-form acceptance line). Deterministic checks on the two halves of the
+  // fix that don't need Claude: the broker filename-detection regex and
+  // emailService.getFormAttachments({skipPnwForm}) honoring the new flag.
+  console.log('\n========== GROUP S+W — own-form detection regex ==========');
+
+  const hasOwnApplication = (name) => /application|loan.?app|summary/i.test(name);
+  const hasOwnPnw = (name) => /pnw|personal.?net.?worth|net.?worth/i.test(name);
+
+  const ownFormCases = [
+    { fileName: 'Loan Application Form - Filled.pdf', expectApp: true,  expectPnw: false },
+    { fileName: 'application_torres_tax.pdf',         expectApp: true,  expectPnw: false },
+    { fileName: 'Loan App - Sandra.pdf',              expectApp: true,  expectPnw: false },
+    { fileName: 'PNW Statement Tran.pdf',             expectApp: false, expectPnw: true },
+    { fileName: 'Personal Net Worth - filled.pdf',    expectApp: false, expectPnw: true },
+    { fileName: 'net_worth_statement.pdf',            expectApp: false, expectPnw: true },
+    { fileName: 'pnw_okafor.pdf',                     expectApp: false, expectPnw: true },
+    { fileName: 'Appraisal_2024.pdf',                 expectApp: false, expectPnw: false },
+    { fileName: 'CIBC Mortgage Payout Statement.pdf', expectApp: false, expectPnw: false },
+    { fileName: 'NOA_2024.pdf',                       expectApp: false, expectPnw: false },
+    { fileName: 'Credit_Bureau_Equifax.pdf',          expectApp: false, expectPnw: false },
+  ];
+
+  let ownFormPassed = 0;
+  for (const tc of ownFormCases) {
+    const gotApp = hasOwnApplication(tc.fileName);
+    const gotPnw = hasOwnPnw(tc.fileName);
+    if (gotApp === tc.expectApp && gotPnw === tc.expectPnw) {
+      console.log(`  PASS: "${tc.fileName}" → app=${gotApp}, pnw=${gotPnw}`);
+      ownFormPassed++;
+    } else {
+      throw new Error(`FAIL [${tc.fileName}]: expected app=${tc.expectApp} pnw=${tc.expectPnw}, got app=${gotApp} pnw=${gotPnw}`);
+    }
+  }
+  console.log(`Own-form detection: ${ownFormPassed}/${ownFormCases.length} passed`);
+
+  console.log('\n========== GROUP S+W — getFormAttachments skip flags ==========');
+  // Restore the real (non-stubbed) emailService for this — we want to exercise
+  // the real getFormAttachments which reads forms from disk.
+  delete require.cache[require.resolve('./src/services/email')];
+  const realEmailService = require('./src/services/email');
+
+  const formAttachCases = [
+    { name: 'no skip flags → both forms attached', opts: {},                                                   expectFiles: ['Loan Application Form (1).pdf', 'PNW Statement Form.pdf'] },
+    { name: 'skipApplicationForm only → PNW only',  opts: { skipApplicationForm: true },                       expectFiles: ['PNW Statement Form.pdf'] },
+    { name: 'skipPnwForm only → Application only',  opts: { skipPnwForm: true },                               expectFiles: ['Loan Application Form (1).pdf'] },
+    { name: 'skip both → empty',                    opts: { skipApplicationForm: true, skipPnwForm: true },    expectFiles: [] },
+  ];
+
+  let formAttachPassed = 0;
+  for (const tc of formAttachCases) {
+    const got = realEmailService.getFormAttachments(tc.opts).map(a => a.Name);
+    if (JSON.stringify(got) === JSON.stringify(tc.expectFiles)) {
+      console.log(`  PASS: ${tc.name} → ${JSON.stringify(got)}`);
+      formAttachPassed++;
+    } else {
+      throw new Error(`FAIL [${tc.name}]: expected ${JSON.stringify(tc.expectFiles)}, got ${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`getFormAttachments skip flags: ${formAttachPassed}/${formAttachCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG B: broker-name extraction / "Franco" greeting regression
   // ════════════════════════════════════════════════════════════════
 

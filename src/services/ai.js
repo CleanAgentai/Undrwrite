@@ -119,11 +119,13 @@ IMPORTANT — AVOID REDUNDANT ASKS:
 - Never add qualifiers like "(if different from the listing info)" — each document request should be clear and standalone
 
 FORMS & DOCUMENTS:
-- PNW (Personal Net Worth) Statement Form is attached — ask the broker to have the borrower fill it out and return it.
 - If the sender attached other documents (credit bureau, appraisal, AML, etc.), acknowledge receipt of those.
 - Do NOT mention the Borrower Intake Form — it is not attached in this initial email.
+- CRITICAL — when a form (Application or PNW) IS attached, you MUST explicitly reference it by name in the email body. Silently attaching a form without mentioning it leaves the broker unaware. Pattern: "I've also attached our [Form Name] for the borrower to fill out — feel free to use your own if you have one already filled out."
 
 {{APPLICATION_FORM_INSTRUCTIONS}}
+
+{{PNW_FORM_INSTRUCTIONS}}
 
 EXAMPLE BROKER EMAILS FOR REFERENCE (adapt these to Vienna's voice):
 
@@ -208,7 +210,7 @@ You MUST return your response in this EXACT format with these exact delimiters:
 
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
-  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false) => {
+  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -218,10 +220,21 @@ module.exports = {
         : '\n\nNo attachments were included with this email.';
 
       const appFormInstructions = hasOwnApplication
-        ? 'LOAN APPLICATION FORM:\n- The broker has ALREADY submitted their own loan application form. Do NOT ask them to fill out ours. Acknowledge that you received their application.'
-        : 'LOAN APPLICATION FORM:\n- The Loan Application Form is attached — ask the broker to have the borrower fill it out and return it. If they already have their own application form filled out, that is acceptable too.';
+        ? 'LOAN APPLICATION FORM:\n- The broker has ALREADY submitted their own loan application form. Do NOT ask them to fill out ours. Do NOT mention or reference our blank Loan Application Form in the email — it was NOT attached. Acknowledge that you received their application.'
+        : 'LOAN APPLICATION FORM:\n- The Loan Application Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our Loan Application Form for the borrower to fill out"). Ask the broker to have the borrower complete and return it. If they already have their own application form filled out, that is acceptable too — they can send theirs instead of using ours.';
 
-      const prompt = INITIAL_EMAIL_PROMPT.replace('{{APPLICATION_FORM_INSTRUCTIONS}}', appFormInstructions);
+      // Group S+W: parallel PNW handling. Pre-fix, the PNW form was always
+      // attached (no hasOwnPnw check) AND the prompt didn't require Vienna to
+      // mention it explicitly AND there was no "use your own PNW" acceptance line.
+      // Post-fix: detect own-PNW via webhook, conditional attachment, conditional
+      // prompt instruction with mandatory mention + own-PNW acceptance.
+      const pnwFormInstructions = hasOwnPnw
+        ? 'PNW STATEMENT FORM:\n- The broker has ALREADY submitted their own PNW (Personal Net Worth) statement. Do NOT ask them to fill out ours. Do NOT mention or reference our blank PNW Statement Form in the email — it was NOT attached. Acknowledge that you received their PNW.'
+        : 'PNW STATEMENT FORM:\n- The PNW (Personal Net Worth) Statement Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our PNW Statement Form for the borrower to complete"). Ask the broker to have the borrower fill it out and return it. If they already have their own PNW or net worth statement filled out, that is acceptable too — they can send theirs instead of using ours.';
+
+      const prompt = INITIAL_EMAIL_PROMPT
+        .replace('{{APPLICATION_FORM_INSTRUCTIONS}}', appFormInstructions)
+        .replace('{{PNW_FORM_INSTRUCTIONS}}', pnwFormInstructions);
 
       content.push({
         type: 'text',
