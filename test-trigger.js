@@ -1281,6 +1281,86 @@ License #M12001505`;
     }
 
     // ════════════════════════════════════════════════════════════════
+    // GROUP T — adversarial live Claude smoke for unstated-lender hallucination
+    // ════════════════════════════════════════════════════════════════
+    // Bug 15.1 (TD Bank) + recurring shape from Scenario 3 Bug 8 (RBC).
+    // Vienna fills in a specific bank name that the broker never stated.
+    // Post-fix: when no lender is named in the input, Vienna's reply must NOT
+    // contain any specific bank name — she should ask the broker to confirm.
+    console.log('\n========== GROUP T — unstated-lender adversarial ==========');
+
+    // Common Canadian mortgage-lender names that are forbidden when not stated.
+    // \b boundaries used; for ambiguous abbreviations like TD/RBC/BMO/CIBC/ATB
+    // these are upper-case only to avoid catching unrelated lowercase substrings
+    // (TD also appears in words; we want to catch only the institution acronym).
+    const lenderForbidden = [
+      [/\bTD\s+(?:Bank|Canada\s+Trust)\b/i,         '"TD Bank/Canada Trust"'],
+      [/\bRBC\b/,                                    '"RBC"'],
+      [/\bRoyal\s+Bank\b/i,                          '"Royal Bank"'],
+      [/\bBMO\b/,                                    '"BMO"'],
+      [/\bBank\s+of\s+Montreal\b/i,                  '"Bank of Montreal"'],
+      [/\bCIBC\b/,                                   '"CIBC"'],
+      [/\bScotia(?:bank)?\b/i,                       '"Scotia(bank)"'],
+      [/\bNational\s+Bank\b/i,                       '"National Bank"'],
+      [/\bTangerine\b/i,                             '"Tangerine"'],
+      [/\bManulife\b/i,                              '"Manulife"'],
+      [/\bEquitable\s+Bank\b/i,                      '"Equitable Bank"'],
+      [/\bHaventree\b/i,                             '"Haventree"'],
+      [/\bMCAP\b/,                                   '"MCAP"'],
+    ];
+
+    const checkUnstatedLender = (label, html) => {
+      const failures = [];
+      for (const [re, desc] of lenderForbidden) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 25), m.index + m[0].length + 30);
+          failures.push(`${desc} appeared in response — broker never stated this lender. Matched at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: lender hallucination detected:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no unstated lender names in response`);
+    };
+
+    // Adversarial: broker's email and conversation history mention NO specific lender.
+    // Just generic "first mortgage" and "refi". Vienna must ask which lender holds
+    // the existing mortgage — NOT fill in TD/RBC/etc.
+    try {
+      const groupTResult = await realAi.generateBrokerResponse(
+        `Hi Vienna,\n\nSubmitting a refi for my client. Property in Toronto. First mortgage on title — looking to refinance with a private second.\n\nAttached: appraisal, NOA, credit bureau, and our application form.\n\nThanks,\nJason Mercer`,
+        [],
+        [],
+        {
+          borrower_name: 'Patricia Wilson',
+          broker_name: 'Jason Mercer',
+          sender_name: 'Jason Mercer',
+          sender_type: 'broker',
+          ltv_percent: 65,
+          loan_type: 'second mortgage',
+          existing_mortgage_balance: 350000,
+          // No bank/lender name anywhere in deal summary
+        },
+        [],
+        // documentsOnFile — appraisal, NOA, credit, application on file. No mortgage statement.
+        [
+          { file_name: 'Appraisal_Wilson.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Wilson_2024.pdf', classification: 'noa' },
+          { file_name: 'Credit_Bureau_Wilson.pdf', classification: 'credit_report' },
+          { file_name: 'Application_Wilson.pdf', classification: 'loan_application' },
+        ]
+      );
+      const groupTHtml = groupTResult?.responseEmail || '';
+      console.log('Group T adversarial output (first 600 chars):');
+      console.log(`  ${groupTHtml.slice(0, 600).replace(/\n/g, ' ')}`);
+      checkUnstatedLender('generateBrokerResponse — no lender stated, Vienna must not invent', groupTHtml);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group T adversarial smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // GROUP R — live Claude smoke for parseDraftReply SEND/EDIT classification
     // ════════════════════════════════════════════════════════════════
     // The REPLACE path is heuristic-only (no Claude — covered by deterministic tests

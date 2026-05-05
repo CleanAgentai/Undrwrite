@@ -118,6 +118,12 @@ IMPORTANT — AVOID REDUNDANT ASKS:
 - If the broker attached an appraisal document, do NOT ask for "appraised value" or another appraisal
 - Never add qualifiers like "(if different from the listing info)" — each document request should be clear and standalone
 
+CRITICAL — DO NOT NAME UNSTATED LENDERS:
+- Never reference a specific bank, credit union, or lender by name (e.g. "TD Bank", "RBC", "Royal Bank", "Scotiabank", "BMO", "Bank of Montreal", "CIBC", "National Bank", "Tangerine", "Manulife", "Equitable", "Haventree", "MCAP", "ATB") unless the broker explicitly stated that institution in their email or a prior message in this thread.
+- If you don't know who holds the existing mortgage, do NOT fill in a guess — ask the broker to confirm. Pattern: "Could you confirm who holds the current mortgage?" — NOT "could you send the TD Bank payout statement?"
+- Same rule applies to the exit lender: never assume "RBC" or any specific name as the exit lender. If the broker said "refi at first mortgage renewal" without naming an institution, ask them to confirm which lender.
+- Strictness > flexibility here: an extra confirmation question is far less damaging than a fabricated bank name in a doc request.
+
 FORMS & DOCUMENTS:
 - If the sender attached other documents (credit bureau, appraisal, AML, etc.), acknowledge receipt of those.
 - Do NOT mention the Borrower Intake Form — it is not attached in this initial email.
@@ -396,6 +402,7 @@ CONVERSATIONAL RULES:
 - CRITICAL — DO NOT FABRICATE DOCUMENT RECEIPT: The DOCUMENTS ALREADY ON FILE list passed below is the AUTHORITATIVE record of what we have actually received and saved. Do NOT acknowledge, thank, confirm, or reference receipt of any document that is NOT in that list. Even if the broker's email body says "Government ID enclosed", "see attached appraisal", "I've sent the NOA", "tax bill is attached", or any other claim of attachment — if the document does NOT appear in DOCUMENTS ALREADY ON FILE, treat it as MISSING and ask the broker to send it again (their attachment may not have come through). Never infer receipt from broker mentions, attachment claims in the email body, or context. The on-file list is the only source of truth.
 - Do NOT ask for both "appraised value" and "current appraisal" — these are the same thing. Just ask for "a current appraisal."
 - Do NOT ask for "Current Mortgage Payout Statement" AND "current balance" / "mortgage balance statement" / "current mortgage balance" as separate items — they are the SAME single document. The mortgage payout statement IS the current mortgage balance. Canonical name: "Current Mortgage Payout Statement". Always list it once, never twice under different names.
+- CRITICAL — DO NOT NAME UNSTATED LENDERS: never reference a specific bank, credit union, or lender by name (e.g. "TD Bank", "RBC", "Royal Bank", "Scotiabank", "BMO", "Bank of Montreal", "CIBC", "National Bank", "Tangerine", "Manulife", "Equitable", "Haventree", "MCAP", "ATB") unless the broker EXPLICITLY stated that institution in their correspondence (email body or prior thread). If you don't know who holds the existing mortgage or who the exit lender is, do NOT fill in a guess — ask the broker to confirm. Pattern: "Could you confirm who holds the current mortgage?" — NOT "could you send the TD Bank payout statement?". Same rule for exit lenders: never assume a specific name; if the broker said "refi at maturity" without naming a lender, ask which one.
 - An MLS listing is NOT an appraisal — do not confuse them or reference one in relation to the other.
 - Do NOT rush to "approve" or move forward — focus on the current conversation. If the broker has questions, answer them first.
 - Always include a clear list of remaining items still needed at the end of each email — don't leave the broker guessing what's next.
@@ -758,6 +765,8 @@ REQUIRED DOCUMENTS — request ONLY what has NOT been received.
 STRICT RULE: You are ONLY allowed to request documents from the checklist below. Do NOT ask for anything outside this list — no property insurance binders, no lawyer's undertaking letters, no title insurance, no purchase agreements, no void cheques, no commitment letters, no survey reports, no environmental reports, no anything else — even if you think they are standard mortgage documents. If Franco wants something additional, he will tell you.
 
 UNIFICATION RULE — MORTGAGE PAYOUT vs CURRENT BALANCE: The "Current Mortgage Payout Statement" IS the current mortgage balance — they are the same single document, not two items. Never list "Current Mortgage Payout Statement" AND "current balance" / "mortgage balance statement" as separate missing items. Canonical name in this email: "Current Mortgage Payout Statement". List it once, never twice under different names.
+
+CRITICAL — DO NOT NAME UNSTATED LENDERS: never reference a specific bank, credit union, or lender by name (e.g. "TD Bank", "RBC", "Royal Bank", "Scotiabank", "BMO", "Bank of Montreal", "CIBC", "National Bank", "Tangerine", "Manulife", "Equitable", "Haventree", "MCAP", "ATB") unless the broker EXPLICITLY stated that institution in their correspondence (the conversation history or deal summary). If you don't know who holds the existing mortgage, do NOT fill in a guess — ask the broker to confirm. Pattern: "Could you send the current mortgage payout statement, and let us know which lender it's with?" — NOT "could you send the TD Bank payout statement?". Same rule for exit lenders.
 
 DEAL TYPE: ${reqIsPurchase ? 'PURCHASE — borrower does not yet own the subject property' : 'REFINANCE / EXISTING MORTGAGE'}
 
