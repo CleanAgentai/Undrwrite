@@ -1675,6 +1675,109 @@ License #M12001505`;
     }
 
     // ════════════════════════════════════════════════════════════════
+    // ITEM 5 — rejection-prompt hardening
+    // ════════════════════════════════════════════════════════════════
+    // Synthetic weak-borrower fixture (~580 credit, NSF history, ~85% LTV, unstable
+    // 1099 income). Run through generateRejectionEmail and assert the rejection:
+    //   - contains no internal-routing leaks (Franco / underwriters / our team / etc.)
+    //   - contains no approval-adjacent language
+    //   - contains no unstated lender names
+    //   - stays brief (≤ 8 sentences, ≤ 150 words — soft caps above the 6-sentence target)
+    //   - doesn't re-litigate the deal terms (no NSF / credit-score / LTV mention)
+    //   - has empathetic acknowledgment + future-deal encouragement
+    console.log('\n========== ITEM 5 — rejection email hardening adversarial ==========');
+
+    const rejectionForbidden = [
+      // Internal routing
+      [/\bfranco\b/i, '"Franco" — broker should not know who decided'],
+      [/the\s+underwrit(?:er|ing)/i, '"the underwriters/underwriting"'],
+      [/\bour\s+team\b/i, '"our team"'],
+      [/\binternal\s+review\b/i, '"internal review"'],
+      [/the\s+(?:underwriting|review)\s+process/i, '"the underwriting/review process"'],
+      // "After our review" (alone) is acceptable in rejection context — it states
+      // evaluation happened without naming who or revealing process. Forbid only
+      // when it names the reviewer ("after review by our team / the underwriters").
+      [/\bafter\s+(?:our\s+|the\s+)?review\s+by\b/i, '"after review by [whom]"'],
+      [/passed\s+(?:on\s+by|along)/i, '"passed on by / passed along"'],
+      [/\bi'?ll\s+(?:let|tell)\s+(?:franco|the\s+(?:lender|team))/i, '"I\'ll let Franco/the lender/the team know"'],
+      // Approval-adjacent
+      [/\bapprov(ed|al|ing)\b/i, '"approved/approval/approving"'],
+      [/passed\s+review/i, '"passed review"'],
+      [/looks\s+good/i, '"looks good"'],
+      // Lender hallucination
+      [/\bTD\s+(?:Bank|Canada\s+Trust)\b/i, '"TD Bank/Canada Trust"'],
+      [/\bRBC\b/, '"RBC"'],
+      [/\bRoyal\s+Bank\b/i, '"Royal Bank"'],
+      [/\bScotia(?:bank)?\b/i, '"Scotia(bank)"'],
+      [/\bCIBC\b/, '"CIBC"'],
+      [/\bBMO\b/, '"BMO"'],
+      [/\bBank\s+of\s+Montreal\b/i, '"Bank of Montreal"'],
+      [/\bManulife\b/i, '"Manulife"'],
+      [/\bEquitable\b/i, '"Equitable"'],
+      [/\bHaventree\b/i, '"Haventree"'],
+      [/\bMCAP\b/, '"MCAP"'],
+      [/\bATB\b/, '"ATB"'],
+      // Re-litigating the deal (rejection context — mention of specific risk factors leaks)
+      [/\b58[03]\b|\bcredit\s+score\b/i, 'mention of credit score / specific number'],
+      [/\bNSF\b/, '"NSF"'],
+      [/\b85(?:\.\d)?\s*%/, 'specific LTV percentage'],
+      [/\bunstable\s+(?:income|employment)\b/i, '"unstable income/employment"'],
+    ];
+
+    const stripHtmlForRej = (h) => (h || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const checkRejection = (label, html) => {
+      const stripped = stripHtmlForRej(html);
+      const sentences = stripped.split(/[.!?]+/).filter(s => s.trim().length > 5);
+      const words = stripped.split(/\s+/).filter(Boolean);
+      const failures = [];
+
+      for (const [re, desc] of rejectionForbidden) {
+        const m = stripped.match(re);
+        if (m) {
+          const ctx = stripped.slice(Math.max(0, m.index - 25), m.index + m[0].length + 30);
+          failures.push(`${desc} — matched "${m[0]}" at "...${ctx}..."`);
+        }
+      }
+      if (sentences.length > 8) failures.push(`${sentences.length} sentences (cap: 8) — too padded for a rejection`);
+      if (words.length > 150) failures.push(`${words.length} words (cap: 150) — too long`);
+
+      // Soft check: rejection should encourage future deals (positive signal)
+      const futureFraming = /(?:next\s+(?:one|deal|time)|future\s+deal|work\s+together\s+(?:again|on|soon)|happy\s+to\s+(?:revisit|see|review))/i.test(stripped);
+      if (!futureFraming) {
+        console.warn(`  WARN [${label}]: no explicit future-deal encouragement detected (soft check, not failing)`);
+      }
+
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: ${sentences.length} sentences, ${words.length} words, no leaks`);
+    };
+
+    try {
+      const item5Result = await realAi.generateRejectionEmail({
+        borrower_name: 'David Reyes',
+        broker_name: 'Jason Mercer',
+        sender_name: 'Jason Mercer',
+        sender_type: 'broker',
+        property_address: '88 Eastern Ave, Toronto, ON',
+        property_value: 540000,
+        loan_amount_requested: 90000,
+        existing_mortgage_balance: 370000,
+        ltv_percent: 85.2,
+        loan_type: 'second mortgage',
+        income_details: '1099 contractor at design studio, 18 months tenure, irregular monthly income',
+        key_risks_or_notes: 'Credit score 583 with two NSF entries in last 6 months. 1099 income with 18-month tenure and inconsistent monthly amounts. Combined LTV 85.2% on a borderline-marketable property. Borrower carries $32K unsecured debt. No clear exit strategy provided.',
+        summary: 'David Reyes seeks a $90K second mortgage on his Toronto home valued at $540K. Existing first of $370K. Credit 583, NSF history, irregular 1099 income, no exit strategy. Combined LTV 85.2%. Risk-stack is heavy across credit, income, LTV, and exit.',
+      });
+      console.log('Item 5 rejection output:');
+      console.log(`  ${(item5Result || '').slice(0, 800).replace(/\n/g, ' ')}`);
+      checkRejection('generateRejectionEmail — weak-borrower fixture', item5Result);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Item 5 adversarial smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // GROUP R — live Claude smoke for parseDraftReply SEND/EDIT classification
     // ════════════════════════════════════════════════════════════════
     // The REPLACE path is heuristic-only (no Claude — covered by deterministic tests
