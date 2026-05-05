@@ -33,11 +33,29 @@ const isUnreliableName = (name) => {
   return false;
 };
 
+// Tighter than isUnreliableName: only matches the Franco-pattern, not empty/null/Unknown.
+// Used by the F2 pre-Claude collision check in webhook to avoid the over-fire where an
+// empty Postmark FromName was being treated as a Franco-collision (regression observed
+// in S1/S2/S3 retest — Vienna greeted Chris/Marcus/Brian as "Hi there!" because their
+// emails arrived without a display name and isUnreliableName('') returned true).
+const firstNameMatchesAdmin = (name) => {
+  if (!ADMIN_FIRST_NAME) return false;
+  const first = firstNameOf(name);
+  return first.length > 0 && first === ADMIN_FIRST_NAME;
+};
+
 const normalizeSenderName = (dealSummary, fromName) => {
   if (!dealSummary) return dealSummary;
-  const fallback = (fromName || '').trim() || null;
-  if (!fallback) return dealSummary;
   const normalized = { ...dealSummary };
+
+  // F2 forward-recovery: every call re-evaluates the collision flag from current state.
+  // Clear any stale flag carried over from previous turns or earlier (buggy) over-fires.
+  // The flag is re-set below only if conditions still warrant it — deals that got the
+  // flag set incorrectly will lose it on the next webhook touch, restoring name greetings.
+  delete normalized.name_collides_with_admin;
+
+  const fallback = (fromName || '').trim() || null;
+  if (!fallback) return normalized;
 
   // F2 — Both-Franco collision branch. When BOTH Claude's extracted name AND
   // the From-header fallback look like Franco (admin-first-name match), we
@@ -526,10 +544,11 @@ ${draftEmail}
       );
 
       // F2 — Detect Franco-collision in the From-header BEFORE calling Claude.
-      // If the broker's display name matches the admin's first name (Franco),
-      // Layer A can't rescue sender_name/broker_name (would no-op Franco→Franco),
-      // so we tell processInitialEmail upfront to greet generically.
-      const initialFromCollision = isUnreliableName(email.fromName);
+      // Use firstNameMatchesAdmin (Franco-pattern only) — NOT isUnreliableName,
+      // which over-fires on empty/Unknown FromName and triggered the Chris/Marcus/Brian
+      // generic-greeting regression. Empty FromName means "no display name", which is
+      // common; it does not mean "Franco-collision".
+      const initialFromCollision = firstNameMatchesAdmin(email.fromName);
 
       // Single Claude call: generate welcome email + deal summary together
       // Passes pre-extracted text from savedDocs — no second pdf-parse run
@@ -861,4 +880,4 @@ ${draftEmail}
 });
 
 module.exports = router;
-module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, ADMIN_FIRST_NAME, textToHtml };
+module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, firstNameMatchesAdmin, ADMIN_FIRST_NAME, textToHtml };

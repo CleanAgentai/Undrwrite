@@ -93,6 +93,7 @@ const {
   sendPreliminaryReviewToAdmin,
   normalizeSenderName,
   isUnreliableName,
+  firstNameMatchesAdmin,
   ADMIN_FIRST_NAME,
   textToHtml,
 } = webhookRouter.__test__;
@@ -802,6 +803,153 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     }
   }
   console.log(`F2 collision flag: ${collisionPassed}/${collisionCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // Fix 1 — F2 over-fire regression: empty FromName must NOT trigger collision
+  // ════════════════════════════════════════════════════════════════
+  // The retest revealed that the original F2 trigger (initialFromCollision via
+  // isUnreliableName) was treating empty/null FromName as "Franco-collision",
+  // because isUnreliableName(empty) returns true. Production symptom: Vienna
+  // greeted Chris/Marcus/Brian as "Hi there!" because their emails had no
+  // display name in the From-header.
+  //
+  // Fix: webhook now uses firstNameMatchesAdmin (Franco-pattern only). These
+  // unit cases cover the gap the original harness missed.
+  console.log('\n========== Fix 1 — firstNameMatchesAdmin (Franco-pattern only) ==========');
+
+  const firstNameMatchesAdminCases = [
+    [null, false, 'null → false (no name)'],
+    [undefined, false, 'undefined → false (no name)'],
+    ['', false, 'empty string → false (NOT a collision — no display name)'],
+    ['   ', false, 'whitespace → false'],
+    ['Unknown', false, 'Unknown → false (NOT a collision — was Bug B trigger but not F2 trigger)'],
+    ['Chris Nolan', false, 'Chris Nolan → false (regular broker name)'],
+    ['Marcus Webb', false, 'Marcus Webb → false (regular borrower name)'],
+    ['Brian', false, 'Brian → false (single-word non-Franco name)'],
+    ['chris@brokerage.com', false, 'email-as-name → false (not Franco)'],
+    ['Frank Smith', false, 'Frank Smith → false (NOT Franco — first-word check)'],
+    ['Franco', true, 'Franco → true'],
+    ['franco', true, 'franco lowercase → true (case-insensitive)'],
+    ['FRANCO', true, 'FRANCO uppercase → true'],
+    ['Franco Vieanna', true, 'Franco Vieanna → true (first-word match)'],
+    ['Franco Maione', true, 'Franco Maione → true'],
+    ['  Franco  ', true, 'whitespace-padded Franco → true'],
+  ];
+
+  let firstNamePassed = 0;
+  for (const [input, expected, label] of firstNameMatchesAdminCases) {
+    const got = firstNameMatchesAdmin(input);
+    if (got === expected) {
+      console.log(`  PASS: ${label}`);
+      firstNamePassed++;
+    } else {
+      throw new Error(`FAIL firstNameMatchesAdmin(${JSON.stringify(input)}): expected ${expected}, got ${got}`);
+    }
+  }
+  console.log(`firstNameMatchesAdmin: ${firstNamePassed}/${firstNameMatchesAdminCases.length} passed`);
+
+  console.log('\n========== Fix 1 — gap cases: empty FromName + reliable extracted name ==========');
+  // These are the cases the original F2 harness never tested. Each represents a
+  // production scenario where the over-fire was observed.
+
+  const gapCases = [
+    {
+      name: 'S1 retest: extracted=Chris Nolan, fromName="" → no flag, name preserved',
+      input: { sender_type: 'broker', sender_name: 'Chris Nolan', broker_name: 'Chris Nolan' },
+      fromName: '',
+      expectFlag: undefined,
+      expectSender: 'Chris Nolan',
+      expectBroker: 'Chris Nolan',
+    },
+    {
+      name: 'S1 retest variant: extracted=Chris Nolan, fromName=null → no flag, name preserved',
+      input: { sender_type: 'broker', sender_name: 'Chris Nolan', broker_name: 'Chris Nolan' },
+      fromName: null,
+      expectFlag: undefined,
+      expectSender: 'Chris Nolan',
+      expectBroker: 'Chris Nolan',
+    },
+    {
+      name: 'S2 retest: extracted=Marcus Webb (borrower), fromName="" → no flag',
+      input: { sender_type: 'borrower', sender_name: 'Marcus Webb', broker_name: null },
+      fromName: '',
+      expectFlag: undefined,
+      expectSender: 'Marcus Webb',
+      expectBroker: null,
+    },
+    {
+      name: 'extracted=Chris Nolan, fromName=Franco → no flag (extracted is fine)',
+      input: { sender_type: 'broker', sender_name: 'Chris Nolan', broker_name: 'Chris Nolan' },
+      fromName: 'Franco Vieanna',
+      expectFlag: undefined,
+      expectSender: 'Chris Nolan',
+      expectBroker: 'Chris Nolan',
+    },
+  ];
+
+  let gapPassed = 0;
+  for (const tc of gapCases) {
+    const out = normalizeSenderName(tc.input, tc.fromName);
+    const flagOk = out.name_collides_with_admin === tc.expectFlag;
+    const senderOk = out.sender_name === tc.expectSender;
+    const brokerOk = out.broker_name === tc.expectBroker;
+    if (flagOk && senderOk && brokerOk) {
+      console.log(`  PASS: ${tc.name}`);
+      gapPassed++;
+    } else {
+      throw new Error(
+        `FAIL [${tc.name}]: ` +
+        `expected flag=${JSON.stringify(tc.expectFlag)} sender=${JSON.stringify(tc.expectSender)} broker=${JSON.stringify(tc.expectBroker)}, ` +
+        `got flag=${JSON.stringify(out.name_collides_with_admin)} sender=${JSON.stringify(out.sender_name)} broker=${JSON.stringify(out.broker_name)}`
+      );
+    }
+  }
+  console.log(`F2 gap cases: ${gapPassed}/${gapCases.length} passed`);
+
+  console.log('\n========== Fix 1 — stale-flag forward-recovery ==========');
+  // Deals already poisoned by the F2 over-fire have name_collides_with_admin=true
+  // stored in extracted_data. Every normalizeSenderName call must clear the stale
+  // flag and re-evaluate from current state — flag stays only if the actual
+  // collision condition still holds.
+
+  const staleFlagCases = [
+    {
+      name: 'stale flag + reliable names, reliable fromName → flag CLEARED',
+      input: { sender_type: 'broker', sender_name: 'Brian', broker_name: 'Brian', name_collides_with_admin: true },
+      fromName: 'Brian',
+      expectFlag: undefined,
+    },
+    {
+      name: 'stale flag + reliable names, empty fromName → flag CLEARED',
+      input: { sender_type: 'broker', sender_name: 'Brian', broker_name: 'Brian', name_collides_with_admin: true },
+      fromName: '',
+      expectFlag: undefined,
+    },
+    {
+      name: 'stale flag + actual collision still holds → flag re-set (idempotent)',
+      input: { sender_type: 'broker', sender_name: 'Franco Maione', broker_name: 'Franco Maione', name_collides_with_admin: true },
+      fromName: 'Franco Vieanna',
+      expectFlag: true,
+    },
+    {
+      name: 'no stale flag, no collision → no flag (control)',
+      input: { sender_type: 'broker', sender_name: 'Brian', broker_name: 'Brian' },
+      fromName: 'Brian',
+      expectFlag: undefined,
+    },
+  ];
+
+  let stalePassed = 0;
+  for (const tc of staleFlagCases) {
+    const out = normalizeSenderName(tc.input, tc.fromName);
+    if (out.name_collides_with_admin === tc.expectFlag) {
+      console.log(`  PASS: ${tc.name}`);
+      stalePassed++;
+    } else {
+      throw new Error(`FAIL [${tc.name}]: expected flag=${JSON.stringify(tc.expectFlag)}, got flag=${JSON.stringify(out.name_collides_with_admin)}`);
+    }
+  }
+  console.log(`Stale-flag clearing: ${stalePassed}/${staleFlagCases.length} passed`);
 
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
@@ -2026,6 +2174,147 @@ Franco Vieanna`;
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  F2 broker-response smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Fix 1 — collision flag = FALSE must produce a NAME greeting
+    // ════════════════════════════════════════════════════════════════
+    // Gap closed: the original F2 harness only verified flag=TRUE produces a
+    // generic greeting. It never asserted flag=FALSE produces a NAME greeting.
+    // Production regression (S1/S2/S3 retest): broker emails with empty FromName
+    // were treated as Franco-collisions because isUnreliableName('') === true.
+    // Post-fix, the pre-Claude check uses firstNameMatchesAdmin (Franco-pattern
+    // only). These smokes verify Vienna correctly greets brokers/borrowers by
+    // name when no actual collision exists.
+    console.log('\n========== Fix 1 — collision flag=FALSE must produce NAME greeting ==========');
+
+    // Helper: verify Vienna's email body greets by the expected first name
+    // (and does NOT use a generic "Hi there!" / "Hello!" greeting).
+    const requireNameGreeting = (label, html, expectedFirstName) => {
+      const stripped = (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      const namePattern = new RegExp(`^[\\s>]*(?:Hi|Hello|Hey|Dear)\\s+${expectedFirstName}\\b`, 'i');
+      const genericPattern = /^[\s>]*(?:Hi\s+there|Hello!?|Hey!?|Greetings)\b/i;
+      const head = stripped.slice(0, 100);
+      if (!namePattern.test(head)) {
+        const generic = genericPattern.test(head) ? ' (used generic greeting instead)' : '';
+        throw new Error(`FAIL [${label}]: greeting does not contain "Hi ${expectedFirstName}"${generic}. Head: "${head}"`);
+      }
+      console.log(`  PASS [${label}]: greeted "${expectedFirstName}" by name (no generic-greeting over-fire)`);
+    };
+
+    // Smoke 1: processInitialEmail with senderName="Chris Nolan", flag=false.
+    // Mirrors S1 retest shape. Pre-fix this would still get the generic greeting
+    // because webhook computed initialFromCollision = isUnreliableName(empty)=true.
+    // Post-fix, the parameter is false (passed explicitly here; webhook now uses
+    // firstNameMatchesAdmin which returns false for empty FromName).
+    try {
+      const s1Body = `Hi,
+
+Submitting a second mortgage opportunity for one of my clients.
+
+Property: 142 Maple Ave, Toronto, ON
+Property value: $850,000
+Existing first mortgage: $400,000
+Loan requested: $120,000
+
+Attached: appraisal, NOA, and credit bureau.
+
+Thanks,
+Chris Nolan
+Nolan Mortgage Group
+License #M22405`;
+
+      const { welcomeEmail: s1Email } = await realAi.processInitialEmail(
+        'Chris Nolan',     // senderName (would be empty in retest case; explicit here for clarity)
+        s1Body,
+        [],
+        [],
+        false,
+        false,
+        false              // ← nameCollidesWithAdmin = false (no collision)
+      );
+      console.log('Fix 1 S1 retest (Chris Nolan) output (first 400 chars):');
+      console.log(`  ${(s1Email || '').slice(0, 400).replace(/\n/g, ' ')}`);
+      requireNameGreeting('processInitialEmail Chris Nolan, no collision', s1Email, 'Chris');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 1 S1 retest smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Smoke 2: processInitialEmail with senderName="Marcus Webb" (borrower path), flag=false.
+    // Mirrors S2 retest shape — borrower direct, no display name.
+    try {
+      const s2Body = `Hi,
+
+I'm looking for a second mortgage on my home in Edmonton.
+
+I'm 38, born March 14, 1988. I work as a graphic designer and own my home outright at $620,000.
+Looking to borrow about $80,000 for a kitchen renovation.
+
+Looking forward to hearing from you.
+
+Marcus Webb`;
+
+      const { welcomeEmail: s2Email } = await realAi.processInitialEmail(
+        'Marcus Webb',
+        s2Body,
+        [],
+        [],
+        false,
+        false,
+        false              // ← nameCollidesWithAdmin = false
+      );
+      console.log('Fix 1 S2 retest (Marcus Webb borrower) output (first 400 chars):');
+      console.log(`  ${(s2Email || '').slice(0, 400).replace(/\n/g, ' ')}`);
+      requireNameGreeting('processInitialEmail Marcus Webb borrower, no collision', s2Email, 'Marcus');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 1 S2 retest smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Smoke 3: generateBrokerResponse with sender_name='Brian', no collision flag.
+    // Mirrors S3 retest shape — broker follow-up where the previous over-fire would
+    // have left a stale flag in extracted_data. Post-fix, normalizeSenderName clears
+    // the stale flag, so generateBrokerResponse sees no flag and uses "Hi Brian!".
+    try {
+      const s3Body = `Hi Vienna, sending the property tax assessment for Derek now. Anything else outstanding?
+
+Thanks,
+Brian`;
+
+      const s3Result = await realAi.generateBrokerResponse(
+        s3Body,
+        [], [],
+        {
+          borrower_name: 'Derek Olsen',
+          broker_name: 'Brian',
+          sender_name: 'Brian',
+          sender_type: 'broker',
+          ltv_percent: 62,
+          loan_type: 'second mortgage',
+          // NO name_collides_with_admin flag — represents post-fix forward-recovery
+        },
+        [
+          { direction: 'inbound', body: 'Hi Vienna, submitting Derek Olsen. Attached: appraisal, NOA, application, credit bureau.', created_at: new Date(Date.now() - 172800000).toISOString() },
+          { direction: 'outbound', body: 'Hi Brian! Thanks for sending those over — appraisal, NOA, application, and credit bureau on file. Vienna | Private Mortgage Link', created_at: new Date(Date.now() - 170000000).toISOString() },
+          { direction: 'inbound', body: s3Body, created_at: new Date().toISOString() },
+        ],
+        [
+          { file_name: 'Appraisal_Olsen.pdf', classification: 'appraisal' },
+          { file_name: 'NOA_Olsen.pdf', classification: 'noa' },
+          { file_name: 'Application_Olsen.pdf', classification: 'loan_application' },
+          { file_name: 'Credit_Olsen.pdf', classification: 'credit_report' },
+          { file_name: 'Property_Tax_Olsen.pdf', classification: 'property_tax' },
+        ],
+        'active'
+      );
+      const s3Html = s3Result?.responseEmail || '';
+      console.log('Fix 1 S3 retest (Brian follow-up) output (first 400 chars):');
+      console.log(`  ${s3Html.slice(0, 400).replace(/\n/g, ' ')}`);
+      requireNameGreeting('generateBrokerResponse Brian follow-up, no collision', s3Html, 'Brian');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 1 S3 retest smoke skipped due to API error: ${e.message}`);
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
