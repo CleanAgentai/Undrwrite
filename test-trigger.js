@@ -2,6 +2,11 @@
 // Stubs Postmark / Supabase / Claude so nothing leaves the process.
 // Exercises both gate predicates and both action helpers.
 
+// 0) Load .env BEFORE the defaulting block below — otherwise our dummy
+//    defaults preempt real values and live Claude smokes get skipped even
+//    when a real CLAUDE_API_KEY is set.
+require('dotenv').config();
+
 // 1) Defaults so config / lib singletons can construct without real creds.
 process.env.CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || 'sk-test-dummy';
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321';
