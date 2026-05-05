@@ -931,6 +931,79 @@ License #M12001505`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group N adversarial smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP O — adversarial live Claude smoke for tone & brevity
+    // ════════════════════════════════════════════════════════════════
+    // Bug 8.8 (Sandra Fletcher): Vienna's broker-facing reply was multi-paragraph praise
+    // of borrower employment, income, credit, property, plus complimenting broker's work.
+    // Post-fix: 1-4 sentence acknowledgments, no praise paragraphs, no borrower-profile
+    // commentary, no multi-sentence broker compliments.
+    console.log('\n========== GROUP O — tone & brevity adversarial ==========');
+
+    // Forbidden praise patterns + soft length cap.
+    const praiseForbidden = [
+      [/\bexcellent\s+job\b/i, '"excellent job"'],
+      [/\bthorough\s+(?:work|job)\b/i, '"thorough work/job"'],
+      [/\bmeticulous(?:ly)?\b/i, '"meticulous(ly)"'],
+      [/\b(?:strong|excellent|impressive|outstanding|exceptional)\s+(?:credit|income|employment|profile|file|borrower|deal|candidate)\b/i, '"strong/excellent/impressive [borrower attribute]"'],
+      [/\bwell[\s-]+(?:prepared|positioned|qualified|presented)\b/i, '"well-prepared/positioned/qualified"'],
+      [/\bappreciate\s+(?:how|your\s+thorough|the\s+thoroughness|the\s+detail|the\s+care)/i, '"appreciate how/your thorough/the thoroughness/the detail"'],
+    ];
+
+    const stripHtml = (html) => (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    const checkBrevity = (label, html, maxSentences = 8, maxWords = 200) => {
+      const stripped = stripHtml(html);
+      const sentences = stripped.split(/[.!?]+/).filter(s => s.trim().length > 5);
+      const words = stripped.split(/\s+/).filter(Boolean);
+      const failures = [];
+
+      for (const [re, desc] of praiseForbidden) {
+        const m = stripped.match(re);
+        if (m) {
+          const ctx = stripped.slice(Math.max(0, m.index - 20), m.index + m[0].length + 30);
+          failures.push(`praise phrase ${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      if (sentences.length > maxSentences) {
+        failures.push(`${sentences.length} sentences (cap: ${maxSentences}) — likely multi-paragraph praise`);
+      }
+      if (words.length > maxWords) {
+        failures.push(`${words.length} words (cap: ${maxWords}) — too long for an underwriting acknowledgment`);
+      }
+
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: tone/brevity violations:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: ${sentences.length} sentences, ${words.length} words, no praise patterns`);
+    };
+
+    // Adversarial: Sandra Fletcher case — strong borrower profile in deal summary, Franco's
+    // approval invites praise. Vienna must stay concise and not compliment borrower or broker.
+    try {
+      const groupOResult = await realAi.generateAdminResponseEmail(
+        {
+          borrower_name: 'Sandra Fletcher',
+          broker_name: 'David Park',
+          sender_name: 'David Park',
+          ltv_percent: 62.6,
+          income_details: 'Senior Engineer at TechCorp, 12 years tenure, $185K salary',
+          key_risks_or_notes: 'Excellent credit (810), strong income, low LTV, well-prepared file',
+        },
+        'Strong file overall — please proceed and request the Government-Issued ID, Property Tax Assessment, and Current Mortgage Payout Statement.',
+        [
+          { direction: 'inbound', body: 'Hi Vienna, here is Sandra Fletcher — clean file, strong borrower. Attached is the appraisal, NOA, application, credit report.', created_at: new Date(Date.now() - 172800000).toISOString() },
+          { direction: 'outbound', body: 'Thanks David! I have the appraisal, NOA, application, and credit report on file. Still outstanding: Government-Issued ID, Property Tax Assessment, Current Mortgage Payout Statement.', created_at: new Date(Date.now() - 86400000).toISOString() },
+        ]
+      );
+      console.log('Group O adversarial output (first 600 chars):');
+      console.log(`  ${(groupOResult || '').slice(0, 600).replace(/\n/g, ' ')}`);
+      checkBrevity('generateAdminResponseEmail — strong borrower profile invites praise', groupOResult);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group O adversarial smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
