@@ -1337,9 +1337,39 @@ License #M12001505`;
       console.log('Group K adversarial output (first 600 chars):');
       console.log(`  ${groupKHtml.slice(0, 600).replace(/\n/g, ' ')}`);
       checkMortgageUnification('generateBrokerResponse — refi missing mortgage doc', groupKHtml);
+
+      // Item 2 extension — same fixture, additional doc-name unification checks.
+      // Vienna's response asks for missing items; she should NOT name the same doc
+      // under two different phrasings (Credit Report + Credit Bureau Report, or
+      // Personal Net Worth Statement + PNW Statement, etc.) in the same email.
+      const checkDocNamingDuplicates = (label, html, pair) => {
+        const stripped = (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const matches = pair.variants.filter(re => re.test(stripped));
+        if (matches.length >= 2) {
+          throw new Error(`FAIL [${label}]: ${pair.name} appears under multiple names in same email — ${matches.length} of ${pair.variants.length} variant patterns matched. Vienna may be listing the same doc twice.`);
+        }
+        console.log(`  PASS [${label}]: ${pair.name} not duplicated under multiple phrasings (${matches.length} variant matched)`);
+      };
+
+      checkDocNamingDuplicates('Item 2 — credit report unification', groupKHtml, {
+        name: 'Credit Report',
+        variants: [
+          /\bcredit\s+report\b/i,
+          /\bcredit\s+bureau\s+report/i,
+          /\bcredit\s+bureau\b(?!\s+report)/i,
+        ],
+      });
+      checkDocNamingDuplicates('Item 2 — PNW unification', groupKHtml, {
+        name: 'PNW Statement',
+        variants: [
+          /\bpersonal\s+net\s+worth\s+statement\b/i,
+          /\bpnw\s+statement\s+form\b/i,
+          /\bpnw\s+statement\b(?!\s+form)/i,
+        ],
+      });
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
-      console.warn(`  Group K adversarial smoke skipped due to API error: ${e.message}`);
+      console.warn(`  Group K / Item 2 adversarial smoke skipped due to API error: ${e.message}`);
     }
 
     // ════════════════════════════════════════════════════════════════
