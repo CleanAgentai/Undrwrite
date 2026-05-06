@@ -660,10 +660,10 @@ ${draftEmail}
         await sendEscalationToAdmin(deal, dealSummary, initialLtv);
       } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
         console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately`);
-        // TODO: ownership_type is null on initial submission (only set later by generateBrokerResponse).
-        // generateLeadSummary will render "Ownership Type: null" in the deal snapshot until then.
-        // Tracked separately — fix is to either extract ownership_type in INITIAL_EMAIL_PROMPT
-        // or have generateLeadSummary render "TBD" when null.
+        // ownership_type is null on initial submission (only set later by generateBrokerResponse).
+        // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
+        // when null. The remaining (deferred) enhancement is to extract ownership_type directly
+        // in INITIAL_EMAIL_PROMPT's TASK 2 JSON so it's populated on day 1.
         await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv);
       }
     } else {

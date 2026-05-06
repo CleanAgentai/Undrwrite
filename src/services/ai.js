@@ -803,7 +803,7 @@ Return only the HTML email body.`,
 
 We have reviewed the documents received and are ready to start working on this file. Now we need the full document package from the broker before proceeding. Do NOT mention LTV thresholds, acceptable ranges, or any approval language — simply acknowledge what was received and let them know we are starting on the file.
 
-OWNERSHIP TYPE: ${ownershipType}
+OWNERSHIP TYPE: ${ownershipType || 'TBD'}
 
 DOCUMENTS ALREADY RECEIVED (do NOT ask for these again):
 ${receivedClassifications.length > 0 ? receivedClassifications.join(', ') : 'None classified yet'}
@@ -1108,7 +1108,7 @@ Present as a clean HTML table with label/value rows:
 - LTV (combined if applicable)
 - Loan Term Requested
 - Borrower Type (Personal / Corporate / Trust)
-- Ownership Type: ${ownershipType}
+- Ownership Type: ${ownershipType || 'TBD'}
 
 === SECTION 2: BORROWER OVERVIEW ===
 A short paragraph explaining who the borrower is:

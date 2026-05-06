@@ -2211,6 +2211,65 @@ Date: 2026-04-15`,
     }
 
     // ════════════════════════════════════════════════════════════════
+    // FIX 6 — "Ownership Type: null" must render as "TBD" (Bug 4)
+    // ════════════════════════════════════════════════════════════════
+    // S3 retest Bug 4: preliminary review email's Deal Snapshot rendered
+    // "Ownership Type: null" verbatim because the JS-interpolated ${ownershipType}
+    // had no fallback. ownershipType is null on initial submission until
+    // generateBrokerResponse populates it on the first follow-up. Fix 6 adds a
+    // `|| 'TBD'` fallback at the prompt template; Vienna now renders the row
+    // as "Ownership Type: TBD" instead of leaking the literal "null" string.
+    console.log('\n========== FIX 6 — Ownership Type null rendering ==========');
+
+    try {
+      const fix6Html = await realAi.generateLeadSummary(
+        {
+          sender_type: 'broker',
+          sender_name: 'Jason Mercer',
+          broker_name: 'Jason Mercer',
+          borrower_name: 'Patricia Simmons',
+          ltv_percent: 65.7,
+          loan_type: 'second mortgage',
+          property_value: 920000,
+          loan_amount_requested: 160000,
+          property_address: '287 Glencairn Ave, Toronto, ON',
+        },
+        null,    // ← ownershipType=null (the bug surface)
+        [
+          { file_name: 'Appraisal_Simmons.pdf', classification: 'appraisal', extracted_data: { text: 'Appraised value: $920,000 (Glencairn Ave, Toronto)' } },
+          { file_name: 'NOA_Simmons.pdf', classification: 'noa', extracted_data: { text: 'CRA Notice of Assessment 2024 — Patricia Simmons — Total income $145,000' } },
+        ],
+        ['government_id', 'property_tax', 'mortgage_statement', 'credit_report'],
+        [
+          { direction: 'inbound', subject: '2nd mortgage submission', body: 'Submitting Patricia Simmons. Property at $920K, requesting $160K.', created_at: new Date(Date.now() - 3600000).toISOString() },
+        ]
+      );
+
+      const fix6Stripped = (fix6Html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      // Find the Ownership Type row context in the rendered output
+      const ownershipMatch = fix6Stripped.match(/Ownership\s+Type[:\s]*([^|.\n]{0,40})/i);
+      console.log(`Fix 6 Ownership Type row excerpt: "${ownershipMatch ? ownershipMatch[0].slice(0, 80) : '(not found)'}"`);
+
+      const failures = [];
+      // The literal "null" must NOT appear in the Ownership Type row
+      if (/Ownership\s+Type[:\s]*(?:[A-Za-z\/]*\s*)?null\b/i.test(fix6Stripped)) {
+        failures.push('"Ownership Type: null" leaked through — JS-interpolated raw null reached the rendered HTML');
+      }
+      // The fallback "TBD" should appear (or some equivalent like "Pending"/"Not yet determined")
+      const hasFallback = /Ownership\s+Type[:\s]*(?:[A-Za-z\/]*\s*)?(?:TBD|Pending|Not\s+yet|Unknown|N\/A|To\s+be)/i.test(fix6Stripped);
+      if (!hasFallback) {
+        failures.push('Ownership Type row does not contain TBD/Pending/equivalent fallback');
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [Fix 6 ownership null rendering]:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [Fix 6 ownership null rendering]: "Ownership Type: TBD" (or equivalent) rendered, no null leak`);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 6 smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // ITEM 5 — rejection-prompt hardening
     // ════════════════════════════════════════════════════════════════
     // Synthetic weak-borrower fixture (~580 credit, NSF history, ~85% LTV, unstable
