@@ -94,6 +94,8 @@ const {
   normalizeSenderName,
   isUnreliableName,
   firstNameMatchesAdmin,
+  isDocRequirementSatisfied,
+  DOC_SYNONYMS,
   ADMIN_FIRST_NAME,
   textToHtml,
 } = webhookRouter.__test__;
@@ -1032,6 +1034,96 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     }
   }
   console.log(`Stale-flag clearing: ${stalePassed}/${staleFlagCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // FIX 4 — NOA satisfies income_proof in missingDocs filter (Bug 2)
+  // ════════════════════════════════════════════════════════════════
+  // S3 retest: deal had NOA classification on file but preliminary review still
+  // listed "Proof of Income" as [MISSING]. Bradley's e4f6b89 dropped 'noa' from
+  // baseRequired with the comment "NOA satisfies income_proof", but the filter
+  // logic was never updated to actually wire in the equivalence. Fix 4 adds a
+  // synonym helper (DOC_SYNONYMS + isDocRequirementSatisfied) and applies it at
+  // all three filter sites in webhook.js.
+  console.log('\n========== FIX 4 — isDocRequirementSatisfied truth table ==========');
+
+  // Sanity check the synonym map is loaded
+  if (!DOC_SYNONYMS || !DOC_SYNONYMS.income_proof || !DOC_SYNONYMS.income_proof.includes('noa')) {
+    throw new Error(`FAIL [Fix 4 setup]: DOC_SYNONYMS.income_proof should include 'noa'. Got: ${JSON.stringify(DOC_SYNONYMS)}`);
+  }
+
+  const docReqCases = [
+    // The bug we're fixing — NOA on file, income_proof required → satisfied
+    { req: 'income_proof', classifications: ['noa'],                expect: true,  label: 'NOA only → income_proof satisfied (the bug we\'re fixing)' },
+    // Canonical: income_proof literal
+    { req: 'income_proof', classifications: ['income_proof'],       expect: true,  label: 'income_proof literal → satisfied' },
+    // Both classifications present (broker sent NOA + paystub)
+    { req: 'income_proof', classifications: ['noa', 'income_proof'],expect: true,  label: 'NOA + income_proof → satisfied (no double-count)' },
+    // Genuinely missing
+    { req: 'income_proof', classifications: [],                     expect: false, label: 'empty classifications → income_proof NOT satisfied' },
+    { req: 'income_proof', classifications: ['appraisal'],          expect: false, label: 'unrelated docs only → income_proof NOT satisfied' },
+    // Non-synonymed required item: literal match only
+    { req: 'government_id', classifications: ['noa'],               expect: false, label: 'NOA does NOT satisfy government_id (no synonym)' },
+    { req: 'government_id', classifications: ['government_id'],     expect: true,  label: 'government_id literal → satisfied' },
+    { req: 'appraisal',     classifications: ['appraisal'],         expect: true,  label: 'appraisal literal → satisfied (control)' },
+    { req: 'appraisal',     classifications: ['noa'],               expect: false, label: 'NOA does NOT satisfy appraisal (no synonym)' },
+    // Required item not in any synonym map: falls through to literal
+    { req: 'mortgage_statement', classifications: ['mortgage_statement'], expect: true,  label: 'mortgage_statement literal → satisfied' },
+    { req: 'mortgage_statement', classifications: ['noa'],                expect: false, label: 'NOA does NOT satisfy mortgage_statement' },
+  ];
+
+  let docReqPassed = 0;
+  for (const tc of docReqCases) {
+    const got = isDocRequirementSatisfied(tc.req, tc.classifications);
+    if (got === tc.expect) {
+      console.log(`  PASS: ${tc.label}`);
+      docReqPassed++;
+    } else {
+      throw new Error(`FAIL [${tc.label}]: isDocRequirementSatisfied(${JSON.stringify(tc.req)}, ${JSON.stringify(tc.classifications)}) expected ${tc.expect}, got ${got}`);
+    }
+  }
+  console.log(`isDocRequirementSatisfied: ${docReqPassed}/${docReqCases.length} passed`);
+
+  // End-to-end: NOA-on-file deal through sendPreliminaryReviewToAdmin must NOT
+  // include income_proof in missingDocs. Pre-fix, this would have leaked.
+  console.log('\n========== FIX 4 — end-to-end: NOA on file → income_proof omitted from [MISSING] ==========');
+
+  const stashedGetDocsFix4 = dealsService.getDocumentsByDeal;
+  const stashedGetDocsWithTextFix4 = dealsService.getDocumentsWithText;
+  const noaOnFileStub = [
+    { classification: 'noa', file_name: 'NOA_Webb_2024.pdf' },
+    { classification: 'appraisal', file_name: 'Appraisal_Webb.pdf' },
+  ];
+  dealsService.getDocumentsByDeal = async () => noaOnFileStub;
+  dealsService.getDocumentsWithText = async () => noaOnFileStub;
+
+  reset();
+  await sendPreliminaryReviewToAdmin(
+    { id: 'deal-fix4-1', borrower_name: 'Marcus Webb' },
+    { sender_type: 'broker', sender_name: 'Jason Mercer', borrower_name: 'Marcus Webb', ltv_percent: 60 },
+    'personal',
+    60
+  );
+
+  const fix4Call = calls.generateLeadSummary[0];
+  if (!fix4Call) throw new Error('FAIL [Fix 4 e2e]: generateLeadSummary not called');
+  const fix4Missing = fix4Call.missingDocs;
+  console.log(`  generateLeadSummary called with missingDocs: ${JSON.stringify(fix4Missing)}`);
+  if (fix4Missing.includes('income_proof')) {
+    throw new Error(`FAIL [Fix 4 e2e]: missingDocs still contains 'income_proof' despite NOA on file. Got: ${JSON.stringify(fix4Missing)}`);
+  }
+  if (fix4Missing.includes('noa')) {
+    throw new Error(`FAIL [Fix 4 e2e]: missingDocs contains 'noa' which should never be in baseRequired (Bradley dropped it in e4f6b89). Got: ${JSON.stringify(fix4Missing)}`);
+  }
+  // Refinance baseRequired (no loan_type → !isPurchase): government_id, appraisal,
+  // property_tax, mortgage_statement, income_proof, credit_report.
+  // With NOA + appraisal on file: 4 items missing (gov_id, property_tax, mortgage_statement, credit_report).
+  if (fix4Missing.length !== 4) {
+    throw new Error(`FAIL [Fix 4 e2e]: expected 4 missing items (gov_id, property_tax, mortgage_statement, credit_report), got ${fix4Missing.length}: ${JSON.stringify(fix4Missing)}`);
+  }
+  console.log(`  PASS: NOA-on-file deal → missingDocs=${JSON.stringify(fix4Missing)} (income_proof correctly satisfied by NOA)`);
+
+  dealsService.getDocumentsByDeal = stashedGetDocsFix4;
+  dealsService.getDocumentsWithText = stashedGetDocsWithTextFix4;
 
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).

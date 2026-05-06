@@ -44,6 +44,22 @@ const firstNameMatchesAdmin = (name) => {
   return first.length > 0 && first === ADMIN_FIRST_NAME;
 };
 
+// Document classification synonyms — for the missingDocs filter, certain doc types
+// satisfy other required items. Bradley's commit e4f6b89 dropped 'noa' from baseRequired
+// with the comment "NOA satisfies income_proof", but the filter logic was never updated
+// to actually wire in the equivalence. Bug 2 from S3 retest: deal with NOA classification
+// showed "Proof of Income" in [MISSING] list of preliminary review email despite the NOA
+// being on file. Map structure makes future equivalences trivial to add (T4, paystubs are
+// already covered because the classifier maps them to 'income_proof' directly).
+const DOC_SYNONYMS = {
+  income_proof: ['income_proof', 'noa'],
+};
+
+const isDocRequirementSatisfied = (req, classifications) => {
+  const accepted = DOC_SYNONYMS[req] || [req];
+  return accepted.some(c => classifications.includes(c));
+};
+
 const normalizeSenderName = (dealSummary, fromName) => {
   if (!dealSummary) return dealSummary;
   const normalized = { ...dealSummary };
@@ -160,7 +176,8 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   const baseRequired = isPurchase
     ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
     : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
-  const missingDocs = baseRequired.filter(req => !classifications.includes(req));
+  // Fix 4: use isDocRequirementSatisfied so NOA satisfies income_proof per Bradley's intent.
+  const missingDocs = baseRequired.filter(req => !isDocRequirementSatisfied(req, classifications));
 
   const dealMessages = await dealsService.getMessages(deal.id);
   const leadSummary = await aiService.generateLeadSummary(
@@ -421,8 +438,12 @@ ${draftEmail}
           // Check if all docs are already received — if so, this is a final completion, not a doc request
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
           const docClassifications = existingDocs.map(d => d.classification).filter(Boolean);
-          const requiredDocs = ['government_id', 'appraisal', 'property_tax', 'noa', 'income_proof', 'credit_report'];
-          const stillMissing = requiredDocs.filter(req => !docClassifications.includes(req));
+          // Fix 4: drop stale 'noa' from list (Bradley's e4f6b89 made NOA satisfy
+          // income_proof; the duplicate item was an oversight in this site). Use
+          // isDocRequirementSatisfied so NOA-only deals correctly classify as
+          // all-docs-received → completion path instead of doc-request loop.
+          const requiredDocs = ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report'];
+          const stillMissing = requiredDocs.filter(req => !isDocRequirementSatisfied(req, docClassifications));
 
           if (stillMissing.length === 0) {
             // FINAL COMPLETION — all docs received, Franco confirms the file is good
@@ -871,7 +892,8 @@ ${draftEmail}
           const finalBaseRequired = finalIsPurchase
             ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
             : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
-          const finalMissing = finalBaseRequired.filter(req => !finalClassifications.includes(req));
+          // Fix 4: use isDocRequirementSatisfied so NOA satisfies income_proof.
+          const finalMissing = finalBaseRequired.filter(req => !isDocRequirementSatisfied(req, finalClassifications));
 
           const finalMessages = await dealsService.getMessages(existingDeal.id);
           const finalSummary = await aiService.generateLeadSummary(
@@ -916,4 +938,4 @@ ${draftEmail}
 });
 
 module.exports = router;
-module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, firstNameMatchesAdmin, ADMIN_FIRST_NAME, textToHtml };
+module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, firstNameMatchesAdmin, isDocRequirementSatisfied, DOC_SYNONYMS, ADMIN_FIRST_NAME, textToHtml };
