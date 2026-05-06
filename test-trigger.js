@@ -1324,6 +1324,285 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
 
   console.log('Bug A concurrency: 5/5 passed');
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BUG B-EDIT — webhook EDIT path must re-preview revised draft, NOT auto-send.
+  // Hoist `saveDraftAndPreview` above draft-review branch; EDIT routes through
+  // saveDraftAndPreview instead of executeDraft. SEND/REPLACE unchanged.
+  //
+  // Bug A's harness section earlier deleted+re-required ./src/services/email
+  // (`webhookEmailService`) and ./src/services/ai. webhook.js (already required
+  // at line ~90) holds references to the ORIGINAL service singletons from before
+  // those cache-busts. To stub correctly here we mutate the SAME instances
+  // webhook.js captured: the line-22 `emailService` / line-21 `aiService`
+  // bindings — NOT the post-cache-bust copies. (Pattern documented in Bug A
+  // tests above.)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('\n========== BUG B-EDIT — webhook EDIT path re-previews revision ==========');
+  {
+    // Locate the /inbound handler from the express router stack.
+    const inboundLayer = webhookRouter.stack.find(l => l.route && l.route.path === '/inbound');
+    if (!inboundLayer) throw new Error('FAIL [Bug B-EDIT]: could not locate /inbound route on webhookRouter');
+    const inboundHandler = inboundLayer.route.stack[0].handle;
+
+    // Mock res — handler calls res.status(200).json(...) early.
+    const mockRes = () => ({ status: () => ({ json: () => {} }) });
+
+    // Build a Postmark-shaped inbound payload from Franco.
+    const buildAdminReply = (textBody, dealMessageId) => ({
+      body: {
+        From: 'franco@privatemortgagelink.com',
+        FromName: 'Franco Genovese',
+        To: 'vienna@example.com',
+        Subject: 'Re: Draft Email Preview — Mei Tanaka',
+        TextBody: textBody,
+        HtmlBody: `<p>${textBody}</p>`,
+        Attachments: [],
+        MessageID: 'admin-reply-' + Math.random().toString(36).slice(2, 10),
+        Headers: [{ Name: 'In-Reply-To', Value: dealMessageId || 'preview-msgid' }],
+        Date: new Date().toUTCString(),
+      },
+    });
+
+    // Capture buckets & helpers
+    const bugB = {
+      sendEmail: [],         // preview-to-Franco sends (saveDraftAndPreview)
+      sendEmailDelayed: [],  // broker sends (executeDraft)
+      saveMessage: [],
+      update: [],
+      reviseEmailWithEdits: [],
+      parseDraftReply: [],
+    };
+    const resetBugB = () => {
+      bugB.sendEmail.length = 0;
+      bugB.sendEmailDelayed.length = 0;
+      bugB.saveMessage.length = 0;
+      bugB.update.length = 0;
+      bugB.reviseEmailWithEdits.length = 0;
+      bugB.parseDraftReply.length = 0;
+    };
+
+    // Snapshot originals so we can restore after this block (Bug A tests already
+    // consumed and restored their own stubs, but earlier patriciaSummary path
+    // also touched these — avoid leaking state into the live Claude smoke).
+    const orig = {
+      dealsFindByMessageId: dealsService.findByMessageId,
+      dealsSaveMessage: dealsService.saveMessage,
+      dealsUpdate: dealsService.update,
+      dealsGetMessages: dealsService.getMessages,
+      aiParseDraftReply: aiService.parseDraftReply,
+      aiReviseEmailWithEdits: aiService.reviseEmailWithEdits,
+      emailSendEmail: emailService.sendEmail,
+      emailSendEmailDelayed: emailService.sendEmailDelayed,
+      emailParseInboundEmail: emailService.parseInboundEmail,
+    };
+
+    // Mutable deal record — saveDraftAndPreview's update() mutates draft_email,
+    // and our test harness must reflect that for repeat-cycle tests.
+    let liveDeal = null;
+    const setDeal = (overrides = {}) => {
+      liveDeal = {
+        id: 'deal-bugb-1',
+        email: 'broker@example.com',
+        borrower_name: 'Mei Tanaka',
+        extracted_data: { borrower_name: 'Mei Tanaka' },
+        status: 'ltv_escalated',
+        draft_email: '<p>Original draft body — please confirm collateral.</p>',
+        draft_subject: 'Re: Mei Tanaka',
+        draft_action: 'conditions',
+        ...overrides,
+      };
+      return liveDeal;
+    };
+
+    // Stubs
+    dealsService.findByMessageId = async () => liveDeal;
+    dealsService.saveMessage = async (...args) => { bugB.saveMessage.push(args); };
+    dealsService.update = async (id, patch) => {
+      bugB.update.push({ id, patch });
+      // Mirror real DB semantics — saveDraftAndPreview's update mutates draft_email.
+      if (liveDeal && id === liveDeal.id) Object.assign(liveDeal, patch);
+      return { id, ...patch };
+    };
+    dealsService.getMessages = async () => [];
+    aiService.parseDraftReply = async (text) => {
+      bugB.parseDraftReply.push(text);
+      // Tests inject the desired classification via a per-test override below.
+      return aiService.__bugBNextDraftReply || { action: 'edit', editInstructions: text };
+    };
+    aiService.reviseEmailWithEdits = async (existing, instructions) => {
+      bugB.reviseEmailWithEdits.push({ existing, instructions });
+      return `<p>REVISED draft incorporating: ${instructions}</p>`;
+    };
+    emailService.sendEmail = async (to, subject, text, html, attach, headers) => {
+      bugB.sendEmail.push({ to, subject, html, headers });
+      return { MessageID: 'preview-' + bugB.sendEmail.length };
+    };
+    emailService.sendEmailDelayed = (to, subject, text, html, attachments, headers, callback) => {
+      bugB.sendEmailDelayed.push({ to, subject, html });
+      // Simulate the delayed broker send firing — invoke callback so saveMessage
+      // tracks the broker outbound (matches production wiring).
+      if (callback) callback({ MessageID: 'broker-' + bugB.sendEmailDelayed.length });
+    };
+
+    // Real parseInboundEmail still works — it's pure transform of req.body.
+    // (No need to stub; webhook.js requires emailService.parseInboundEmail.)
+
+    // -------- E1: EDIT routes through saveDraftAndPreview, NOT executeDraft --------
+    {
+      resetBugB();
+      setDeal({ status: 'ltv_escalated', draft_action: 'conditions' });
+      aiService.__bugBNextDraftReply = { action: 'edit', editInstructions: 'shorten the opening paragraph' };
+      const req = buildAdminReply('Please shorten the opening paragraph.');
+      await inboundHandler(req, mockRes(), () => {});
+
+      if (bugB.reviseEmailWithEdits.length !== 1) {
+        throw new Error(`FAIL [Bug B-EDIT E1]: expected 1 reviseEmailWithEdits call, got ${bugB.reviseEmailWithEdits.length}`);
+      }
+      if (bugB.sendEmailDelayed.length !== 0) {
+        throw new Error(`FAIL [Bug B-EDIT E1]: EDIT must NOT call sendEmailDelayed (broker send), got ${bugB.sendEmailDelayed.length}`);
+      }
+      if (bugB.sendEmail.length !== 1) {
+        throw new Error(`FAIL [Bug B-EDIT E1]: expected 1 preview sendEmail to admin, got ${bugB.sendEmail.length}`);
+      }
+      if (bugB.sendEmail[0].to !== 'franco@privatemortgagelink.com') {
+        throw new Error(`FAIL [Bug B-EDIT E1]: preview must go to admin, got ${bugB.sendEmail[0].to}`);
+      }
+      if (!bugB.sendEmail[0].html.includes('REVISED draft incorporating: shorten the opening paragraph')) {
+        throw new Error(`FAIL [Bug B-EDIT E1]: preview must contain revised body, got: ${bugB.sendEmail[0].html.slice(0, 200)}`);
+      }
+      console.log('  PASS [Bug B-EDIT E1]: EDIT calls saveDraftAndPreview (1 preview to admin), NOT executeDraft (0 broker sends)');
+    }
+
+    // -------- E2: After EDIT, draft_email updated to revision; status + draft_action preserved --------
+    {
+      resetBugB();
+      setDeal({ status: 'under_review', draft_action: 'approval_doc_request' });
+      aiService.__bugBNextDraftReply = { action: 'edit', editInstructions: 'add a friendlier sign-off' };
+      const req = buildAdminReply('add a friendlier sign-off');
+      await inboundHandler(req, mockRes(), () => {});
+
+      // saveDraftAndPreview calls update() with new draft_email + same draft_action.
+      const draftUpdate = bugB.update.find(u => u.patch.draft_email !== undefined);
+      if (!draftUpdate) {
+        throw new Error(`FAIL [Bug B-EDIT E2]: expected an update() call writing draft_email, got: ${JSON.stringify(bugB.update)}`);
+      }
+      if (!draftUpdate.patch.draft_email.includes('REVISED draft incorporating: add a friendlier sign-off')) {
+        throw new Error(`FAIL [Bug B-EDIT E2]: draft_email not updated to revision, got: ${draftUpdate.patch.draft_email?.slice(0, 200)}`);
+      }
+      if (draftUpdate.patch.draft_action !== 'approval_doc_request') {
+        throw new Error(`FAIL [Bug B-EDIT E2]: draft_action must be preserved as 'approval_doc_request', got: ${draftUpdate.patch.draft_action}`);
+      }
+      // status itself is NOT in the update() patch — it stays whatever it was on the deal row.
+      if (draftUpdate.patch.status !== undefined) {
+        throw new Error(`FAIL [Bug B-EDIT E2]: saveDraftAndPreview must not change status, got patch.status=${draftUpdate.patch.status}`);
+      }
+      // Live deal should now have the revised draft_email (mirroring DB).
+      if (!liveDeal.draft_email.includes('REVISED draft incorporating: add a friendlier sign-off')) {
+        throw new Error(`FAIL [Bug B-EDIT E2]: liveDeal.draft_email not mutated by update, got: ${liveDeal.draft_email}`);
+      }
+      console.log('  PASS [Bug B-EDIT E2]: draft_email updated to revision; draft_action preserved; status untouched');
+    }
+
+    // -------- E3: Repeat EDIT cycle — second admin reply with edits stays in draft-review --------
+    {
+      resetBugB();
+      setDeal({ status: 'ltv_escalated', draft_action: 'conditions' });
+      // First edit
+      aiService.__bugBNextDraftReply = { action: 'edit', editInstructions: 'first round of edits' };
+      await inboundHandler(buildAdminReply('first round of edits'), mockRes(), () => {});
+      const firstRoundPreviews = bugB.sendEmail.length;
+      const firstRoundDraft = liveDeal.draft_email;
+      // Second edit on the revised draft
+      aiService.__bugBNextDraftReply = { action: 'edit', editInstructions: 'second round of edits' };
+      await inboundHandler(buildAdminReply('second round of edits'), mockRes(), () => {});
+
+      if (bugB.reviseEmailWithEdits.length !== 2) {
+        throw new Error(`FAIL [Bug B-EDIT E3]: expected 2 revise calls (one per cycle), got ${bugB.reviseEmailWithEdits.length}`);
+      }
+      // Second revise should be against the FIRST-round revised draft, not the original.
+      if (!bugB.reviseEmailWithEdits[1].existing.includes('first round of edits')) {
+        throw new Error(`FAIL [Bug B-EDIT E3]: second revise must operate on first revision, got existing: ${bugB.reviseEmailWithEdits[1].existing.slice(0, 200)}`);
+      }
+      if (bugB.sendEmailDelayed.length !== 0) {
+        throw new Error(`FAIL [Bug B-EDIT E3]: no broker sends across edit cycles, got ${bugB.sendEmailDelayed.length}`);
+      }
+      if (bugB.sendEmail.length !== firstRoundPreviews + 1) {
+        throw new Error(`FAIL [Bug B-EDIT E3]: expected one more preview after second edit, got total=${bugB.sendEmail.length}`);
+      }
+      if (liveDeal.draft_action !== 'conditions') {
+        throw new Error(`FAIL [Bug B-EDIT E3]: draft_action must remain 'conditions' across cycles, got ${liveDeal.draft_action}`);
+      }
+      console.log('  PASS [Bug B-EDIT E3]: repeat EDIT cycle works — 2 revisions, 2 previews, 0 broker sends, state preserved');
+    }
+
+    // -------- E4: SEND after EDIT ships the revised draft to broker --------
+    {
+      resetBugB();
+      // Set up deal that already has a revised draft on it (post-EDIT state).
+      setDeal({
+        status: 'ltv_escalated',
+        draft_action: 'conditions',
+        draft_email: '<p>REVISED draft incorporating: shorten opening</p>',
+      });
+      aiService.__bugBNextDraftReply = { action: 'send' };
+      await inboundHandler(buildAdminReply('SEND'), mockRes(), () => {});
+
+      if (bugB.sendEmailDelayed.length !== 1) {
+        throw new Error(`FAIL [Bug B-EDIT E4]: SEND must ship to broker once, got ${bugB.sendEmailDelayed.length}`);
+      }
+      if (bugB.sendEmailDelayed[0].to !== 'broker@example.com') {
+        throw new Error(`FAIL [Bug B-EDIT E4]: SEND must go to broker, got ${bugB.sendEmailDelayed[0].to}`);
+      }
+      if (!bugB.sendEmailDelayed[0].html.includes('REVISED draft incorporating: shorten opening')) {
+        throw new Error(`FAIL [Bug B-EDIT E4]: SEND must ship the revised draft, got: ${bugB.sendEmailDelayed[0].html.slice(0, 200)}`);
+      }
+      // No re-revision on SEND.
+      if (bugB.reviseEmailWithEdits.length !== 0) {
+        throw new Error(`FAIL [Bug B-EDIT E4]: SEND must not call reviseEmailWithEdits, got ${bugB.reviseEmailWithEdits.length}`);
+      }
+      console.log('  PASS [Bug B-EDIT E4]: SEND after EDIT ships revised draft to broker (1 broker send, 0 re-revisions)');
+    }
+
+    // -------- E5: REPLACE during edit cycle still bypasses to broker (Q4 regression guard) --------
+    {
+      resetBugB();
+      setDeal({ status: 'ltv_escalated', draft_action: 'conditions' });
+      aiService.__bugBNextDraftReply = {
+        action: 'replace',
+        replacementText: 'Hi broker,\n\nFranco here. Please send the appraisal directly.\n\nThanks.',
+      };
+      await inboundHandler(buildAdminReply('Hi broker,\n\nFranco here. Please send the appraisal directly.\n\nThanks.'), mockRes(), () => {});
+
+      if (bugB.sendEmailDelayed.length !== 1) {
+        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE must still ship to broker once, got ${bugB.sendEmailDelayed.length}`);
+      }
+      if (bugB.sendEmailDelayed[0].to !== 'broker@example.com') {
+        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE goes to broker, got ${bugB.sendEmailDelayed[0].to}`);
+      }
+      if (!bugB.sendEmailDelayed[0].html.includes('Franco here')) {
+        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE must ship Franco's verbatim text, got: ${bugB.sendEmailDelayed[0].html.slice(0, 200)}`);
+      }
+      if (bugB.reviseEmailWithEdits.length !== 0) {
+        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE must NOT call reviseEmailWithEdits, got ${bugB.reviseEmailWithEdits.length}`);
+      }
+      console.log('  PASS [Bug B-EDIT E5]: REPLACE during edit cycle bypasses preview, ships verbatim to broker');
+    }
+
+    // Restore originals so downstream sections aren't polluted.
+    delete aiService.__bugBNextDraftReply;
+    dealsService.findByMessageId = orig.dealsFindByMessageId;
+    dealsService.saveMessage = orig.dealsSaveMessage;
+    dealsService.update = orig.dealsUpdate;
+    dealsService.getMessages = orig.dealsGetMessages;
+    aiService.parseDraftReply = orig.aiParseDraftReply;
+    aiService.reviseEmailWithEdits = orig.aiReviseEmailWithEdits;
+    emailService.sendEmail = orig.emailSendEmail;
+    emailService.sendEmailDelayed = orig.emailSendEmailDelayed;
+    emailService.parseInboundEmail = orig.emailParseInboundEmail;
+
+    console.log('Bug B-EDIT: 5/5 passed');
+  }
+
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
   const realKey = process.env.CLAUDE_API_KEY && !process.env.CLAUDE_API_KEY.startsWith('sk-test');

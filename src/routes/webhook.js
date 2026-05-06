@@ -293,6 +293,50 @@ router.post('/inbound', async (req, res) => {
 
       const borrowerSubject = `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`;
 
+      // Helper: save draft and send preview to Franco (replies in same thread).
+      // Hoisted above the draft-review branch (Bug B) so the EDIT path can route
+      // revised drafts back through the same preview cycle rather than auto-sending.
+      const saveDraftAndPreview = async (draftEmail, draftSubject, draftAction) => {
+        await dealsService.update(existingDeal.id, {
+          draft_email: draftEmail,
+          draft_subject: draftSubject,
+          draft_action: draftAction,
+        });
+
+        const borrowerName = existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name;
+        const previewHtml = `<h3>Draft Email Preview — ${borrowerName}</h3>
+<p>Here's what Vienna will send to <strong>${existingDeal.email}</strong>:</p>
+<hr>
+${draftEmail}
+<hr>
+<p><strong>Reply SEND to confirm, or reply with your edits.</strong></p>`;
+
+        // Reply in the same thread as Franco's message.
+        // HITL email subjects vary across the flow (ACTION REQUIRED: ... -> Re: ACTION REQUIRED:
+        // -> Draft Email Preview ...), so subject-based threading breaks. We must set explicit
+        // In-Reply-To + References headers to keep the conversation grouped in Franco's inbox.
+        // Postmark outbound Message-IDs are <uuid@mtasv.net>; inbound IDs may already have a domain
+        // (Gmail / Outlook), so only append @mtasv.net if there's no @ in the raw value.
+        const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+        const threadHeaders = [];
+        if (email.messageId) {
+          threadHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(email.messageId) });
+          const chain = [...(email.references || []), email.messageId].filter(Boolean);
+          threadHeaders.push({ Name: 'References', Value: chain.map(formatThreadId).join(' ') });
+        }
+
+        const previewResult = await emailService.sendEmail(
+          config.adminEmail,
+          `Re: ${email.subject}`,
+          previewHtml.replace(/<[^>]*>/g, ''),
+          previewHtml,
+          [],
+          threadHeaders
+        );
+        await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, previewHtml, previewResult.MessageID);
+        console.log('Draft saved and preview sent to Franco (same thread)');
+      };
+
       // --- DRAFT REVIEW HANDLING ---
       // If draft_action is set, Franco is reviewing a draft preview
       if (existingDeal.draft_action && (existingDeal.status === 'ltv_escalated' || existingDeal.status === 'under_review')) {
@@ -340,64 +384,30 @@ router.post('/inbound', async (req, res) => {
           // Group R: Franco sent a full alternative draft. Use his text VERBATIM —
           // no Claude rewriting, no tone wrapper. Convert plain text to HTML for
           // the broker-facing send (executeDraft expects HTML). Status flow stays
-          // identical to SEND/EDIT — the draft_action code drives the state advance.
+          // identical to SEND — the draft_action code drives the state advance.
+          // REPLACE is the explicit override at any draft stage and bypasses the
+          // edit-preview cycle (Bug B Q4).
           console.log('Franco sent a full corrected draft — using verbatim, no Claude rewrite');
           const replacementHtml = textToHtml(replacementText);
           await executeDraft(replacementHtml, existingDeal.draft_subject, existingDeal.draft_action);
         } else {
-          console.log('Franco wants edits — revising and sending immediately');
+          // Bug B fix: EDIT no longer auto-sends. Revise the draft, then route the
+          // revision back through saveDraftAndPreview so Franco approves the new
+          // version before it ships. The deal stays in its current draft-review
+          // state (draft_action + status preserved); Franco's next reply re-enters
+          // this same branch, supporting unbounded edit cycles until SEND/REPLACE.
+          console.log('Franco wants edits — generating revised draft for re-review');
           const revisedEmail = await aiService.reviseEmailWithEdits(
             existingDeal.draft_email,
             editInstructions,
             existingDeal.extracted_data
           );
-          await executeDraft(revisedEmail, existingDeal.draft_subject, existingDeal.draft_action);
+          await saveDraftAndPreview(revisedEmail, existingDeal.draft_subject, existingDeal.draft_action);
         }
         return;
       }
 
       // --- FIRST REPLY HANDLING (no draft pending) ---
-      // Helper: save draft and send preview to Franco (replies in same thread)
-      const saveDraftAndPreview = async (draftEmail, draftSubject, draftAction) => {
-        await dealsService.update(existingDeal.id, {
-          draft_email: draftEmail,
-          draft_subject: draftSubject,
-          draft_action: draftAction,
-        });
-
-        const borrowerName = existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name;
-        const previewHtml = `<h3>Draft Email Preview — ${borrowerName}</h3>
-<p>Here's what Vienna will send to <strong>${existingDeal.email}</strong>:</p>
-<hr>
-${draftEmail}
-<hr>
-<p><strong>Reply SEND to confirm, or reply with your edits.</strong></p>`;
-
-        // Reply in the same thread as Franco's message.
-        // HITL email subjects vary across the flow (ACTION REQUIRED: ... -> Re: ACTION REQUIRED:
-        // -> Draft Email Preview ...), so subject-based threading breaks. We must set explicit
-        // In-Reply-To + References headers to keep the conversation grouped in Franco's inbox.
-        // Postmark outbound Message-IDs are <uuid@mtasv.net>; inbound IDs may already have a domain
-        // (Gmail / Outlook), so only append @mtasv.net if there's no @ in the raw value.
-        const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
-        const threadHeaders = [];
-        if (email.messageId) {
-          threadHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(email.messageId) });
-          const chain = [...(email.references || []), email.messageId].filter(Boolean);
-          threadHeaders.push({ Name: 'References', Value: chain.map(formatThreadId).join(' ') });
-        }
-
-        const previewResult = await emailService.sendEmail(
-          config.adminEmail,
-          `Re: ${email.subject}`,
-          previewHtml.replace(/<[^>]*>/g, ''),
-          previewHtml,
-          [],
-          threadHeaders
-        );
-        await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, previewHtml, previewResult.MessageID);
-        console.log('Draft saved and preview sent to Franco (same thread)');
-      };
 
       if (existingDeal.status === 'ltv_escalated') {
         const { intent, message } = await aiService.parseAdminReply(email.textBody);
