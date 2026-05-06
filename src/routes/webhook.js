@@ -101,9 +101,13 @@ const textToHtml = (text) => {
 // Helper: send LTV escalation email to admin and flip deal status to ltv_escalated.
 // Body is line-for-line equivalent to the previous inline block in the existing-deal branch
 // (only `existingDeal` → `deal` and `result.updatedSummary` → `dealSummary`).
-const sendEscalationToAdmin = async (deal, dealSummary, ltv) => {
+//
+// options.isUpdate (Fix 2): when true, prefix subject with "[UPDATED] " so Franco can
+// distinguish a fresh escalation from the original one when broker submits more docs to
+// an already-escalated deal.
+const sendEscalationToAdmin = async (deal, dealSummary, ltv, options = {}) => {
   // LTV > 80% — escalate to Franco for approval
-  console.log(`LTV ${ltv}% > 80 — escalating to admin for approval`);
+  console.log(`LTV ${ltv}% > 80 — escalating to admin for approval${options.isUpdate ? ' (updated)' : ''}`);
   const dealMessages = await dealsService.getMessages(deal.id);
   const dealDocs = await dealsService.getDocumentsWithText(deal.id);
   const escalationEmail = await aiService.generateEscalationNotification(dealSummary, dealMessages, dealDocs);
@@ -120,14 +124,16 @@ const sendEscalationToAdmin = async (deal, dealSummary, ltv) => {
     }];
   }
 
+  const subjectPrefix = options.isUpdate ? '[UPDATED] ' : '';
+  const subject = `${subjectPrefix}ACTION REQUIRED: LTV Over 80% — ${dealSummary?.borrower_name || deal.borrower_name}`;
   const escalateResult = await emailService.sendEmail(
     config.adminEmail,
-    `ACTION REQUIRED: LTV Over 80% — ${dealSummary?.borrower_name || deal.borrower_name}`,
+    subject,
     escalationEmail.replace(/<[^>]*>/g, ''),
     escalationEmail,
     escalationAttachments
   );
-  await dealsService.saveMessage(deal.id, 'outbound', `ACTION REQUIRED: LTV Over 80% — ${dealSummary?.borrower_name || deal.borrower_name}`, escalationEmail, escalateResult.MessageID);
+  await dealsService.saveMessage(deal.id, 'outbound', subject, escalationEmail, escalateResult.MessageID);
   await dealsService.update(deal.id, { status: 'ltv_escalated' });
   console.log('Escalation email sent to admin, deal status: ltv_escalated');
 };
@@ -135,9 +141,13 @@ const sendEscalationToAdmin = async (deal, dealSummary, ltv) => {
 // Helper: send preliminary review email to admin and flip deal status to under_review.
 // Body is line-for-line equivalent to the previous inline block in the existing-deal branch.
 // Includes Bradley's purchase-vs-refinance branching for the required-doc list.
-const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv) => {
+//
+// options.isUpdate (Fix 2): when true, prefix subject with "[UPDATED] " so Franco can
+// distinguish a fresh review from the original one. Used when broker submits remaining
+// docs to an under_review deal — replaces the passive [Broker Update] dead-end.
+const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv, options = {}) => {
   // LTV ≤ 80% confirmed — send Franco preliminary review with docs
-  console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco`);
+  console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco${options.isUpdate ? ' (updated)' : ''}`);
   const dealDocs = await dealsService.getDocumentsWithText(deal.id);
   const allDocsList = await dealsService.getDocumentsByDeal(deal.id);
   const classifications = allDocsList.map(d => d.classification).filter(Boolean);
@@ -174,14 +184,16 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
 
   const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
   const statusFlag = missingDocs.length > 0 ? 'PRELIMINARY' : 'COMPLETE';
+  const subjectPrefix = options.isUpdate ? '[UPDATED] ' : '';
+  const subject = `${subjectPrefix}ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`;
   const reviewResult = await emailService.sendEmail(
     config.adminEmail,
-    `ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`,
+    subject,
     leadSummary.replace(/<[^>]*>/g, ''),
     leadSummary,
     reviewAttachments
   );
-  await dealsService.saveMessage(deal.id, 'outbound', `ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`, leadSummary, reviewResult.MessageID);
+  await dealsService.saveMessage(deal.id, 'outbound', subject, leadSummary, reviewResult.MessageID);
   await dealsService.update(deal.id, { status: 'under_review' });
   console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing)`);
 };
@@ -651,25 +663,22 @@ ${draftEmail}
       }
 
       if (existingDeal.status === 'ltv_escalated' || existingDeal.status === 'under_review') {
-        // Broker replied while Franco is reviewing — save docs, forward to Franco, and send acknowledgment to broker
-        const statusLabel = existingDeal.status === 'ltv_escalated' ? 'Awaiting Your Approval' : 'Under Your Review';
-        console.log(`Broker replied while deal is ${existingDeal.status} — saving docs and forwarding to admin`);
+        // Broker replied while Franco is reviewing.
+        // Fix 2: dispatch admin notification AFTER generateBrokerResponse so we can
+        // send an UPDATED preliminary review / escalation with fresh state when broker
+        // submitted new docs. Pre-fix this branch only sent a passive [Broker Update]
+        // ping with no action options — workflow stalled because admin couldn't see
+        // the updated doc state or APPROVE/DECLINE without scrolling to the original
+        // review email. New behavior:
+        //   - hasNewDocs → updated review/escalation supersedes the passive [Broker Update]
+        //   - no docs   → keep the passive [Broker Update] (state didn't change; just a note)
+        const hasNewDocs = email.attachments.length > 0;
+        console.log(`Broker replied while deal is ${existingDeal.status} (${email.attachments.length} attachment(s))`);
 
-        const borrowerName = existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name;
-        const forwardBody = `<p><strong>Broker update for ${borrowerName}:</strong></p><p>${(email.textBody || '').replace(/\n/g, '<br>')}</p>${email.attachments.length > 0 ? `<p><em>${email.attachments.length} attachment(s) received and saved.</em></p>` : ''}`;
-        const fwdResult = await emailService.sendEmail(
-          config.adminEmail,
-          `[Broker Update] ${borrowerName} — ${statusLabel}`,
-          forwardBody.replace(/<[^>]*>/g, ''),
-          forwardBody
-        );
-        await dealsService.saveMessage(existingDeal.id, 'outbound', `[Broker Update] ${borrowerName}`, forwardBody, fwdResult.MessageID);
-        console.log('Broker update forwarded to admin');
-
-        // Run the conversational handler so Vienna can reply with full deal context,
-        // answer questions, and acknowledge docs — even while Franco is reviewing.
-        // We intentionally do NOT re-trigger LTV escalation/review here because Franco
-        // is already in the loop via the [Broker Update] notification above.
+        // Run the conversational handler first so we have fresh extracted_data, LTV,
+        // and ownership for the updated review. We intentionally do NOT re-trigger LTV
+        // escalation/review based on LTV thresholds here — the deal is already in
+        // admin's queue. The updated review (below) refreshes the doc state instead.
         console.log('Generating conversational response during review...');
 
         const reviewConversationHistory = await dealsService.getMessages(existingDeal.id);
@@ -706,6 +715,33 @@ ${draftEmail}
           has_application_form: reviewHasApp,
           has_pnw_statement: reviewHasPnw,
         });
+
+        // Admin notification dispatch (Fix 2):
+        if (hasNewDocs) {
+          // New docs arrived → send UPDATED review/escalation so admin sees fresh state
+          // and the standard APPROVE/DECLINE action options. Replaces the passive ping.
+          console.log(`hasNewDocs=true → sending updated ${existingDeal.status === 'ltv_escalated' ? 'escalation' : 'preliminary review'} (replaces passive [Broker Update])`);
+          if (existingDeal.status === 'ltv_escalated') {
+            await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
+          } else {
+            await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true });
+          }
+        } else {
+          // No attachments → broker sent a question/note, doc state unchanged. Keep
+          // the passive [Broker Update] notification so admin knows broker replied;
+          // no fresh review needed.
+          const statusLabel = existingDeal.status === 'ltv_escalated' ? 'Awaiting Your Approval' : 'Under Your Review';
+          const borrowerNameForUpdate = reviewResult.updatedSummary?.borrower_name || existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name;
+          const forwardBody = `<p><strong>Broker update for ${borrowerNameForUpdate}:</strong></p><p>${(email.textBody || '').replace(/\n/g, '<br>')}</p>`;
+          const fwdResult = await emailService.sendEmail(
+            config.adminEmail,
+            `[Broker Update] ${borrowerNameForUpdate} — ${statusLabel}`,
+            forwardBody.replace(/<[^>]*>/g, ''),
+            forwardBody
+          );
+          await dealsService.saveMessage(existingDeal.id, 'outbound', `[Broker Update] ${borrowerNameForUpdate}`, forwardBody, fwdResult.MessageID);
+          console.log('No new docs — sent passive [Broker Update] notification');
+        }
 
         if (reviewResult.responseEmail) {
           emailService.sendEmailDelayed(

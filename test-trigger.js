@@ -292,6 +292,88 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log('Negative case: GATE CORRECTLY DID NOT FIRE');
 
   // ════════════════════════════════════════════════════════════════
+  // FIX 2 — [UPDATED] subject prefix on review/escalation helpers
+  // ════════════════════════════════════════════════════════════════
+  // Bug 5 from S3 retest: when a broker submits remaining docs to an under_review
+  // deal, Vienna sent a passive [Broker Update] notification with no action options
+  // — admin couldn't proceed. Fix 2 routes those replies through the existing
+  // preliminary-review (or escalation) helper with an isUpdate flag that prefixes
+  // the subject with "[UPDATED] " so Franco can tell the new email apart from the
+  // original review in his inbox.
+  console.log('\n========== FIX 2 — [UPDATED] subject prefix ==========');
+
+  // 1) Preliminary review with isUpdate=true → "[UPDATED] ACTION REQUIRED: ..."
+  reset();
+  await sendPreliminaryReviewToAdmin(patriciaDeal, patriciaSummary, null, 65.7, { isUpdate: true });
+  const updatedPrelimSubject = calls.sendEmail[0]?.subject;
+  if (updatedPrelimSubject !== '[UPDATED] ACTION REQUIRED: PRELIMINARY Review — Patricia Simmons — 65.7% LTV') {
+    throw new Error(`FAIL [Fix 2 prelim isUpdate=true]: expected "[UPDATED] ACTION REQUIRED: PRELIMINARY Review — Patricia Simmons — 65.7% LTV", got "${updatedPrelimSubject}"`);
+  }
+  // saveMessage subject should also carry the prefix
+  const updatedPrelimSavedSubject = calls.saveMessage[0]?.[2];
+  if (updatedPrelimSavedSubject !== updatedPrelimSubject) {
+    throw new Error(`FAIL [Fix 2 prelim isUpdate=true saveMessage]: expected saveMessage subject="${updatedPrelimSubject}", got "${updatedPrelimSavedSubject}"`);
+  }
+  console.log(`  PASS: sendPreliminaryReviewToAdmin({ isUpdate: true }) → subject="${updatedPrelimSubject}"`);
+
+  // 2) Default (no options) → no prefix (regression check)
+  reset();
+  await sendPreliminaryReviewToAdmin(patriciaDeal, patriciaSummary, null, 65.7);
+  const defaultPrelimSubject = calls.sendEmail[0]?.subject;
+  if (defaultPrelimSubject !== 'ACTION REQUIRED: PRELIMINARY Review — Patricia Simmons — 65.7% LTV') {
+    throw new Error(`FAIL [Fix 2 prelim no options]: expected unprefixed subject, got "${defaultPrelimSubject}"`);
+  }
+  console.log(`  PASS: sendPreliminaryReviewToAdmin() default → subject="${defaultPrelimSubject}" (no prefix)`);
+
+  // 3) Escalation with isUpdate=true → "[UPDATED] ACTION REQUIRED: LTV Over 80% — ..."
+  reset();
+  await sendEscalationToAdmin(ryanDeal, ryanSummary, 83.1, { isUpdate: true });
+  const updatedEscSubject = calls.sendEmail[0]?.subject;
+  if (updatedEscSubject !== '[UPDATED] ACTION REQUIRED: LTV Over 80% — Ryan Callahan') {
+    throw new Error(`FAIL [Fix 2 escalation isUpdate=true]: expected "[UPDATED] ACTION REQUIRED: LTV Over 80% — Ryan Callahan", got "${updatedEscSubject}"`);
+  }
+  const updatedEscSavedSubject = calls.saveMessage[0]?.[2];
+  if (updatedEscSavedSubject !== updatedEscSubject) {
+    throw new Error(`FAIL [Fix 2 escalation saveMessage]: expected saveMessage subject="${updatedEscSubject}", got "${updatedEscSavedSubject}"`);
+  }
+  console.log(`  PASS: sendEscalationToAdmin({ isUpdate: true }) → subject="${updatedEscSubject}"`);
+
+  // 4) Escalation default (no options) → no prefix (regression check)
+  reset();
+  await sendEscalationToAdmin(ryanDeal, ryanSummary, 83.1);
+  const defaultEscSubject = calls.sendEmail[0]?.subject;
+  if (defaultEscSubject !== 'ACTION REQUIRED: LTV Over 80% — Ryan Callahan') {
+    throw new Error(`FAIL [Fix 2 escalation no options]: expected unprefixed subject, got "${defaultEscSubject}"`);
+  }
+  console.log(`  PASS: sendEscalationToAdmin() default → subject="${defaultEscSubject}" (no prefix)`);
+
+  // 5) COMPLETE Review variant with isUpdate=true (all docs received case).
+  //    Stub getDocumentsByDeal to return ALL the baseRequired classifications so
+  //    missingDocs.length === 0 and the helper picks "COMPLETE" instead of "PRELIMINARY".
+  console.log('\n========== FIX 2 — [UPDATED] subject with COMPLETE Review variant ==========');
+  const completeStubDocs = [
+    { classification: 'government_id', file_name: 'GovID.pdf' },
+    { classification: 'appraisal', file_name: 'Appraisal.pdf' },
+    { classification: 'property_tax', file_name: 'Tax.pdf' },
+    { classification: 'mortgage_statement', file_name: 'Payout.pdf' },
+    { classification: 'income_proof', file_name: 'Income.pdf' },
+    { classification: 'credit_report', file_name: 'Credit.pdf' },
+  ];
+  const stashedGetDocsFix2 = dealsService.getDocumentsByDeal;
+  const stashedGetDocsWithTextFix2 = dealsService.getDocumentsWithText;
+  dealsService.getDocumentsByDeal = async () => completeStubDocs;
+  dealsService.getDocumentsWithText = async () => completeStubDocs;
+  reset();
+  await sendPreliminaryReviewToAdmin(patriciaDeal, patriciaSummary, 'personal', 65.7, { isUpdate: true });
+  const completeUpdatedSubject = calls.sendEmail[0]?.subject;
+  if (completeUpdatedSubject !== '[UPDATED] ACTION REQUIRED: COMPLETE Review — Patricia Simmons — 65.7% LTV') {
+    throw new Error(`FAIL [Fix 2 COMPLETE isUpdate=true]: expected "[UPDATED] ACTION REQUIRED: COMPLETE Review — Patricia Simmons — 65.7% LTV", got "${completeUpdatedSubject}"`);
+  }
+  console.log(`  PASS: COMPLETE Review with isUpdate=true → subject="${completeUpdatedSubject}"`);
+  dealsService.getDocumentsByDeal = stashedGetDocsFix2;
+  dealsService.getDocumentsWithText = stashedGetDocsWithTextFix2;
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP L: suppress Vienna's broker reply when FINAL REVIEW will fire
   // ════════════════════════════════════════════════════════════════
   // Mirrors webhook.js exactly: a deal where allDocsReceived=true AND no LTV gate fires
