@@ -1125,6 +1125,58 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   dealsService.getDocumentsByDeal = stashedGetDocsFix4;
   dealsService.getDocumentsWithText = stashedGetDocsWithTextFix4;
 
+  // ════════════════════════════════════════════════════════════════
+  // FIX 7 — parseCollateralReply fast-path truth table (no Claude calls)
+  // ════════════════════════════════════════════════════════════════
+  // Bug 7 (S4 retest): high-LTV collateral flow rework. parseCollateralReply
+  // classifies broker replies to Vienna's collateral question as 'no' (silent
+  // escalation), 'yes' (resume normal intake), or 'ambiguous' (re-ask). Fast-path
+  // regex catches unambiguous "no" replies; substantive replies flow to Claude.
+  console.log('\n========== FIX 7 — parseCollateralReply fast-path truth table ==========');
+
+  // We test the fast-path patterns deterministically. Substantive cases that need
+  // Claude classification are covered by live smokes below.
+  const collateralFastPathCases = [
+    // Clear "no" — fast-path expected
+    ['No', 'no'],
+    ['no.', 'no'],
+    ['NO!', 'no'],
+    ['None', 'no'],
+    ['none.', 'no'],
+    ['Nothing', 'no'],
+    ['nothing else', 'no'],
+    ['Nothing additional', 'no'],
+    ['Nope', 'no'],
+    ['n/a', 'no'],
+    ['N/A', 'no'],
+    ['Nada', 'no'],
+    ['No additional collateral', 'no'],
+    ['No other property', 'no'],
+    ['No additional security', 'no'],
+    ['Just the subject property', 'no'],
+    ['just the property', 'no'],
+    ['Only the subject home', 'no'],
+    ['only the property', 'no'],
+    ['Not really', 'no'],
+    ['not at this time', 'no'],
+    ['Not at all', 'no'],
+    // Empty → ambiguous (no Claude call)
+    ['', 'ambiguous'],
+    ['   ', 'ambiguous'],
+  ];
+
+  let collateralFastPathPassed = 0;
+  for (const [input, expectedDisposition] of collateralFastPathCases) {
+    const result = await aiService.parseCollateralReply(input);
+    if (result.disposition === expectedDisposition) {
+      console.log(`  PASS: parseCollateralReply(${JSON.stringify(input)}) → '${expectedDisposition}'`);
+      collateralFastPathPassed++;
+    } else {
+      throw new Error(`FAIL [parseCollateralReply ${JSON.stringify(input)}]: expected '${expectedDisposition}', got '${result.disposition}'`);
+    }
+  }
+  console.log(`parseCollateralReply fast-path: ${collateralFastPathPassed}/${collateralFastPathCases.length} passed`);
+
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
   const realKey = process.env.CLAUDE_API_KEY && !process.env.CLAUDE_API_KEY.startsWith('sk-test');
@@ -2271,6 +2323,179 @@ Date: 2026-04-15`,
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Fix 6 smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // FIX 7 — high-LTV collateral flow (S4 rework)
+    // ════════════════════════════════════════════════════════════════
+    // Three smokes:
+    //   1. parseCollateralReply substantive cases (Claude path)
+    //   2. Initial high-LTV welcome email — collateral question + NO doc list
+    //   3. generateBrokerResponse with collateral_offered=true — acknowledges
+    //      collateral and resumes normal intake (asks for docs)
+    console.log('\n========== FIX 7 — parseCollateralReply substantive cases (Claude) ==========');
+
+    const collateralLiveCases = [
+      // YES — clear collateral offered
+      ['Yes, the borrower has a cottage at Lake Wabamun worth about $400K with no mortgage on it.', 'yes'],
+      ['We can add the rental property he owns at 142 Vine Ave as additional security.', 'yes'],
+      ['Sure — there is also a second property on title, an investment condo downtown.', 'yes'],
+      ['He has another house, fully paid off, valued around $550K.', 'yes'],
+      // NO — substantive but ultimately declining
+      ['Unfortunately no, the subject property is the only real estate he owns.', 'no'],
+      ['I checked with him and he does not have any other property to pledge.', 'no'],
+      // AMBIGUOUS — questions, deflections, non-real-estate offers
+      ['Let me check with the borrower and get back to you.', 'ambiguous'],
+      ['What types of collateral would qualify? Would an RRSP work?', 'ambiguous'],
+      ['He has about $200K in savings — would that count?', 'ambiguous'],
+      ['I will need to confirm with my client.', 'ambiguous'],
+    ];
+
+    let collateralLivePassed = 0;
+    for (const [reply, expectedDisposition] of collateralLiveCases) {
+      try {
+        const result = await realAi.parseCollateralReply(reply);
+        if (result.disposition === expectedDisposition) {
+          console.log(`  PASS: ${JSON.stringify(reply.slice(0, 60) + (reply.length > 60 ? '...' : ''))} → '${expectedDisposition}'`);
+          collateralLivePassed++;
+        } else {
+          throw new Error(`FAIL [parseCollateralReply ${JSON.stringify(reply.slice(0, 80))}]: expected '${expectedDisposition}', got '${result.disposition}'`);
+        }
+      } catch (e) {
+        if (e.message.startsWith('FAIL')) throw e;
+        console.warn(`  [collateral live] skipped due to API error: ${e.message}`);
+      }
+    }
+    console.log(`parseCollateralReply substantive: ${collateralLivePassed}/${collateralLiveCases.length} passed`);
+
+    // ─────────────────────────────────────────────────────────────────
+    // Smoke 2: Initial high-LTV submission must NOT include doc list
+    // ─────────────────────────────────────────────────────────────────
+    console.log('\n========== FIX 7 — initial high-LTV email: collateral question + NO doc list ==========');
+
+    const docRequestPhrases = [
+      [/\bpayout\s+statement\b/i, 'payout statement'],
+      [/\bappraisal\b/i, 'appraisal'],
+      [/\bAML\s+form\b/i, 'AML form'],
+      [/\bPEP\s+form\b/i, 'PEP form'],
+      [/\bPNW\s+statement\b/i, 'PNW statement'],
+      [/\b(?:notice\s+of\s+assessment|\bNOA\b)/i, 'NOA / Notice of Assessment'],
+      [/\bproof\s+of\s+income\b/i, 'proof of income'],
+      [/\bgovernment[\s-]issued\s+id\b/i, 'government-issued ID'],
+      [/\bproperty\s+tax\s+(?:assessment|bill)\b/i, 'property tax assessment'],
+      [/\bcredit\s+(?:bureau|report)\b/i, 'credit bureau / credit report'],
+    ];
+
+    const collateralAskPattern = /(?:additional\s+collateral|other\s+(?:property|security|real\s+estate)|second\s+piece|extra\s+collateral|second\s+(?:home|property))/i;
+
+    try {
+      const highLtvBody = `Hi Franco,
+
+Submitting a second mortgage opportunity for one of my clients. Heads up — the LTV is high.
+
+Property: 88 Eastern Ave, Toronto, ON
+Property value (per recent appraisal): $540,000
+Existing first mortgage: $370,000 (Scotiabank)
+Loan amount requested: $90,000
+Combined LTV: ~85.2%
+
+Borrower: Ryan Callahan, employed at TechCorp.
+
+Thanks,
+Michelle Reid
+Reid Mortgage Group`;
+
+      const { welcomeEmail: highLtvEmail } = await realAi.processInitialEmail(
+        'Michelle Reid',
+        highLtvBody,
+        [],
+        [],
+        false,
+        false,
+        false
+      );
+      const highLtvStripped = (highLtvEmail || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      console.log('Fix 7 high-LTV initial email (first 500 chars):');
+      console.log(`  ${highLtvStripped.slice(0, 500)}`);
+
+      const failures = [];
+      // Must contain the collateral question
+      if (!collateralAskPattern.test(highLtvStripped)) {
+        failures.push('email does NOT contain a collateral question (regex: additional collateral / other property / second piece / etc.)');
+      }
+      // Must NOT contain doc-list phrases
+      const leakedDocs = [];
+      for (const [re, name] of docRequestPhrases) {
+        if (re.test(highLtvStripped)) leakedDocs.push(name);
+      }
+      if (leakedDocs.length > 0) {
+        failures.push(`high-LTV initial email leaked doc requests: ${leakedDocs.join(', ')}`);
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [Fix 7 high-LTV initial]:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [Fix 7 high-LTV initial email]: collateral question present, no doc list leaked`);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 7 high-LTV initial smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Smoke 3: generateBrokerResponse with collateral_offered=true → asks for docs
+    // ─────────────────────────────────────────────────────────────────
+    console.log('\n========== FIX 7 — generateBrokerResponse post-collateral resume ==========');
+
+    try {
+      const postCollateralResult = await realAi.generateBrokerResponse(
+        `Yes, we can add the rental property at 142 Vine Ave as additional collateral. It is fully paid off, valued around $400K.`,
+        [], [],
+        {
+          borrower_name: 'Ryan Callahan',
+          broker_name: 'Michelle Reid',
+          sender_name: 'Michelle Reid',
+          sender_type: 'broker',
+          ltv_percent: 85.2,
+          loan_type: 'second mortgage',
+          collateral_offered: true,   // ← Fix 7 flag set after broker said yes
+        },
+        [
+          { direction: 'inbound', body: 'Submitting a second mortgage for Ryan Callahan, ~85.2% LTV.', created_at: new Date(Date.now() - 86400000).toISOString() },
+          { direction: 'outbound', body: 'Thanks for sending this through, Michelle. The combined LTV is over our usual 80% threshold — is there any additional collateral the borrower could include? A second piece of real estate, an investment property, anything else with equity?', created_at: new Date(Date.now() - 80000000).toISOString() },
+          { direction: 'inbound', body: 'Yes, we can add the rental property at 142 Vine Ave as additional collateral. It is fully paid off, valued around $400K.', created_at: new Date().toISOString() },
+        ],
+        [],
+        'active'   // status='active' after Fix 7 YES path
+      );
+      const postCollateralHtml = postCollateralResult?.responseEmail || '';
+      const postCollateralStripped = (postCollateralHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      console.log('Fix 7 post-collateral output (first 500 chars):');
+      console.log(`  ${postCollateralStripped.slice(0, 500)}`);
+
+      // Vienna must acknowledge the collateral (mention Vine Ave or rental property)
+      const ackedCollateral = /(?:vine\s+ave|rental\s+property|additional\s+(?:collateral|security)|second\s+property|noted)/i.test(postCollateralStripped);
+      // Vienna must request at least SOME documents (the doc-suppression should LIFT now)
+      const requestedDocs = docRequestPhrases.some(([re]) => re.test(postCollateralStripped));
+      // Vienna must NOT re-ASK collateral (already offered). Only catch actual question-
+      // shaped re-asks; "additional collateral will help" is a valid acknowledgment, not
+      // a re-ask. Question patterns: "any other/additional/more...", "do you have...",
+      // "is there...", "could you confirm...".
+      const reAskedCollateral =
+        /any\s+(?:other|additional|more)\s+(?:collateral|property|security|real\s+estate)/i.test(postCollateralStripped) ||
+        /do\s+(?:you|they|the\s+borrower)\s+have\s+(?:any\s+)?(?:other|additional|more)/i.test(postCollateralStripped) ||
+        /is\s+there\s+(?:any\s+)?(?:other|additional|more)\s+(?:collateral|property|security)/i.test(postCollateralStripped);
+
+      const issues = [];
+      if (!ackedCollateral) issues.push('did not acknowledge the collateral offer (Vine Ave / rental property)');
+      if (!requestedDocs) issues.push('did not request any standard docs (doc-suppression should have LIFTED post-collateral)');
+      if (reAskedCollateral) issues.push('re-asked for additional collateral despite collateral_offered=true');
+
+      if (issues.length > 0) {
+        throw new Error(`FAIL [Fix 7 post-collateral resume]:\n  - ${issues.join('\n  - ')}`);
+      }
+      console.log(`  PASS [Fix 7 post-collateral resume]: Vienna acknowledged collateral and asked for docs (intake resumed)`);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 7 post-collateral smoke skipped due to API error: ${e.message}`);
     }
 
     // ════════════════════════════════════════════════════════════════

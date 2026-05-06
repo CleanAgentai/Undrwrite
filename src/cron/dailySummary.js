@@ -30,8 +30,11 @@ const runFollowUpReminders = async () => {
   console.log('\n--- Checking for stale deals needing follow-up ---');
 
   const activeDeals = await dealsService.getActiveDeals();
-  // Only follow up on deals waiting for the broker (not Franco)
-  const brokerWaiting = activeDeals.filter(d => d.status === 'active');
+  // Only follow up on deals waiting for the broker (not Franco).
+  // Fix 7: 'awaiting_collateral' is also a broker-waiting state — Vienna asked the
+  // collateral question and is waiting for the broker's reply. Same generic reminder
+  // copy as 'active' (Porter's clarifying answer); no tailored collateral-specific copy.
+  const brokerWaiting = activeDeals.filter(d => d.status === 'active' || d.status === 'awaiting_collateral');
 
   let remindersSent = 0;
   const remindersLog = []; // Track which deals got reminders for the daily summary

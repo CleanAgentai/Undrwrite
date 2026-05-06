@@ -99,6 +99,7 @@ HIGH LTV (over 80%) — when the broker has stated an LTV above 80%, OR when our
 - Acknowledge directly that the LTV is outside our usual 80% threshold.
 - Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
 - Do NOT reject the deal. Do NOT promise it will be approved either. Just flag the threshold and ask about collateral options. Franco will make the final call.
+- CRITICAL — DO NOT REQUEST DOCUMENTS IN A HIGH-LTV INITIAL EMAIL: when LTV > 80%, the ONLY ask in this email is the collateral question. Do NOT include a document request list in this email — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. The full doc package will be requested LATER, after the lender decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 
 WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - A brief write-up or "story" about the deal — a high-level overview of what the client is looking for, how much they want to borrow and for how long, a bit of background on the borrowers, etc. If the broker already provided this kind of overview in their email, do NOT ask again. Only ask if the email is thin on context (e.g. just "here are the docs" with no explanation).
@@ -421,8 +422,12 @@ COMMON BROKER QUESTIONS — handle these consistently:
 
 HIGH LTV (over 80%) — when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:
 - Acknowledge directly that the LTV is outside our usual 80% threshold. Be honest about it.
-- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
-- Do NOT reject the deal, do NOT promise it will be approved. Just flag the threshold and ask about collateral options. Franco will make the final call.
+${existingSummary?.collateral_offered
+  ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, AML, PEP, etc., per the STANDARD DOCUMENT CHECKLIST below).`
+  : `- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
+- CRITICAL — DO NOT REQUEST DOCUMENTS IN THIS EMAIL: when LTV > 80% and additional collateral has NOT yet been confirmed by the broker, the ONLY ask in this email is the collateral question. Do NOT include a document request list — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. Document requests will follow LATER, after Franco decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
+- If the broker's most recent reply was unclear about collateral (questions back, "let me check", off-topic), re-ask the collateral question in different words — give concrete examples of what would qualify (a second piece of real estate, an investment property, a vacation home with equity). Stay firm: the doc package is NOT requested until collateral is resolved.`}
+- Do NOT reject the deal, do NOT promise it will be approved. Just flag the threshold and ${existingSummary?.collateral_offered ? 'proceed with normal intake.' : 'ask about collateral options.'} Franco will make the final call.
 
 CRITICAL — NO INVENTED CONTACT INFO:
 - Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
@@ -1350,6 +1355,75 @@ ADMIN'S REPLY:
     } catch (error) {
       console.error('Claude draft reply parsing failed, defaulting to edit:', error.message);
       return { action: 'edit', editInstructions: text };
+    }
+  },
+
+  // Fix 7: classify a broker's reply to Vienna's high-LTV collateral question.
+  // Three dispositions:
+  //   - 'yes'       : broker offered additional collateral (any kind of real-estate
+  //                   security, second piece of property, additional asset for security).
+  //                   Status flips back to 'active'; normal intake resumes.
+  //   - 'no'        : broker declined collateral. Status flips to 'ltv_escalated';
+  //                   sendEscalationToAdmin fires silently; NO broker reply.
+  //   - 'ambiguous' : broker's reply doesn't clearly address collateral (questions back,
+  //                   "let me check", off-topic content). Status stays 'awaiting_collateral';
+  //                   Vienna re-asks via generateBrokerResponse.
+  // Fast-path regex catches unambiguous "no" patterns; everything else flows to Claude.
+  parseCollateralReply: async (replyText) => {
+    const stripped = module.exports.stripQuotedText(replyText);
+    const text = (stripped || replyText || '').trim();
+    if (!text) return { disposition: 'ambiguous', message: '' };
+
+    // Fast-path: clear "no" patterns. Each is anchored ^...$ so it ONLY matches
+    // when the entire reply (post-stripping) is the negation phrase. Multi-sentence
+    // replies fall through to Claude — even if they contain "no", the broker may
+    // have added context (e.g. "no other property but he has a cottage").
+    const fastNoPatterns = [
+      /^no[.!]?$/i,
+      /^none[.!]?$/i,
+      /^nothing(?:\s+(?:else|additional))?[.!]?$/i,
+      /^nope[.!]?$/i,
+      /^n\/?a[.!]?$/i,
+      /^nada[.!]?$/i,
+      /^no\s+(?:additional|other)\s+(?:collateral|property|assets?|security)[.!]?$/i,
+      /^just\s+the\s+(?:subject\s+)?(?:home|property)[.!]?$/i,
+      /^only\s+the\s+(?:subject\s+)?(?:home|property)[.!]?$/i,
+      /^not\s+(?:really|at\s+(?:this\s+time|all|the\s+moment))[.!]?$/i,
+    ];
+    for (const re of fastNoPatterns) {
+      if (re.test(text)) return { disposition: 'no', message: text };
+    }
+
+    // Use Claude for ambiguous / substantive replies. Conservative default = ambiguous
+    // when in doubt — better to ask broker for clarification than mis-escalate.
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 20,
+        messages: [{
+          role: 'user',
+          content: `Classify a broker's reply about additional collateral for a high-LTV mortgage deal.
+
+Reply with EXACTLY one word: YES, NO, or AMBIGUOUS.
+
+- YES: broker confirms additional collateral exists. Examples: "Yes, the borrower has a cottage worth $400K", "We can add the rental property as additional security", "There's another house on title", "He has an investment property at...", "We can pledge the second home". Any offer of real-estate collateral, additional property, or supplementary security counts as YES even if the dollar amount is small.
+- NO: broker explicitly declines additional collateral. Examples: "No additional collateral", "Just the subject property", "Nothing else available", "He doesn't have any other assets", "Only this property", "No other security to offer".
+- AMBIGUOUS: broker's reply doesn't clearly address collateral OR offers something non-real-estate (RRSP, cash on hand, vehicles) where qualification is unclear. Examples: "Let me check with the borrower", "What types of collateral would qualify?", "Maybe his RRSP — does that count?", "I'll get back to you on this", "He has $200K in savings — would that work?", broker reply that talks about other deal aspects without addressing collateral.
+
+When in doubt, choose AMBIGUOUS — better to ask the broker for clarification than to escalate or proceed on a misread.
+
+BROKER'S REPLY:
+"${text.replace(/"/g, '\\"')}"`,
+        }],
+      });
+
+      const result = response.content[0].text.trim().toUpperCase();
+      if (result.includes('YES')) return { disposition: 'yes', message: text };
+      if (result.includes('NO') && !result.includes('NOT')) return { disposition: 'no', message: text };
+      return { disposition: 'ambiguous', message: text };
+    } catch (error) {
+      console.error('Claude collateral reply parsing failed, defaulting to ambiguous:', error.message);
+      return { disposition: 'ambiguous', message: text };
     }
   },
 

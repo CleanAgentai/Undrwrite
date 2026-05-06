@@ -656,8 +656,13 @@ ${draftEmail}
       const initialLtv = dealSummary?.ltv_percent;
 
       if (initialLtv && initialLtv > 80) {
-        console.log(`Initial submission LTV ${initialLtv}% > 80 — escalating immediately`);
-        await sendEscalationToAdmin(deal, dealSummary, initialLtv);
+        // Fix 7: do NOT escalate immediately. Set status to 'awaiting_collateral'
+        // and let Vienna's welcome email carry the collateral question. Admin sees
+        // nothing until the broker confirms no-collateral (then we silently
+        // escalate) or offers collateral (then status flips back to active).
+        // Reverses Bradley's e93f657 parallel-fire model per Franco's S4 retest.
+        console.log(`Initial submission LTV ${initialLtv}% > 80 — entering awaiting_collateral state (Fix 7)`);
+        await dealsService.update(deal.id, { status: 'awaiting_collateral' });
       } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
         console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately`);
         // ownership_type is null on initial submission (only set later by generateBrokerResponse).
@@ -681,6 +686,48 @@ ${draftEmail}
       if (email.attachments.length > 0) {
         console.log('Saving attachments to Supabase...');
         savedDocs = await dealsService.saveAttachments(existingDeal.id, email.attachments);
+      }
+
+      // Fix 7: high-LTV collateral gate. When a deal is awaiting_collateral, parse the
+      // broker's reply for yes/no/ambiguous and dispatch:
+      //   - 'no'        → silently escalate to admin (no broker reply, similar to Group L
+      //                   suppression). sendEscalationToAdmin flips status to ltv_escalated.
+      //   - 'yes'       → broker offered additional collateral. Set extracted_data.collateral_offered
+      //                   so the active-branch LTV gate doesn't re-route back to awaiting_collateral.
+      //                   Flip status to active and fall through to normal active handling.
+      //   - 'ambiguous' → no DB state change; in-memory route through active branch so Vienna
+      //                   re-asks via generateBrokerResponse. Next broker reply gets re-parsed.
+      if (existingDeal.status === 'awaiting_collateral') {
+        console.log('Awaiting-collateral broker reply — parsing for yes/no/ambiguous');
+        const { disposition } = await aiService.parseCollateralReply(email.textBody);
+        console.log(`Collateral disposition: ${disposition}`);
+
+        if (disposition === 'no') {
+          console.log('No additional collateral offered — escalating silently to admin');
+          // Defensively normalize the stored summary before passing in (Bug B Layer A + F2).
+          const escalationSummary = normalizeSenderName(existingDeal.extracted_data, email.fromName);
+          await sendEscalationToAdmin(existingDeal, escalationSummary, existingDeal.ltv);
+          return; // Silent — no broker-facing reply
+        }
+
+        if (disposition === 'yes') {
+          console.log('Additional collateral offered — flipping status to active, marking collateral_offered');
+          // Persist the collateral_offered flag so the active-branch LTV gate below does
+          // NOT re-route this deal back to awaiting_collateral (which would otherwise
+          // create a state loop, since the LTV value itself hasn't changed yet).
+          const updatedExtracted = { ...(existingDeal.extracted_data || {}), collateral_offered: true };
+          await dealsService.update(existingDeal.id, { status: 'active', extracted_data: updatedExtracted });
+          existingDeal.status = 'active';
+          existingDeal.extracted_data = updatedExtracted;
+        } else {
+          console.log('Ambiguous collateral reply — staying in awaiting_collateral, re-asking via conversational handler');
+          // In-memory route through the active branch so generateBrokerResponse runs and
+          // re-asks via the high-LTV prompt block. DB status stays 'awaiting_collateral',
+          // so the next broker reply is parsed for collateral disposition again. The
+          // active-branch LTV gate WILL re-write status='awaiting_collateral' to the DB
+          // (idempotent — already that value).
+          existingDeal.status = 'active';
+        }
       }
 
       if (existingDeal.status === 'ltv_escalated' || existingDeal.status === 'under_review') {
@@ -827,18 +874,23 @@ ${draftEmail}
         const classificationsForGate = docsForGate.map(d => d.classification).filter(Boolean);
         const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => classificationsForGate.includes(c));
 
-        // Check if LTV triggers escalation or preliminary review
-        // High-LTV escalation fires immediately; preliminary review waits for a reviewable doc
-        const willEscalate = ltv && ltv > 80 && existingDeal.status !== 'ltv_escalated';
+        // Fix 7: high-LTV deals route to awaiting_collateral state instead of immediate
+        // escalation. Skip the routing if extracted_data.collateral_offered is already
+        // true (broker offered collateral on a previous turn — re-routing would create
+        // a loop since LTV value hasn't changed). Once collateral is offered, the deal
+        // proceeds through normal active flow; admin sees the collateral context on the
+        // eventual prelim review.
+        const collateralAlreadyOffered = !!existingDeal.extracted_data?.collateral_offered
+          || !!result.updatedSummary?.collateral_offered;
+        const willGoToCollateralCheck = ltv && ltv > 80 && existingDeal.status === 'active' && !collateralAlreadyOffered;
         const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc;
 
         // Group L: when the FINAL REVIEW HITL is about to fire (all docs in, no LTV gate
         // active, deal currently active), Vienna goes silent on the broker side. Per Franco:
         // "When all docs are in, Vienna should silently trigger the preliminary review to
         // admin and wait. No broker reply at this stage. The admin-approved closing draft
-        // is the one and only broker-facing message." Bradley's "always send" stays for
-        // willEscalate / willReview (deliberate parallel send per his commit e93f657).
-        const willFireFinalReview = result.allDocsReceived && !willEscalate && !willReview && existingDeal.status === 'active';
+        // is the one and only broker-facing message."
+        const willFireFinalReview = result.allDocsReceived && !willGoToCollateralCheck && !willReview && existingDeal.status === 'active';
 
         if (ltv && ltv <= 80 && !hasReviewableDoc) {
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
@@ -863,17 +915,24 @@ ${draftEmail}
         } else if (willFireFinalReview) {
           console.log('All docs received — suppressing Vienna broker reply; FINAL REVIEW will fire silently to Franco');
         }
-        if (willEscalate || willReview) {
-          console.log('LTV gate active — Vienna replied conversationally AND sending HITL to Franco');
+        if (willGoToCollateralCheck || willReview) {
+          console.log(`LTV gate active — Vienna replied conversationally AND ${willGoToCollateralCheck ? 'routing deal to awaiting_collateral' : 'sending HITL to Franco'}`);
         }
 
-        if (willEscalate) {
-          await sendEscalationToAdmin(existingDeal, result.updatedSummary, ltv);
+        if (willGoToCollateralCheck) {
+          // Fix 7: high-LTV → awaiting_collateral state. No admin notification yet.
+          // Vienna's reply (already sent above) carries the collateral question via
+          // the high-LTV prompt block. Admin sees nothing until broker confirms
+          // no-collateral (silent escalation) or offers collateral (resume active flow).
+          await dealsService.update(existingDeal.id, { status: 'awaiting_collateral' });
+          console.log('Deal status: awaiting_collateral (Fix 7 — collateral question pending)');
         } else if (willReview) {
           await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv);
         } else {
-          // Deal already under_review or no LTV yet — keep conversation going
-          if (existingDeal.status !== 'active' && existingDeal.status !== 'under_review') {
+          // Deal already under_review or no LTV yet — keep conversation going.
+          // (We do NOT auto-flip to 'active' here anymore — awaiting_collateral, completed,
+          // rejected, etc. should preserve their state.)
+          if (!['active', 'under_review', 'awaiting_collateral', 'ltv_escalated', 'completed', 'rejected'].includes(existingDeal.status)) {
             await dealsService.update(existingDeal.id, { status: 'active' });
           }
           console.log('Conversation continues — waiting for more docs/info');
