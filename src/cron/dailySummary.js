@@ -64,7 +64,21 @@ const runFollowUpReminders = async () => {
     }
 
     const newReminderNumber = reminderCount + 1;
-    console.log(`Deal ${deal.id} (${deal.borrower_name}) — ${Math.round(daysSilent)} days silent, sending reminder #${newReminderNumber}`);
+    console.log(`Deal ${deal.id} (${deal.borrower_name}) — ${Math.round(daysSilent)} days silent, attempting reminder #${newReminderNumber}`);
+
+    // Bug A fix: claim the reminder slot atomically BEFORE doing any other work
+    // (Claude API call, email send, etc.). Conditional UPDATE serializes concurrent
+    // workers via Postgres row lock — only ONE worker can transition reminder_count
+    // from `reminderCount` to `newReminderNumber`; the others get 0 rows back and
+    // skip. Production diagnosis: 9 cron fires at 9 PM sent 9 emails to the same
+    // broker because the prior 20-hour outbound check was non-atomic. The 20h
+    // guard above stays as defense-in-depth (cuts API calls in the no-race path);
+    // this claim is the actual lock.
+    const { claimed } = await dealsService.claimReminderSlot(deal.id, reminderCount, newReminderNumber);
+    if (!claimed) {
+      console.log(`Deal ${deal.id} (${deal.borrower_name}) — concurrent worker claimed reminder slot first, skipping`);
+      continue;
+    }
 
     try {
       const reminderEmail = await aiService.generateFollowUpReminder(
@@ -110,8 +124,9 @@ const runFollowUpReminders = async () => {
         reminderHeaders
       );
 
+      // Counter was already incremented via claimReminderSlot — do NOT call
+      // dealsService.update with reminder_count here (would be a redundant write).
       await dealsService.saveMessage(deal.id, 'outbound', reminderSubject, reminderEmail, result.MessageID);
-      await dealsService.update(deal.id, { reminder_count: newReminderNumber });
       remindersSent++;
       remindersLog.push({
         borrower: deal.borrower_name,
@@ -122,6 +137,17 @@ const runFollowUpReminders = async () => {
       console.log(`Reminder #${newReminderNumber} sent to ${deal.email}`);
     } catch (err) {
       console.error(`Failed to send reminder for deal ${deal.id}:`, err.message);
+      // Roll back the slot since the email never went out. If rollback fails
+      // (someone else has touched the counter since), accept that the broker
+      // gets one fewer reminder — self-corrects on next cron via MAX_REMINDERS.
+      try {
+        const { released } = await dealsService.releaseReminderSlot(deal.id, newReminderNumber, reminderCount);
+        if (!released) {
+          console.warn(`Deal ${deal.id} — rollback skipped (counter changed by another worker); broker will get one fewer reminder, self-corrects on next cron`);
+        }
+      } catch (rollbackErr) {
+        console.error(`Deal ${deal.id} — rollback failed: ${rollbackErr.message}; counter may be high, broker will get one fewer reminder`);
+      }
     }
   }
 
@@ -221,4 +247,4 @@ console.log(`Daily summary cron scheduled — runs at 9:00 PM ${ADMIN_TIMEZONE}`
 
 // Export for manual triggering/testing. formatAdminDate is exposed for the
 // harness to pin Bug 13.1 (timezone wrap on date header).
-module.exports = { runDailySummary, formatAdminDate, ADMIN_TIMEZONE };
+module.exports = { runDailySummary, runFollowUpReminders, formatAdminDate, ADMIN_TIMEZONE };

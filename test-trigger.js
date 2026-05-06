@@ -1177,6 +1177,153 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   }
   console.log(`parseCollateralReply fast-path: ${collateralFastPathPassed}/${collateralFastPathCases.length} passed`);
 
+  // ════════════════════════════════════════════════════════════════
+  // BUG A — cron concurrency: claim-then-send pattern
+  // ════════════════════════════════════════════════════════════════
+  // Production observed 9 reminder emails fired to one broker at the same 9 PM
+  // cron tick (9 cron instances racing on a non-atomic 20-hour outbound check).
+  // Fix: claim the reminder slot via a conditional UPDATE before any work; only
+  // one concurrent worker wins the claim; others skip cleanly. Rollback on send
+  // failure. These tests stub dealsService and exercise runFollowUpReminders
+  // directly (now exported). No live API calls.
+  console.log('\n========== BUG A — cron concurrency claim-then-send ==========');
+
+  // Fresh require of dailySummary so we get the un-mocked module (other tests
+  // mocked aiService.generateLeadSummary which lives at module top; the cron
+  // module reads aiService at call time, so we just need to stub it now).
+  const { runFollowUpReminders } = require('./src/cron/dailySummary');
+
+  // Group S+W earlier delete-cache'd email at line 616 and re-required it. The
+  // dailySummary module captured the post-cache-bust emailService instance, which
+  // is a DIFFERENT object than the harness's top-level emailService reference (line
+  // 24, captured pre-cache-bust). Re-grab the currently-cached instance so our
+  // Bug A stubs mutate the same singleton that dailySummary uses.
+  const cronEmailService = require('./src/services/email');
+
+  // Common stub setup helpers
+  const stubEligibleDeal = (overrides = {}) => ({
+    id: 'deal-bugA-1',
+    borrower_name: 'Ryan Kowalski',
+    email: 'broker@example.com',
+    extracted_data: { borrower_name: 'Ryan Kowalski', sender_name: 'Jason' },
+    reminder_count: 1,
+    status: 'active',
+    ...overrides,
+  });
+
+  // Older lastInbound timestamp so daysSilent > FOLLOW_UP_AFTER_DAYS=2.
+  // Older lastOut timestamp so 20-hour guard passes.
+  const stale = (days) => ({ created_at: new Date(Date.now() - days * 86400000).toISOString() });
+  const trackBugACalls = () => {
+    const c = { claim: [], release: [], sendEmail: [], saveMessage: [], generateFollowUpReminder: [] };
+    dealsService.getActiveDeals = async () => [stubEligibleDeal()];
+    dealsService.getLastInboundMessage = async () => ({ ...stale(5), subject: 'orig' });
+    dealsService.getMessages = async () => [{ direction: 'outbound', ...stale(2), subject: 'last out' }];
+    dealsService.getLastOutboundMessageId = async () => 'msgid-1';
+    dealsService.getAllMessageIdsForThread = async () => ['msgid-1'];
+    dealsService.saveMessage = async (...args) => { c.saveMessage.push(args); };
+    dealsService.update = async () => {}; // not used by Bug A path anymore
+    aiService.generateFollowUpReminder = async (...args) => {
+      c.generateFollowUpReminder.push(args);
+      return '<p>Reminder body</p>';
+    };
+    cronEmailService.sendEmail = async (to, subject) => {
+      c.sendEmail.push({ to, subject });
+      return { MessageID: `MOCK-${c.sendEmail.length}` };
+    };
+    dealsService.claimReminderSlot = async (dealId, expected, neu) => {
+      c.claim.push({ dealId, expected, neu });
+      return { claimed: true }; // overridden per test
+    };
+    dealsService.releaseReminderSlot = async (dealId, claimed, rollbackTo) => {
+      c.release.push({ dealId, claimed, rollbackTo });
+      return { released: true };
+    };
+    return c;
+  };
+
+  // Test 1: claim wins → email sent, no rollback
+  {
+    const c = trackBugACalls();
+    dealsService.claimReminderSlot = async () => { c.claim.push('A'); return { claimed: true }; };
+    await runFollowUpReminders();
+    if (c.claim.length !== 1) throw new Error(`FAIL [Bug A claim wins]: expected 1 claim attempt, got ${c.claim.length}`);
+    if (c.sendEmail.length !== 1) throw new Error(`FAIL [Bug A claim wins]: expected 1 sendEmail, got ${c.sendEmail.length}`);
+    if (c.saveMessage.length !== 1) throw new Error(`FAIL [Bug A claim wins]: expected 1 saveMessage, got ${c.saveMessage.length}`);
+    if (c.release.length !== 0) throw new Error(`FAIL [Bug A claim wins]: should NOT release on success, got ${c.release.length}`);
+    if (c.generateFollowUpReminder.length !== 1) throw new Error(`FAIL [Bug A claim wins]: expected 1 Claude call, got ${c.generateFollowUpReminder.length}`);
+    console.log('  PASS [Bug A claim wins]: 1 claim, 1 Claude call, 1 send, 1 saveMessage, no rollback');
+  }
+
+  // Test 2: claim loses → no email, no Claude call (saves API budget on race)
+  {
+    const c = trackBugACalls();
+    dealsService.claimReminderSlot = async () => { c.claim.push('B'); return { claimed: false }; };
+    await runFollowUpReminders();
+    if (c.claim.length !== 1) throw new Error(`FAIL [Bug A claim loses]: expected 1 claim attempt, got ${c.claim.length}`);
+    if (c.sendEmail.length !== 0) throw new Error(`FAIL [Bug A claim loses]: expected 0 sendEmail, got ${c.sendEmail.length}`);
+    if (c.saveMessage.length !== 0) throw new Error(`FAIL [Bug A claim loses]: expected 0 saveMessage, got ${c.saveMessage.length}`);
+    if (c.release.length !== 0) throw new Error(`FAIL [Bug A claim loses]: should NOT release (no claim to release), got ${c.release.length}`);
+    if (c.generateFollowUpReminder.length !== 0) throw new Error(`FAIL [Bug A claim loses]: should NOT call Claude on lost claim, got ${c.generateFollowUpReminder.length}`);
+    console.log('  PASS [Bug A claim loses]: 1 claim, 0 Claude calls, 0 send, 0 saveMessage, no rollback');
+  }
+
+  // Test 3: send fails after claim → rollback fires
+  {
+    const c = trackBugACalls();
+    dealsService.claimReminderSlot = async (dealId, expected, neu) => {
+      c.claim.push({ dealId, expected, neu });
+      return { claimed: true };
+    };
+    cronEmailService.sendEmail = async () => { throw new Error('Postmark 503'); };
+    await runFollowUpReminders();
+    if (c.claim.length !== 1) throw new Error(`FAIL [Bug A send fails]: expected 1 claim, got ${c.claim.length}`);
+    if (c.release.length !== 1) throw new Error(`FAIL [Bug A send fails]: expected 1 rollback, got ${c.release.length}`);
+    if (c.release[0].dealId !== 'deal-bugA-1' || c.release[0].claimed !== 2 || c.release[0].rollbackTo !== 1) {
+      throw new Error(`FAIL [Bug A send fails]: rollback args wrong: ${JSON.stringify(c.release[0])}`);
+    }
+    if (c.saveMessage.length !== 0) throw new Error(`FAIL [Bug A send fails]: should NOT save message after send failure, got ${c.saveMessage.length}`);
+    console.log('  PASS [Bug A send fails]: 1 claim, 1 rollback (claimed=2, rollbackTo=1), 0 saveMessage');
+  }
+
+  // Test 4: two deals, A wins claim, B loses → only A sends
+  {
+    const c = trackBugACalls();
+    dealsService.getActiveDeals = async () => [
+      stubEligibleDeal({ id: 'deal-A', borrower_name: 'Ryan Kowalski' }),
+      stubEligibleDeal({ id: 'deal-B', borrower_name: 'Marcus Webb' }),
+    ];
+    dealsService.claimReminderSlot = async (dealId) => {
+      c.claim.push(dealId);
+      return { claimed: dealId === 'deal-A' };
+    };
+    await runFollowUpReminders();
+    if (c.claim.length !== 2) throw new Error(`FAIL [Bug A two deals]: expected 2 claim attempts (one per deal), got ${c.claim.length}`);
+    if (c.sendEmail.length !== 1) throw new Error(`FAIL [Bug A two deals]: only A wins claim, expected 1 sendEmail, got ${c.sendEmail.length}`);
+    if (c.generateFollowUpReminder.length !== 1) throw new Error(`FAIL [Bug A two deals]: only A wins claim, expected 1 Claude call, got ${c.generateFollowUpReminder.length}`);
+    if (c.release.length !== 0) throw new Error(`FAIL [Bug A two deals]: no failures, expected 0 rollbacks, got ${c.release.length}`);
+    console.log('  PASS [Bug A two deals]: independent claims — A wins (1 send), B loses (0 send), no rollbacks');
+  }
+
+  // Test 5: claim args shape — verify expectedCount and newCount are correct
+  {
+    const c = trackBugACalls();
+    dealsService.getActiveDeals = async () => [stubEligibleDeal({ id: 'deal-shape', reminder_count: 2 })];
+    dealsService.claimReminderSlot = async (dealId, expected, neu) => {
+      c.claim.push({ dealId, expected, neu });
+      return { claimed: true };
+    };
+    await runFollowUpReminders();
+    if (c.claim.length !== 1) throw new Error(`FAIL [Bug A claim shape]: expected 1 claim, got ${c.claim.length}`);
+    const a = c.claim[0];
+    if (a.dealId !== 'deal-shape' || a.expected !== 2 || a.neu !== 3) {
+      throw new Error(`FAIL [Bug A claim shape]: claim args wrong — expected (deal-shape, 2, 3), got (${a.dealId}, ${a.expected}, ${a.neu})`);
+    }
+    console.log('  PASS [Bug A claim shape]: claim called with (dealId, expected=2, newCount=3) — atomic increment from N to N+1');
+  }
+
+  console.log('Bug A concurrency: 5/5 passed');
+
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
   const realKey = process.env.CLAUDE_API_KEY && !process.env.CLAUDE_API_KEY.startsWith('sk-test');

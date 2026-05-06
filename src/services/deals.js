@@ -108,6 +108,42 @@ module.exports = {
     return data;
   },
 
+  // Bug A (cron duplicate reminders): atomic per-deal lock for the cron reminder
+  // path. Conditional UPDATE serializes concurrent workers via Postgres row lock —
+  // only one worker successfully transitions reminder_count from `expectedCount`
+  // to `newCount`; the others get 0 rows and skip. Production diagnosis: 9 cron
+  // fires sent 9 emails to the same broker at 9 PM because the prior 20-hour
+  // outbound check was non-atomic.
+  claimReminderSlot: async (dealId, expectedCount, newCount) => {
+    const { data, error } = await supabase
+      .from('deals')
+      .update({ reminder_count: newCount })
+      .eq('id', dealId)
+      .eq('reminder_count', expectedCount)
+      .select('id');
+
+    if (error) throw error;
+    return { claimed: (data || []).length > 0 };
+  },
+
+  // Roll back a previously-claimed slot when the post-claim email send fails.
+  // Conditional UPDATE — only decrements if reminder_count is still at the
+  // claimed value (no other worker has changed it). Returns released=false if
+  // someone else has already advanced the count; in that case we just log and
+  // accept the broker missing one reminder (self-corrects on next cron via
+  // MAX_REMINDERS check).
+  releaseReminderSlot: async (dealId, claimedCount, rollbackTo) => {
+    const { data, error } = await supabase
+      .from('deals')
+      .update({ reminder_count: rollbackTo })
+      .eq('id', dealId)
+      .eq('reminder_count', claimedCount)
+      .select('id');
+
+    if (error) throw error;
+    return { released: (data || []).length > 0 };
+  },
+
   // Save a message (inbound or outbound) linked to a deal
   saveMessage: async (dealId, direction, subject, body, externalMessageId = null) => {
     const row = { deal_id: dealId, direction, subject, body };
