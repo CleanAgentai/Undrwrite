@@ -1423,13 +1423,17 @@ License #M12001505`;
     console.log('\n========== GROUP M — vague missing-doc list adversarial ==========');
 
     // Forbidden vague phrasings when missing docs are referenced.
+    // Negative lookahead `(?!\s*:)` excludes list-introducer patterns where the
+    // phrase IS followed by an explicit enumeration ("the remaining items: A, B, C")
+    // — that's not vague, the names follow. Vague case is "the remaining items"
+    // standing alone or followed by other prose.
     const vaguePhrases = [
-      [/\bthe\s+final\s+documents\b/i, '"the final documents"'],
-      [/\bthe\s+missing\s+documents\b/i, '"the missing documents"'],
-      [/\bthe\s+outstanding\s+(?:items|documents|paperwork)\b/i, '"the outstanding items/documents/paperwork"'],
-      [/\bthe\s+rest\s+of\s+the\s+(?:package|documents|paperwork)\b/i, '"the rest of the package/documents"'],
-      [/\bthe\s+remaining\s+(?:paperwork|documents|items)\b/i, '"the remaining paperwork/documents/items"'],
-      [/\bthe\s+final\s+items\b/i, '"the final items"'],
+      [/\bthe\s+final\s+documents\b(?!\s*:)/i, '"the final documents"'],
+      [/\bthe\s+missing\s+documents\b(?!\s*:)/i, '"the missing documents"'],
+      [/\bthe\s+outstanding\s+(?:items|documents|paperwork)\b(?!\s*:)/i, '"the outstanding items/documents/paperwork"'],
+      [/\bthe\s+rest\s+of\s+the\s+(?:package|documents|paperwork)\b(?!\s*:)/i, '"the rest of the package/documents"'],
+      [/\bthe\s+remaining\s+(?:paperwork|documents|items)\b(?!\s*:)/i, '"the remaining paperwork/documents/items"'],
+      [/\bthe\s+final\s+items\b(?!\s*:)/i, '"the final items"'],
     ];
 
     const checkVagueness = (label, html, expectedDocNames) => {
