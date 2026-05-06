@@ -2094,6 +2094,123 @@ License #M12001505`;
     }
 
     // ════════════════════════════════════════════════════════════════
+    // FIX 5 — discrepancy iteration: flag ALL same-territory discrepancies
+    // ════════════════════════════════════════════════════════════════
+    // S3 retest Bug 3: Vienna correctly flagged the property value mismatch but
+    // missed the mortgage balance mismatch in the SAME email. Two same-territory
+    // numeric discrepancies merged into one mental theme; only one surfaced.
+    // Marcus Webb diagnostic exercises CROSS-territory two-discrepancy handling
+    // (lender + tenure) which already passes; this smoke is the harder
+    // SAME-territory case (two financial numbers, both about deal terms).
+    console.log('\n========== FIX 5 — two same-territory discrepancies must both surface ==========');
+
+    try {
+      // Synthetic broker submission with TWO simultaneous numeric mismatches both
+      // sourced from the same loan_application document (a strict same-territory
+      // test — both financial, both about deal terms, both numeric):
+      //   - Property value: email body $890,000 vs loan_application $920,000
+      //   - Mortgage balance: email body $318,000 vs loan_application $341,000
+      // Pre-fix Vienna would surface only one of these; post-fix she must surface both.
+      const fix5Body = `Hi,
+
+Submitting a second mortgage opportunity for one of my clients.
+
+Property: 142 Maple Ave, Toronto, ON
+Property value: $890,000
+Existing first mortgage: $318,000 (Scotiabank)
+Loan amount requested: $90,000
+
+Borrower: Patricia Wilson, 41 years old, employed at Stantec for 8 years.
+Combined LTV: approximately 65.7%
+
+Attached: the loan application.
+
+Thanks,
+Jason Mercer
+Mercer Mortgage Group`;
+
+      // Single saved doc with BOTH conflicts embedded in extracted text (property
+      // value AND mortgage balance disagree with email body). Filename avoids
+      // /application|summary|appraisal/ regex in pdf.js's isDualPathDocument so
+      // synthetic base64 bytes don't get sent (Claude rejects synthetic bytes as
+      // invalid PDFs). Same pattern as Marcus Webb diagnostic which uses
+      // 'Loan_App_Webb.pdf' for the same reason.
+      const fix5SavedDocs = [
+        {
+          file_name: 'Loan_App_Wilson.pdf',
+          classification: 'loan_application',
+          extracted_data: {
+            text: `LOAN APPLICATION FORM
+Applicant: Patricia Wilson
+Property Address: 142 Maple Ave, Toronto, ON
+
+Property Details:
+  Appraised Value: $920,000
+  Property Type: Single Family Detached
+
+Loan Amount Requested: $90,000
+
+Existing Mortgage Details:
+  Lender: Scotiabank
+  Outstanding Balance: $341,000
+  Mortgage Position: First Mortgage
+  Maturity: 2027-09-15
+
+Employment:
+  Employer: Stantec
+  Position: Senior Planner
+  Years of Service: 8 years
+  Annual Income: $145,000
+
+Signed: Patricia Wilson
+Date: 2026-04-15`,
+          },
+        },
+      ];
+
+      // buildContentBlocks iterates over `attachments` and looks up text in savedDocs
+      // by filename match. We need a non-empty attachments array for Claude to receive
+      // the doc text at all. Synthetic bytes are fine here because the filename doesn't
+      // match the dual-path regex.
+      const fix5Attachments = [
+        { Name: 'Loan_App_Wilson.pdf', Content: Buffer.from('synthetic-pdf-loan-app').toString('base64'), ContentType: 'application/pdf', ContentLength: 1000 },
+      ];
+
+      const { welcomeEmail: fix5Email } = await realAi.processInitialEmail(
+        'Jason Mercer',
+        fix5Body,
+        fix5Attachments,
+        fix5SavedDocs,
+        false,    // hasOwnApplication (we test discrepancy, not own-form handling)
+        false,    // hasOwnPnw
+        false     // nameCollidesWithAdmin
+      );
+      const fix5Stripped = (fix5Email || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      console.log('Fix 5 output (first 600 chars):');
+      console.log(`  ${fix5Stripped.slice(0, 600)}`);
+
+      // Detection: BOTH discrepancies must appear, both with clarify language.
+      // Property value discrepancy: 890 AND 920 both present
+      const hasPropertyValueDiscrepancy = /\b890[\s,]?000?\b|\$890\b/.test(fix5Stripped) && /\b920[\s,]?000?\b|\$920\b/.test(fix5Stripped);
+      // Mortgage balance discrepancy: 318 AND 341 both present
+      const hasMortgageBalanceDiscrepancy = /\b318[\s,]?000?\b|\$318\b/.test(fix5Stripped) && /\b341[\s,]?000?\b|\$341\b/.test(fix5Stripped);
+      // Clarify language somewhere in the reply
+      const hasClarifyLanguage = /(discrepan|differ|conflict|clarif|which (?:is|are) correct|confirm.*correct|noticed.*but)/i.test(fix5Stripped);
+
+      const failures = [];
+      if (!hasPropertyValueDiscrepancy) failures.push('Property value discrepancy ($890K body vs $920K appraisal) NOT surfaced');
+      if (!hasMortgageBalanceDiscrepancy) failures.push('Mortgage balance discrepancy ($318K body vs $341K application) NOT surfaced');
+      if (!hasClarifyLanguage) failures.push('No clarify/confirm/discrepancy language in reply');
+      if (failures.length > 0) {
+        throw new Error(`FAIL [Fix 5 two same-territory discrepancies]:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [Fix 5 two same-territory discrepancies]: BOTH property-value AND mortgage-balance mismatches surfaced with clarify language`);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 5 two same-territory smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // ITEM 5 — rejection-prompt hardening
     // ════════════════════════════════════════════════════════════════
     // Synthetic weak-borrower fixture (~580 credit, NSF history, ~85% LTV, unstable
