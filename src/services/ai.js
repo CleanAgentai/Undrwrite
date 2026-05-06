@@ -745,7 +745,7 @@ At the bottom, include this action section:
 <p>Reply to this email with one of the following:</p>
 <ul>
 <li><strong>APPROVED</strong> — deal will move forward and broker will be asked for full document package</li>
-<li><strong>Any other reply</strong> — your message will be polished and forwarded to the broker by Vienna</li>
+<li><strong>DECLINE</strong> — file rejected, Vienna will send a polite rejection to the broker</li>
 </ul>
 
 DEAL SUMMARY:
@@ -1182,7 +1182,7 @@ At the bottom, include this action section:
 <p>Reply to this email with one of the following:</p>
 <ul>
 <li><strong>APPROVED</strong> — preliminary approval granted, Vienna will request remaining documents from the broker</li>
-<li><strong>Any other reply</strong> — your message will be polished and forwarded to the broker by Vienna</li>
+<li><strong>DECLINE</strong> — file rejected, Vienna will send a polite rejection to the broker</li>
 </ul>
 
 === INPUT DATA ===
@@ -1583,7 +1583,7 @@ At the bottom, include this action section:
 <p>Reply to this email with one of the following:</p>
 <ul>
 <li><strong>APPROVED</strong> — deal will be marked as complete even with missing documents</li>
-<li><strong>Any other reply</strong> — your message will be polished and forwarded to the broker by Vienna</li>
+<li><strong>DECLINE</strong> — file rejected, Vienna will send a polite rejection to the broker</li>
 </ul>
 
 DEAL SUMMARY:

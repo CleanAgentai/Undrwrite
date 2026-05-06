@@ -2398,6 +2398,120 @@ Brian`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Fix 1 S3 retest smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // FIX 3 — admin-facing action options: APPROVED / DECLINE only
+    // ════════════════════════════════════════════════════════════════
+    // Bug 6 from S3 retest: preliminary review email included "Any other reply —
+    // your message will be polished and forwarded to the broker by Vienna" as an
+    // action option. That belongs at the draft-review stage, not preliminary
+    // review — at this stage admin should only be deciding APPROVE/DECLINE, not
+    // composing broker messages. Fix 3 swaps "Any other reply" for explicit
+    // DECLINE in three sites (generateLeadSummary, generateEscalationNotification,
+    // generateDocReviewNotification). parseAdminReply still classifies free-form
+    // replies as 'conditions' (backward compat for admin habit) but the email no
+    // longer teaches it as a path.
+    console.log('\n========== FIX 3 — action options must be APPROVE/DECLINE only ==========');
+
+    const checkActionOptions = (label, html) => {
+      const stripped = (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      const failures = [];
+      // Required: both APPROVED and DECLINE labels present
+      if (!/\bAPPROVED\b/i.test(stripped)) failures.push('missing "APPROVED" action label');
+      if (!/\bDECLINE\b/i.test(stripped)) failures.push('missing "DECLINE" action label');
+      // Forbidden: pre-fix "Any other reply" / "polished and forwarded" wording
+      if (/\bany\s+other\s+reply\b/i.test(stripped)) failures.push('"Any other reply" — pre-fix wording leaked through');
+      if (/\bpolished\s+and\s+forwarded\b/i.test(stripped)) failures.push('"polished and forwarded" — pre-fix wording leaked through');
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: APPROVED + DECLINE present, no "Any other reply" leak`);
+    };
+
+    // Smoke 1: generateLeadSummary preliminary review — Patricia-shaped fixture
+    try {
+      const f3LeadHtml = await realAi.generateLeadSummary(
+        {
+          sender_type: 'broker',
+          sender_name: 'Jason Mercer',
+          broker_name: 'Jason Mercer',
+          borrower_name: 'Patricia Simmons',
+          ltv_percent: 65.7,
+          loan_type: 'second mortgage',
+          property_value: 920000,
+          loan_amount_requested: 160000,
+        },
+        'personal',
+        [
+          { file_name: 'Appraisal_Simmons.pdf', classification: 'appraisal', extracted_data: { text: 'Appraised value: $920,000 (Glencairn Ave, Toronto)' } },
+          { file_name: 'NOA_Simmons.pdf', classification: 'noa', extracted_data: { text: 'CRA Notice of Assessment 2024 — Patricia Simmons — Total income $145,000' } },
+        ],
+        ['government_id', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'],
+        [
+          { direction: 'inbound', subject: '2nd mortgage submission — Patricia Simmons', body: 'Submitting Patricia Simmons. Property at $920K, existing first $445K, requesting $160K. Attached: appraisal + NOA.', created_at: new Date(Date.now() - 3600000).toISOString() },
+        ]
+      );
+      console.log('Fix 3 generateLeadSummary action section snippet:');
+      const actionSection = (f3LeadHtml || '').match(/Action Required[\s\S]*?<\/ul>/i);
+      console.log(`  ${actionSection ? actionSection[0].replace(/\s+/g, ' ').slice(0, 400) : '(no action section found)'}`);
+      checkActionOptions('generateLeadSummary preliminary review', f3LeadHtml);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 3 generateLeadSummary smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Smoke 2: generateEscalationNotification — Ryan-shaped (high-LTV) fixture
+    try {
+      const f3EscHtml = await realAi.generateEscalationNotification(
+        {
+          sender_type: 'broker',
+          sender_name: 'Jason Mercer',
+          broker_name: 'Jason Mercer',
+          borrower_name: 'Ryan Callahan',
+          ltv_percent: 83.1,
+          loan_type: 'second mortgage',
+          property_value: 700000,
+          loan_amount_requested: 200000,
+          existing_mortgage_balance: 380000,
+        },
+        [
+          { direction: 'inbound', subject: '2nd mortgage — Ryan Callahan — 83.1% LTV', body: 'Submitting Ryan Callahan, 83.1% LTV. Need to flag this is over our usual threshold.', created_at: new Date(Date.now() - 3600000).toISOString() },
+        ],
+        [
+          { file_name: 'Appraisal_Callahan.pdf', classification: 'appraisal' },
+        ]
+      );
+      console.log('Fix 3 generateEscalationNotification action section snippet:');
+      const escActionSection = (f3EscHtml || '').match(/Action Required[\s\S]*?<\/ul>/i);
+      console.log(`  ${escActionSection ? escActionSection[0].replace(/\s+/g, ' ').slice(0, 400) : '(no action section found)'}`);
+      checkActionOptions('generateEscalationNotification', f3EscHtml);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Fix 3 generateEscalationNotification smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Deterministic: parseAdminReply must classify "DECLINE" as 'rejected'.
+    // (parseAdminReply unchanged — fast-path regex already covers decline/declined.
+    // This check confirms end-to-end the new action label routes correctly.)
+    console.log('\n========== FIX 3 — parseAdminReply DECLINE → rejected ==========');
+    const declineCases = [
+      ['DECLINE', 'rejected'],
+      ['decline', 'rejected'],
+      ['Decline.', 'rejected'],
+      ['Declined!', 'rejected'],
+      ['APPROVED', 'approved'],
+      ['Approved.', 'approved'],
+      ['REJECT', 'rejected'],
+      ['rejected', 'rejected'],
+    ];
+    for (const [reply, expectedIntent] of declineCases) {
+      const result = await realAi.parseAdminReply(reply);
+      if (result.intent === expectedIntent) {
+        console.log(`  PASS: parseAdminReply(${JSON.stringify(reply)}) → intent='${expectedIntent}'`);
+      } else {
+        throw new Error(`FAIL [parseAdminReply ${JSON.stringify(reply)}]: expected intent='${expectedIntent}', got '${result.intent}'`);
+      }
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
