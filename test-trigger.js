@@ -3965,6 +3965,63 @@ Brian`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group CCC smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP EEE — "Perfect," banned-opener variant (S14.1)
+    // ════════════════════════════════════════════════════════════════
+    // S14.1: Vienna wrote "Hi Jason! Perfect, thank you for clarifying..." —
+    // the comma variant slipped through. Pre-EEE the banned-openers list at 10
+    // sites in ai.js had "Perfect!" and "Perfect." but not "Perfect," — Vienna
+    // picked it up. EEE fix: insert "Perfect," into all 10 banned-openers lists.
+    // Live smoke: discrepancy-clarification reply scenario (the natural S14.1
+    // trigger) — assert Vienna's response doesn't start with "Perfect," + word.
+    // Regression guards: existing "Perfect!" / "Perfect." bans still hold.
+    console.log('\n========== GROUP EEE — "Perfect," banned-opener variant ==========');
+    try {
+      const eeeSummary = {
+        sender_type: 'broker',
+        broker_name: 'Jason Mercer',
+        sender_name: 'Jason Mercer',
+        borrower_name: 'Lena Park',
+        ltv_percent: 65,
+        loan_type: 'second mortgage',
+      };
+      const eeeConvo = [
+        // Vienna's previous message asked to clarify a discrepancy.
+        { direction: 'outbound', subject: 'Re: Lena Park', body: "I noticed two figures that don't match between your email and the application: (1) the property value — your email lists $720,000 but the appraisal shows $695,000; (2) the existing mortgage balance — your email states $258,000 but the loan application shows $271,500. Could you confirm which figures are accurate?", created_at: new Date(Date.now() - 7200000).toISOString() },
+        // Broker's clarification reply — natural trigger for "Perfect," opener pre-EEE.
+        { direction: 'inbound', subject: 'Re: Re: Lena Park', body: 'Good catch — the appraisal numbers are accurate. $695,000 property value, $271,500 existing mortgage balance. The figures in my email were stale, sorry about that.', created_at: new Date(Date.now() - 1800000).toISOString() },
+      ];
+      const eeeResult = await realAi.generateBrokerResponse(
+        eeeConvo[1].body,
+        [], [],
+        eeeSummary,
+        eeeConvo,
+        [],
+        'active'
+      );
+      const eeeOutput = eeeResult.responseEmail || '';
+      console.log('Group EEE output (first 300 chars):');
+      console.log(`  ${eeeOutput.slice(0, 300).replace(/\n/g, ' ')}`);
+
+      // Assert: opening must NOT start with "Perfect," (with comma + continuation).
+      // Greeting-region scope: first 250 chars covers greeting + opening.
+      const eeeGreetingRegion = eeeOutput.slice(0, 250);
+      if (/(?:^|>|\n)\s*Perfect,\s*\w/i.test(eeeGreetingRegion)) {
+        throw new Error(`FAIL [Group EEE]: "Perfect," opener leaked. First 250 chars: "${eeeGreetingRegion.replace(/\s+/g, ' ')}"`);
+      }
+      // Regression guards: existing variants must still be banned.
+      if (/(?:^|>|\n)\s*Perfect!\s*\w/i.test(eeeGreetingRegion)) {
+        throw new Error(`FAIL [Group EEE regression]: "Perfect!" opener leaked (pre-existing rule). First 250 chars: "${eeeGreetingRegion.replace(/\s+/g, ' ')}"`);
+      }
+      if (/(?:^|>|\n)\s*Perfect\.\s*\w/i.test(eeeGreetingRegion)) {
+        throw new Error(`FAIL [Group EEE regression]: "Perfect." opener leaked (pre-existing rule). First 250 chars: "${eeeGreetingRegion.replace(/\s+/g, ' ')}"`);
+      }
+      console.log('  PASS [Group EEE]: no "Perfect," opener; existing "Perfect!" / "Perfect." bans still holding');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group EEE smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
