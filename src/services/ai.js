@@ -1304,7 +1304,17 @@ ADMIN'S REPLY:
     if (!text) return false;
     const wordCount = text.split(/\s+/).filter(Boolean).length;
     const paragraphCount = text.split(/\n\s*\n+/).filter(p => p.trim().length > 0).length;
-    return wordCount >= 50 && paragraphCount >= 2;
+    if (wordCount < 50 || paragraphCount < 2) return false;
+    // Group D: structural gate. A genuine alternative draft opens with a greeting
+    // ("Hi Jennifer,", "Hello,", "Dear …", "Good morning,"). Instruction-prefixed
+    // text ("Reply to her with this:", "Send this:", "Tell him:") fails this gate
+    // and routes to EDIT, where reviseEmailWithEdits integrates Franco's body into
+    // the existing draft and Bug B's preview cycle re-asks for approval. Length
+    // alone misclassified S6.4/S7.4 as REPLACE and shipped Franco's directive
+    // verbatim to brokers.
+    const firstLine = text.split('\n').map(l => l.trim()).find(l => l.length > 0) || '';
+    const greetingPattern = /^(hi|hello|dear|good (morning|afternoon|evening)|hey)\b/i;
+    return greetingPattern.test(firstLine);
   },
 
   parseDraftReply: async (replyText) => {

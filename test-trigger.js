@@ -487,12 +487,61 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       expect: false,
     },
     {
-      name: 'CALIBRATION RISK — 50w+ multi-paragraph edit instructions → REPLACE (false positive shape)',
-      // This is the documented false-positive direction Porter accepted: long
-      // multi-paragraph edit instructions trip the heuristic. Test asserts the
-      // current calibration's behavior (REPLACE) so future tightening is visible.
+      name: 'GROUP D fix — 50w+ multi-paragraph edit instructions (no greeting opener) → not REPLACE',
+      // Pre-Group-D this case asserted true (documented false positive — long
+      // multi-paragraph edit instructions tripped the length-only heuristic and
+      // shipped to broker verbatim). Group D added a structural greeting gate:
+      // first non-blank line is "Couple of changes I want to flag on this draft."
+      // — no greeting word — so REPLACE no longer fires. Routes to EDIT, Claude
+      // integrates instructions, Bug B preview cycle re-asks for approval.
       text: 'Couple of changes I want to flag on this draft.\n\nFirst, please remove the praise paragraph entirely — the tone is too florid for the broker and we want to stay neutral throughout.\n\nSecond, change the closing to mention we will be in touch within 48 hours about next steps rather than the current vague language about timing.',
+      expect: false,
+    },
+    // ───────────────── Group D fixtures (S6.4 / S7.4 root cause) ─────────────────
+    // Length-only heuristic misclassified instruction-prefixed edits as REPLACE,
+    // shipping Franco's directive ("Reply to her with this:") verbatim to brokers
+    // and bypassing Bug B's preview cycle. Greeting-line gate forces these to EDIT.
+    {
+      name: 'S6.4 verbatim — directive prefix + greeting + body (single line) → not REPLACE (Group D)',
+      text: 'Reply to her with this: Hi Jennifer, Thanks for sending those through. To complete Kevin\'s file, I\'ll still need: - Government-issued ID for Kevin - Property Tax Assessment - Exit strategy — please describe how Kevin plans to repay or refinance out of this loan Let me know if you have any questions.',
+      expect: false,
+    },
+    {
+      name: 'S6.4 reshaped — directive prefix on own line + drafted body → not REPLACE (Group D)',
+      text: 'Reply to her with this:\n\nHi Jennifer,\n\nThanks for sending those through. To complete Kevin\'s file, I\'ll still need:\n\n- Government-issued ID for Kevin\n- Property Tax Assessment\n- Exit strategy — please describe how Kevin plans to repay or refinance out of this loan\n\nLet me know if you have any questions.',
+      expect: false,
+    },
+    {
+      name: '"Send this to him:" prefix variant → not REPLACE (Group D)',
+      text: 'Send this to him:\n\nHey Marcus, just a quick follow-up on the file. We will need the appraisal and gov ID before close. Could you please send those over by Friday so we can keep things moving on schedule?\n\nThanks for your patience here, appreciate it.',
+      expect: false,
+    },
+    {
+      name: '"Tell her:" prefix variant → not REPLACE (Group D)',
+      text: 'Tell her:\n\nHi Sarah — thanks for the update on the file. We are still missing the property tax assessment and the exit strategy details. Once those come in we should be in good shape to move ahead with the next stage of the review.\n\nLooking forward to hearing back.',
+      expect: false,
+    },
+    {
+      name: 'genuine alternative draft opening with "Hi" → REPLACE (regression guard)',
+      text: 'Hi Michael,\n\nThanks for getting the AML and PEP forms over to us so promptly. We will also need the government ID, the property tax assessment, and the CIBC payout statement to wrap up the file properly on this one. Once those land we will be in good shape to move ahead with the next stage.\n\nThanks,\nVienna\nPrivate Mortgage Link',
       expect: true,
+    },
+    {
+      name: 'genuine alternative draft opening with "Hello" → REPLACE',
+      text: 'Hello Michael,\n\nQuick update on Kevin\'s file from our side. We are still missing a few items — the government ID, the property tax assessment, and the CIBC payout statement. Could you please have those forwarded across at your earliest convenience so we can finalize the review and move ahead with the next stage of the process?\n\nThanks for your help on this one.',
+      expect: true,
+    },
+    {
+      name: 'genuine alternative draft opening with "Good morning" → REPLACE',
+      text: 'Good morning Michael,\n\nWanted to circle back on the Kevin Tran file. To wrap things up properly we will need the government ID, the property tax assessment, and a current mortgage payout statement from CIBC. Let me know if any of these are tricky to track down.\n\nThanks for your help.',
+      expect: true,
+    },
+    {
+      name: 'long body with no greeting and no directive → not REPLACE (Group D, edge case)',
+      // Edge case: Franco pastes body that opens narratively with no greeting.
+      // Routes to EDIT, recovers via re-preview cycle. Documented in fix shape.
+      text: 'Just a quick note on this one. We will need the government ID, the property tax assessment, and the CIBC payout statement to wrap up the file properly on our end.\n\nOnce those are in we should be in good shape to move ahead.',
+      expect: false,
     },
   ];
 
