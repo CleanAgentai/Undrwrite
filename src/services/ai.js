@@ -857,6 +857,9 @@ ${propertySpecificDoc}${complianceDocs}
 - Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine. Do NOT list NOA and Proof of Income as separate items)
 ${propertySpecificDoc}${complianceDocs}`}
 
+ADDITIONAL ITEMS — ask for these only when MISSING from the deal summary AND not already stated by the broker in the conversation history above:
+- EXIT STRATEGY: If dealSummary.exit_strategy is null/empty AND the broker has not stated an exit strategy in the conversation history, ALSO ask the broker for the exit strategy at the end of the doc list. Phrase it as a clear question — example: "Could you also let us know the exit strategy on this — how the borrower plans to repay or refinance out of the loan at maturity?". The STRICT DOCS RULE above does not exclude this — exit strategy is an information ask, not a document, and is always permitted when missing. Skip this ask if the broker has already provided an exit strategy (it would be in dealSummary.exit_strategy or stated in conversation history).
+
 DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
 
@@ -1068,6 +1071,8 @@ File name: ${fileName}`,
     intake_form: 'Borrower Intake Form',
     purchase_contract: 'Purchase Contract / Agreement of Purchase and Sale',
     down_payment_proof: 'Proof of Down Payment',
+    // Group C: non-document deal-summary field surfaced in [MISSING] lists when null.
+    exit_strategy: 'Exit Strategy',
     other: 'Other',
   },
 

@@ -171,9 +171,12 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   pAssert(calls.generateLeadSummary[0].ownershipType === null, 'ownershipType passed as null with TODO');
   // Bradley's commit e4f6b89 dropped 'noa' from baseRequired (NOA satisfies income_proof).
   // Refinance list (no loan_type set → !isPurchase): government_id, appraisal, property_tax,
-  // mortgage_statement, income_proof, credit_report. Patricia's stub has appraisal — so 5 missing.
-  pAssert(calls.generateLeadSummary[0].missingDocs.length === 5, `expected 5 missing docs (post-Bradley), got ${calls.generateLeadSummary[0].missingDocs.length}: ${JSON.stringify(calls.generateLeadSummary[0].missingDocs)}`);
+  // mortgage_statement, income_proof, credit_report. Patricia's stub has appraisal — so 5
+  // doc misses. Group C (S6.3/S7.3) appends 'exit_strategy' when dealSummary.exit_strategy
+  // is null/empty — Patricia's summary has no exit_strategy field, so total = 6 items.
+  pAssert(calls.generateLeadSummary[0].missingDocs.length === 6, `expected 6 missing items (5 docs + exit_strategy), got ${calls.generateLeadSummary[0].missingDocs.length}: ${JSON.stringify(calls.generateLeadSummary[0].missingDocs)}`);
   pAssert(!calls.generateLeadSummary[0].missingDocs.includes('noa'), 'NOA should NOT be in missingDocs list');
+  pAssert(calls.generateLeadSummary[0].missingDocs.includes('exit_strategy'), 'exit_strategy SHOULD be in missingDocs (Group C)');
   console.log('Patricia: ALL ASSERTIONS PASSED');
 
   // ────────── RYAN CALLAHAN: 83.1% LTV, broker initial submission ──────────
@@ -366,7 +369,12 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   dealsService.getDocumentsByDeal = async () => completeStubDocs;
   dealsService.getDocumentsWithText = async () => completeStubDocs;
   reset();
-  await sendPreliminaryReviewToAdmin(patriciaDeal, patriciaSummary, 'personal', 65.7, { isUpdate: true });
+  // Inline summary with exit_strategy populated — Group C added exit_strategy
+  // to missingDocs when null, which would flip COMPLETE → PRELIMINARY here. The
+  // shared patriciaSummary deliberately omits exit_strategy for the Group C
+  // aggregation tests; this test cares only about the [UPDATED] subject prefix.
+  const completeSummaryFix2 = { ...patriciaSummary, exit_strategy: 'refinance with B lender at maturity' };
+  await sendPreliminaryReviewToAdmin(patriciaDeal, completeSummaryFix2, 'personal', 65.7, { isUpdate: true });
   const completeUpdatedSubject = calls.sendEmail[0]?.subject;
   if (completeUpdatedSubject !== '[UPDATED] ACTION REQUIRED: COMPLETE Review — Patricia Simmons — 65.7% LTV') {
     throw new Error(`FAIL [Fix 2 COMPLETE isUpdate=true]: expected "[UPDATED] ACTION REQUIRED: COMPLETE Review — Patricia Simmons — 65.7% LTV", got "${completeUpdatedSubject}"`);
@@ -1148,7 +1156,9 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   reset();
   await sendPreliminaryReviewToAdmin(
     { id: 'deal-fix4-1', borrower_name: 'Marcus Webb' },
-    { sender_type: 'broker', sender_name: 'Jason Mercer', borrower_name: 'Marcus Webb', ltv_percent: 60 },
+    // exit_strategy populated so Group C aggregation doesn't add an extra item —
+    // this test is scoped to the NOA-satisfies-income_proof concern, not Group C.
+    { sender_type: 'broker', sender_name: 'Jason Mercer', borrower_name: 'Marcus Webb', ltv_percent: 60, exit_strategy: 'refinance with B lender at maturity' },
     'personal',
     60
   );
@@ -1718,6 +1728,87 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     }
   }
   console.log(`Group B classifier text-fallback: ${groupBTextPassed}/${groupBTextCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C — missingDocs aggregation includes exit_strategy when null/empty
+  // ════════════════════════════════════════════════════════════════
+  // S6.3 / S7.3 root cause: missingDocs filter at webhook.js:180 only checked
+  // document classifications. dealSummary.exit_strategy is a deal-summary field
+  // (set null at ai.js:206 when broker doesn't state one), but never entered the
+  // [MISSING] surface. Group C fix: webhook pushes 'exit_strategy' onto missingDocs
+  // when dealSummary.exit_strategy is null/empty. DOC_DISPLAY_NAMES.exit_strategy
+  // = 'Exit Strategy' renders the friendly label in admin emails.
+  console.log('\n========== GROUP C — exit_strategy in missingDocs aggregation ==========');
+
+  // Sub-case 1: exit_strategy null → 'exit_strategy' IN missingDocs
+  reset();
+  const groupCDeal = { id: 'deal-groupc-1', borrower_name: 'Test Borrower' };
+  await sendPreliminaryReviewToAdmin(
+    groupCDeal,
+    {
+      sender_type: 'broker',
+      sender_name: 'Jason Mercer',
+      broker_name: 'Jason Mercer',
+      borrower_name: 'Test Borrower',
+      ltv_percent: 65.0,
+      exit_strategy: null,
+    },
+    null,
+    65.0
+  );
+  if (!calls.generateLeadSummary[0].missingDocs.includes('exit_strategy')) {
+    throw new Error(`FAIL [Group C exit_strategy=null]: expected 'exit_strategy' in missingDocs, got ${JSON.stringify(calls.generateLeadSummary[0].missingDocs)}`);
+  }
+  console.log(`  PASS [Group C exit_strategy=null]: 'exit_strategy' in missingDocs (${calls.generateLeadSummary[0].missingDocs.length} items total)`);
+
+  // Sub-case 2: exit_strategy populated → 'exit_strategy' NOT in missingDocs
+  reset();
+  await sendPreliminaryReviewToAdmin(
+    groupCDeal,
+    {
+      sender_type: 'broker',
+      sender_name: 'Jason Mercer',
+      broker_name: 'Jason Mercer',
+      borrower_name: 'Test Borrower',
+      ltv_percent: 65.0,
+      exit_strategy: 'refinance with B lender at maturity',
+    },
+    null,
+    65.0
+  );
+  if (calls.generateLeadSummary[0].missingDocs.includes('exit_strategy')) {
+    throw new Error(`FAIL [Group C exit_strategy=string]: did NOT expect 'exit_strategy' in missingDocs, got ${JSON.stringify(calls.generateLeadSummary[0].missingDocs)}`);
+  }
+  console.log(`  PASS [Group C exit_strategy=string]: 'exit_strategy' NOT in missingDocs (broker provided it)`);
+
+  // Sub-case 3: exit_strategy empty string → IN missingDocs (empty-string handling)
+  reset();
+  await sendPreliminaryReviewToAdmin(
+    groupCDeal,
+    {
+      sender_type: 'broker',
+      sender_name: 'Jason Mercer',
+      broker_name: 'Jason Mercer',
+      borrower_name: 'Test Borrower',
+      ltv_percent: 65.0,
+      exit_strategy: '',
+    },
+    null,
+    65.0
+  );
+  if (!calls.generateLeadSummary[0].missingDocs.includes('exit_strategy')) {
+    throw new Error(`FAIL [Group C exit_strategy='']: expected 'exit_strategy' in missingDocs (empty string is missing), got ${JSON.stringify(calls.generateLeadSummary[0].missingDocs)}`);
+  }
+  console.log(`  PASS [Group C exit_strategy='']: 'exit_strategy' in missingDocs (empty-string treated as missing)`);
+
+  // DOC_DISPLAY_NAMES export sanity — render label is wired up.
+  const aiServiceForLabel = require('./src/services/ai');
+  if (aiServiceForLabel.DOC_DISPLAY_NAMES?.exit_strategy !== 'Exit Strategy') {
+    throw new Error(`FAIL [Group C display name]: expected DOC_DISPLAY_NAMES.exit_strategy === 'Exit Strategy', got ${JSON.stringify(aiServiceForLabel.DOC_DISPLAY_NAMES?.exit_strategy)}`);
+  }
+  console.log(`  PASS [Group C display name]: DOC_DISPLAY_NAMES.exit_strategy === 'Exit Strategy'`);
+
+  console.log('Group C aggregation: 4/4 passed');
 
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
@@ -3678,6 +3769,80 @@ Brian`;
       } else {
         throw new Error(`FAIL [parseAdminReply ${JSON.stringify(reply)}]: expected intent='${expectedIntent}', got '${result.intent}'`);
       }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP C — generateDocumentRequestEmail asks for exit_strategy when missing
+    // ════════════════════════════════════════════════════════════════
+    // Live Claude smokes for the broker-facing draft. The doc-request prompt
+    // gets an "ADDITIONAL ITEMS" carve-out that overrides the STRICT DOCS RULE
+    // for exit_strategy specifically. Two cases:
+    //   1. exit_strategy=null + no exit-strategy in conversation → output mentions "exit strategy"
+    //   2. Off-checklist regression guard → carve-out doesn't loosen the STRICT RULE generally
+    //      (must NOT name forbidden docs like insurance binders, void cheques, etc.)
+    console.log('\n========== GROUP C — generateDocumentRequestEmail asks for missing exit_strategy ==========');
+
+    try {
+      const groupCSummary = {
+        sender_type: 'broker',
+        sender_name: 'Jason Mercer',
+        broker_name: 'Jason Mercer',
+        borrower_name: 'Patricia Simmons',
+        ltv_percent: 65.7,
+        loan_type: 'second mortgage',
+        property_value: 720000,
+        loan_amount_requested: 160000,
+        existing_mortgage_balance: 310000,
+        exit_strategy: null,                     // ← missing — must be asked
+        purpose: 'refinance',
+      };
+
+      const groupCConvo = [
+        { direction: 'inbound', subject: '2nd mortgage — Patricia Simmons', body: 'Submitting Patricia Simmons, ~65.7% LTV. Will get docs across this week.', created_at: new Date(Date.now() - 86400000).toISOString() },
+      ];
+
+      const groupCExistingDocs = [
+        { file_name: 'Appraisal_Simmons.pdf', classification: 'appraisal' },
+        { file_name: 'Loan_Application_Simmons.pdf', classification: 'loan_application' },
+      ];
+
+      const groupCDocRequest = await realAi.generateDocumentRequestEmail(
+        groupCSummary,
+        'personal',           // ownershipType
+        true,                 // hasApp (loan_application classified above)
+        false,                // hasPnw
+        groupCExistingDocs,
+        groupCConvo
+      );
+
+      console.log('Group C doc-request output (first 500 chars):');
+      console.log(`  ${(groupCDocRequest || '').slice(0, 500).replace(/\n/g, ' ')}`);
+
+      // Smoke 5: must ask about exit strategy
+      if (!/exit\s+strateg/i.test(groupCDocRequest || '')) {
+        throw new Error(`FAIL [Group C exit-strategy ask]: doc-request must mention exit strategy when null. Got first 500 chars: "${(groupCDocRequest || '').slice(0, 500).replace(/\s+/g, ' ')}"`);
+      }
+      console.log('  PASS [Group C exit-strategy ask]: doc-request asks about exit strategy when dealSummary.exit_strategy is null');
+
+      // Smoke 7: regression guard — carve-out must NOT loosen the STRICT RULE for off-checklist docs.
+      const forbiddenOffChecklist = [
+        [/\b(?:insurance\s+binder|property\s+insurance|home\s+insurance)\b/i, 'insurance binder/policy'],
+        [/\bundertaking\s+letter\b/i, 'lawyer undertaking letter'],
+        [/\bvoid\s+cheque\b/i, 'void cheque'],
+        [/\btitle\s+insurance\b/i, 'title insurance'],
+        [/\bcommitment\s+letter\b/i, 'commitment letter'],
+      ];
+      const forbiddenHits = [];
+      for (const [re, desc] of forbiddenOffChecklist) {
+        if (re.test(groupCDocRequest || '')) forbiddenHits.push(desc);
+      }
+      if (forbiddenHits.length > 0) {
+        throw new Error(`FAIL [Group C off-checklist regression]: doc-request asked for forbidden off-checklist items: ${forbiddenHits.join(', ')}. STRICT DOCS RULE was loosened by exit_strategy carve-out.`);
+      }
+      console.log('  PASS [Group C off-checklist regression]: STRICT DOCS RULE preserved — no off-checklist asks despite exit_strategy carve-out');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group C doc-request smoke skipped due to API error: ${e.message}`);
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');

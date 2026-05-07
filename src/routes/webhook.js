@@ -179,6 +179,14 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // Fix 4: use isDocRequirementSatisfied so NOA satisfies income_proof per Bradley's intent.
   const missingDocs = baseRequired.filter(req => !isDocRequirementSatisfied(req, classifications));
 
+  // Group C (S6.3/S7.3): exit_strategy is a deal-summary field, not a document
+  // classification. Surface it here when null/empty so it appears in the admin's
+  // preliminary review [MISSING] list and downstream draft preview. missingDocs
+  // semantically becomes "missing items" — the rendering loop downstream handles
+  // the non-doc key via DOC_DISPLAY_NAMES.exit_strategy. Variable name stays for
+  // diff-tightness; semantic widening is comment-only.
+  if (!dealSummary?.exit_strategy) missingDocs.push('exit_strategy');
+
   const dealMessages = await dealsService.getMessages(deal.id);
   const leadSummary = await aiService.generateLeadSummary(
     dealSummary,
