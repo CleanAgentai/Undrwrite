@@ -389,15 +389,19 @@ ${draftEmail}
           console.log('Franco confirmed — sending draft as-is');
           await executeDraft(existingDeal.draft_email, existingDeal.draft_subject, existingDeal.draft_action);
         } else if (action === 'replace') {
-          // Group R: Franco sent a full alternative draft. Use his text VERBATIM —
-          // no Claude rewriting, no tone wrapper. Convert plain text to HTML for
-          // the broker-facing send (executeDraft expects HTML). Status flow stays
-          // identical to SEND — the draft_action code drives the state advance.
-          // REPLACE is the explicit override at any draft stage and bypasses the
-          // edit-preview cycle (Bug B Q4).
-          console.log('Franco sent a full corrected draft — using verbatim, no Claude rewrite');
+          // Group AAA fix (S8.1): REPLACE no longer bypasses the preview cycle.
+          // Franco's full alternative draft is rendered to HTML verbatim (no Claude
+          // rewrite — that's the kept-promise that distinguishes REPLACE from EDIT)
+          // and routed through saveDraftAndPreview, same as EDIT post-Bug B. Result:
+          // every draft change goes through admin preview before broker ship. The
+          // verbatim guarantee is preserved — Franco's text reaches the broker
+          // byte-for-byte after he replies SEND on the preview, with no Claude
+          // rewriting at any step. Reverses Bug B Q4's "REPLACE is the explicit
+          // override" — Franco's S8 retest showed that mental model was wrong; he
+          // expects "skip rewriting, still confirm", not "skip approval".
+          console.log('Franco sent a full corrected draft — saving verbatim and re-previewing for confirmation');
           const replacementHtml = textToHtml(replacementText);
-          await executeDraft(replacementHtml, existingDeal.draft_subject, existingDeal.draft_action);
+          await saveDraftAndPreview(replacementHtml, existingDeal.draft_subject, existingDeal.draft_action);
         } else {
           // Bug B fix: EDIT no longer auto-sends. Revise the draft, then route the
           // revision back through saveDraftAndPreview so Franco approves the new

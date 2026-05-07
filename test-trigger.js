@@ -1622,7 +1622,13 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       console.log('  PASS [Bug B-EDIT E4]: SEND after EDIT ships revised draft to broker (1 broker send, 0 re-revisions)');
     }
 
-    // -------- E5: REPLACE during edit cycle still bypasses to broker (Q4 regression guard) --------
+    // -------- E5-AAA: REPLACE now routes through saveDraftAndPreview (no auto-bypass) --------
+    // Group AAA fix (S8.1): pre-AAA, REPLACE-classified replies bypassed the preview
+    // cycle and shipped verbatim to broker (Bug B Q4 design). Franco's S8 retest
+    // showed his mental model is "skip rewriting, still confirm" — REPLACE should
+    // skip the Claude rewrite (verbatim guarantee) but still re-preview to admin
+    // before broker ship. This test verifies REPLACE → saveDraftAndPreview, NOT
+    // executeDraft, and that reviseEmailWithEdits is NEVER invoked (verbatim path).
     {
       resetBugB();
       setDeal({ status: 'ltv_escalated', draft_action: 'conditions' });
@@ -1632,19 +1638,86 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       };
       await inboundHandler(buildAdminReply('Hi broker,\n\nFranco here. Please send the appraisal directly.\n\nThanks.'), mockRes(), () => {});
 
+      if (bugB.sendEmailDelayed.length !== 0) {
+        throw new Error(`FAIL [Bug B-EDIT E5-AAA]: REPLACE must NOT ship to broker (preview cycle), got ${bugB.sendEmailDelayed.length} broker sends`);
+      }
+      if (bugB.sendEmail.length !== 1) {
+        throw new Error(`FAIL [Bug B-EDIT E5-AAA]: REPLACE must send 1 preview to admin, got ${bugB.sendEmail.length}`);
+      }
+      if (bugB.sendEmail[0].to !== 'franco@privatemortgagelink.com') {
+        throw new Error(`FAIL [Bug B-EDIT E5-AAA]: preview must go to admin, got ${bugB.sendEmail[0].to}`);
+      }
+      // Verbatim guarantee: Franco's text must appear in the preview HTML byte-equivalent
+      // (textToHtml wraps it in <p> tags but does not paraphrase).
+      if (!bugB.sendEmail[0].html.includes('Franco here. Please send the appraisal directly.')) {
+        throw new Error(`FAIL [Bug B-EDIT E5-AAA]: preview must contain Franco's verbatim text, got: ${bugB.sendEmail[0].html.slice(0, 300)}`);
+      }
+      // CRITICAL verbatim-guarantee assertion: Claude must NOT have rewritten Franco's text.
+      if (bugB.reviseEmailWithEdits.length !== 0) {
+        throw new Error(`FAIL [Bug B-EDIT E5-AAA verbatim guarantee]: reviseEmailWithEdits must NEVER fire on REPLACE path (would paraphrase Franco's text), got ${bugB.reviseEmailWithEdits.length} invocations`);
+      }
+      // saveDraftAndPreview's update() should have written Franco's HTML to draft_email.
+      const draftUpdate = bugB.update.find(u => u.patch.draft_email !== undefined);
+      if (!draftUpdate || !draftUpdate.patch.draft_email.includes('Franco here. Please send the appraisal directly.')) {
+        throw new Error(`FAIL [Bug B-EDIT E5-AAA]: draft_email must be updated to Franco's verbatim HTML, got: ${draftUpdate?.patch?.draft_email?.slice(0, 200)}`);
+      }
+      // draft_action and status preserved (rejection / conditions / approval_doc_request all stay).
+      if (draftUpdate.patch.draft_action !== 'conditions') {
+        throw new Error(`FAIL [Bug B-EDIT E5-AAA]: draft_action must be preserved, got ${draftUpdate.patch.draft_action}`);
+      }
+      console.log('  PASS [Bug B-EDIT E5-AAA]: REPLACE routed to saveDraftAndPreview (1 preview, 0 broker sends, 0 reviseEmailWithEdits — verbatim guarantee preserved)');
+    }
+
+    // -------- E6-AAA: REPLACE → SEND cycle ships verbatim text to broker --------
+    // End-to-end regression guard for the verbatim-text promise. Step 1: Franco
+    // sends a full alternative draft → preview to admin. Step 2: Franco replies
+    // SEND → broker receives the EXACT verbatim HTML from step 1. Asserts that
+    // reviseEmailWithEdits never fires across BOTH steps.
+    {
+      resetBugB();
+      setDeal({ status: 'ltv_escalated', draft_action: 'rejection' });
+
+      // Step 1: REPLACE — Franco's verbatim alternative draft.
+      const francoVerbatimText = 'Hi Kevin,\n\nAfter further review we have decided to close this file. The figures in the application could not be reconciled with the supporting documents.\n\nWe appreciate the submission and look forward to working together on a future opportunity.\n\nVienna\nPrivate Mortgage Link';
+      aiService.__bugBNextDraftReply = {
+        action: 'replace',
+        replacementText: francoVerbatimText,
+      };
+      await inboundHandler(buildAdminReply(francoVerbatimText), mockRes(), () => {});
+
+      const previewCount = bugB.sendEmail.length;
+      const reviseCountAfterReplace = bugB.reviseEmailWithEdits.length;
+      if (previewCount !== 1) {
+        throw new Error(`FAIL [Bug B-EDIT E6-AAA step 1]: expected 1 preview to admin, got ${previewCount}`);
+      }
+      if (reviseCountAfterReplace !== 0) {
+        throw new Error(`FAIL [Bug B-EDIT E6-AAA step 1]: reviseEmailWithEdits fired on REPLACE path (would paraphrase), got ${reviseCountAfterReplace}`);
+      }
+      // Capture the saved draft_email — must be byte-equivalent to Franco's verbatim text via textToHtml.
+      const savedDraftEmail = liveDeal.draft_email;
+      if (!savedDraftEmail.includes('After further review we have decided to close this file.')) {
+        throw new Error(`FAIL [Bug B-EDIT E6-AAA step 1]: saved draft_email missing Franco's verbatim text, got: ${savedDraftEmail.slice(0, 300)}`);
+      }
+
+      // Step 2: SEND — Franco confirms. Broker should receive the exact draft_email from step 1.
+      aiService.__bugBNextDraftReply = { action: 'send' };
+      await inboundHandler(buildAdminReply('SEND'), mockRes(), () => {});
+
       if (bugB.sendEmailDelayed.length !== 1) {
-        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE must still ship to broker once, got ${bugB.sendEmailDelayed.length}`);
+        throw new Error(`FAIL [Bug B-EDIT E6-AAA step 2]: SEND must ship to broker once, got ${bugB.sendEmailDelayed.length}`);
       }
       if (bugB.sendEmailDelayed[0].to !== 'broker@example.com') {
-        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE goes to broker, got ${bugB.sendEmailDelayed[0].to}`);
+        throw new Error(`FAIL [Bug B-EDIT E6-AAA step 2]: SEND must go to broker, got ${bugB.sendEmailDelayed[0].to}`);
       }
-      if (!bugB.sendEmailDelayed[0].html.includes('Franco here')) {
-        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE must ship Franco's verbatim text, got: ${bugB.sendEmailDelayed[0].html.slice(0, 200)}`);
+      // CRITICAL byte-equality: broker's HTML must equal step 1's saved draft_email exactly.
+      if (bugB.sendEmailDelayed[0].html !== savedDraftEmail) {
+        throw new Error(`FAIL [Bug B-EDIT E6-AAA step 2 verbatim]: broker HTML differs from saved draft. SAVED: ${savedDraftEmail.slice(0, 200)} | BROKER: ${bugB.sendEmailDelayed[0].html.slice(0, 200)}`);
       }
+      // Verbatim guarantee across BOTH steps: Claude never rewrote Franco's text.
       if (bugB.reviseEmailWithEdits.length !== 0) {
-        throw new Error(`FAIL [Bug B-EDIT E5]: REPLACE must NOT call reviseEmailWithEdits, got ${bugB.reviseEmailWithEdits.length}`);
+        throw new Error(`FAIL [Bug B-EDIT E6-AAA full cycle verbatim]: reviseEmailWithEdits fired during REPLACE→SEND lifecycle (Franco's text would have been paraphrased), got ${bugB.reviseEmailWithEdits.length} invocations`);
       }
-      console.log('  PASS [Bug B-EDIT E5]: REPLACE during edit cycle bypasses preview, ships verbatim to broker');
+      console.log('  PASS [Bug B-EDIT E6-AAA]: REPLACE → SEND cycle ships byte-equivalent verbatim HTML to broker; reviseEmailWithEdits never fired');
     }
 
     // Restore originals so downstream sections aren't polluted.
@@ -1659,7 +1732,7 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     emailService.sendEmailDelayed = orig.emailSendEmailDelayed;
     emailService.parseInboundEmail = orig.emailParseInboundEmail;
 
-    console.log('Bug B-EDIT: 5/5 passed');
+    console.log('Bug B-EDIT + AAA: 6/6 passed');
   }
 
   // ════════════════════════════════════════════════════════════════
