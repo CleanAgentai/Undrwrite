@@ -27,7 +27,7 @@ const classifyDocument = (fileName, extractedText) => {
   if (/tax.?bill|property.?tax/i.test(name)) return 'property_tax';
   if (/survey/i.test(name)) return 'survey';
   if (/environmental/i.test(name)) return 'environmental';
-  if (/mortgage.?balance|mortgage.?statement|current.?mortgage/i.test(name)) return 'mortgage_statement';
+  if (/mortgage.?balance|mortgage.?statement|current.?mortgage|payout.?statement|payout.?letter|mortgage.?payout|discharge.?statement|mortgage.?discharge/i.test(name)) return 'mortgage_statement';
   if (/corporate.?financial|corp.?financ/i.test(name)) return 'corporate_financials';
   if (/t1.?general|tax.?return/i.test(name)) return 'tax_return';
   if (/resume|cv|experience/i.test(name)) return 'borrower_resume';
@@ -43,7 +43,7 @@ const classifyDocument = (fileName, extractedText) => {
     if (/notice of assessment|canada revenue|income tax.*return/i.test(text)) return 'noa';
     if (/anti-money laundering|proceeds of crime|fintrac/i.test(text)) return 'aml';
     if (/politically exposed person/i.test(text)) return 'pep';
-    if (/mortgage balance|mortgage statement|outstanding balance.*mortgage/i.test(text)) return 'mortgage_statement';
+    if (/mortgage balance|mortgage statement|outstanding balance.*mortgage|payout statement|payout letter|mortgage payout|discharge statement|mortgage discharge/i.test(text)) return 'mortgage_statement';
     if (/corporate financial|balance sheet.*income statement|fiscal year/i.test(text) && /corporation|inc\.|ltd\.|corp\./i.test(text)) return 'corporate_financials';
     if (/t1 general|tax return|taxable income.*federal/i.test(text)) return 'tax_return';
     if (/resume|curriculum vitae|professional experience|building experience|development experience/i.test(text)) return 'borrower_resume';
@@ -439,3 +439,8 @@ module.exports = {
     return data || [];
   },
 };
+
+// Test-only exposure for the deterministic classifier truth table (Group B).
+// Production callers use the local const at module scope; this just makes the
+// pure-regex predicate reachable from test-trigger.js without a DB roundtrip.
+module.exports.__test__ = { classifyDocument };

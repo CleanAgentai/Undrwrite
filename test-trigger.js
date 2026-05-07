@@ -1652,6 +1652,73 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     console.log('Bug B-EDIT: 5/5 passed');
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // GROUP B — classifier filename + text-fallback for mortgage_statement
+  // ════════════════════════════════════════════════════════════════
+  // S6.2 / S7.2 root cause: filename regex didn't recognize "payout statement"
+  // / "discharge statement" patterns, so CIBC_Payout_Statement_*.pdf classified
+  // as 'other' and surfaced in BOTH [RECEIVED] and [MISSING] in the same
+  // preliminary review (Group K's prompt-side terminology unification didn't
+  // extend to the classifier). Fix: extend filename + text regexes to include
+  // payout / mortgage payout / discharge statement / mortgage discharge as
+  // synonyms for mortgage_statement. Bare "discharge" stays out (would catch
+  // bankruptcy/consumer-proposal discharges).
+  console.log('\n========== GROUP B — classifier mortgage_statement filename truth table ==========');
+  const { classifyDocument } = require('./src/services/deals').__test__;
+
+  const groupBCases = [
+    // Positive — should classify as mortgage_statement (S6.2/S7.2 production cases)
+    ['CIBC_Payout_Statement_Kevin_Tran.pdf',          'mortgage_statement'],
+    ['CIBC_Payout_Statement_Ethan_Broussard.pdf',     'mortgage_statement'],
+    ['RBC_Mortgage_Payout.pdf',                        'mortgage_statement'],
+    ['TD_Payout_Letter.pdf',                           'mortgage_statement'],
+    ['Discharge_Statement_Webb.pdf',                   'mortgage_statement'],
+    ['Mortgage_Discharge_2026.pdf',                    'mortgage_statement'],
+    // Pre-existing positives that must still classify (regression guards)
+    ['Mortgage_Statement.pdf',                         'mortgage_statement'],
+    ['Current_Mortgage.pdf',                           'mortgage_statement'],
+    ['Mortgage_Balance_Apr2026.pdf',                   'mortgage_statement'],
+    // Negative — must NOT trip mortgage_statement (Q4 scoping: bare "discharge"
+    // patterns from non-mortgage contexts must stay 'other')
+    ['Bankruptcy_Discharge.pdf',                       'other'],
+    ['Consumer_Proposal_Discharge.pdf',                'other'],
+    // Negative — adjacent doc types should still classify correctly (no collisions)
+    ['NOA_2025.pdf',                                   'noa'],
+    ['Property_Tax_Bill.pdf',                          'property_tax'],
+    ['Appraisal_Webb.pdf',                             'appraisal'],
+  ];
+
+  let groupBPassed = 0;
+  for (const [filename, expected] of groupBCases) {
+    const got = classifyDocument(filename, '');
+    if (got === expected) {
+      console.log(`  PASS: ${filename} → '${expected}'`);
+      groupBPassed++;
+    } else {
+      throw new Error(`FAIL [Group B classifier ${filename}]: expected '${expected}', got '${got}'`);
+    }
+  }
+  console.log(`Group B classifier filename: ${groupBPassed}/${groupBCases.length} passed`);
+
+  console.log('\n========== GROUP B — classifier mortgage_statement text-fallback ==========');
+  const groupBTextCases = [
+    ['Mortgage Payout Statement\n\nAccount #4521\nOutstanding balance: $318,420.55', 'mortgage_statement'],
+    ['Mortgage Discharge\n\nProperty: 142 Vine Ave\nDischarge date: April 30, 2026',  'mortgage_statement'],
+    ['Discharge Statement issued for closure of account',                              'mortgage_statement'],
+  ];
+  let groupBTextPassed = 0;
+  for (const [text, expected] of groupBTextCases) {
+    // Empty filename → classifier falls through filename regexes and reads text.
+    const got = classifyDocument('unknown.pdf', text);
+    if (got === expected) {
+      console.log(`  PASS: ...${text.slice(0, 50).replace(/\n/g, ' ')}... → '${expected}'`);
+      groupBTextPassed++;
+    } else {
+      throw new Error(`FAIL [Group B text-fallback]: expected '${expected}', got '${got}' for ${JSON.stringify(text.slice(0, 80))}`);
+    }
+  }
+  console.log(`Group B classifier text-fallback: ${groupBTextPassed}/${groupBTextCases.length} passed`);
+
   // ────────── Optional live Claude smoke (skipped without a real API key) ──────────
   // Gated on CLAUDE_API_KEY being a real key (not the dummy default).
   const realKey = process.env.CLAUDE_API_KEY && !process.env.CLAUDE_API_KEY.startsWith('sk-test');
