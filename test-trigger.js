@@ -2916,6 +2916,77 @@ License #M12001505`;
     }
 
     // ════════════════════════════════════════════════════════════════
+    // GROUP DDD — referral broker branch (S10.1 + S10.2)
+    // ════════════════════════════════════════════════════════════════
+    // S10.1: Vienna asked broker for a write-up despite Franco providing full deal
+    //   context. Group V flipped the borrower branch only (per Bradley's "always ask
+    //   broker" rule). Franco's S10 retest reverses that for the broker branch too.
+    // S10.2: Vienna attributed the borrower's profile to the broker — wrote "you
+    //   have a strong borrower profile with clean credit" to Michael (broker), but
+    //   that's the CLIENT's profile, not Michael's.
+    // Two smokes — D1 reuses Group V's checkNoReAsk helper for the write-up ask
+    // patterns; D2 has a new checkNoBrokerAttribution helper.
+
+    console.log('\n========== GROUP DDD — broker referral with deal_details, no write-up ask ==========');
+    try {
+      const dddBrokerResult = await realAi.generateReferralWelcomeEmail({
+        referred_name: 'Michael Chen',
+        referred_email: 'michael.chen@brokerage.com',
+        sender_type: 'broker',
+        deal_details: 'Michael has a client looking to refinance an investment property in Toronto. Property value $1.2M, existing first $480K with TD, looking for a $200K second. Strong borrower profile, clean credit, good equity position. Closing target end of month.',
+        notes: null,
+      });
+      console.log('Group DDD broker output (first 600 chars):');
+      console.log(`  ${(dddBrokerResult || '').slice(0, 600).replace(/\n/g, ' ')}`);
+      // Reuse Group V's helper — same forbidden patterns apply to the broker branch.
+      checkNoReAsk('generateReferralWelcomeEmail broker — full deal context, no write-up ask', dddBrokerResult);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group DDD broker re-ask smoke skipped due to API error: ${e.message}`);
+    }
+
+    console.log('\n========== GROUP DDD — broker referral broker-vs-client distinction ==========');
+
+    // Forbidden: second-person attribution of borrower characteristics to the broker.
+    // The broker is the RECIPIENT — borrower characteristics belong to their client.
+    const brokerVsClientForbidden = [
+      [/\byou(?:'ve| have| are)\s+(?:got\s+)?(?:a|an)?\s*(?:strong|clean|good|excellent|solid)\s+(?:borrower|credit|equity|financial|income)/i, '"you have a [strong/clean/good/solid] [borrower/credit/equity/financial/income] [profile/score/position]"'],
+      [/\byour\s+(?:strong|clean|good|excellent|solid)\s+(?:borrower\s+)?(?:credit|equity|financial|income|borrower)\b/i, '"your [strong/clean/good/solid] [credit/equity/financial/income/borrower]"'],
+      [/\byour\s+(?:borrower\s+)?(?:credit\s+(?:score|history|profile)|equity\s+position|financial\s+(?:position|history))\b/i, '"your borrower credit/equity/financial position"'],
+    ];
+
+    const checkNoBrokerAttribution = (label, html) => {
+      const failures = [];
+      for (const [re, desc] of brokerVsClientForbidden) {
+        const m = (html || '').match(re);
+        if (m) {
+          const ctx = (html || '').slice(Math.max(0, m.index - 30), m.index + m[0].length + 35);
+          failures.push(`${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [${label}]: Vienna attributed borrower characteristics to the broker:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log(`  PASS [${label}]: no borrower-attribution to broker (broker-vs-client distinction held)`);
+    };
+
+    try {
+      const dddDistinctionResult = await realAi.generateReferralWelcomeEmail({
+        referred_name: 'Michael Chen',
+        referred_email: 'michael.chen@brokerage.com',
+        sender_type: 'broker',
+        deal_details: 'Michael has a client with a strong borrower profile, clean credit, good equity position. The client owns a $1.2M Toronto property, $480K first mortgage with TD, looking for a $200K second.',
+        notes: null,
+      });
+      console.log('Group DDD distinction output (first 600 chars):');
+      console.log(`  ${(dddDistinctionResult || '').slice(0, 600).replace(/\n/g, ' ')}`);
+      checkNoBrokerAttribution('generateReferralWelcomeEmail broker — borrower-attribution', dddDistinctionResult);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group DDD broker-vs-client smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // ITEMS 3 + 4 — conversational handler state awareness
     // ════════════════════════════════════════════════════════════════
     // Item 3: don't re-thank for documents already acknowledged in a prior Vienna
