@@ -3917,6 +3917,54 @@ Brian`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group C doc-request smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP CCC — admin-response no "thanks for confirming" leak when broker did not confirm
+    // ════════════════════════════════════════════════════════════════
+    // S9.4: Tyler's last message was passive (just sending docs). Vienna wrote
+    // "Thanks for confirming those details" — attributing Franco's internal
+    // approval-with-conditions decision to the broker. Pre-CCC the prompt
+    // EXPLICITLY suggested "Thanks for confirming the details" as an allowed
+    // alternative — Vienna picked it up. CCC fix: precondition-gate the framing
+    // to broker-actually-confirmed-something cases. Negative-case live smoke
+    // verifies the leak doesn't fire when broker hasn't confirmed anything.
+    console.log('\n========== GROUP CCC — admin-response no-leak when broker did not confirm ==========');
+    try {
+      const cccSummary = {
+        sender_type: 'broker',
+        broker_name: 'Tyler Bennett',
+        sender_name: 'Tyler Bennett',
+        borrower_name: 'James Okafor',
+        ltv_percent: 68,
+        loan_type: 'second mortgage',
+      };
+      // Broker's last message — sending docs, no specific confirmation.
+      const cccConvo = [
+        { direction: 'inbound', subject: 'Re: James Okafor', body: 'Sending across the gov ID and property tax assessment now. The appraisal will follow next week once the appraiser finalizes.', created_at: new Date(Date.now() - 3600000).toISOString() },
+      ];
+      // Admin's notes — Franco's internal decision, NOT broker's confirmation.
+      const cccAdminNotes = 'Approve subject to receiving the appraisal and confirming the exit strategy. Once those land we can move forward to terms.';
+
+      const cccOutput = await realAi.generateAdminResponseEmail(cccSummary, cccAdminNotes, cccConvo);
+      console.log('Group CCC output (first 500 chars):');
+      console.log(`  ${(cccOutput || '').slice(0, 500).replace(/\n/g, ' ')}`);
+
+      // Negative assertion: broker did NOT confirm anything in their last message —
+      // Vienna must NOT use "thanks for confirming" / "appreciate the confirmation"
+      // framing in the opening (first 400 chars covers greeting + opening).
+      const cccGreetingRegion = (cccOutput || '').slice(0, 400);
+      if (/thanks for (the\s+)?confirm/i.test(cccGreetingRegion) || /appreciate (the\s+)?confirm/i.test(cccGreetingRegion)) {
+        throw new Error(`FAIL [Group CCC]: "thanks for confirming" / "appreciate the confirmation" framing leaked when broker did not confirm anything. First 400 chars: "${cccGreetingRegion.replace(/\s+/g, ' ')}"`);
+      }
+      // Regression guard: existing F7-reliability rule (Franco-as-actor) still holds.
+      if (/(?:^|>|\n)\s*Franco\s+(has|said|approved|'s decision)/i.test(cccOutput || '')) {
+        throw new Error(`FAIL [Group CCC Franco-attribution regression]: Franco-as-actor leaked. Got: "${(cccOutput || '').slice(0, 400).replace(/\s+/g, ' ')}"`);
+      }
+      console.log('  PASS [Group CCC]: no "thanks for confirming" leak when broker did not confirm; F7 Franco-attribution rule still holding');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group CCC smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
