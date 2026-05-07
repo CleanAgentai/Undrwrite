@@ -242,18 +242,21 @@ module.exports = {
         ? 'PNW STATEMENT FORM:\n- The broker has ALREADY submitted their own PNW (Personal Net Worth) statement. Do NOT ask them to fill out ours. Do NOT mention or reference our blank PNW Statement Form in the email — it was NOT attached. Acknowledge that you received their PNW.'
         : 'PNW STATEMENT FORM:\n- The PNW (Personal Net Worth) Statement Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our PNW Statement Form for the borrower to complete"). Ask the broker to have the borrower fill it out and return it. If they already have their own PNW or net worth statement filled out, that is acceptable too — they can send theirs instead of using ours.';
 
-      // F2 — Both-Franco collision branch. When the sender's first name matches
-      // the admin's first name (Franco), Vienna can't reliably distinguish
-      // "broker actually named Franco" from "Claude misextracted the lender
-      // name." Either way, greeting the recipient by first name in the welcome
-      // email body would produce "Hi Franco!" — which collides with the rule
-      // that says Franco is the LENDER, not the recipient. Render an explicit
-      // generic-greeting instruction only when the collision is detected.
+      // F2 — Both-Franco collision branch. When the sender's first name from the
+      // From-header matches the admin's first name (Franco), the From-header alone
+      // isn't reliable for greeting. Group A (S6.1/S7.1 fix): the prompt now teaches
+      // Claude to look at the body signature first — if the sig has a clearly
+      // different first name (e.g. "Jennifer", "Daniel"), greet by that name. Only
+      // fall back to a generic greeting when the sig is absent or also Franco-like
+      // (preserves the genuine-Franco-broker regression guard, e.g. "Franco Vieanna").
       const nameCollisionInstructions = nameCollidesWithAdmin
         ? `\n\nCRITICAL — NAME COLLISION DETECTED (READ BEFORE GREETING):
-- The sender's first name (provided as "${senderName || 'Unknown'}") matches the admin's first name (Franco). This may be because the broker is actually named Franco (a real broker — e.g. Franco Vieanna), or because the From-header display is itself "Franco". Either way, you cannot reliably greet by first name in this email.
-- Use a GENERIC greeting in the welcome email body: "Hi there!" or "Hello!" — NO first name. Do NOT write "Hi Franco!", "Hello Franco!", "Dear Franco", or any variation, even though the sender's name field appears to be Franco-something.
-- This applies to the email body greeting only. The deal summary JSON should still populate sender_name / broker_name from any fuller name visible in the email signature (e.g. "Franco Vieanna" if his signature spells it out). The collision rule only governs how you address the recipient in the welcome email body.`
+- The sender's first name (from the From-header, "${senderName || 'Unknown'}") matches the admin's first name (Franco). The From-header alone is unreliable for greeting.
+- HARD RULE — UNCONDITIONAL: Do NOT greet the recipient as "Hi Franco!", "Hello Franco!", "Dear Franco", "Hey Franco", or any variation that uses the name "Franco". This rule is absolute. Even if the body signature reads "Franco Vieanna", "Franco Genovese", or "F. Vieanna", you must NOT greet by the name "Franco".
+- DECIDE THE GREETING IN THIS ORDER:
+  1) Look at the email body for a signature (e.g. "Thanks, Jennifer", "Best, Daniel", "— Sarah Tanaka", "Cheers, Mei"). If the signature contains a first name that is CLEARLY DIFFERENT from "Franco" (e.g. "Jennifer", "Daniel", "Sarah", "Mei"), greet by THAT name: "Hi Jennifer!", "Hi Daniel!", "Hi Sarah!".
+  2) Otherwise — if the email body has NO signature, OR the signature's first name is also "Franco" (any "Franco Lastname" or "F. Lastname" pattern) — use a GENERIC greeting: "Hi there!" or "Hello!" with NO first name. Per the HARD RULE above, never substitute "Franco" here.
+- The deal summary JSON should populate sender_name / broker_name from the fullest name visible (signature preferred, From-header as fallback). The collision rule above governs only the body greeting in this welcome email.`
         : '';
 
       const prompt = INITIAL_EMAIL_PROMPT

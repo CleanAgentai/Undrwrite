@@ -3186,6 +3186,134 @@ License #M11892`;
       console.warn(`  F2 initial-email smoke skipped due to API error: ${e.message}`);
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // Group A (S6.1/S7.1) — sig-override smokes
+    //
+    // Bug shape: Franco's QA setup uses From-header "Franco" but signs body
+    // as a different broker (e.g. Jennifer / Daniel) to simulate real submissions.
+    // Pre-Group-A the collision flag forced "Hi there!" regardless of body sig.
+    // Post-Group-A: prompt teaches Claude to greet by sig name when sig differs
+    // from "Franco"; only fall back to generic when sig absent or also Franco-like.
+    //
+    // checkGreetingByName: assert greeting region (first 200 chars) contains
+    // "Hi/Hello/Dear NAME" with word-boundary on the expected name. Mid-body
+    // mentions of NAME elsewhere don't count as a pass.
+    // ─────────────────────────────────────────────────────────────────
+    const checkGreetingByName = (label, html, expectedFirstName) => {
+      const greetingRegion = (html || '').slice(0, 200);
+      const re = new RegExp(`(?:^|>|\\n)\\s*(hi|hello|dear)\\s+${expectedFirstName}\\b`, 'i');
+      if (!re.test(greetingRegion)) {
+        const snippet = greetingRegion.replace(/\s+/g, ' ').trim().slice(0, 220);
+        throw new Error(`FAIL [${label}]: expected greeting "Hi ${expectedFirstName}" in first 200 chars, got: "${snippet}"`);
+      }
+      console.log(`  PASS [${label}]: greeted by sig name "${expectedFirstName}" despite collision flag`);
+    };
+
+    const checkGenericGreeting = (label, html) => {
+      const greetingRegion = (html || '').slice(0, 200);
+      const generic = /(?:^|>|\n)\s*(hi\s+there|hello)[!,\s]/i;
+      if (!generic.test(greetingRegion)) {
+        const snippet = greetingRegion.replace(/\s+/g, ' ').trim().slice(0, 220);
+        throw new Error(`FAIL [${label}]: expected generic greeting (Hi there / Hello) in first 200 chars, got: "${snippet}"`);
+      }
+      // Also check no Franco-greeting leak — reuses checkNoFrancoGreeting on full body.
+      checkNoFrancoGreeting(`${label} (no-Franco-leak)`, html);
+      console.log(`  PASS [${label}]: generic greeting used; no Franco-leak`);
+    };
+
+    // Smoke A.1: From-header "Franco Vieanna" + body sig "Jennifer Tanaka"
+    // → must greet "Hi Jennifer!" (sig override, S6.1 root cause).
+    console.log('\n========== Group A — sig-override smokes (FromName=Franco, sig=non-Franco) ==========');
+    try {
+      const jenniferBody = `Hi Franco,
+
+Hope your week is going well. I have a new file I'd like to submit for review — refinance on a property in Calgary, owner-occupied, looking at around 65% LTV.
+
+Borrower: Kevin Tran, 12-year tenure at Suncor.
+Property value: $720,000
+Existing first: $310,000 (CIBC)
+Loan requested: $160,000
+
+I'll have the appraisal and NOA across to you tomorrow. Let me know what else you'll need from us.
+
+Thanks,
+Jennifer Tanaka
+Acme Mortgage Group`;
+
+      const { welcomeEmail: jenniferWelcome } = await realAi.processInitialEmail(
+        'Franco Vieanna',     // From-header — collides with admin
+        jenniferBody,
+        [], [], false, false,
+        true                   // collision flag set
+      );
+      console.log('Group A Jennifer-sig output (first 400 chars):');
+      console.log(`  ${(jenniferWelcome || '').slice(0, 400).replace(/\n/g, ' ')}`);
+      checkGreetingByName('processInitialEmail sig=Jennifer', jenniferWelcome, 'Jennifer');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group A Jennifer-sig smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Smoke A.2: From-header "Franco" + body sig "Daniel"
+    // → must greet "Hi Daniel!" (sig override, S7.1 root cause).
+    try {
+      const danielBody = `Hi Franco,
+
+Submitting a 2nd mortgage opportunity for review. Toronto property, ~58% LTV.
+
+Borrower: Ethan Broussard, self-employed (incorporated, 6 years).
+Property value: $1,150,000
+Existing first: $480,000 (TD)
+Loan requested: $185,000
+
+Appraisal is in hand, will send across once I get a clean copy from the appraiser. NOA and gov ID coming separately.
+
+Thanks,
+Daniel Rosen
+Pinnacle Brokerage`;
+
+      const { welcomeEmail: danielWelcome } = await realAi.processInitialEmail(
+        'Franco',              // From-header — collides with admin
+        danielBody,
+        [], [], false, false,
+        true                   // collision flag set
+      );
+      console.log('Group A Daniel-sig output (first 400 chars):');
+      console.log(`  ${(danielWelcome || '').slice(0, 400).replace(/\n/g, ' ')}`);
+      checkGreetingByName('processInitialEmail sig=Daniel', danielWelcome, 'Daniel');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group A Daniel-sig smoke skipped due to API error: ${e.message}`);
+    }
+
+    // Smoke A.3: From-header "Franco" + NO body signature
+    // → must fall back to generic greeting (no Franco-leak).
+    try {
+      const noSigBody = `Hi Franco,
+
+Quick submission for one of my clients. Refinance, ~72% LTV.
+
+Borrower: Mei Tanaka.
+Property value: $980,000
+Existing first: $620,000
+Loan requested: $85,000
+
+Will get the doc package across this week.`;
+
+      const { welcomeEmail: noSigWelcome } = await realAi.processInitialEmail(
+        'Franco',              // From-header — collides with admin
+        noSigBody,
+        [], [], false, false,
+        true                   // collision flag set
+      );
+      console.log('Group A no-sig output (first 400 chars):');
+      console.log(`  ${(noSigWelcome || '').slice(0, 400).replace(/\n/g, ' ')}`);
+      checkGenericGreeting('processInitialEmail no-sig fallback', noSigWelcome);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group A no-sig fallback smoke skipped due to API error: ${e.message}`);
+    }
+
     console.log('\n========== F2 — broker-response both-Franco generic greeting ==========');
 
     // Adversarial 2: generateBrokerResponse where existingSummary has the
