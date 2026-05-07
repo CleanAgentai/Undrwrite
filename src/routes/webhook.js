@@ -918,10 +918,15 @@ ${draftEmail}
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
         }
 
-        // Send Vienna's conversational reply unless the FINAL REVIEW is about to fire —
-        // in that case we suppress and let Franco's eventual closing draft be the only
-        // broker-facing message at this stage.
-        if (result.responseEmail && !willFireFinalReview) {
+        // Send Vienna's conversational reply unless an admin HITL is about to fire —
+        // in that case we suppress and let Franco's drafted reply be the next broker-
+        // facing message. Group GGG (S14.3) extended this from FINAL REVIEW only to
+        // also include PRELIMINARY review (willReview): pre-GGG, Vienna sent a "let me
+        // know if you have questions, then I'll send for review" reply that contradicted
+        // the prelim review which fired ~49s later. willGoToCollateralCheck is NOT
+        // suppressed — that path uses Vienna's reply to deliver the collateral question
+        // to the broker (Fix 7).
+        if (result.responseEmail && !willFireFinalReview && !willReview) {
           emailService.sendEmailDelayed(
             email.from,
             `Re: ${email.subject}`,
@@ -934,11 +939,14 @@ ${draftEmail}
               console.log('Conversational response sent to broker');
             }
           );
-        } else if (willFireFinalReview) {
-          console.log('All docs received — suppressing Vienna broker reply; FINAL REVIEW will fire silently to Franco');
+        } else if (willFireFinalReview || willReview) {
+          const gateLabel = willFireFinalReview ? 'FINAL REVIEW' : 'PRELIMINARY review';
+          console.log(`Suppressing Vienna broker reply — ${gateLabel} firing to Franco; admin-drafted reply will be the next broker-facing message`);
         }
-        if (willGoToCollateralCheck || willReview) {
-          console.log(`LTV gate active — Vienna replied conversationally AND ${willGoToCollateralCheck ? 'routing deal to awaiting_collateral' : 'sending HITL to Franco'}`);
+        if (willGoToCollateralCheck) {
+          console.log('LTV gate active — Vienna replied conversationally AND routing deal to awaiting_collateral');
+        } else if (willReview) {
+          console.log('LTV gate active — Vienna reply suppressed AND sending PRELIMINARY review HITL to Franco');
         }
 
         if (willGoToCollateralCheck) {

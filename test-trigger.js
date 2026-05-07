@@ -1736,6 +1736,214 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP GGG — broker reply suppressed when willReview fires (S14.3)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-GGG: when broker submitted docs that triggered PRELIMINARY review, Vienna
+  // sent a "let me know if you have questions, then I'll send for review" reply
+  // that contradicted the prelim review firing ~49s later in the same request.
+  // GGG fix: extend Group L's suppression pattern (which already silenced Vienna
+  // on FINAL REVIEW) to also suppress on willReview. willGoToCollateralCheck is
+  // NOT suppressed — that path uses Vienna's reply to deliver the collateral
+  // question to the broker (Fix 7).
+  console.log('\n========== GROUP GGG — broker reply suppressed when willReview fires ==========');
+  {
+    // Reuse the inbound handler infrastructure pattern from Bug B-EDIT.
+    const inboundLayer = webhookRouter.stack.find(l => l.route && l.route.path === '/inbound');
+    if (!inboundLayer) throw new Error('FAIL [Group GGG]: could not locate /inbound route on webhookRouter');
+    const inboundHandler = inboundLayer.route.stack[0].handle;
+
+    const mockRes = () => ({ status: () => ({ json: () => {} }) });
+
+    const buildBrokerReply = (textBody, threadMsgId) => ({
+      body: {
+        From: 'jason.mercer@brokerage.com',
+        FromName: 'Jason Mercer',
+        To: 'vienna@example.com',
+        Subject: 'Re: Patricia Simmons — Loan Inquiry',
+        TextBody: textBody,
+        HtmlBody: `<p>${textBody}</p>`,
+        Attachments: [],
+        MessageID: 'broker-reply-' + Math.random().toString(36).slice(2, 10),
+        Headers: [{ Name: 'In-Reply-To', Value: threadMsgId || 'prev-msgid' }],
+        Date: new Date().toUTCString(),
+      },
+    });
+
+    // Capture buckets
+    const ggg = {
+      sendEmail: [],         // admin notifications (prelim review etc.)
+      sendEmailDelayed: [],  // broker-facing replies
+      saveMessage: [],
+      update: [],
+      generateBrokerResponse: [],
+      generateLeadSummary: [],
+    };
+    const resetGgg = () => {
+      ggg.sendEmail.length = 0;
+      ggg.sendEmailDelayed.length = 0;
+      ggg.saveMessage.length = 0;
+      ggg.update.length = 0;
+      ggg.generateBrokerResponse.length = 0;
+      ggg.generateLeadSummary.length = 0;
+    };
+
+    // Snapshot originals for restore
+    const origGgg = {
+      dealsFindByMessageId: dealsService.findByMessageId,
+      dealsSaveMessage: dealsService.saveMessage,
+      dealsUpdate: dealsService.update,
+      dealsGetMessages: dealsService.getMessages,
+      dealsGetDocumentsByDeal: dealsService.getDocumentsByDeal,
+      dealsGetDocumentsWithText: dealsService.getDocumentsWithText,
+      dealsDownloadDocsAsZip: dealsService.downloadDocsAsZip,
+      aiGenerateBrokerResponse: aiService.generateBrokerResponse,
+      aiGenerateLeadSummary: aiService.generateLeadSummary,
+      emailSendEmail: emailService.sendEmail,
+      emailSendEmailDelayed: emailService.sendEmailDelayed,
+    };
+
+    // Mutable deal record
+    let gggDeal = null;
+    const setGggDeal = (overrides = {}) => {
+      gggDeal = {
+        id: 'deal-ggg-1',
+        email: 'jason.mercer@brokerage.com',
+        borrower_name: 'Patricia Simmons',
+        extracted_data: { borrower_name: 'Patricia Simmons', sender_name: 'Jason Mercer', broker_name: 'Jason Mercer', sender_type: 'broker' },
+        status: 'active',
+        ltv: null,
+        ownership_type: 'personal',
+        has_application_form: true,
+        has_pnw_statement: true,
+        ...overrides,
+      };
+      return gggDeal;
+    };
+
+    const stubDocsWithReviewable = [
+      { classification: 'appraisal', file_name: 'Appraisal_Simmons.pdf' },
+      { classification: 'loan_application', file_name: 'Loan_App_Simmons.pdf' },
+      { classification: 'noa', file_name: 'NOA_Simmons.pdf' },
+    ];
+
+    // Apply stubs
+    dealsService.findByMessageId = async () => gggDeal;
+    dealsService.saveMessage = async (...args) => { ggg.saveMessage.push(args); };
+    dealsService.update = async (id, patch) => {
+      ggg.update.push({ id, patch });
+      if (gggDeal && id === gggDeal.id) Object.assign(gggDeal, patch);
+      return { id, ...patch };
+    };
+    dealsService.getMessages = async () => [];
+    dealsService.getDocumentsByDeal = async () => stubDocsWithReviewable;
+    dealsService.getDocumentsWithText = async () => stubDocsWithReviewable;
+    dealsService.downloadDocsAsZip = async () => 'ZIPBASE64PLACEHOLDER';
+    aiService.generateLeadSummary = async (...args) => {
+      ggg.generateLeadSummary.push(args);
+      return '<h2>PRELIMINARY Review for Patricia Simmons</h2>';
+    };
+    emailService.sendEmail = async (to, subject, text, html, attachments, headers) => {
+      ggg.sendEmail.push({ to, subject, html, headers });
+      return { MessageID: 'admin-' + ggg.sendEmail.length };
+    };
+    emailService.sendEmailDelayed = (to, subject, text, html, attachments, headers, callback) => {
+      ggg.sendEmailDelayed.push({ to, subject, html });
+      if (callback) callback({ MessageID: 'broker-' + ggg.sendEmailDelayed.length });
+    };
+
+    // -------- G1: willReview triggers → Vienna reply suppressed, prelim review fires --------
+    {
+      resetGgg();
+      // LTV 65% via aiService.generateBrokerResponse return; status='active' on deal.
+      setGggDeal({ status: 'active', ltv: null });
+      aiService.generateBrokerResponse = async (...args) => {
+        ggg.generateBrokerResponse.push(args.length);
+        return {
+          responseEmail: '<p>Test response — should be suppressed by GGG.</p>',
+          updatedSummary: { ...gggDeal.extracted_data, ltv_percent: 65 },
+          allDocsReceived: false,
+          hasApplicationForm: true,
+          hasPnwStatement: true,
+          ownershipType: 'personal',
+          ltvPercent: 65,
+        };
+      };
+
+      const req = buildBrokerReply('Sending across the appraisal and NOA for Patricia.');
+      await inboundHandler(req, mockRes(), () => {});
+
+      // Assertions
+      if (ggg.generateBrokerResponse.length !== 1) {
+        throw new Error(`FAIL [Group GGG G1]: expected generateBrokerResponse to be called once (reply generated, then suppressed), got ${ggg.generateBrokerResponse.length}`);
+      }
+      if (ggg.sendEmailDelayed.length !== 0) {
+        throw new Error(`FAIL [Group GGG G1]: Vienna's broker reply must be SUPPRESSED when willReview fires, got ${ggg.sendEmailDelayed.length} broker sends`);
+      }
+      if (ggg.sendEmail.length !== 1) {
+        throw new Error(`FAIL [Group GGG G1]: expected 1 admin notification (PRELIMINARY review), got ${ggg.sendEmail.length}`);
+      }
+      const adminNotif = ggg.sendEmail[0];
+      if (!/PRELIMINARY Review/.test(adminNotif.subject)) {
+        throw new Error(`FAIL [Group GGG G1]: admin notification subject must mention PRELIMINARY Review, got "${adminNotif.subject}"`);
+      }
+      console.log('  PASS [Group GGG G1]: willReview triggers → 0 broker sends, 1 admin PRELIMINARY review notification, generateBrokerResponse still invoked');
+    }
+
+    // -------- G2: willGoToCollateralCheck still sends Vienna's reply (Fix 7 regression guard) --------
+    {
+      resetGgg();
+      setGggDeal({ status: 'active', ltv: null, extracted_data: { ...gggDeal.extracted_data, collateral_offered: false } });
+      aiService.generateBrokerResponse = async (...args) => {
+        ggg.generateBrokerResponse.push(args.length);
+        return {
+          responseEmail: '<p>Vienna asks about additional collateral.</p>',
+          updatedSummary: { ...gggDeal.extracted_data, ltv_percent: 85 },
+          allDocsReceived: false,
+          hasApplicationForm: true,
+          hasPnwStatement: true,
+          ownershipType: 'personal',
+          ltvPercent: 85,
+        };
+      };
+
+      const req = buildBrokerReply('Submitting Patricia Simmons, ~85% LTV, looking for second mortgage.');
+      await inboundHandler(req, mockRes(), () => {});
+
+      if (ggg.sendEmailDelayed.length !== 1) {
+        throw new Error(`FAIL [Group GGG G2 Fix 7 regression]: willGoToCollateralCheck must send Vienna's reply (carries collateral question), got ${ggg.sendEmailDelayed.length} broker sends`);
+      }
+      if (ggg.sendEmailDelayed[0].to !== 'jason.mercer@brokerage.com') {
+        throw new Error(`FAIL [Group GGG G2]: Vienna's reply must go to broker, got ${ggg.sendEmailDelayed[0].to}`);
+      }
+      // No admin notification yet (Fix 7 — silent until broker confirms collateral disposition).
+      if (ggg.sendEmail.length !== 0) {
+        throw new Error(`FAIL [Group GGG G2 Fix 7 regression]: willGoToCollateralCheck must NOT fire admin notification yet, got ${ggg.sendEmail.length}`);
+      }
+      // Status should flip to awaiting_collateral.
+      const collateralStatusUpdate = ggg.update.find(u => u.patch.status === 'awaiting_collateral');
+      if (!collateralStatusUpdate) {
+        throw new Error(`FAIL [Group GGG G2]: deal status must flip to awaiting_collateral, updates: ${JSON.stringify(ggg.update)}`);
+      }
+      console.log('  PASS [Group GGG G2]: willGoToCollateralCheck still sends Vienna reply (1 broker send, 0 admin notifs, status → awaiting_collateral) — Fix 7 path preserved');
+    }
+
+    // Restore originals
+    dealsService.findByMessageId = origGgg.dealsFindByMessageId;
+    dealsService.saveMessage = origGgg.dealsSaveMessage;
+    dealsService.update = origGgg.dealsUpdate;
+    dealsService.getMessages = origGgg.dealsGetMessages;
+    dealsService.getDocumentsByDeal = origGgg.dealsGetDocumentsByDeal;
+    dealsService.getDocumentsWithText = origGgg.dealsGetDocumentsWithText;
+    dealsService.downloadDocsAsZip = origGgg.dealsDownloadDocsAsZip;
+    aiService.generateBrokerResponse = origGgg.aiGenerateBrokerResponse;
+    aiService.generateLeadSummary = origGgg.aiGenerateLeadSummary;
+    emailService.sendEmail = origGgg.emailSendEmail;
+    emailService.sendEmailDelayed = origGgg.emailSendEmailDelayed;
+
+    console.log('Group GGG: 2/2 passed');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP B — classifier filename + text-fallback for mortgage_statement
   // ════════════════════════════════════════════════════════════════
   // S6.2 / S7.2 root cause: filename regex didn't recognize "payout statement"
