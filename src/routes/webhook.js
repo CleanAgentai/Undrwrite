@@ -223,6 +223,68 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing)`);
 };
 
+// Group BBB (S9.1/S9.2/S9.3): conditions-fulfilled handoff. Fires when broker
+// submits new docs to a deal that already has conditions_sent_at stamped — i.e.
+// admin already approved with conditions, and the broker is now satisfying them.
+//
+// Pre-BBB this path fired sendPreliminaryReviewToAdmin({ isUpdate: true }) which
+// produced "[UPDATED] ACTION REQUIRED: PRELIMINARY Review" with redundant
+// APPROVED/DECLINE prompt — admin already moved past prelim by sending conditions.
+//
+// New shape (two emails per Porter's S9.2 framing, both in the broker submission's
+// thread for tidy admin inbox):
+//   1. [Conditions Fulfilled] informational notice — no action required
+//   2. Closing draft preview — saveDraftAndPreview pattern with draft_action
+//      'approval_completed' so admin's SEND advances status to 'completed'
+//
+// Vienna's broker reply is suppressed in the call site (line ~846 — symmetric
+// with Group L / GGG). The next broker-facing message is the closing email
+// after admin SENDs the preview.
+const sendConditionsFulfilledHandoff = async (deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail) => {
+  const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
+
+  // 1. Informational notice — no APPROVED/DECLINE, no action required.
+  const infoSubject = `[Conditions Fulfilled] ${borrowerName} — File Complete`;
+  const infoBody = `<p>Broker submitted the remaining condition docs for <strong>${borrowerName}</strong>. The file is now complete.</p><p>Closing draft preview will follow in this thread.</p>`;
+  const infoResult = await emailService.sendEmail(
+    config.adminEmail,
+    infoSubject,
+    infoBody.replace(/<[^>]*>/g, ''),
+    infoBody,
+    []
+  );
+  await dealsService.saveMessage(deal.id, 'outbound', infoSubject, infoBody, infoResult.MessageID);
+  console.log('Conditions-fulfilled informational notice sent to admin');
+
+  // 2. Closing draft preview — replicate saveDraftAndPreview pattern (the helper
+  // is scoped inside the admin-reply branch, not reachable here). Sets draft_email,
+  // draft_subject, draft_action; sends preview to admin in-thread. Admin's eventual
+  // SEND on this preview triggers executeDraft with action='approval_completed' →
+  // broker gets the deterministic closing template, status flips to 'completed'.
+  const closingEmail = await aiService.generateCompletionEmail(dealSummary, dealMessages, dealDocs);
+  const borrowerSubject = `Re: ${borrowerName}`;
+  await dealsService.update(deal.id, {
+    draft_email: closingEmail,
+    draft_subject: borrowerSubject,
+    draft_action: 'approval_completed',
+  });
+  const previewHtml = `<h3>Closing Draft Preview — ${borrowerName}</h3>
+<p>Conditions fulfilled. Here's the closing email Vienna will send to <strong>${deal.email}</strong>:</p>
+<hr>
+${closingEmail}
+<hr>
+<p><strong>Reply SEND to confirm, or reply with your edits.</strong></p>`;
+  const previewResult = await emailService.sendEmail(
+    config.adminEmail,
+    `Re: ${infoSubject}`,
+    previewHtml.replace(/<[^>]*>/g, ''),
+    previewHtml,
+    []
+  );
+  await dealsService.saveMessage(deal.id, 'outbound', `Re: ${infoSubject}`, previewHtml, previewResult.MessageID);
+  console.log('Closing draft preview sent to admin (in-thread with informational notice)');
+};
+
 // POST /webhook/inbound - receives incoming emails from Postmark
 router.post('/inbound', async (req, res) => {
   // Respond immediately so Postmark doesn't retry
@@ -379,9 +441,19 @@ ${draftEmail}
             await dealsService.update(existingDeal.id, { status: 'completed', draft_email: null, draft_subject: null, draft_action: null });
             console.log('Deal status: completed');
           } else {
-            // conditions — status stays, just clear draft
-            await dealsService.update(existingDeal.id, { draft_email: null, draft_subject: null, draft_action: null });
-            console.log('Conditions sent to broker, status unchanged');
+            // conditions — status stays. Group BBB (S9.2): stamp conditions_sent_at
+            // (timestamptz column added in BBB migration) so the next inbound from
+            // broker with new docs routes to the conditions-fulfilled handoff path
+            // instead of re-firing the [UPDATED] PRELIMINARY Review with redundant
+            // APPROVED/DECLINE prompt. Preserve original timestamp if conditions
+            // are sent multiple times — first-stamp wins.
+            await dealsService.update(existingDeal.id, {
+              draft_email: null,
+              draft_subject: null,
+              draft_action: null,
+              conditions_sent_at: existingDeal.conditions_sent_at || new Date().toISOString(),
+            });
+            console.log('Conditions sent to broker, status unchanged, conditions_sent_at stamped');
           }
         };
 
@@ -806,15 +878,28 @@ ${draftEmail}
           has_pnw_statement: reviewHasPnw,
         });
 
-        // Admin notification dispatch (Fix 2):
+        // Admin notification dispatch (Fix 2 + Group BBB):
         if (hasNewDocs) {
-          // New docs arrived → send UPDATED review/escalation so admin sees fresh state
-          // and the standard APPROVE/DECLINE action options. Replaces the passive ping.
-          console.log(`hasNewDocs=true → sending updated ${existingDeal.status === 'ltv_escalated' ? 'escalation' : 'preliminary review'} (replaces passive [Broker Update])`);
-          if (existingDeal.status === 'ltv_escalated') {
-            await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
+          if (existingDeal.conditions_sent_at) {
+            // Group BBB (S9.2): admin already moved past prelim by sending conditions.
+            // Broker is now fulfilling them — route to handoff (informational notice +
+            // closing draft preview), NOT another [UPDATED] ACTION REQUIRED prelim
+            // review. Reads conditions_sent_at column added in BBB migration; if column
+            // doesn't exist yet (pre-migration), value is undefined → falsy → falls
+            // through to legacy Fix 2 path. Safe deployment ordering.
+            console.log('hasNewDocs=true AND conditions_sent_at set → routing to conditions-fulfilled handoff');
+            const reviewDocs = await dealsService.getDocumentsWithText(existingDeal.id);
+            const reviewMessages = await dealsService.getMessages(existingDeal.id);
+            await sendConditionsFulfilledHandoff(existingDeal, reviewResult.updatedSummary, reviewDocs, reviewMessages, email);
           } else {
-            await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true });
+            // Original Fix 2 path: new docs arrived, admin hasn't sent conditions yet.
+            // Send UPDATED review/escalation with APPROVE/DECLINE.
+            console.log(`hasNewDocs=true → sending updated ${existingDeal.status === 'ltv_escalated' ? 'escalation' : 'preliminary review'} (replaces passive [Broker Update])`);
+            if (existingDeal.status === 'ltv_escalated') {
+              await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
+            } else {
+              await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true });
+            }
           }
         } else {
           // No attachments → broker sent a question/note, doc state unchanged. Keep
@@ -833,7 +918,13 @@ ${draftEmail}
           console.log('No new docs — sent passive [Broker Update] notification');
         }
 
-        if (reviewResult.responseEmail) {
+        // Group BBB (S9.1): suppress Vienna's broker reply when conditions_sent_at
+        // set AND new docs landed — the closing draft preview is the next broker-
+        // facing message, after admin SENDs it. Symmetric with Group L / GGG
+        // suppression patterns. Vienna's reply still fires for non-conditions-
+        // fulfilled paths (broker question without docs, broker submitting before
+        // conditions sent, etc.) — original behavior preserved.
+        if (reviewResult.responseEmail && !(existingDeal.conditions_sent_at && hasNewDocs)) {
           emailService.sendEmailDelayed(
             email.from,
             `Re: ${email.subject}`,
@@ -846,6 +937,8 @@ ${draftEmail}
               console.log('Conversational response sent to broker (during review)');
             }
           );
+        } else if (existingDeal.conditions_sent_at && hasNewDocs) {
+          console.log('Suppressing Vienna broker reply — conditions fulfilled, closing draft preview is the next broker-facing message');
         }
       } else if (existingDeal.status === 'active') {
         // CONVERSATIONAL HANDLER — respond to broker contextually

@@ -1944,6 +1944,332 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP BBB — conditions-fulfilled flow (S9.1/S9.2/S9.3)
+  // ════════════════════════════════════════════════════════════════
+  // S9.1: when broker submitted condition docs, Vienna fired a "thanks for sending
+  //   those through" reply that contradicted the in-flight admin handoff.
+  // S9.2: same event fired "[UPDATED] ACTION REQUIRED: PRELIMINARY Review" with
+  //   APPROVED/DECLINE — redundant since admin already approved by sending
+  //   conditions. Pre-BBB the dispatch at webhook.js:806-814 had no signal that
+  //   admin had moved past prelim.
+  // S9.3: generateCompletionEmail produced "we will be in touch shortly if anything
+  //   else is required" — should be a clean handoff per Franco's deterministic
+  //   template ("file complete + redirect to Franco").
+  // BBB fix:
+  //   - conditions_sent_at column on deals (timestamptz, nullable)
+  //   - executeDraft 'conditions' branch stamps conditions_sent_at
+  //   - inbound dispatch reads conditions_sent_at: if set, route to handoff
+  //     (informational notice + closing draft preview), suppress Vienna's reply
+  //   - generateCompletionEmail rewritten to deterministic template (no Claude)
+  //
+  // Tests: 4 scenarios.
+  console.log('\n========== GROUP BBB — conditions-fulfilled flow ==========');
+  {
+    const inboundLayer = webhookRouter.stack.find(l => l.route && l.route.path === '/inbound');
+    if (!inboundLayer) throw new Error('FAIL [Group BBB]: could not locate /inbound route');
+    const inboundHandler = inboundLayer.route.stack[0].handle;
+
+    const mockRes = () => ({ status: () => ({ json: () => {} }) });
+
+    const buildBrokerReply = (textBody, threadMsgId) => ({
+      body: {
+        From: 'tyler.bennett@brokerage.com',
+        FromName: 'Tyler Bennett',
+        To: 'vienna@example.com',
+        Subject: 'Re: James Okafor — Loan Inquiry',
+        TextBody: textBody,
+        HtmlBody: `<p>${textBody}</p>`,
+        Attachments: [{ Name: 'GovID_Okafor.pdf', ContentType: 'application/pdf', Content: 'BASE64', ContentLength: 100 }],
+        MessageID: 'broker-reply-bbb-' + Math.random().toString(36).slice(2, 10),
+        Headers: [{ Name: 'In-Reply-To', Value: threadMsgId || 'prev-msgid' }],
+        Date: new Date().toUTCString(),
+      },
+    });
+
+    const buildAdminReply = (textBody, threadMsgId) => ({
+      body: {
+        From: 'franco@privatemortgagelink.com',
+        FromName: 'Franco Genovese',
+        To: 'vienna@example.com',
+        Subject: 'Re: Draft Email Preview — James Okafor',
+        TextBody: textBody,
+        HtmlBody: `<p>${textBody}</p>`,
+        Attachments: [],
+        MessageID: 'admin-reply-bbb-' + Math.random().toString(36).slice(2, 10),
+        Headers: [{ Name: 'In-Reply-To', Value: threadMsgId || 'prev-msgid' }],
+        Date: new Date().toUTCString(),
+      },
+    });
+
+    // Capture buckets
+    const bbb = {
+      sendEmail: [],
+      sendEmailDelayed: [],
+      saveMessage: [],
+      update: [],
+    };
+    const resetBbb = () => {
+      bbb.sendEmail.length = 0;
+      bbb.sendEmailDelayed.length = 0;
+      bbb.saveMessage.length = 0;
+      bbb.update.length = 0;
+    };
+
+    const origBbb = {
+      dealsFindByMessageId: dealsService.findByMessageId,
+      dealsSaveMessage: dealsService.saveMessage,
+      dealsUpdate: dealsService.update,
+      dealsGetMessages: dealsService.getMessages,
+      dealsGetDocumentsByDeal: dealsService.getDocumentsByDeal,
+      dealsGetDocumentsWithText: dealsService.getDocumentsWithText,
+      dealsDownloadDocsAsZip: dealsService.downloadDocsAsZip,
+      dealsSaveAttachment: dealsService.saveAttachment,
+      aiGenerateBrokerResponse: aiService.generateBrokerResponse,
+      aiGenerateLeadSummary: aiService.generateLeadSummary,
+      aiGenerateCompletionEmail: aiService.generateCompletionEmail,
+      aiParseDraftReply: aiService.parseDraftReply,
+      emailSendEmail: emailService.sendEmail,
+      emailSendEmailDelayed: emailService.sendEmailDelayed,
+    };
+
+    let bbbDeal = null;
+    const setBbbDeal = (overrides = {}) => {
+      bbbDeal = {
+        id: 'deal-bbb-1',
+        email: 'tyler.bennett@brokerage.com',
+        borrower_name: 'James Okafor',
+        extracted_data: { borrower_name: 'James Okafor', sender_name: 'Tyler Bennett', broker_name: 'Tyler Bennett', sender_type: 'broker' },
+        status: 'under_review',
+        ltv: 65,
+        ownership_type: 'personal',
+        has_application_form: true,
+        has_pnw_statement: true,
+        draft_email: null,
+        draft_subject: null,
+        draft_action: null,
+        conditions_sent_at: null,
+        ...overrides,
+      };
+      return bbbDeal;
+    };
+
+    // Apply stubs
+    dealsService.findByMessageId = async () => bbbDeal;
+    dealsService.saveMessage = async (...args) => { bbb.saveMessage.push(args); };
+    dealsService.update = async (id, patch) => {
+      bbb.update.push({ id, patch });
+      if (bbbDeal && id === bbbDeal.id) Object.assign(bbbDeal, patch);
+      return { id, ...patch };
+    };
+    dealsService.getMessages = async () => [];
+    dealsService.getDocumentsByDeal = async () => [{ classification: 'appraisal', file_name: 'Appraisal.pdf' }];
+    dealsService.getDocumentsWithText = async () => [{ classification: 'appraisal', file_name: 'Appraisal.pdf' }];
+    dealsService.downloadDocsAsZip = async () => 'ZIPBASE64';
+    dealsService.saveAttachment = async () => ({ id: 'doc-bbb-1', file_name: 'GovID_Okafor.pdf', classification: 'government_id' });
+    aiService.generateLeadSummary = async () => '<h2>Lead Summary</h2>';
+
+    emailService.sendEmail = async (to, subject, text, html, attachments) => {
+      bbb.sendEmail.push({ to, subject, html, attachmentCount: (attachments || []).length });
+      return { MessageID: 'admin-' + bbb.sendEmail.length };
+    };
+    emailService.sendEmailDelayed = (to, subject, text, html, attachments, headers, callback) => {
+      bbb.sendEmailDelayed.push({ to, subject, html });
+      if (callback) callback({ MessageID: 'broker-' + bbb.sendEmailDelayed.length });
+    };
+
+    // -------- B1: executeDraft 'conditions' branch stamps conditions_sent_at --------
+    // Admin sends conditions via SEND on a 'conditions' draft → executeDraft fires
+    // for action='conditions', updates the deal with conditions_sent_at timestamp.
+    {
+      resetBbb();
+      // Set up a deal with a 'conditions' draft pending admin's SEND.
+      setBbbDeal({
+        status: 'under_review',
+        draft_email: '<p>Hi Tyler, approving subject to gov ID and exit strategy clarification...</p>',
+        draft_subject: 'Re: James Okafor',
+        draft_action: 'conditions',
+        conditions_sent_at: null,
+      });
+      aiService.parseDraftReply = async () => ({ action: 'send' });
+      await inboundHandler(buildAdminReply('SEND'), mockRes(), () => {});
+
+      const stampUpdate = bbb.update.find(u => u.patch.conditions_sent_at !== undefined);
+      if (!stampUpdate) {
+        throw new Error(`FAIL [Group BBB B1]: executeDraft 'conditions' must stamp conditions_sent_at, updates: ${JSON.stringify(bbb.update)}`);
+      }
+      if (typeof stampUpdate.patch.conditions_sent_at !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(stampUpdate.patch.conditions_sent_at)) {
+        throw new Error(`FAIL [Group BBB B1]: conditions_sent_at must be an ISO timestamp, got: ${JSON.stringify(stampUpdate.patch.conditions_sent_at)}`);
+      }
+      // Status must stay (not change to 'active'/'rejected'/'completed').
+      if (stampUpdate.patch.status !== undefined) {
+        throw new Error(`FAIL [Group BBB B1]: 'conditions' branch must NOT change status, got patch.status=${stampUpdate.patch.status}`);
+      }
+      // Draft fields cleared.
+      if (stampUpdate.patch.draft_email !== null || stampUpdate.patch.draft_action !== null) {
+        throw new Error(`FAIL [Group BBB B1]: 'conditions' branch must clear draft_email/draft_action, got patch: ${JSON.stringify(stampUpdate.patch)}`);
+      }
+      console.log('  PASS [Group BBB B1]: executeDraft conditions branch stamps conditions_sent_at + clears draft fields + preserves status');
+    }
+
+    // -------- B2: broker submission with conditions_sent_at routes to handoff --------
+    {
+      resetBbb();
+      // Deal has conditions_sent_at populated (admin already sent conditions).
+      setBbbDeal({
+        status: 'under_review',
+        conditions_sent_at: '2026-05-07T15:00:00.000Z',
+        draft_email: null,
+      });
+      // Stub Claude analysis to return a hasNewDocs-like state.
+      aiService.generateBrokerResponse = async () => ({
+        responseEmail: '<p>Vienna would normally reply here.</p>',
+        updatedSummary: { ...bbbDeal.extracted_data, ltv_percent: 65 },
+        allDocsReceived: false,
+        hasApplicationForm: true,
+        hasPnwStatement: true,
+        ownershipType: 'personal',
+        ltvPercent: 65,
+      });
+
+      await inboundHandler(buildBrokerReply('Sending the gov ID and exit strategy details for James.'), mockRes(), () => {});
+
+      // Vienna's broker reply must be SUPPRESSED.
+      if (bbb.sendEmailDelayed.length !== 0) {
+        throw new Error(`FAIL [Group BBB B2 reply suppression]: expected 0 broker sends (Vienna reply suppressed when conditions fulfilled), got ${bbb.sendEmailDelayed.length}`);
+      }
+      // Two admin emails: informational notice + closing draft preview.
+      if (bbb.sendEmail.length !== 2) {
+        throw new Error(`FAIL [Group BBB B2 admin emails]: expected 2 admin emails (info + draft preview), got ${bbb.sendEmail.length}: ${JSON.stringify(bbb.sendEmail.map(e => e.subject))}`);
+      }
+      // Email 1: informational notice — subject contains "[Conditions Fulfilled]", does NOT include "ACTION REQUIRED" or "PRELIMINARY Review".
+      const infoEmail = bbb.sendEmail[0];
+      if (!/\[Conditions Fulfilled\]/.test(infoEmail.subject)) {
+        throw new Error(`FAIL [Group BBB B2 info subject]: expected '[Conditions Fulfilled]' prefix, got "${infoEmail.subject}"`);
+      }
+      if (/ACTION REQUIRED|PRELIMINARY Review/.test(infoEmail.subject)) {
+        throw new Error(`FAIL [Group BBB B2 redundant ACTION REQUIRED]: info email must NOT use ACTION REQUIRED / PRELIMINARY Review framing (S9.2 root cause), got "${infoEmail.subject}"`);
+      }
+      // Email 2: closing draft preview — subject is in-thread "Re: [Conditions Fulfilled]...".
+      const previewEmail = bbb.sendEmail[1];
+      if (!/^Re: \[Conditions Fulfilled\]/.test(previewEmail.subject)) {
+        throw new Error(`FAIL [Group BBB B2 preview subject]: expected 'Re: [Conditions Fulfilled]...' (in-thread), got "${previewEmail.subject}"`);
+      }
+      // Preview HTML contains the closing draft preview chrome and the closing template.
+      if (!/Closing Draft Preview/.test(previewEmail.html) || !/Reply SEND to confirm/.test(previewEmail.html)) {
+        throw new Error(`FAIL [Group BBB B2 preview body]: expected closing-draft-preview chrome + Reply SEND, got: ${previewEmail.html.slice(0, 300)}`);
+      }
+      // Deal updated with draft_email = closing template, draft_action = 'approval_completed'.
+      const draftUpdate = bbb.update.find(u => u.patch.draft_email !== undefined && u.patch.draft_email !== null);
+      if (!draftUpdate) {
+        throw new Error(`FAIL [Group BBB B2 draft saved]: expected an update writing draft_email (closing template), got updates: ${JSON.stringify(bbb.update)}`);
+      }
+      if (draftUpdate.patch.draft_action !== 'approval_completed') {
+        throw new Error(`FAIL [Group BBB B2 draft_action]: expected 'approval_completed' (so SEND advances to 'completed'), got '${draftUpdate.patch.draft_action}'`);
+      }
+      // Closing template content sanity (deterministic — should contain "complete and submitted").
+      if (!/file is now complete and submitted/i.test(draftUpdate.patch.draft_email) || !/direct any further questions to Franco/i.test(draftUpdate.patch.draft_email)) {
+        throw new Error(`FAIL [Group BBB B2 closing template]: closing draft must contain Franco's deterministic template, got: ${draftUpdate.patch.draft_email.slice(0, 300)}`);
+      }
+      console.log('  PASS [Group BBB B2]: conditions-fulfilled handoff fires (info + draft preview), Vienna reply suppressed, draft saved with approval_completed action');
+    }
+
+    // -------- B3: broker submission WITHOUT conditions_sent_at keeps Fix 2 behavior --------
+    {
+      resetBbb();
+      // Same shape as B2 but conditions_sent_at = null (admin hasn't sent conditions).
+      setBbbDeal({
+        status: 'under_review',
+        conditions_sent_at: null,
+      });
+      aiService.generateBrokerResponse = async () => ({
+        responseEmail: '<p>Vienna replies here.</p>',
+        updatedSummary: { ...bbbDeal.extracted_data, ltv_percent: 65 },
+        allDocsReceived: false,
+        hasApplicationForm: true,
+        hasPnwStatement: true,
+        ownershipType: 'personal',
+        ltvPercent: 65,
+      });
+
+      await inboundHandler(buildBrokerReply('Sending more docs for James.'), mockRes(), () => {});
+
+      // Vienna's broker reply must FIRE (no conditions-fulfilled suppression).
+      if (bbb.sendEmailDelayed.length !== 1) {
+        throw new Error(`FAIL [Group BBB B3 Fix 2 regression]: expected 1 broker reply (Fix 2 path), got ${bbb.sendEmailDelayed.length}`);
+      }
+      // [UPDATED] PRELIMINARY Review must fire.
+      const updatedReview = bbb.sendEmail.find(e => /\[UPDATED\] ACTION REQUIRED: PRELIMINARY Review/.test(e.subject));
+      if (!updatedReview) {
+        throw new Error(`FAIL [Group BBB B3 Fix 2 regression]: expected '[UPDATED] ACTION REQUIRED: PRELIMINARY Review' subject, got: ${JSON.stringify(bbb.sendEmail.map(e => e.subject))}`);
+      }
+      // No conditions-fulfilled informational notice.
+      const conditionsInfo = bbb.sendEmail.find(e => /\[Conditions Fulfilled\]/.test(e.subject));
+      if (conditionsInfo) {
+        throw new Error(`FAIL [Group BBB B3 path leak]: handoff path fired for non-conditions-fulfilled deal, got: ${conditionsInfo.subject}`);
+      }
+      console.log('  PASS [Group BBB B3]: original Fix 2 path preserved when conditions_sent_at is null (regression guard)');
+    }
+
+    // -------- B4: generateCompletionEmail deterministic template (no Claude) --------
+    {
+      // Pure JS test — no API key needed, no stubs touched.
+      const realCompletionEmail = origBbb.aiGenerateCompletionEmail;
+      const tylerOutput = await realCompletionEmail({ broker_name: 'Tyler Bennett', borrower_name: 'James Okafor' });
+      const expected = `<p>Hi Tyler,</p>
+<p>The file is now complete and submitted. Please direct any further questions to Franco.</p>
+<p>Vienna<br>Private Mortgage Link</p>`;
+      if (tylerOutput !== expected) {
+        throw new Error(`FAIL [Group BBB B4 deterministic template]: output != expected.\n  EXPECTED: ${JSON.stringify(expected)}\n  GOT:      ${JSON.stringify(tylerOutput)}`);
+      }
+      // Fallback when broker_name is absent — defensive default.
+      const fallbackOutput = await realCompletionEmail({ borrower_name: 'James Okafor' });
+      if (!/^<p>Hi there,<\/p>/.test(fallbackOutput)) {
+        throw new Error(`FAIL [Group BBB B4 fallback]: expected 'Hi there,' fallback when broker_name absent, got: ${fallbackOutput.slice(0, 80)}`);
+      }
+      // Sender_name fallback.
+      const senderFallbackOutput = await realCompletionEmail({ sender_name: 'Daniel Rosen' });
+      if (!/<p>Hi Daniel,<\/p>/.test(senderFallbackOutput)) {
+        throw new Error(`FAIL [Group BBB B4 sender_name fallback]: expected 'Hi Daniel,', got: ${senderFallbackOutput.slice(0, 80)}`);
+      }
+      // Negative regression: must NOT contain old prompt language.
+      const forbiddenLegacyPhrases = [
+        /we will be in touch shortly if anything else is required/i,
+        /file has been reviewed/i,
+        /the complete package includes/i,
+        /everything looks good/i,
+      ];
+      for (const re of forbiddenLegacyPhrases) {
+        if (re.test(tylerOutput)) {
+          throw new Error(`FAIL [Group BBB B4 legacy regression]: output contains forbidden legacy phrase ${re}: ${tylerOutput}`);
+        }
+      }
+      // Positive: "Franco" appears literally.
+      if (!/Franco/.test(tylerOutput)) {
+        throw new Error(`FAIL [Group BBB B4 Franco hardcode]: expected 'Franco' literal in template, got: ${tylerOutput}`);
+      }
+      console.log('  PASS [Group BBB B4]: deterministic closing template — exact match for Tyler, fallbacks work, no legacy prompt phrases, Franco hardcoded');
+    }
+
+    // Restore originals
+    dealsService.findByMessageId = origBbb.dealsFindByMessageId;
+    dealsService.saveMessage = origBbb.dealsSaveMessage;
+    dealsService.update = origBbb.dealsUpdate;
+    dealsService.getMessages = origBbb.dealsGetMessages;
+    dealsService.getDocumentsByDeal = origBbb.dealsGetDocumentsByDeal;
+    dealsService.getDocumentsWithText = origBbb.dealsGetDocumentsWithText;
+    dealsService.downloadDocsAsZip = origBbb.dealsDownloadDocsAsZip;
+    dealsService.saveAttachment = origBbb.dealsSaveAttachment;
+    aiService.generateBrokerResponse = origBbb.aiGenerateBrokerResponse;
+    aiService.generateLeadSummary = origBbb.aiGenerateLeadSummary;
+    aiService.generateCompletionEmail = origBbb.aiGenerateCompletionEmail;
+    aiService.parseDraftReply = origBbb.aiParseDraftReply;
+    emailService.sendEmail = origBbb.emailSendEmail;
+    emailService.sendEmailDelayed = origBbb.emailSendEmailDelayed;
+
+    console.log('Group BBB: 4/4 passed');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP B — classifier filename + text-fallback for mortgage_statement
   // ════════════════════════════════════════════════════════════════
   // S6.2 / S7.2 root cause: filename regex didn't recognize "payout statement"
@@ -2209,27 +2535,13 @@ License #M12001505`;
       console.warn(`  generateAdminResponseEmail smoke skipped due to API error: ${e.message}`);
     }
 
-    // Adversarial 2: generateCompletionEmail — final closing email. The Scenario 3 shape that
-    // produced "Thanks for confirming approval, Jason!" + "I'll get this over to Franco".
-    try {
-      const completionEmail = await realAi.generateCompletionEmail(
-        {
-          borrower_name: 'Derek Olsen',
-          broker_name: 'Jason Mercer',
-          sender_name: 'Jason Mercer',
-        },
-        [
-          { direction: 'inbound', body: 'Here are the last few documents — gov ID, tax assessment, and payout statement attached.' },
-          { direction: 'outbound', body: 'Thanks for sending those through!' },
-        ]
-      );
-      console.log('generateCompletionEmail output (first 300 chars):');
-      console.log(`  ${(completionEmail || '').slice(0, 300).replace(/\n/g, ' ')}`);
-      checkBugC('generateCompletionEmail', completionEmail);
-    } catch (e) {
-      if (e.message.startsWith('FAIL')) throw e;
-      console.warn(`  generateCompletionEmail smoke skipped due to API error: ${e.message}`);
-    }
+    // Adversarial 2 — RETIRED by Group BBB: generateCompletionEmail is now a
+    // deterministic JS template (no Claude call), so the Bug C adversarial smoke
+    // (Claude-output Franco-attribution leak detection) doesn't apply. The
+    // template intentionally includes "Franco" in the directive "direct any
+    // further questions to Franco" per Q5 — that's the hardcoded handoff target,
+    // NOT a Franco-as-actor leak. Deterministic Group BBB B4 test exercises the
+    // template directly.
 
     // ════════════════════════════════════════════════════════════════
     // GROUP I — adversarial live Claude smoke for document-receipt fabrication

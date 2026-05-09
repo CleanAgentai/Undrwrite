@@ -646,75 +646,17 @@ Private Mortgage Link`,
 
   // Generate closing email to broker — file has been reviewed, we'll follow up if more is needed
   generateCompletionEmail: async (dealSummary, conversationHistory = [], documentsOnFile = []) => {
-    try {
-      const docsList = documentsOnFile.length > 0
-        ? documentsOnFile.map(d => `- ${d.file_name}${d.classification ? ` (${d.classification})` : ''}`).join('\n')
-        : '(none on file)';
-      const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 512,
-        messages: [{
-          role: 'user',
-          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short, warm closing email to the broker letting them know the file has been reviewed and we will be in touch shortly if anything else is required.
-
-DEAL DETAILS:
-Borrower: ${dealSummary?.borrower_name || 'Unknown'}
-Broker: ${dealSummary?.broker_name || dealSummary?.sender_name || 'Unknown'}
-
-DOCUMENTS ALREADY ON FILE (authoritative — only what we've actually received):
-${docsList}
-
-CONVERSATION HISTORY:
-${conversationHistory.map(m => `[${m.direction === 'inbound' ? 'BROKER' : 'VIENNA'}] ${m.body?.substring(0, 300) || ''}`).join('\n\n')}
-
-CRITICAL — DO NOT FABRICATE DOCUMENT RECEIPT:
-- The DOCUMENTS ALREADY ON FILE list above is the AUTHORITATIVE record of what we have actually received and saved.
-- Do NOT acknowledge, thank, confirm, or reference receipt of any document that is NOT in that list — even if the conversation history mentions it. The conversation history may include broker promises ("I'll send the gov ID") that were never actually fulfilled, or prior Vienna messages that themselves fabricated receipt.
-- If you reference any specific document by name in this closing email, that document MUST appear in DOCUMENTS ALREADY ON FILE. Otherwise, refer generically to "the final documents" or "everything you sent through" without naming specifics.
-
-CRITICAL WORDING RULES:
-- Do NOT say the file is "approved" or has been "approved"
-- Do NOT say "everything looks good" or "everything is in order"
-- Do NOT imply the deal has been finalized — the lender's underwriters may still request additional documentation after their own review
-- The correct message is: we have everything we were asking for, and we will reach out shortly if anything else is needed
-
-CRITICAL — APPROVAL LANGUAGE & INTERNAL ROUTING:
-- The deal has NOT been approved. Vienna does not grant approval. Final approval is determined later by the lender's underwriters — not by anyone in this email chain.
-- The broker is sourcing a deal, NOT granting approval. NEVER write "thanks for confirming approval", "thanks for confirming the approval", "you've approved", or any phrase that implies the broker is approving anything.
-- FORBIDDEN APPROVAL PHRASES (do not write any of these in your email): "approved", "approval", "passed review", "looks good", "everything is in order", "thanks for confirming the approval", "for final assessment", "going to underwriting", "final approval and terms", "for final review by our team".
-- FORBIDDEN INTERNAL ROUTING REFERENCES (in your email to the broker): never name "Franco", never reference "the lender rep", "our team", "the underwriters", "internal review", any "review process" phrasing ("the review process", "our review process", "patience with the review", "patience with our review process", "the underwriting process"), any "passing along" phrasing ("passing it along", "passing this along", "passing everything along", "passing the file along", "passing along to..."), "forwarding to", "I'll get this over to", or any specific internal department or person. The broker should know only that the file has been received and is being reviewed.
-- ALLOWED phrasing: "the file has been reviewed", "I'll be in touch shortly if anything else is needed", "thanks for getting these together".
-
-EMAIL RULES:
-- Write as Vienna in first person
-- Address the broker by their FIRST NAME (from the Broker field above)
-- Thank them for their work getting the documents together
-- BANNED OPENERS — never start the email with any of these (they sound hollow, robotic, or scripted): "Perfect!", "Perfect.", "Perfect,", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". SELF-CHECK before returning: re-read the FIRST WORD of your email opening. If it begins with "Perfect", "Awesome", "Amazing", "Wonderful", "Sounds good", "Got it", or "Great news" in ANY punctuation form (!, ., comma, or alone), REWRITE that opening to start with a specific acknowledgement instead. Do not let these slip through under any acknowledgement context — even when the broker just provided positive news, the opener must NOT be one of these.Use a real specific acknowledgement instead.
-- State that we will be in touch shortly if we require anything else
-- Keep it SHORT — 3-4 sentences max
-- Warm and professional tone — but not triumphant or celebratory
-- CRITICAL — TONE & BREVITY: underwriting communication is concise. Acknowledgments are 1-4 sentences max — NEVER multi-paragraph praise. Do NOT praise the borrower's profile to the broker (no commentary on their employment, income, credit, net worth, property, or other deal characteristics — the broker already knows their client). Do NOT compliment the broker's work in multiple sentences ("excellent job", "thank you for your thorough work", "I appreciate how meticulously..."). At most ONE short thank-you ("thanks for getting these together"), never a paragraph. Do NOT add praise paragraphs about how strong/clean/well-positioned the deal is.
-- CRITICAL — DO NOT RECAP THE FULL PACKAGE: this closing email must NOT enumerate every document received throughout the file. Past Vienna closing emails have re-listed 8-10 items — that is forbidden. The closing email may reference at most the LATEST batch the broker sent in their most recent message (typically 1-3 items, never more) AND ONLY if those documents appear in DOCUMENTS ALREADY ON FILE above. Do NOT list documents from earlier messages even if they're on file.
-- FORBIDDEN PHRASINGS in the closing email: "the complete package includes...", "we have all of the following: ...", "the full package: ...", "your file contains: ...", any sentence enumerating 4+ documents, any recap of the entire document set.
-- ALLOWED at this stage: a brief acknowledgement of the latest 1-3 items by name (e.g. "Thanks for getting the gov ID, tax assessment, and payout statement over"), or a generic phrase like "thanks for getting these final pieces through."
-- Do NOT mention specific terms, rates, or timelines
-- Use proper HTML formatting with <p> tags
-- Sign off as: Vienna\\nPrivate Mortgage Link
-
-CRITICAL — RECIPIENT NAME RULE:
-- The recipient is the BROKER. Their first name comes from the Broker field above.
-- Franco is the LENDER you work for — Franco is NEVER the recipient. NEVER greet the recipient as "Franco", "Frank", or any variation.
-- Use only the broker's actual first name. If Broker is "Jason Mercer", greet them as "Hi Jason!".
-
-Return only the HTML email body. Do not include a subject line.`,
-        }],
-      });
-
-      return response.content[0].text.trim();
-    } catch (error) {
-      console.error('Claude completion email error:', error);
-      throw error;
-    }
+    // Group BBB (S9.3): deterministic template. No Claude call — content is fixed,
+    // brittle to LLM drift, and Porter explicitly chose hardcoded structure for the
+    // closing handoff. "Franco" is hardcoded per Q5 (consistent with how Franco's
+    // name is already hardcoded throughout — banned-greeting checks, F2 collision,
+    // etc.). Function remains async + signature unchanged for backward compat.
+    const brokerName = dealSummary?.broker_name || dealSummary?.sender_name || '';
+    const firstName = brokerName.split(/\s+/)[0] || '';
+    const greeting = firstName ? `Hi ${firstName},` : 'Hi there,';
+    return `<p>${greeting}</p>
+<p>The file is now complete and submitted. Please direct any further questions to Franco.</p>
+<p>Vienna<br>Private Mortgage Link</p>`;
   },
 
   // Generate internal escalation notification to admin (LTV > 80%)
