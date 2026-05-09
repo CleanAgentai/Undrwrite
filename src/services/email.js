@@ -5,15 +5,48 @@ const config = require('../config');
 
 const DELAY_MS = 0; // immediate send
 
+// Group III (S12.1) — scrub admin-greeting opener from broker-facing emails.
+// Production failure mode: Group A's HARD RULE leaks when the broker email body
+// has TWO signatures (broker's inner sig + admin auto-appended outer sig from a
+// QA mail client) and Claude picks the outer one, baking sender_name="Franco
+// Maione" into the deal record. Downstream emails then naturally greet "Hi Franco"
+// from Claude's perspective. Belt-and-suspenders escalation per Q3 of original
+// Group A plan: prompt-only first, JS post-processing if smokes flake — they did
+// in production deal 9db03a27 (Torres/Westgate, 3 reminders sent to "Hi Franco").
+//
+// Match opening greeting up to closing </p> or newline. Handles:
+//   <p>Hi Franco!</p>... → <p>Hi there!</p>...
+//   <p>Hello Franco Maione,</p>... → <p>Hi there!</p>...
+//   <p>Hey Franco — </p>... → <p>Hi there!</p>...
+//   Hi Franco,\n\nThanks... → Hi there!\n\nThanks... (text body)
+// Negative cases (don't match): "Hi Sarah!", "Hi Frances!" (word-boundary), mid-body Franco mentions.
+const stripAdminGreeting = (body) => {
+  if (!body) return body;
+  return body.replace(
+    /^(\s*(?:<p>\s*)?)(?:hi|hello|hey|dear)\s+franco(?:\s+\w+)?[^<\n]*?(?=<\/p>|\n|$)/i,
+    '$1Hi there!'
+  );
+};
+
+const isAdminRecipient = (to) => {
+  const adminEmail = (config.adminEmail || '').toLowerCase();
+  return !!(adminEmail && String(to || '').toLowerCase().includes(adminEmail));
+};
+
 module.exports = {
   sendEmail: async (to, subject, textBody, htmlBody = null, attachments = [], headers = [], cc = null) => {
     try {
+      // Group III: scrub admin-greeting opener for broker-facing sends. Admin sends
+      // pass through unchanged (admin-facing emails legitimately reference Franco).
+      const isAdmin = isAdminRecipient(to);
+      const scrubbedHtml = isAdmin ? htmlBody : stripAdminGreeting(htmlBody);
+      const scrubbedText = isAdmin ? textBody : stripAdminGreeting(textBody);
       const emailData = {
         From: config.postmark.senderEmail,
         To: to,
         Subject: subject,
-        TextBody: textBody,
-        HtmlBody: htmlBody || textBody,
+        TextBody: scrubbedText,
+        HtmlBody: scrubbedHtml || scrubbedText,
         Attachments: attachments,
       };
       if (headers.length > 0) emailData.Headers = headers;
@@ -32,12 +65,16 @@ module.exports = {
     console.log(`Email to ${to} queued — sending immediately`);
     setTimeout(async () => {
       try {
+        // Group III: same scrub policy as sendEmail above.
+        const isAdmin = isAdminRecipient(to);
+        const scrubbedHtml = isAdmin ? htmlBody : stripAdminGreeting(htmlBody);
+        const scrubbedText = isAdmin ? textBody : stripAdminGreeting(textBody);
         const emailData = {
           From: config.postmark.senderEmail,
           To: to,
           Subject: subject,
-          TextBody: textBody,
-          HtmlBody: htmlBody || textBody,
+          TextBody: scrubbedText,
+          HtmlBody: scrubbedHtml || scrubbedText,
           Attachments: attachments,
         };
         if (headers.length > 0) emailData.Headers = headers;
@@ -86,3 +123,8 @@ module.exports = {
     };
   },
 };
+
+// Test-only exposure for the deterministic Group III scrub truth table.
+// Production callers use the local consts at module scope; this just makes the
+// pure-regex predicates reachable from test-trigger.js.
+module.exports.__test__ = { stripAdminGreeting, isAdminRecipient };

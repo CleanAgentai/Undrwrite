@@ -2337,6 +2337,78 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`Group B classifier text-fallback: ${groupBTextPassed}/${groupBTextCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP III — admin-greeting scrub (S12.1)
+  // ════════════════════════════════════════════════════════════════
+  // Production failure: deal 9db03a27 (Torres/Westgate). Email body had two
+  // signatures (broker's inner + admin auto-appended outer). Claude picked outer
+  // as sender_name="Franco Maione". Group A's HARD RULE leaked → Vienna sent 4
+  // emails greeting "Hi Franco" / "Hey Franco" to the broker. Belt-and-suspenders
+  // escalation per Q3 of original Group A plan: deterministic JS scrub at email-
+  // service level, gated on `to !== config.adminEmail`.
+  console.log('\n========== GROUP III — admin-greeting scrub truth table ==========');
+  const { stripAdminGreeting, isAdminRecipient } = require('./src/services/email').__test__;
+
+  const stripCases = [
+    // Positive — admin-greeting variants get scrubbed (HTML body)
+    ['<p>Hi Franco!</p>\n<p>Body...</p>',                    '<p>Hi there!</p>\n<p>Body...</p>'],
+    ['<p>Hello Franco,</p>\n<p>Body...</p>',                 '<p>Hi there!</p>\n<p>Body...</p>'],
+    ['<p>Hey Franco! Hope you\'re having a great week!</p>', '<p>Hi there!</p>'],
+    ['<p>Dear Franco —</p>\n<p>Body</p>',                    '<p>Hi there!</p>\n<p>Body</p>'],
+    // Full-name variants — Group A's prompt sometimes outputs "Hi Franco Maione"
+    ['<p>Hi Franco Maione,</p>\n<p>Body</p>',                '<p>Hi there!</p>\n<p>Body</p>'],
+    ['<p>Hello Franco Vieanna!</p>\n<p>Body</p>',            '<p>Hi there!</p>\n<p>Body</p>'],
+    // Text body variants
+    ['Hi Franco!\nBody...',                                  'Hi there!\nBody...'],
+    ['Hey Franco — let me know\nThanks',                     'Hi there!\nThanks'],
+    // Negative — non-Franco greetings pass through unchanged
+    ['<p>Hi Sarah!</p>\n<p>Body</p>',                        '<p>Hi Sarah!</p>\n<p>Body</p>'],
+    ['<p>Hello Jason!</p>\n<p>Body</p>',                     '<p>Hello Jason!</p>\n<p>Body</p>'],
+    ['<p>Hi Frances!</p>',                                   '<p>Hi Frances!</p>'],
+    // Edge — empty / null
+    ['',                                                     ''],
+    [null,                                                   null],
+    // Idempotence — already scrubbed pass through
+    ['<p>Hi there!</p>\n<p>Body</p>',                        '<p>Hi there!</p>\n<p>Body</p>'],
+    // Negative — Franco mentioned mid-body (not opening greeting) — preserve
+    ['<p>Hi Sarah!</p>\n<p>Franco will be in touch.</p>',    '<p>Hi Sarah!</p>\n<p>Franco will be in touch.</p>'],
+  ];
+
+  let stripPassed = 0;
+  for (const [input, expected] of stripCases) {
+    const got = stripAdminGreeting(input);
+    if (got === expected) {
+      const inputPreview = String(input || '').slice(0, 60).replace(/\s+/g, ' ');
+      console.log(`  PASS: ${JSON.stringify(inputPreview)} → ${JSON.stringify(String(expected || '').slice(0, 60).replace(/\s+/g, ' '))}`);
+      stripPassed++;
+    } else {
+      throw new Error(`FAIL [Group III stripAdminGreeting]: input=${JSON.stringify(input)} expected=${JSON.stringify(expected)} got=${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`Group III stripAdminGreeting: ${stripPassed}/${stripCases.length} passed`);
+
+  // isAdminRecipient gate — verify only admin email triggers the no-scrub path.
+  console.log('\n========== GROUP III — isAdminRecipient gate ==========');
+  const adminGateCases = [
+    ['franco@privatemortgagelink.com',  true,  'exact admin match'],
+    ['Franco@PrivateMortgageLink.com',  true,  'case-insensitive admin match'],
+    ['franco@vimarealty.com',           false, 'broker QA email — NOT admin'],
+    ['jason.mercer@brokerage.com',      false, 'normal broker — NOT admin'],
+    ['',                                false, 'empty string'],
+    [null,                              false, 'null'],
+  ];
+  let gatePassed = 0;
+  for (const [to, expected, label] of adminGateCases) {
+    const got = isAdminRecipient(to);
+    if (got === expected) {
+      console.log(`  PASS [${label}]: isAdminRecipient(${JSON.stringify(to)}) → ${expected}`);
+      gatePassed++;
+    } else {
+      throw new Error(`FAIL [Group III isAdminRecipient ${label}]: expected ${expected}, got ${got} for ${JSON.stringify(to)}`);
+    }
+  }
+  console.log(`Group III isAdminRecipient: ${gatePassed}/${adminGateCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP C — missingDocs aggregation includes exit_strategy when null/empty
   // ════════════════════════════════════════════════════════════════
   // S6.3 / S7.3 root cause: missingDocs filter at webhook.js:180 only checked
