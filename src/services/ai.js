@@ -902,39 +902,56 @@ Return only the HTML email body. Do not include a subject line.`,
   },
 
   // Generate follow-up reminder email for stale deals (broker hasn't replied)
-  generateFollowUpReminder: async (dealSummary, daysSilent, reminderNumber) => {
+  // Group KKK + LLL (S12.3 + S12.4): warm-but-businesslike tone (no "Hey", no
+  // filler greetings) + enumerate outstanding items by name (recipient shouldn't
+  // have to scroll back). Both fixes touch the same prompt — batched.
+  generateFollowUpReminder: async (dealSummary, daysSilent, reminderNumber, missingDocs = []) => {
     try {
-      const whatWeNeed = 'the outstanding documents and information we previously requested';
+      // LLL: render outstanding items as a name-by-name list using DOC_DISPLAY_NAMES.
+      // Empty array → fallback to generic phrasing (backward compat for callers that
+      // don't pass missingDocs).
+      const itemsList = missingDocs.length > 0
+        ? missingDocs.map(d => `- ${module.exports.DOC_DISPLAY_NAMES[d] || d}`).join('\n')
+        : '(no specific items tracked — use a generic "the items we previously requested" reference)';
 
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 512,
         messages: [{
           role: 'user',
-          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short, friendly follow-up email to someone who hasn't replied.
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short, businesslike follow-up email to someone who hasn't replied.
 
 It has been ${Math.round(daysSilent)} days since we last heard from them. This is follow-up reminder #${reminderNumber}.
 
-We are still waiting for: ${whatWeNeed}
+OUTSTANDING ITEMS — list these BY NAME in your email so the recipient doesn't have to scroll back to remember what was needed:
+${itemsList}
 
 DEAL DETAILS:
 Sender type: ${dealSummary?.sender_type || 'broker'}
 Sender name: ${dealSummary?.sender_type === 'borrower' ? (dealSummary?.sender_name || dealSummary?.borrower_name || 'Unknown') : (dealSummary?.sender_name || dealSummary?.broker_name || 'Unknown')} (USE THEIR FIRST NAME ONLY — e.g. if "Jason Mercer", address them as "Jason")
 Borrower: ${dealSummary?.borrower_name || 'Unknown'}
 
-TONE:
-- Reminder #1: Friendly and casual — "Hey [first name]! Just wanted to check in" / "Hope you're having a great week!"
-- Reminder #2: Still warm but a little more direct — "We'd love to keep this moving!" / "Just wanted to make sure this didn't slip through the cracks!"
-- Reminder #3: Kind but clear — "We'll go ahead and close this file for now, but no worries at all — feel free to reach out anytime and we'd be happy to pick it back up!"
+TONE — preserve the warm-but-businesslike gradient across reminders:
+- Reminder #1: Warm and friendly check-in — "Hi [first name]! Just wanted to check in on [borrower's] file." Open with a "Hi" greeting (NOT "Hey"). Direct and substantive — no filler greetings.
+- Reminder #2: Still warm but a little more direct — "Wanted to make sure this didn't slip through the cracks" / "We'd love to keep this moving forward." More urgency without losing friendliness.
+- Reminder #3: Kind but clear closer — "We'll go ahead and close this file for now, but no worries at all — feel free to reach out anytime and we'd be happy to pick it back up!"
+
+BANNED OPENERS — these are too casual or filler-y for business follow-up:
+- "Hey [name]!" — too casual; use "Hi [name]!" instead
+- "Hope you're having a great week!" — filler with no value, REMOVE
+- "I hope this email finds you well" — filler with no value, REMOVE
+- "Hope all is well!" — filler with no value, REMOVE
+- Plus the standard banned list: "Perfect!", "Perfect.", "Perfect,", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,".
+
+SELF-CHECK before returning: re-read the FIRST WORD of your opening. If it begins with "Hey", "Perfect", "Awesome", "Amazing", "Wonderful", "Sounds good", "Got it", or "Great news" in ANY punctuation form (!, ., comma, or alone), REWRITE that opening to start with "Hi [first name]!" instead. Also re-read for filler greetings ("Hope you're having a great week!", "I hope this email finds you well", "Hope all is well!") — REMOVE them entirely; jump directly into the substance after the "Hi" greeting.
 
 EMAIL RULES:
-- ALWAYS address the person by their FIRST NAME — use the sender name above. Never use "Hi there" or generic greetings.
+- ALWAYS address the person by their FIRST NAME — use the sender name above. Never use generic greetings.
 - If sender is a borrower, use simple language — no industry jargon.
 - Write as Vienna in first person
-- Keep it SHORT — 2-3 sentences max
-- Do NOT re-list every document needed — just reference "the items we previously requested"
-- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Perfect,", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". SELF-CHECK before returning: re-read the FIRST WORD of your email opening. If it begins with "Perfect", "Awesome", "Amazing", "Wonderful", "Sounds good", "Got it", or "Great news" in ANY punctuation form (!, ., comma, or alone), REWRITE that opening to start with a specific acknowledgement instead. Do not let these slip through under any acknowledgement context — even when the broker just provided positive news, the opener must NOT be one of these.Use a real specific acknowledgement instead.
-- Use proper HTML formatting with <p> tags
+- Keep it SHORT — 3-5 sentences plus the doc list. The doc enumeration is critical; do NOT skip it to stay short — that defeats the reminder's purpose.
+- ENUMERATE THE OUTSTANDING ITEMS BY NAME using a <ul> bullet list with the exact display names from OUTSTANDING ITEMS above. Do NOT use vague phrasing like "the items we previously requested" or "the outstanding documents" without specific names — the recipient should not have to scroll back to recall what was needed.
+- Use proper HTML formatting with <p> tags for prose, <ul>/<li> for the doc list
 - Sign off as: Vienna\\nPrivate Mortgage Link
 
 CRITICAL — RECIPIENT NAME RULE:

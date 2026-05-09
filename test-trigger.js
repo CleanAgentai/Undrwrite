@@ -1384,6 +1384,122 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log('Bug A concurrency: 5/5 passed');
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Group LLL — cron passes computed missingDocs to generateFollowUpReminder
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Pre-LLL: cron called generateFollowUpReminder(extracted_data, daysSilent, num)
+  // — no missingDocs. Vienna fell back to "the items we previously requested".
+  // LLL: cron computes missingDocs (mirrors webhook's logic + Group C exit_strategy
+  // push), passes as 4th arg. This deterministic test verifies the cron path
+  // computes and passes missingDocs correctly — independent of Claude.
+  console.log('\n========== GROUP LLL — cron computes + passes missingDocs ==========');
+  {
+    // Capture buckets specific to this scenario.
+    const lllCapture = { generateFollowUpReminder: [] };
+
+    // Snapshot originals to restore after.
+    const lllOrig = {
+      claimReminderSlot: dealsService.claimReminderSlot,
+      releaseReminderSlot: dealsService.releaseReminderSlot,
+      getActiveDeals: dealsService.getActiveDeals,
+      getLastInboundMessage: dealsService.getLastInboundMessage,
+      getMessages: dealsService.getMessages,
+      getDocumentsByDeal: dealsService.getDocumentsByDeal,
+      getLastOutboundMessageId: dealsService.getLastOutboundMessageId,
+      getAllMessageIdsForThread: dealsService.getAllMessageIdsForThread,
+      generateFollowUpReminder: aiService.generateFollowUpReminder,
+      cronEmailSendEmail: cronEmailService.sendEmail,
+    };
+
+    // Stubs — mirror existing Bug A pattern. The deal under test has appraisal+NOA on
+    // file, so missingDocs should be: gov_id, property_tax, mortgage_statement, credit_report
+    // PLUS exit_strategy (null in extracted_data per the fixture below).
+    dealsService.claimReminderSlot = async () => ({ claimed: true });
+    dealsService.releaseReminderSlot = async () => ({ released: true });
+    dealsService.getActiveDeals = async () => [{
+      id: 'deal-lll-1',
+      borrower_name: 'Noah MacKenzie',
+      email: 'broker@example.com',
+      status: 'active',
+      reminder_count: 0,
+      extracted_data: {
+        broker_name: 'Michael Torres',
+        sender_name: 'Michael Torres',
+        sender_type: 'broker',
+        borrower_name: 'Noah MacKenzie',
+        loan_type: 'second mortgage',
+        exit_strategy: null,
+      },
+    }];
+    dealsService.getLastInboundMessage = async () => ({
+      created_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    dealsService.getMessages = async () => [];
+    dealsService.getDocumentsByDeal = async () => [
+      { classification: 'appraisal', file_name: 'Appraisal.pdf' },
+      { classification: 'noa', file_name: 'NOA.pdf' },
+    ];
+    dealsService.getLastOutboundMessageId = async () => 'mock-outbound-id';
+    dealsService.getAllMessageIdsForThread = async () => ['mock-id-1'];
+    aiService.generateFollowUpReminder = async (...args) => {
+      lllCapture.generateFollowUpReminder.push(args);
+      return '<p>Hi Michael!</p><p>Stub reminder body.</p>';
+    };
+    cronEmailService.sendEmail = async () => ({ MessageID: 'mock-msg-id' });
+
+    await runFollowUpReminders();
+
+    // Assertions
+    if (lllCapture.generateFollowUpReminder.length !== 1) {
+      throw new Error(`FAIL [Group LLL]: expected 1 generateFollowUpReminder call, got ${lllCapture.generateFollowUpReminder.length}`);
+    }
+    const args = lllCapture.generateFollowUpReminder[0];
+    // Signature: (dealSummary, daysSilent, reminderNumber, missingDocs)
+    if (args.length < 4) {
+      throw new Error(`FAIL [Group LLL signature]: expected 4 args (dealSummary, daysSilent, reminderNumber, missingDocs), got ${args.length}`);
+    }
+    const passedMissing = args[3];
+    if (!Array.isArray(passedMissing)) {
+      throw new Error(`FAIL [Group LLL missingDocs type]: expected array, got ${typeof passedMissing}`);
+    }
+    // Refinance baseRequired (no purchase): government_id, appraisal, property_tax,
+    // mortgage_statement, income_proof, credit_report. With appraisal + noa on file:
+    //   - appraisal satisfied
+    //   - income_proof satisfied by NOA (Fix 4 DOC_SYNONYMS)
+    // Remaining: government_id, property_tax, mortgage_statement, credit_report
+    // Plus Group C: exit_strategy null → push exit_strategy.
+    // Total: 5 items.
+    const expectedMissing = ['government_id', 'property_tax', 'mortgage_statement', 'credit_report', 'exit_strategy'];
+    if (passedMissing.length !== expectedMissing.length) {
+      throw new Error(`FAIL [Group LLL missingDocs count]: expected ${expectedMissing.length} items (${expectedMissing.join(', ')}), got ${passedMissing.length}: ${JSON.stringify(passedMissing)}`);
+    }
+    for (const expected of expectedMissing) {
+      if (!passedMissing.includes(expected)) {
+        throw new Error(`FAIL [Group LLL missingDocs content]: expected '${expected}' in passed missingDocs, got ${JSON.stringify(passedMissing)}`);
+      }
+    }
+    // Negative: NOA satisfies income_proof, must NOT be in missingDocs (Fix 4 regression guard)
+    if (passedMissing.includes('income_proof')) {
+      throw new Error(`FAIL [Group LLL Fix 4 regression]: NOA on file should satisfy income_proof, but income_proof in missingDocs: ${JSON.stringify(passedMissing)}`);
+    }
+    if (passedMissing.includes('appraisal')) {
+      throw new Error(`FAIL [Group LLL]: appraisal on file but listed as missing: ${JSON.stringify(passedMissing)}`);
+    }
+    console.log(`  PASS [Group LLL]: cron passed missingDocs=[${passedMissing.join(', ')}] (5 items, NOA→income_proof + appraisal satisfied, exit_strategy added per Group C)`);
+
+    // Restore
+    dealsService.claimReminderSlot = lllOrig.claimReminderSlot;
+    dealsService.releaseReminderSlot = lllOrig.releaseReminderSlot;
+    dealsService.getActiveDeals = lllOrig.getActiveDeals;
+    dealsService.getLastInboundMessage = lllOrig.getLastInboundMessage;
+    dealsService.getMessages = lllOrig.getMessages;
+    dealsService.getDocumentsByDeal = lllOrig.getDocumentsByDeal;
+    dealsService.getLastOutboundMessageId = lllOrig.getLastOutboundMessageId;
+    dealsService.getAllMessageIdsForThread = lllOrig.getAllMessageIdsForThread;
+    aiService.generateFollowUpReminder = lllOrig.generateFollowUpReminder;
+    cronEmailService.sendEmail = lllOrig.cronEmailSendEmail;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // BUG B-EDIT — webhook EDIT path must re-preview revised draft, NOT auto-send.
   // Hoist `saveDraftAndPreview` above draft-review branch; EDIT routes through
   // saveDraftAndPreview instead of executeDraft. SEND/REPLACE unchanged.
@@ -4817,6 +4933,67 @@ Brian`;
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group FFF smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP KKK + LLL — businesslike reminder tone + enumerate missing docs
+    // ════════════════════════════════════════════════════════════════
+    // S12.3: pre-KKK prompt EXPLICITLY recommended "Hey [name]!" + filler greetings as
+    //   reminder #1 examples. KKK rewrites the TONE block and bans those patterns.
+    // S12.4: pre-LLL prompt EXPLICITLY forbade enumeration ("Do NOT re-list every doc
+    //   needed — just reference 'the items we previously requested'"). LLL adds a
+    //   missingDocs param + REQUIRES enumeration by canonical name.
+    // 5x verifier already shipped 1/5 leaks (acceptable per 0-1 threshold). This
+    // single harness smoke is the ongoing regression guard.
+    console.log('\n========== GROUP KKK + LLL — reminder tone + doc enumeration ==========');
+    try {
+      const kklSummary = {
+        broker_name: 'Michael Torres',
+        ltv_percent: 60,
+        sender_name: 'Michael Torres',
+        sender_type: 'broker',
+        borrower_name: 'Noah MacKenzie',
+        exit_strategy: 'Refinance with TD at mortgage renewal (April 2028)',
+        broker_company: 'Westgate Mortgage Partners',
+        loan_type: 'second mortgage',
+      };
+      const kklMissing = ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
+      const kklOutput = await realAi.generateFollowUpReminder(kklSummary, 3, 1, kklMissing);
+      console.log('Group KKK+LLL output (first 400 chars):');
+      console.log(`  ${(kklOutput || '').slice(0, 400).replace(/\n/g, ' ')}`);
+
+      // KKK assertions — tone violations
+      const kklTonePatterns = [
+        [/^(\s*<p>\s*)?Hey\b/i,                           '"Hey" opener (banned per KKK)'],
+        [/Hope\s+you'?re\s+having\s+a\s+great\s+week/i,   '"Hope you\'re having a great week" filler'],
+        [/I\s+hope\s+this\s+email\s+finds\s+you\s+well/i, '"I hope this email finds you well" filler'],
+        [/Hope\s+all\s+is\s+well/i,                       '"Hope all is well" filler'],
+      ];
+      const toneFailures = [];
+      for (const [re, desc] of kklTonePatterns) {
+        if (re.test(kklOutput)) toneFailures.push(desc);
+      }
+      if (toneFailures.length > 0) {
+        throw new Error(`FAIL [Group KKK tone]: reminder leaked banned tone patterns:\n  - ${toneFailures.join('\n  - ')}`);
+      }
+
+      // LLL assertions — must enumerate at least 3 specific doc names
+      const enumerationMarkers = [
+        /\bGovernment[-\s]Issued\s+ID\b/i,
+        /\bProperty\s+Appraisal\b/i,
+        /\bProperty\s+Tax\s+Assessment\b/i,
+        /\bCurrent\s+Mortgage\s+Payout\s+Statement\b/i,
+        /\bProof\s+of\s+Income\b/i,
+        /\bCredit\s+Report\b/i,
+      ];
+      const enumeratedCount = enumerationMarkers.filter(re => re.test(kklOutput)).length;
+      if (enumeratedCount < 3) {
+        throw new Error(`FAIL [Group LLL enumeration]: expected at least 3 specific doc names, got ${enumeratedCount}/6. Output: "${(kklOutput || '').slice(0, 500).replace(/\s+/g, ' ')}"`);
+      }
+      console.log(`  PASS [Group KKK+LLL]: tone clean (no Hey/filler) + ${enumeratedCount}/6 specific doc names enumerated`);
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group KKK+LLL smoke skipped due to API error: ${e.message}`);
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');

@@ -81,10 +81,30 @@ const runFollowUpReminders = async () => {
     }
 
     try {
+      // Group LLL (S12.4): compute missingDocs for this deal and pass to the reminder
+      // generator so Vienna can enumerate outstanding items by name (instead of vague
+      // "the items we previously requested"). Mirrors webhook.js's missingDocs aggregation
+      // logic (line 176-186 + Group C exit_strategy push). Inline duplicate of
+      // DOC_SYNONYMS rather than cross-module import — see TODO below.
+      const dealDocs = await dealsService.getDocumentsByDeal(deal.id);
+      const classifications = dealDocs.map(d => d.classification).filter(Boolean);
+      const reminderLoanType = (deal.extracted_data?.loan_type || '').toLowerCase();
+      const reminderIsPurchase = /purchas/.test(reminderLoanType) || /purchas/.test(deal.extracted_data?.purpose || '');
+      const baseRequired = reminderIsPurchase
+        ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
+        : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
+      // TODO: extract DOC_SYNONYMS to a shared util if a third consumer surfaces.
+      // Currently inlined here and in src/routes/webhook.js (single entry — NOA satisfies income_proof).
+      const DOC_SYNONYMS_LOCAL = { income_proof: ['income_proof', 'noa'] };
+      const isDocSatisfied = (req, cs) => (DOC_SYNONYMS_LOCAL[req] || [req]).some(c => cs.includes(c));
+      const missingDocs = baseRequired.filter(req => !isDocSatisfied(req, classifications));
+      if (!deal.extracted_data?.exit_strategy) missingDocs.push('exit_strategy');
+
       const reminderEmail = await aiService.generateFollowUpReminder(
         deal.extracted_data,
         daysSilent,
-        newReminderNumber
+        newReminderNumber,
+        missingDocs
       );
 
       // Use the LAST OUTBOUND subject (what the recipient actually has in their inbox)
