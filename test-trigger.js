@@ -4613,6 +4613,83 @@ Brian`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group EEE smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP FFF — no over-clarification when info already provided (S14.2)
+    // ════════════════════════════════════════════════════════════════
+    // S14.2: Vienna asked "Just to clarify — is the plan to refinance the total
+    // combined balance with Scotiabank at that time, or will this be handled
+    // differently?" — when exit_strategy was already stated in the loan app and
+    // the broker had just resolved the ONLY actual discrepancy. Pre-FFF, no rule
+    // forbade Vienna from asking follow-up clarifications on info already on file.
+    // FFF fix: explicit CONVERSATIONAL RULE in generateBrokerResponse — accept
+    // what's stated, only ask when GENUINELY MISSING / AMBIGUOUS / CONTRADICTION.
+    console.log('\n========== GROUP FFF — no over-clarification when info already provided ==========');
+    try {
+      const fffSummary = {
+        sender_type: 'broker',
+        broker_name: 'Jason Mercer',
+        sender_name: 'Jason Mercer',
+        borrower_name: 'Lena Park',
+        ltv_percent: 65,
+        loan_type: 'second mortgage',
+        property_value: 695000,
+        loan_amount_requested: 180000,
+        existing_mortgage_balance: 271500,
+        exit_strategy: 'refinance with Scotiabank at mortgage renewal in August 2028',
+        purpose: 'refinance',
+      };
+      const fffConvo = [
+        {
+          direction: 'outbound',
+          subject: 'Re: Lena Park',
+          body: "I noticed two figures that don't match between your email and the application: (1) the property value — your email lists $720,000 but the appraisal shows $695,000; (2) the existing mortgage balance — your email states $258,000 but the loan application shows $271,500. Could you confirm which figures are accurate?",
+          created_at: new Date(Date.now() - 7200000).toISOString(),
+        },
+        {
+          direction: 'inbound',
+          subject: 'Re: Re: Lena Park',
+          body: 'Good catch — the appraisal numbers are accurate. $695,000 property value, $271,500 existing mortgage balance.',
+          created_at: new Date(Date.now() - 1800000).toISOString(),
+        },
+      ];
+      const fffResult = await realAi.generateBrokerResponse(
+        fffConvo[1].body,
+        [], [],
+        fffSummary,
+        fffConvo,
+        [],
+        'active'
+      );
+      const fffOutput = fffResult.responseEmail || '';
+      console.log('Group FFF output (first 500 chars):');
+      console.log(`  ${fffOutput.slice(0, 500).replace(/\n/g, ' ')}`);
+
+      // Negative assertion — six over-clarification patterns calibrated to S14.2's shape.
+      const overClarificationPatterns = [
+        [/just\s+to\s+clarify\b/i, '"just to clarify" opener'],
+        [/\bis\s+(?:the|that|this)\s+(?:plan|approach|strategy|intent|idea)\s+to\b/i, '"is the plan/approach/strategy/intent to..."'],
+        [/\bcould\s+you\s+(?:also\s+)?confirm\s+(?:the|how|whether|if)\s+(?:exit|refinance|combined|total\s+balance)/i, '"could you confirm the exit/refinance/combined/balance..."'],
+        [/\bcan\s+you\s+(?:also\s+)?clarify\s+(?:the|how|whether|if)\s+(?:exit|refinance|combined|total\s+balance)/i, '"can you clarify the exit/refinance/combined/balance..."'],
+        [/\bhow\s+(?:do\s+you|will\s+you|are\s+you|are\s+they)\s+plan(?:ning)?\s+to\s+(?:refinance|exit|repay)/i, '"how do you plan to refinance/exit/repay..."'],
+        [/\bwill\s+(?:this|that|the\s+exit)\s+be\s+handled\s+differently/i, '"will this be handled differently" (S14.2 verbatim shape)'],
+      ];
+      const failures = [];
+      for (const [re, desc] of overClarificationPatterns) {
+        const m = fffOutput.match(re);
+        if (m) {
+          const ctx = fffOutput.slice(Math.max(0, m.index - 30), m.index + m[0].length + 35).replace(/\s+/g, ' ');
+          failures.push(`${desc} — matched at "...${ctx}..."`);
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`FAIL [Group FFF]: Vienna over-clarified info already provided in deal summary / conversation:\n  - ${failures.join('\n  - ')}`);
+      }
+      console.log('  PASS [Group FFF]: no over-clarification when exit strategy + figures already stated');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group FFF smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
