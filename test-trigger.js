@@ -4995,6 +4995,162 @@ Brian`;
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group KKK+LLL smoke skipped due to API error: ${e.message}`);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP JJJ — AML/PEP timing policy: dropped from intake, kept post-approval
+    // ════════════════════════════════════════════════════════════════
+    // S12.2: Vienna asked for AML/PEP forms in initial intake reply alongside
+    // appraisal, NOA, etc. Franco's policy: AML/PEP are required on every deal
+    // but not urgent at intake — some brokers have them on file, lender can pull.
+    // Right time to ask is post-approval (admin sends APPROVED → Vienna drafts
+    // generateDocumentRequestEmail with AML/PEP in the list). JJJ drops AML/PEP
+    // from INITIAL_EMAIL_PROMPT + generateBrokerResponse; keeps them in
+    // generateDocumentRequestEmail.
+    //
+    // Three smokes — JJJ.1/JJJ.2 are negative (no AML/PEP), JJJ.3 is positive
+    // (AML/PEP must appear post-approval — regression guard for "we moved them,
+    // didn't delete them").
+
+    // JJJ.1 — INITIAL email must NOT mention AML/PEP
+    console.log('\n========== GROUP JJJ.1 — INITIAL email no AML/PEP at intake ==========');
+    try {
+      const jjjInitialBody = `Hi Franco,
+
+New second mortgage submission for review.
+
+Borrower: Marcus Webb
+Property: 142 Vine Avenue, Edmonton, AB
+Property Value: $890,000
+Existing First Mortgage: $318,000 (Scotiabank)
+Loan Amount Requested: $90,000
+Approximate LTV: ~46%
+Exit Strategy: refinance with Scotiabank at maturity
+
+Loan application attached. Will follow up with the rest shortly.
+
+Thanks,
+Jason Mercer
+Apex Mortgage`;
+      const { welcomeEmail: jjjInitialEmail } = await realAi.processInitialEmail(
+        'Jason Mercer',
+        jjjInitialBody,
+        [], [], false, false, false
+      );
+      console.log('JJJ.1 INITIAL output (first 500 chars):');
+      console.log(`  ${(jjjInitialEmail || '').slice(0, 500).replace(/\n/g, ' ')}`);
+
+      // Negative: must NOT mention AML or PEP at intake
+      if (/\bAML\b|\banti.?money\s+laundering\b/i.test(jjjInitialEmail)) {
+        throw new Error(`FAIL [Group JJJ.1]: INITIAL email mentions AML at intake (post-JJJ they move to post-approval). Got: ${(jjjInitialEmail || '').slice(0, 600)}`);
+      }
+      if (/\bPEP\b|\bpolitically\s+exposed/i.test(jjjInitialEmail)) {
+        throw new Error(`FAIL [Group JJJ.1]: INITIAL email mentions PEP at intake. Got: ${(jjjInitialEmail || '').slice(0, 600)}`);
+      }
+      // Regression: other intake docs still asked. INITIAL_EMAIL_PROMPT's WHAT TO ASK FOR
+      // list (lines 104-112) covers payout, appraisal, proof of income, credit bureau,
+      // exit strategy, loan amount, LTV. NOT gov_id / property_tax — those are
+      // generateBrokerResponse standardDocs (conversational handler), not INITIAL asks.
+      const expectedJJJ1 = [
+        [/(?:payout\s+statement|mortgage\s+payout)/i, 'mortgage payout statement'],
+        [/appraisal/i, 'appraisal'],
+        [/(?:proof\s+of\s+income|NOA|notice\s+of\s+assessment)/i, 'proof of income'],
+        [/credit\s+(?:bureau|report|pulled\s+credit)/i, 'credit bureau/report'],
+      ];
+      for (const [re, label] of expectedJJJ1) {
+        if (!re.test(jjjInitialEmail)) {
+          throw new Error(`FAIL [Group JJJ.1 regression]: INITIAL must still ask for ${label}. Got: ${(jjjInitialEmail || '').slice(0, 600)}`);
+        }
+      }
+      console.log('  PASS [Group JJJ.1]: INITIAL drops AML/PEP, other intake docs still asked');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group JJJ.1 smoke skipped due to API error: ${e.message}`);
+    }
+
+    // JJJ.2 — generateBrokerResponse (broker sender, active state) must NOT mention AML/PEP
+    console.log('\n========== GROUP JJJ.2 — broker response no AML/PEP at intake ==========');
+    try {
+      const jjjBrokerSummary = {
+        sender_type: 'broker',
+        broker_name: 'Jason Mercer',
+        sender_name: 'Jason Mercer',
+        borrower_name: 'Marcus Webb',
+        ltv_percent: 46,
+        loan_type: 'second mortgage',
+      };
+      const jjjBrokerConvo = [
+        { direction: 'outbound', subject: 'Re: Marcus Webb', body: 'Thanks for sending the loan application! To move forward I\'ll need: gov ID, appraisal, property tax assessment, proof of income, credit bureau, payout statement, exit strategy.', created_at: new Date(Date.now() - 86400000).toISOString() },
+        { direction: 'inbound', subject: 'Re: Re: Marcus Webb', body: 'Working on getting these together — what else do you need on this one?', created_at: new Date(Date.now() - 1800000).toISOString() },
+      ];
+      const jjjBrokerResult = await realAi.generateBrokerResponse(
+        jjjBrokerConvo[1].body,
+        [], [],
+        jjjBrokerSummary,
+        jjjBrokerConvo,
+        [],
+        'active'
+      );
+      const jjjBrokerOutput = jjjBrokerResult.responseEmail || '';
+      console.log('JJJ.2 broker-response output (first 500 chars):');
+      console.log(`  ${jjjBrokerOutput.slice(0, 500).replace(/\n/g, ' ')}`);
+
+      if (/\bAML\b|\banti.?money\s+laundering\b/i.test(jjjBrokerOutput)) {
+        throw new Error(`FAIL [Group JJJ.2]: broker response mentions AML at intake. Got: ${jjjBrokerOutput.slice(0, 600)}`);
+      }
+      if (/\bPEP\b|\bpolitically\s+exposed/i.test(jjjBrokerOutput)) {
+        throw new Error(`FAIL [Group JJJ.2]: broker response mentions PEP at intake. Got: ${jjjBrokerOutput.slice(0, 600)}`);
+      }
+      console.log('  PASS [Group JJJ.2]: broker response drops AML/PEP at intake');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group JJJ.2 smoke skipped due to API error: ${e.message}`);
+    }
+
+    // JJJ.3 — generateDocumentRequestEmail (post-approval) MUST mention AML AND PEP
+    console.log('\n========== GROUP JJJ.3 — post-approval doc-request keeps AML/PEP ==========');
+    try {
+      const jjjPostSummary = {
+        sender_type: 'broker',
+        broker_name: 'Jason Mercer',
+        sender_name: 'Jason Mercer',
+        borrower_name: 'Marcus Webb',
+        ltv_percent: 46,
+        loan_type: 'second mortgage',
+        property_value: 890000,
+        loan_amount_requested: 90000,
+        existing_mortgage_balance: 318000,
+        exit_strategy: 'refinance with Scotiabank at maturity',
+        purpose: 'refinance',
+      };
+      const jjjPostConvo = [
+        { direction: 'inbound', subject: 'Marcus Webb', body: 'Submitting Marcus Webb for review.', created_at: new Date(Date.now() - 86400000).toISOString() },
+      ];
+      const jjjPostExistingDocs = [
+        { file_name: 'Loan_Application_Webb.pdf', classification: 'loan_application' },
+        { file_name: 'Appraisal_Webb.pdf', classification: 'appraisal' },
+      ];
+      const jjjPostOutput = await realAi.generateDocumentRequestEmail(
+        jjjPostSummary,
+        'personal',
+        true,                  // hasApp
+        false,                 // hasPnw
+        jjjPostExistingDocs,
+        jjjPostConvo
+      );
+      console.log('JJJ.3 post-approval doc-request output (first 600 chars):');
+      console.log(`  ${(jjjPostOutput || '').slice(0, 600).replace(/\n/g, ' ')}`);
+
+      if (!/\bAML\b|\banti.?money\s+laundering\b/i.test(jjjPostOutput)) {
+        throw new Error(`FAIL [Group JJJ.3]: post-approval doc-request must mention AML (broker compliance, post-approval ask). Got: ${(jjjPostOutput || '').slice(0, 600)}`);
+      }
+      if (!/\bPEP\b|\bpolitically\s+exposed/i.test(jjjPostOutput)) {
+        throw new Error(`FAIL [Group JJJ.3]: post-approval doc-request must mention PEP (broker compliance, post-approval ask). Got: ${(jjjPostOutput || '').slice(0, 600)}`);
+      }
+      console.log('  PASS [Group JJJ.3]: post-approval doc-request includes AML and PEP (regression guard)');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group JJJ.3 smoke skipped due to API error: ${e.message}`);
+    }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }

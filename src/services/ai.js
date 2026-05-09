@@ -108,8 +108,6 @@ WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - Current appraisal (do NOT ask for "appraised value" separately — that comes from the appraisal itself. Just ask for "a current appraisal" if one hasn't been provided)
 - Proof of income — ask for "proof of income (an NOA works — or pay stubs / T4 / employment letter)" as a SINGLE item. Do NOT list NOA and Proof of Income as two separate asks — they're interchangeable for our initial review. We may follow up for additional income docs later (especially for self-employed borrowers where the NOA shows low income).
 - Credit bureau reports — if NO credit bureau (CB) documents were attached, ask "Have you pulled credit for the borrower(s)?" Do NOT ask if credit reports were already included in the attachments.
-- AML form (Anti-Money Laundering) — required compliance document. Always ask for it unless an AML doc was already attached.
-- PEP form (Politically Exposed Person) — required compliance document. Always ask for it unless a PEP doc was already attached.
 - Loan amount (only if not stated)
 - LTV (only if you cannot calculate it)
 
@@ -335,15 +333,13 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
       const dealLoanType = (existingSummary?.loan_type || '').toLowerCase();
       const dealPurpose = (existingSummary?.purpose || '').toLowerCase();
       const isPurchaseDeal = /purchas/.test(dealLoanType) || /purchas/.test(dealPurpose);
-      // AML/PEP forms only apply to broker submissions (brokers fill these for compliance).
-      // Borrowers don't submit these; lender / broker can pull them later if needed.
-      const senderIsBroker = existingSummary?.sender_type === 'broker';
-      const complianceDocs = senderIsBroker
-        ? [
-            'AML form (Anti-Money Laundering — broker compliance)',
-            'PEP form (Politically Exposed Person — broker compliance)',
-          ]
-        : [];
+      // Group JJJ (S12.2): AML/PEP no longer asked at intake. Both compliance forms
+      // move to post-approval — they're handled by generateDocumentRequestEmail's
+      // existing complianceDocs ask (line ~744). Variable kept (always []) so the
+      // existing spread sites in standardDocs below remain stable; collapses to a
+      // no-op spread post-JJJ. Senders (broker vs borrower) no longer differentiated
+      // here for compliance docs.
+      const complianceDocs = [];
       const standardDocs = isPurchaseDeal
         ? [
             'Government-Issued ID',
@@ -426,7 +422,7 @@ COMMON BROKER QUESTIONS — handle these consistently:
 HIGH LTV (over 80%) — when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:
 - Acknowledge directly that the LTV is outside our usual 80% threshold. Be honest about it.
 ${existingSummary?.collateral_offered
-  ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, AML, PEP, etc., per the STANDARD DOCUMENT CHECKLIST below).`
+  ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, etc., per the STANDARD DOCUMENT CHECKLIST below). Note: AML/PEP are NOT asked at intake — Group JJJ moved them to post-approval (generateDocumentRequestEmail).`
   : `- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
 - CRITICAL — DO NOT REQUEST DOCUMENTS IN THIS EMAIL: when LTV > 80% and additional collateral has NOT yet been confirmed by the broker, the ONLY ask in this email is the collateral question. Do NOT include a document request list — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. Document requests will follow LATER, after Franco decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 - If the broker's most recent reply was unclear about collateral (questions back, "let me check", off-topic), re-ask the collateral question in different words — give concrete examples of what would qualify (a second piece of real estate, an investment property, a vacation home with equity). Stay firm: the doc package is NOT requested until collateral is resolved.`}
