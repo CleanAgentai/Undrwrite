@@ -31,10 +31,15 @@ const runFollowUpReminders = async () => {
 
   const activeDeals = await dealsService.getActiveDeals();
   // Only follow up on deals waiting for the broker (not Franco).
-  // Fix 7: 'awaiting_collateral' is also a broker-waiting state — Vienna asked the
-  // collateral question and is waiting for the broker's reply. Same generic reminder
-  // copy as 'active' (Porter's clarifying answer); no tailored collateral-specific copy.
-  const brokerWaiting = activeDeals.filter(d => d.status === 'active' || d.status === 'awaiting_collateral');
+  // Fix 7 + Group HHH: 'awaiting_collateral' and 'awaiting_identity_confirmation'
+  // are also broker-waiting states — Vienna asked the collateral / identity-clash
+  // question and is waiting for the broker's reply. Same generic reminder copy as
+  // 'active' (Porter's clarifying answer); no tailored gate-specific copy.
+  const brokerWaiting = activeDeals.filter(d =>
+    d.status === 'active'
+    || d.status === 'awaiting_collateral'
+    || d.status === 'awaiting_identity_confirmation'
+  );
 
   let remindersSent = 0;
   const remindersLog = []; // Track which deals got reminders for the daily summary
@@ -191,10 +196,10 @@ const runFollowUpReminders = async () => {
 //   - "[Conditions Fulfilled]" (Group BBB handoff notice + draft preview)
 //   - "[Broker Update]" (passive admin notification)
 //
-// FUTURE: Group HHH will add `awaiting_identity_confirmation` state with a new
-// admin-bound subject (likely "[Identity Discrepancy]"). When HHH lands, add
-// that prefix to this regex alongside the others. Cross-reference noted in MMM
-// commit message.
+// HHH cross-reference RETIRED: Group HHH (S15.1) shipped without adding a new
+// admin-bound subject — awaiting_identity_confirmation is a silent-pending state
+// like Fix 7's awaiting_collateral. Admin sees no notification during the gate.
+// No regex update needed.
 const ADMIN_REPLY_SUBJECT_RE = /^(?:Re:\s+)+(?:\[UPDATED\]\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\[Conditions Fulfilled\]|\[Broker Update\])/i;
 const isAdminReplySubject = (subject) => ADMIN_REPLY_SUBJECT_RE.test(subject || '');
 

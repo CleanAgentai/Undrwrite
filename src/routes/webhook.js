@@ -749,7 +749,15 @@ ${draftEmail}
       const initialHasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => initialClassifications.includes(c));
       const initialLtv = dealSummary?.ltv_percent;
 
-      if (initialLtv && initialLtv > 80) {
+      if (dealSummary?.identity_clash) {
+        // Group HHH (S15.1): identity gate runs FIRST, before LTV gates. Vienna's
+        // welcome email asks ONLY for the borrower-name clarification (per the
+        // IDENTITY CLASH block in INITIAL_EMAIL_PROMPT); doc requests and the
+        // collateral question are deferred until identity is resolved. Admin sees
+        // nothing during this state — same silent-pending pattern as Fix 7.
+        console.log('Initial submission identity_clash=true — entering awaiting_identity_confirmation state (HHH)');
+        await dealsService.update(deal.id, { status: 'awaiting_identity_confirmation' });
+      } else if (initialLtv && initialLtv > 80) {
         // Fix 7: do NOT escalate immediately. Set status to 'awaiting_collateral'
         // and let Vienna's welcome email carry the collateral question. Admin sees
         // nothing until the broker confirms no-collateral (then we silently
@@ -780,6 +788,59 @@ ${draftEmail}
       if (email.attachments.length > 0) {
         console.log('Saving attachments to Supabase...');
         savedDocs = await dealsService.saveAttachments(existingDeal.id, email.attachments);
+      }
+
+      // Group HHH (S15.1): identity gate. When a deal is awaiting_identity_confirmation,
+      // parse the broker's reply for resolved/unresolved and dispatch:
+      //   - 'resolved'   → broker confirmed which borrower is correct. If parser
+      //                    extracted a confirmedBorrowerName, update dealSummary.borrower_name.
+      //                    Flip status to active, clear identity_clash flag, and fall through
+      //                    to normal active handling — generateBrokerResponse runs on the
+      //                    resolved deal and resumes normal intake.
+      //   - 'unresolved' → no DB state change; in-memory route through active branch so
+      //                    Vienna re-asks via generateBrokerResponse's awaiting_identity_confirmation
+      //                    block. Next broker reply gets re-parsed.
+      // Identity gate runs BEFORE Fix 7's collateral gate — clarify identity first, then
+      // evaluate LTV in subsequent turn (two-hop state for the rare double-issue case).
+      if (existingDeal.status === 'awaiting_identity_confirmation') {
+        console.log('Awaiting-identity-confirmation broker reply — parsing for resolved/unresolved');
+        const { disposition, confirmedBorrowerName } = await aiService.parseIdentityClarification(
+          email.textBody,
+          existingDeal.extracted_data
+        );
+        console.log(`Identity disposition: ${disposition}${confirmedBorrowerName ? ` (confirmed: ${confirmedBorrowerName})` : ''}`);
+
+        if (disposition === 'resolved') {
+          console.log('Identity resolved — flipping status to active, clearing identity_clash');
+          const updatedExtracted = {
+            ...(existingDeal.extracted_data || {}),
+            identity_clash: false,
+          };
+          // Q2: confirmedBorrowerName falls back to null if extraction unreliable. Only
+          // update borrower_name if we have a confirmed value; otherwise keep the
+          // originally-detected name (Vienna's subsequent flow re-extracts on next turn).
+          const updates = { status: 'active', extracted_data: updatedExtracted };
+          if (confirmedBorrowerName) {
+            updates.borrower_name = confirmedBorrowerName;
+            updatedExtracted.borrower_name = confirmedBorrowerName;
+          }
+          await dealsService.update(existingDeal.id, updates);
+          existingDeal.status = 'active';
+          if (confirmedBorrowerName) existingDeal.borrower_name = confirmedBorrowerName;
+          existingDeal.extracted_data = updatedExtracted;
+          // Fall through to normal active handling
+        } else {
+          console.log('Unresolved identity reply — staying in awaiting_identity_confirmation, re-asking via conversational handler');
+          // In-memory route through active branch so generateBrokerResponse runs and
+          // re-asks via the IDENTITY CLASH PENDING prompt block (gated on
+          // existingSummary.identity_clash, not status). Mirrors Fix 7's ambiguous-
+          // collateral pattern. DB status stays awaiting_identity_confirmation —
+          // the active-branch LTV gate below requires status==='active' AND
+          // identity_clash check happens at processInitialEmail time only, so the
+          // active branch's LTV gate won't re-route this deal. Once broker
+          // resolves on next turn, we'll flip to active properly.
+          existingDeal.status = 'active';
+        }
       }
 
       // Fix 7: high-LTV collateral gate. When a deal is awaiting_collateral, parse the
@@ -997,15 +1058,23 @@ ${draftEmail}
         // eventual prelim review.
         const collateralAlreadyOffered = !!existingDeal.extracted_data?.collateral_offered
           || !!result.updatedSummary?.collateral_offered;
-        const willGoToCollateralCheck = ltv && ltv > 80 && existingDeal.status === 'active' && !collateralAlreadyOffered;
-        const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc;
+        // Group HHH (S15.1): identity gate takes priority over all LTV gates. When
+        // identity_clash is unresolved, the active-branch fall-through (from the
+        // unresolved-reply handler that in-memory-flipped status='active') must NOT
+        // trigger awaiting_collateral / under_review / FINAL REVIEW transitions —
+        // identity must be confirmed first. The flag is cleared on resolved path
+        // before reaching this gate, so resolved deals proceed normally.
+        const identityClashUnresolved = !!existingDeal.extracted_data?.identity_clash
+          || !!result.updatedSummary?.identity_clash;
+        const willGoToCollateralCheck = ltv && ltv > 80 && existingDeal.status === 'active' && !collateralAlreadyOffered && !identityClashUnresolved;
+        const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc && !identityClashUnresolved;
 
         // Group L: when the FINAL REVIEW HITL is about to fire (all docs in, no LTV gate
         // active, deal currently active), Vienna goes silent on the broker side. Per Franco:
         // "When all docs are in, Vienna should silently trigger the preliminary review to
         // admin and wait. No broker reply at this stage. The admin-approved closing draft
         // is the one and only broker-facing message."
-        const willFireFinalReview = result.allDocsReceived && !willGoToCollateralCheck && !willReview && existingDeal.status === 'active';
+        const willFireFinalReview = result.allDocsReceived && !willGoToCollateralCheck && !willReview && existingDeal.status === 'active' && !identityClashUnresolved;
 
         if (ltv && ltv <= 80 && !hasReviewableDoc) {
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');

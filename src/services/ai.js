@@ -101,6 +101,12 @@ HIGH LTV (over 80%) — when the broker has stated an LTV above 80%, OR when our
 - Do NOT reject the deal. Do NOT promise it will be approved either. Just flag the threshold and ask about collateral options. Franco will make the final call.
 - CRITICAL — DO NOT REQUEST DOCUMENTS IN A HIGH-LTV INITIAL EMAIL: when LTV > 80%, the ONLY ask in this email is the collateral question. Do NOT include a document request list in this email — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. The full doc package will be requested LATER, after the lender decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 
+IDENTITY CLASH (when identity_clash=true per the IDENTITY CLASH DETECTION RULE in TASK 2):
+- The ONLY ask in this email is the borrower-name clarification. Do NOT include a document request list — no exit strategy, no payout statement, no appraisal, no proof of income, no credit bureau, no anything. The doc package will be requested LATER, once identity is confirmed.
+- Cite BOTH conflicting names explicitly: the one from the email body AND the one from the attached document. Pattern: "I noticed your email mentions [body name] with property at [body address] but the attached documents are for [doc name]. Could you confirm which is the correct borrower for this application?". Use the actual names you found, not placeholders.
+- Do NOT acknowledge receipt of attached documents as belonging to the file. Specifically, do NOT say "thanks for sending those through", "I've received the [doc]", "I've got the application", or any phrase that implies the docs are saved to the right deal — they may belong to a different borrower's file. Indirect reference is OK if natural ("once we confirm the borrower, I'll review what came across") — but no direct receipt acknowledgment.
+- Identity gate runs BEFORE the high-LTV check. Even if LTV > 80%, ask the identity question first; the collateral question waits until identity is confirmed.
+
 WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - A brief write-up or "story" about the deal — a high-level overview of what the client is looking for, how much they want to borrow and for how long, a bit of background on the borrowers, etc. If the broker already provided this kind of overview in their email, do NOT ask again. Only ask if the email is thin on context (e.g. just "here are the docs" with no explanation).
 - Exit strategy (how the borrower will repay / refinance out)
@@ -195,6 +201,7 @@ Use this exact JSON structure (use null for unknown fields, do not guess):
   "documents_received": ["list of document names received"],
   "documents_still_needed": ["list of documents still missing"],
   "key_risks_or_notes": "string - any red flags, urgency, or notable details",
+  "identity_clash": true | false,
   "summary": "9-10 sentence plain English summary of the deal so far"
 }
 
@@ -202,6 +209,7 @@ Do NOT calculate LTV yourself. If the broker explicitly states an LTV percentage
 The accurate LTV will be confirmed once we review the appraisal, NOT from the application form.
 Be specific about documents received vs still needed.
 EXIT STRATEGY RULE: Only set exit_strategy to a value if the broker EXPLICITLY stated the exit strategy in their email (e.g. "exit strategy: refinance with B lender at maturity" or "the borrower plans to sell the property after 12 months"). Do NOT infer, guess, or reconstruct an exit strategy from loan purpose, loan type, or any other context. If the exit strategy is not explicitly stated, set exit_strategy to null — and the missing exit strategy should appear in documents_still_needed.
+IDENTITY CLASH DETECTION RULE (Group HHH): set identity_clash=true ONLY when the borrower name in the email body is CLEARLY DIFFERENT from the borrower name in the attached loan application (or any other doc that names a borrower) — i.e. they refer to two different people. Compare full names, not just first names. A typo, missing middle name, or initial-vs-full-name difference is NOT a clash (e.g. "Anna Bergstrom" vs "Anna M. Bergstrom" is the same person; "Anna Bergstrom" vs "Grace Paulson" IS a clash). Set identity_clash=false for any of: no attached doc with a borrower name, names match, names are minor variants of the same person, only one name source available. When identity_clash=true, also add a note to key_risks_or_notes with both names (e.g. "Email body says 'Anna Bergstrom' but loan application is for 'Grace Paulson' — needs clarification before doc requests").
 If any number stated in the email (credit scores, property value, loan amount, balances) differs from what an attached document shows, add a note to key_risks_or_notes flagging the discrepancy — e.g. "Email stated credit scores 531/519 but credit bureau shows 583/608 — needs clarification."
 The summary field should read like a brief to a lender — include all key facts.
 
@@ -419,7 +427,12 @@ COMMON BROKER QUESTIONS — handle these consistently:
 - "Do you pull credit?" / "Do you guys pull credit?" → Answer: "We sometimes pull credit ourselves, but in most cases we ask the broker to provide credit bureau reports for the borrower(s). Have you already pulled credit for this deal? If so, please send the reports along — otherwise, let me know and Franco can decide how to handle it." Do NOT give a definitive yes/no — we handle it case-by-case.
 - "Can I speak with Franco?" / "What's Franco's number?" / "How do I reach Franco?" → Redirect them to the calendar link: "Absolutely! You can book a quick call with Franco here: https://calendar.app.google/rxr46kh4rzJgZpFx6". Do NOT share a phone number, do NOT invent one, do NOT say "call him at...".
 
-HIGH LTV (over 80%) — when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:
+${existingSummary?.identity_clash ? `IDENTITY CLASH PENDING (Group HHH) — the deal is currently in awaiting_identity_confirmation state because the prior submission's email body and attached documents named different borrowers. Vienna previously asked the broker to clarify which is correct, and the current broker reply did NOT clearly resolve the discrepancy (it was classified UNRESOLVED).
+- The ONLY ask in this email is to RE-ASK the borrower-name clarification, in different words this time. Do NOT include a document request list — no payout statement, no appraisal, no exit strategy, no proof of income, no anything. Doc requests resume ONLY after identity is confirmed.
+- Cite the conflicting names again from the deal summary's key_risks_or_notes or borrower_name field. Be patient and clear — the broker may not have understood the question.
+- Do NOT acknowledge or reference the attached documents as belonging to this file. They may belong to a different borrower's deal.
+
+` : ''}HIGH LTV (over 80%) — when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:
 - Acknowledge directly that the LTV is outside our usual 80% threshold. Be honest about it.
 ${existingSummary?.collateral_offered
   ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, etc., per the STANDARD DOCUMENT CHECKLIST below). Note: AML/PEP are NOT asked at intake — Group JJJ moved them to post-approval (generateDocumentRequestEmail).`
@@ -1398,6 +1411,88 @@ BROKER'S REPLY:
     } catch (error) {
       console.error('Claude collateral reply parsing failed, defaulting to ambiguous:', error.message);
       return { disposition: 'ambiguous', message: text };
+    }
+  },
+
+  // Group HHH (S15.1): classify a broker's reply to Vienna's identity-clash
+  // clarification question. Three dispositions:
+  //   - 'resolved'   : broker confirmed which name/file is correct (or provided
+  //                    a third name). Optional confirmedBorrowerName in the
+  //                    return — webhook updates dealSummary.borrower_name and
+  //                    flips status to 'active' to resume normal intake.
+  //   - 'unresolved' : broker's reply doesn't disambiguate (asked back, off-topic,
+  //                    "let me check"). Status stays 'awaiting_identity_confirmation';
+  //                    Vienna re-asks via generateBrokerResponse.
+  // Fast-path regex catches unambiguous "X is correct" patterns; everything else
+  // flows to Claude. confirmedBorrowerName falls back to null if extraction is
+  // unreliable per Q2 — webhook keeps the originally-detected name in that case.
+  parseIdentityClarification: async (replyText, dealSummary = {}) => {
+    const stripped = module.exports.stripQuotedText(replyText);
+    const text = (stripped || replyText || '').trim();
+    if (!text) return { disposition: 'unresolved', message: '', confirmedBorrowerName: null };
+
+    // Fast-path: explicit "[Name] is correct" / "the correct borrower is [Name]" patterns.
+    // Capture the resolved name. Conservative — only fires on tight patterns.
+    const fastResolvePatterns = [
+      /(?:correct\s+borrower\s+is|borrower\s+(?:is|should\s+be|name\s+is))\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/,
+      /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+is\s+(?:the\s+)?correct\b/,
+      /\bignore\s+(?:the\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?[,\s—]+(?:it'?s|the\s+borrower\s+is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/i,
+    ];
+    for (const re of fastResolvePatterns) {
+      const m = text.match(re);
+      if (m) return { disposition: 'resolved', message: text, confirmedBorrowerName: m[1] };
+    }
+
+    // Use Claude for substantive replies. Conservative default = unresolved when in doubt.
+    try {
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 80,
+        messages: [{
+          role: 'user',
+          content: `Classify a broker's reply to a borrower-identity clarification question.
+
+Vienna previously asked the broker to confirm the correct borrower because the email body and attached documents named different people. Classify the reply.
+
+Reply with EXACTLY this format on a single line:
+RESOLVED: <Confirmed Borrower Full Name>
+or
+RESOLVED: (no name extracted)
+or
+UNRESOLVED
+
+- RESOLVED: broker confirmed which name is correct (or provided a third name). Examples: "Anna Bergstrom is the correct borrower", "Apologies — the correct borrower is Anna Bergstrom, the docs were for a different file", "Ignore the Grace Paulson docs — Anna is correct", "Actually the borrower is Lisa Smith, both prior were wrong". Extract the confirmed full name into the response. If the broker confirmed but didn't restate the full name (e.g. "yes the first one", "the email is right"), use "(no name extracted)".
+- UNRESOLVED: broker's reply doesn't disambiguate. Examples: "what do you mean?", "let me check with my team", "I'll get back to you", off-topic content, broker continues with other deal aspects without addressing identity.
+
+When in doubt, choose UNRESOLVED — better to re-ask than to lock in the wrong borrower.
+
+CONTEXT — names previously seen by Vienna:
+- Body name: ${dealSummary?.borrower_name || 'unknown'}
+- Other names found in attached docs: (Vienna's prior message would have cited specific names; if not visible, say so)
+
+BROKER'S REPLY:
+"${text.replace(/"/g, '\\"')}"`,
+        }],
+      });
+
+      const raw = response.content[0].text.trim();
+      const upper = raw.toUpperCase();
+      if (upper.startsWith('RESOLVED')) {
+        // Extract name after "RESOLVED:" — strip the prefix and any trailing punctuation.
+        const m = raw.match(/^RESOLVED\s*:\s*(.+?)\s*$/i);
+        const namePart = m ? m[1].trim() : '';
+        // Treat "(no name extracted)" / empty as resolved-without-name (Q2 fallback).
+        const isNoName = !namePart || /\(\s*no\s+name\s+extracted\s*\)/i.test(namePart);
+        return {
+          disposition: 'resolved',
+          message: text,
+          confirmedBorrowerName: isNoName ? null : namePart,
+        };
+      }
+      return { disposition: 'unresolved', message: text, confirmedBorrowerName: null };
+    } catch (error) {
+      console.error('Claude identity clarification parsing failed, defaulting to unresolved:', error.message);
+      return { disposition: 'unresolved', message: text, confirmedBorrowerName: null };
     }
   },
 

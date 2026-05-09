@@ -1237,6 +1237,35 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`parseCollateralReply fast-path: ${collateralFastPathPassed}/${collateralFastPathCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP HHH — parseIdentityClarification fast-path truth table (no Claude)
+  // ════════════════════════════════════════════════════════════════
+  // S15.1 root cause: Vienna detected identity discrepancy AND fired doc list
+  // in same email. HHH adds awaiting_identity_confirmation gate. parseIdentityClarification
+  // classifies broker reply as 'resolved' (with optional confirmedBorrowerName) or
+  // 'unresolved'. Fast-path regex catches unambiguous resolutions; everything else
+  // flows to Claude. This block tests fast-path patterns deterministically.
+  console.log('\n========== GROUP HHH — parseIdentityClarification fast-path truth table ==========');
+  const identityClashCases = [
+    // Resolved with extracted name
+    ['Anna Bergstrom is the correct borrower.',                                'resolved',  'Anna Bergstrom'],
+    ['The correct borrower is Anna Bergstrom — apologies for the confusion.',  'resolved',  'Anna Bergstrom'],
+    ['borrower is Lisa Smith, both prior were wrong.',                         'resolved',  'Lisa Smith'],
+    ['borrower should be Anna Bergstrom.',                                     'resolved',  'Anna Bergstrom'],
+    ['Borrower name is Daniel Rosen.',                                         'resolved',  'Daniel Rosen'],
+  ];
+  let identityFastPassed = 0;
+  for (const [reply, expectedDisp, expectedName] of identityClashCases) {
+    const result = await aiService.parseIdentityClarification(reply);
+    if (result.disposition === expectedDisp && result.confirmedBorrowerName === expectedName) {
+      console.log(`  PASS: ${JSON.stringify(reply.slice(0, 55))} → '${expectedDisp}' (${expectedName})`);
+      identityFastPassed++;
+    } else {
+      throw new Error(`FAIL [Group HHH parseIdentityClarification ${JSON.stringify(reply)}]: expected '${expectedDisp}' (${expectedName}), got '${result.disposition}' (${result.confirmedBorrowerName})`);
+    }
+  }
+  console.log(`Group HHH parseIdentityClarification fast-path: ${identityFastPassed}/${identityClashCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
   // ════════════════════════════════════════════════════════════════
   // Production observed 9 reminder emails fired to one broker at the same 9 PM
@@ -5150,6 +5179,123 @@ Apex Mortgage`;
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group JJJ.3 smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP HHH — INITIAL identity-clash detection + minimal-ask block
+    // ════════════════════════════════════════════════════════════════
+    // S15.1: Vienna correctly detected identity discrepancy but fired full doc
+    // list in the same email. Sequential gate violation. HHH adds:
+    //   - identity_clash field in TASK 2 schema
+    //   - IDENTITY CLASH minimal-ask block in INITIAL_EMAIL_PROMPT
+    //   - awaiting_identity_confirmation status routing in webhook
+    // Live smoke uses the exact production fixture shape (Bergstrom body / Paulson
+    // loan app). 5x verification before harness commit ran 0/5 leaks across all
+    // assertions — single harness smoke is the ongoing regression guard.
+    console.log('\n========== GROUP HHH — INITIAL identity-clash minimal-ask ==========');
+    try {
+      const hhhBody = `Hi Franco,
+
+New second mortgage submission for review.
+
+Borrower: Anna Bergstrom
+Property: 1801 Varsity Estates Dr NW, Calgary, AB
+Property Value: $620,000
+Existing Mortgage Balance: $341,000 (TD Bank)
+Loan Amount Requested: $92,000
+Approximate LTV: ~69.8%
+
+I'm attaching the loan application to start.
+
+Thanks,
+Jason Mercer
+Capital Bridge Mortgage Group`;
+
+      const hhhFakeLoanApp = `LOAN APPLICATION FORM
+
+PRIMARY BORROWER
+Full Legal Name: Grace Paulson
+Date of Birth: 1981-03-14
+Address: 88 Harvest Hills Blvd NE, Calgary, AB
+
+PROPERTY DETAILS
+Property Address: 88 Harvest Hills Blvd NE, Calgary, AB
+Current Property Value: $480,000
+Existing Mortgage: $215,000
+
+LOAN DETAILS
+Loan Amount Requested: $65,000
+
+Signed: Grace Paulson`;
+
+      const hhhSavedDocs = [{
+        file_name: 'LoanApp_Paulson.pdf',
+        classification: 'loan_application',
+        extracted_data: { text: hhhFakeLoanApp },
+      }];
+      const hhhAttachments = [{
+        Name: 'LoanApp_Paulson.pdf',
+        ContentType: 'application/pdf',
+        Content: 'BASE64STUB',
+        ContentLength: 100,
+      }];
+
+      const hhhResult = await realAi.processInitialEmail(
+        'Jason Mercer',
+        hhhBody,
+        hhhAttachments,
+        hhhSavedDocs,
+        false, false, false
+      );
+      const hhhWelcome = hhhResult.welcomeEmail || '';
+      const hhhSummary = hhhResult.dealSummary || {};
+      console.log('Group HHH output (first 500 chars):');
+      console.log(`  ${hhhWelcome.slice(0, 500).replace(/\n/g, ' ')}`);
+
+      // 1. dealSummary.identity_clash must be true
+      if (hhhSummary.identity_clash !== true) {
+        throw new Error(`FAIL [Group HHH identity_clash flag]: expected dealSummary.identity_clash=true, got ${JSON.stringify(hhhSummary.identity_clash)}`);
+      }
+      // 2. NO doc-list patterns in welcome email
+      const hhhDocListForbidden = [
+        [/<ul>/i, '<ul> tag (doc list)'],
+        [/\b(?:exit\s+strategy|payout\s+statement|appraisal|proof\s+of\s+income|credit\s+bureau)\b/i, 'doc-list keyword'],
+        [/\bI'?ll\s+need:/i, '"I\'ll need:" doc-ask phrase'],
+      ];
+      const docLeaks = [];
+      for (const [re, desc] of hhhDocListForbidden) {
+        if (re.test(hhhWelcome)) docLeaks.push(desc);
+      }
+      if (docLeaks.length > 0) {
+        throw new Error(`FAIL [Group HHH no-doc-list]: doc list leaked despite identity_clash. Got: ${docLeaks.join(', ')}\nFirst 600 chars: ${hhhWelcome.slice(0, 600)}`);
+      }
+      // 3. NO doc-receipt acknowledgment
+      const hhhReceiptForbidden = [
+        [/\bthanks\s+for\s+sending\s+(?:those\s+)?(?:through|over)/i, '"thanks for sending those through"'],
+        [/\bI'?ve\s+received\s+the\s+(?:loan\s+app|application|credit\s+bureau|appraisal|docs?)/i, '"I\'ve received the X" receipt'],
+      ];
+      const receiptLeaks = [];
+      for (const [re, desc] of hhhReceiptForbidden) {
+        if (re.test(hhhWelcome)) receiptLeaks.push(desc);
+      }
+      if (receiptLeaks.length > 0) {
+        throw new Error(`FAIL [Group HHH no-receipt-ack]: doc-receipt acknowledgment leaked. Got: ${receiptLeaks.join(', ')}`);
+      }
+      // 4. MUST contain a clarification ask
+      if (!/(?:could\s+you|can\s+you)\s+(?:please\s+)?confirm/i.test(hhhWelcome) && !/\bwhich\s+(?:is\s+)?(?:the\s+)?correct/i.test(hhhWelcome)) {
+        throw new Error(`FAIL [Group HHH clarification ask]: expected a 'could you confirm' / 'which is the correct' pattern. First 600: ${hhhWelcome.slice(0, 600)}`);
+      }
+      // 5. MUST cite both names
+      if (!/\bAnna\s+Bergstrom\b/.test(hhhWelcome)) {
+        throw new Error(`FAIL [Group HHH cite Anna]: welcome must cite "Anna Bergstrom" (body name). First 600: ${hhhWelcome.slice(0, 600)}`);
+      }
+      if (!/\bGrace\s+Paulson\b/.test(hhhWelcome)) {
+        throw new Error(`FAIL [Group HHH cite Grace]: welcome must cite "Grace Paulson" (loan-app name). First 600: ${hhhWelcome.slice(0, 600)}`);
+      }
+      console.log('  PASS [Group HHH]: identity_clash=true, no doc-list, no receipt-ack, clarification ask present, both names cited');
+    } catch (e) {
+      if (e.message.startsWith('FAIL')) throw e;
+      console.warn(`  Group HHH smoke skipped due to API error: ${e.message}`);
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
