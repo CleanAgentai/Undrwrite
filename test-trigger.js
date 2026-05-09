@@ -2409,6 +2409,62 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`Group III isAdminRecipient: ${gatePassed}/${adminGateCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP MMM — daily summary admin-reply subject filter (S13.1)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-MMM: cron/dailySummary.js filtered direction='inbound' but didn't
+  // distinguish broker-from-admin. Admin replies (saved as inbound under deals
+  // for HITL conversation history) leaked into the "Emails Received" section
+  // as if they were broker activity. MMM fix: subject-prefix heuristic — admin
+  // replies inherit Vienna's controlled outbound-to-admin subject prefixes.
+  console.log('\n========== GROUP MMM — daily summary admin-reply subject filter ==========');
+  const { isAdminReplySubject } = require('./src/cron/dailySummary');
+
+  const adminReplyCases = [
+    // Positive — Vienna's outbound-to-admin subject prefixes (admin replies inherit these)
+    ['Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Tran — 65.7% LTV',           true,  'admin reply to prelim review'],
+    ['Re: ACTION REQUIRED: LTV Over 80% — Ryan Callahan',                          true,  'admin reply to escalation'],
+    ['Re: [UPDATED] ACTION REQUIRED: PRELIMINARY Review — Patricia Simmons — 65.7% LTV', true, 'admin reply to updated prelim (Fix 2 path)'],
+    ['Re: [UPDATED] ACTION REQUIRED: LTV Over 80% — Ryan Callahan',                true,  'admin reply to updated escalation'],
+    ['Re: FINAL REVIEW: All Documents Received — Marcus Webb',                     true,  'admin reply to FINAL REVIEW'],
+    ['Re: [Conditions Fulfilled] James Okafor — File Complete',                    true,  'admin reply to BBB handoff notice'],
+    ['Re: [Broker Update] Sarah Mitchell — Under Your Review',                     true,  'admin reply to passive [Broker Update]'],
+    // Nested Re: chains — multi-turn admin draft preview cycles
+    ['Re: Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Tran',                   true,  'nested Re: (admin reply to draft preview)'],
+    ['Re: Re: Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Tran',               true,  'triple-nested Re: (multi-turn edit cycle)'],
+    ['Re: Re: [UPDATED] ACTION REQUIRED: PRELIMINARY Review — Patricia Simmons',   true,  'nested Re: + [UPDATED]'],
+    ['Re: Re: [Conditions Fulfilled] James Okafor — File Complete',                true,  'nested Re: + [Conditions Fulfilled]'],
+    // Case-insensitive Re:
+    ['re: action required: PRELIMINARY Review — Kevin Tran',                       true,  'lowercase re: still matches'],
+    // Negative — broker/borrower replies must pass through (returns false)
+    ['Re: New Mortgage Application — Noah MacKenzie',                              false, 'broker initial reply'],
+    ['Re: Loan Inquiry',                                                           false, 'broker reply to Vienna welcome'],
+    ['Patricia Simmons — Documents',                                               false, 'broker fresh thread (no Re:)'],
+    ['Re: Patricia Simmons',                                                       false, 'broker reply on borrower-name subject'],
+    ['Sending the appraisal',                                                      false, 'broker forward with new docs'],
+    ['Re: Second Mortgage Application — Noah MacKenzie',                           false, 'broker reply to original-thread subject'],
+    // Edge — empty / null
+    ['',                                                                           false, 'empty subject'],
+    [null,                                                                         false, 'null subject'],
+    // False-positive trap: broker subject mentions "ACTION REQUIRED" mid-phrase
+    ['Re: My client wants to know what action required for the AML form',          false, 'broker subject mentioning "action required" mid-phrase — must NOT match'],
+    ['Re: Action items from our call last Tuesday',                                false, 'broker subject mentioning "Action" mid-phrase — must NOT match'],
+    // False-positive trap: broker subject contains [UPDATED] but not as Vienna's pattern
+    ['Re: [UPDATED] My borrower has new income docs',                              false, 'broker subject with [UPDATED] but no ACTION REQUIRED — must NOT match'],
+  ];
+
+  let mmmPassed = 0;
+  for (const [subject, expected, label] of adminReplyCases) {
+    const got = isAdminReplySubject(subject);
+    if (got === expected) {
+      console.log(`  PASS [${label}]: isAdminReplySubject(${JSON.stringify(String(subject || '').slice(0, 50))}) → ${expected}`);
+      mmmPassed++;
+    } else {
+      throw new Error(`FAIL [Group MMM ${label}]: expected ${expected}, got ${got} for ${JSON.stringify(subject)}`);
+    }
+  }
+  console.log(`Group MMM isAdminReplySubject: ${mmmPassed}/${adminReplyCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP C — missingDocs aggregation includes exit_strategy when null/empty
   // ════════════════════════════════════════════════════════════════
   // S6.3 / S7.3 root cause: missingDocs filter at webhook.js:180 only checked

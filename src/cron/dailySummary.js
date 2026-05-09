@@ -155,6 +155,29 @@ const runFollowUpReminders = async () => {
   return remindersLog;
 };
 
+// Group MMM (S13.1): admin replies leak into "Emails Received" because they're
+// saved with direction='inbound' under existing deals (webhook admin-reply path
+// needs them in conversation history for HITL drafting). Subject heuristic —
+// admin replies inherit Vienna's controlled outbound-to-admin subject prefixes
+// after a leading "Re: " chain. Reliable because the prefixes are all enumerated
+// in this codebase. Handles nested "Re: Re: ..." chains (multi-turn admin draft
+// preview cycles) and optional "[UPDATED]" prefix from Fix 2's update path.
+//
+// Vienna's outbound-to-admin subject prefixes (the authoritative source — keep
+// the regex in sync if any new prefix is added):
+//   - "ACTION REQUIRED:" (preliminary review, escalation)
+//   - "[UPDATED] ACTION REQUIRED:" (Fix 2 update path)
+//   - "FINAL REVIEW:" (all-docs FINAL REVIEW HITL)
+//   - "[Conditions Fulfilled]" (Group BBB handoff notice + draft preview)
+//   - "[Broker Update]" (passive admin notification)
+//
+// FUTURE: Group HHH will add `awaiting_identity_confirmation` state with a new
+// admin-bound subject (likely "[Identity Discrepancy]"). When HHH lands, add
+// that prefix to this regex alongside the others. Cross-reference noted in MMM
+// commit message.
+const ADMIN_REPLY_SUBJECT_RE = /^(?:Re:\s+)+(?:\[UPDATED\]\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\[Conditions Fulfilled\]|\[Broker Update\])/i;
+const isAdminReplySubject = (subject) => ADMIN_REPLY_SUBJECT_RE.test(subject || '');
+
 const runDailySummary = async () => {
   console.log('\n========== DAILY SUMMARY CRON ==========');
   console.log('Timestamp:', new Date().toISOString());
@@ -171,8 +194,14 @@ const runDailySummary = async () => {
       return;
     }
 
-    // Filter to inbound messages only
-    const inbound = recentMessages.filter(m => m.direction === 'inbound');
+    // Filter to inbound messages only — Group MMM also excludes admin replies
+    // (subject heuristic above) so Franco's own approve/decline/conditions/referral
+    // replies don't leak into the "Emails Received" section as if they were broker
+    // inbound. The admin replies still live in conversation history for HITL
+    // drafting; this filter is read-side only.
+    const inbound = recentMessages.filter(m =>
+      m.direction === 'inbound' && !isAdminReplySubject(m.subject)
+    );
 
     // Group deals by status
     const dealsByStatus = {};
@@ -247,4 +276,4 @@ console.log(`Daily summary cron scheduled — runs at 9:00 PM ${ADMIN_TIMEZONE}`
 
 // Export for manual triggering/testing. formatAdminDate is exposed for the
 // harness to pin Bug 13.1 (timezone wrap on date header).
-module.exports = { runDailySummary, runFollowUpReminders, formatAdminDate, ADMIN_TIMEZONE };
+module.exports = { runDailySummary, runFollowUpReminders, formatAdminDate, ADMIN_TIMEZONE, isAdminReplySubject };
