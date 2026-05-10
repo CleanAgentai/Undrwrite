@@ -1199,16 +1199,41 @@ Return only the HTML. Do not include a subject line.`,
     }
   },
 
-  // Strip quoted/forwarded text from email replies (lines starting with > or "On ... wrote:" blocks)
+  // Strip quoted/forwarded text from email replies (lines starting with > or "On ... wrote:" blocks).
+  //
+  // Group PPP-leak (S1.7): pre-fix this missed two patterns and shipped Franco's
+  // Union Financial signature to a broker in production (deal 9aa136aa, msg 11→14):
+  //   1. Wrapped Gmail-mobile header where long display name pushes `<email> wrote:`
+  //      to a second line. Single-line regex didn't match either half.
+  //   2. RFC 3676 `\n-- \n` signature separator. No rule, full sig survived.
+  //
+  // Phase 1 — string-level truncation for "On ... wrote:" with multi-line tolerance.
+  // Phase 2 — line-by-line scan for `--`, `>`, forwarded headers, mobile trailers.
   stripQuotedText: (text) => {
     if (!text) return '';
+
+    // Phase 1: find earliest "On <date> ... wrote:" header even when wrapped across
+    // 2-3 lines. /s flag lets `.` match newlines; 400-char cap bounds the search and
+    // prevents runaway matching across body content. Anchored on `\n` (or start of
+    // text) so the "On " must begin a line, not be mid-sentence ("On the other hand").
+    const headerMatch = text.match(/(^|\n)on\s+\S.{0,400}?\swrote\s*:\s*\n/is);
+    if (headerMatch) {
+      text = text.substring(0, headerMatch.index);
+    }
+
+    // Phase 2: existing line-based rules + new `--` sig separator + mobile trailers.
     const lines = text.split('\n');
     const freshLines = [];
     for (const line of lines) {
-      // Stop at "On <date> ... wrote:" or "---------- Forwarded message" or similar
-      if (/^on .+ wrote:\s*$/i.test(line.trim())) break;
-      if (/^-{3,}\s*(original message|forwarded message)/i.test(line.trim())) break;
-      if (/^from:\s/i.test(line.trim()) && freshLines.length > 0 && /^(sent|to|date|subject):\s/i.test(lines[lines.indexOf(line) + 1]?.trim() || '')) break;
+      const trimmed = line.trim();
+      // RFC 3676 signature separator: line containing only `--` (with optional trailing
+      // whitespace). Standard convention; anchoring requires nothing-after-the-dashes
+      // so body text like "-- not really" doesn't false-positive.
+      if (/^--\s*$/.test(trimmed)) break;
+      if (/^-{3,}\s*(original message|forwarded message)/i.test(trimmed)) break;
+      // Mobile-client trailers (iOS / Android / Samsung). Common signature-block leader.
+      if (/^sent from my (iphone|ipad|android|mobile|samsung|galaxy)/i.test(trimmed)) break;
+      if (/^from:\s/i.test(trimmed) && freshLines.length > 0 && /^(sent|to|date|subject):\s/i.test(lines[lines.indexOf(line) + 1]?.trim() || '')) break;
       // Skip individually quoted lines (> prefix)
       if (/^\s*>/.test(line)) continue;
       freshLines.push(line);

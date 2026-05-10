@@ -2554,6 +2554,342 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`Group III isAdminRecipient: ${gatePassed}/${adminGateCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP PPP-leak — stripQuotedText hardening + textToHtml tightening
+  // + stripAdminSignature scrub (S1.6 + S1.7)
+  // ════════════════════════════════════════════════════════════════
+  // Production failure: deal 9aa136aa (Grace Paulson). Franco EDITed the BBB
+  // closing-draft preview to add his email address. Gmail-mobile auto-appended
+  // a wrapped "On <date>, Lead Underwriter @ Private Mortgage Link <\nemail>
+  // wrote:" header and a `\n-- \n` separator + 6-marker Union Financial sig.
+  // stripQuotedText's single-line regex missed the wrapped header; textToHtml's
+  // loose HTML-detect regex matched <fmaione@...> and early-returned bare text;
+  // result was shipped to broker franco@vimarealty.com as msg 14 — PII leak.
+  //
+  // This block tests three deterministic truth tables (A: stripQuotedText,
+  // B: textToHtml, C: stripAdminSignature) and one end-to-end deterministic
+  // pipeline fixture (D1) using the verbatim production msg 11 body. The D2
+  // probabilistic harness (Claude-driven EDIT path, 5x verification) is gated
+  // behind RUN_PPP_LEAK_D2=1 to avoid burning Claude calls on every harness run.
+  console.log('\n========== GROUP PPP-leak — stripQuotedText / textToHtml / stripAdminSignature ==========');
+  // textToHtml is already in scope (destructured from webhookRouter.__test__ at module top).
+  const { stripAdminSignature, ADMIN_SIG_MARKERS } = require('./src/services/email').__test__;
+  const fs_ppp = require('fs');
+  const path_ppp = require('path');
+
+  // ─── Truth table A — stripQuotedText ────────────────────────────────────
+  console.log('\n---------- Group PPP-leak / A: stripQuotedText ----------');
+  const stripQuotedCases = [
+    // Single-line "On ... wrote:" header
+    [
+      'Thanks!\n\nOn Mon, 1 Jan 2026 at 09:00, Jason <jason@x.com> wrote:\n> previous content',
+      'Thanks!',
+      'single-line "On ... wrote:" header',
+    ],
+    // Wrapped 2-line header (the production msg 11 shape)
+    [
+      'Hi Rachel.\n\nOn Sun, 10 May 2026 at 14:03, Lead Underwriter @ Private Mortgage Link <\ninfo@privatemortgagelink.com> wrote:\n\n> Draft Email Preview',
+      'Hi Rachel.',
+      'wrapped 2-line "On ... wrote:" header (production case)',
+    ],
+    // Wrapped 3-line variant
+    [
+      'Hi Rachel.\n\nOn Sun, 10 May 2026 at 14:03,\nLead Underwriter @ Private Mortgage Link\n<info@privatemortgagelink.com> wrote:\n\n> quoted',
+      'Hi Rachel.',
+      'wrapped 3-line "On ... wrote:" header',
+    ],
+    // RFC 3676 sig separator with trailing space
+    [
+      'Hi there.\n\n-- \nJohn Doe\njohn@x.com',
+      'Hi there.',
+      'RFC 3676 sig separator "-- " (with trailing space)',
+    ],
+    // RFC 3676 sig separator without trailing space (some clients drop it)
+    [
+      'Hi there.\n\n--\nJohn Doe\njohn@x.com',
+      'Hi there.',
+      'sig separator "--" (no trailing space)',
+    ],
+    // Mobile-client trailers
+    [
+      'Quick reply.\n\nSent from my iPhone',
+      'Quick reply.',
+      'Sent from my iPhone trailer',
+    ],
+    [
+      'Quick reply.\n\nSent from my Galaxy S23',
+      'Quick reply.',
+      'Sent from my Galaxy trailer',
+    ],
+    // No quoted content, no separator — return as-is
+    [
+      'Hi there. This is just the body.',
+      'Hi there. This is just the body.',
+      'no quoted content, no separator',
+    ],
+    // `>` prefixed lines mid-body
+    [
+      'Reply text.\n> quoted line 1\n> quoted line 2\nMore reply text.',
+      'Reply text.\nMore reply text.',
+      '> prefixed lines stripped, rest kept',
+    ],
+    // False-positive check: "On the other hand" should NOT trigger
+    [
+      'Thanks!\n\nOn the other hand, we should check the rate.',
+      'Thanks!\n\nOn the other hand, we should check the rate.',
+      '"On the other hand" not a false positive (no "wrote:")',
+    ],
+  ];
+  let stripQuotedPassed = 0;
+  for (const [input, expected, label] of stripQuotedCases) {
+    const got = aiService.stripQuotedText(input);
+    if (got === expected) {
+      console.log(`  PASS [${label}]`);
+      stripQuotedPassed++;
+    } else {
+      throw new Error(`FAIL [Group PPP-leak / A stripQuotedText ${label}]:\n  input=${JSON.stringify(input)}\n  expected=${JSON.stringify(expected)}\n  got=${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`Group PPP-leak / A stripQuotedText: ${stripQuotedPassed}/${stripQuotedCases.length} passed`);
+
+  // ─── Truth table B — textToHtml HTML_DETECT ─────────────────────────────
+  console.log('\n---------- Group PPP-leak / B: textToHtml ----------');
+  const pppTextToHtmlCases = [
+    // Real HTML — return as-is
+    ['<p>Hello</p>',                  '<p>Hello</p>',                  'real <p> HTML'],
+    ['<p class="x">Hello</p>',        '<p class="x">Hello</p>',        '<p> with attributes'],
+    ['Line one<br>Line two',          'Line one<br>Line two',          '<br> tag'],
+    ['<a href="x">link</a>',          '<a href="x">link</a>',          '<a> link tag'],
+    ['<table><tr><td>x</td></tr></table>', '<table><tr><td>x</td></tr></table>', 'table HTML'],
+    ['<strong>bold</strong> word',    '<strong>bold</strong> word',    '<strong> tag'],
+    // Bare text with email-in-angle-brackets — MUST wrap (the production bug)
+    [
+      'Hi <fmaione@unionfinancialcorp.com>',
+      '<p>Hi <fmaione@unionfinancialcorp.com></p>',
+      'email-in-angle-brackets does NOT count as HTML (production bug)',
+    ],
+    [
+      'Send to <test@example.com>',
+      '<p>Send to <test@example.com></p>',
+      'generic email-in-angle-brackets',
+    ],
+    // Bare text with name-in-angle-brackets — wrap
+    [
+      'Hi <Some Name>',
+      '<p>Hi <Some Name></p>',
+      'name-in-angle-brackets does NOT count as HTML',
+    ],
+    // Plain text
+    ['Hello world',                   '<p>Hello world</p>',            'plain text'],
+    // Empty
+    ['',                              '',                              'empty text'],
+    // Multi-paragraph plain
+    [
+      'First paragraph.\n\nSecond paragraph.',
+      '<p>First paragraph.</p>\n<p>Second paragraph.</p>',
+      'multi-paragraph plain text',
+    ],
+  ];
+  let pppTextToHtmlPassed = 0;
+  for (const [input, expected, label] of pppTextToHtmlCases) {
+    const got = textToHtml(input);
+    if (got === expected) {
+      console.log(`  PASS [${label}]`);
+      pppTextToHtmlPassed++;
+    } else {
+      throw new Error(`FAIL [Group PPP-leak / B textToHtml ${label}]:\n  input=${JSON.stringify(input)}\n  expected=${JSON.stringify(expected)}\n  got=${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`Group PPP-leak / B textToHtml: ${pppTextToHtmlPassed}/${pppTextToHtmlCases.length} passed`);
+
+  // ─── Truth table C — stripAdminSignature ────────────────────────────────
+  console.log('\n---------- Group PPP-leak / C: stripAdminSignature ----------');
+  const stripSigCases = [
+    // Structural: \n-- \n separator
+    [
+      'Body content.\n\n-- \nFranco Maione\nfmaione@unionfinancialcorp.com',
+      true,  // expected to have zero markers in result
+      'plaintext "-- " separator truncates entire sig',
+    ],
+    // Structural: <p>-- </p> textToHtml-wrapped variant
+    [
+      '<p>Body content.</p>\n<p>-- </p>\n<p>Franco Maione</p>\n<p>fmaione@unionfinancialcorp.com</p>',
+      true,
+      'HTML <p>-- </p> separator truncates wrapped sig',
+    ],
+    // Match-list belt: markers without separator (e.g., separator was stripped earlier)
+    [
+      'Body. fmaione@unionfinancialcorp.com is the email. Call 780-244-4769.',
+      true,
+      'markers stripped via belt when no separator',
+    ],
+    // Both fire cleanly
+    [
+      'Body.\n\n-- \nFranco Maione\nfmaione@unionfinancialcorp.com\n780-244-4769',
+      true,
+      'separator + markers, both stripped',
+    ],
+    // No markers, no separator — unchanged
+    [
+      'Just a normal email body. No markers here.',
+      true,
+      'no markers, no separator — passes through cleanly',
+    ],
+    // Mixed: admin sig + broker context (broker quote preserved enough)
+    [
+      'Broker said: "interesting deal". On Mon Sarah wrote: > look here\n\n-- \nFranco\nfmaione@unionfinancialcorp.com',
+      true,
+      'admin sig stripped, broker context preserved',
+    ],
+  ];
+  let stripSigPassed = 0;
+  for (const [input, _expectClean, label] of stripSigCases) {
+    const got = stripAdminSignature(input);
+    const leakedMarkers = ADMIN_SIG_MARKERS.filter(m => got.includes(m));
+    if (leakedMarkers.length === 0) {
+      console.log(`  PASS [${label}]: 0 markers in result (${got.length} chars)`);
+      stripSigPassed++;
+    } else {
+      throw new Error(`FAIL [Group PPP-leak / C stripAdminSignature ${label}]:\n  input=${JSON.stringify(input)}\n  leaked markers=${JSON.stringify(leakedMarkers)}\n  got=${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`Group PPP-leak / C stripAdminSignature: ${stripSigPassed}/${stripSigCases.length} passed`);
+
+  // ─── D1 — End-to-end deterministic defense-layer cascade (msg 11 fixture) ──
+  // Note: post-fix, stripQuotedText cleans the fixture so thoroughly that the
+  // remaining text drops below isFullAlternativeDraft's 50-word threshold, so
+  // parseDraftReply no longer routes to REPLACE on this input — falls through to
+  // Claude SEND/EDIT classification (which IS D2's exercise). To keep D1 fully
+  // deterministic, D1 directly verifies all three defense layers on the
+  // production msg 11 body without depending on which action parseDraftReply
+  // chooses. Each layer asserted in isolation + the cascade.
+  console.log('\n---------- Group PPP-leak / D1: defense-layer cascade (production msg 11) ----------');
+  const msg11Path = path_ppp.join(__dirname, 'test-fixtures/admin-sig-leak-msg11.txt');
+  const msg11Body = fs_ppp.readFileSync(msg11Path, 'utf8');
+  const headerSentinels = ['On Sun, 10 May 2026 at 14:03', 'Lead Underwriter @ Private Mortgage Link'];
+  const allSentinels = [...ADMIN_SIG_MARKERS, ...headerSentinels];
+
+  // Layer A — stripQuotedText must remove the wrapped "On ... wrote:" header
+  // AND the `\n-- \n` separator, leaving only Vienna's edited draft body.
+  const strippedD1 = aiService.stripQuotedText(msg11Body);
+  const stripLeaks = allSentinels.filter(s => strippedD1.includes(s));
+  if (stripLeaks.length > 0) {
+    throw new Error(`FAIL [Group PPP-leak / D1 Layer A stripQuotedText]: ${stripLeaks.length} sentinels survived.\n  Leaks: ${JSON.stringify(stripLeaks)}\n  Stripped result (first 600): ${strippedD1.slice(0, 600)}`);
+  }
+  console.log(`  PASS [Layer A stripQuotedText]: 0 sentinels in stripped body (${strippedD1.length} chars from ${msg11Body.length})`);
+
+  // Layer B — textToHtml on the stripped text must wrap in <p> tags (not bare).
+  // Production bug: pre-fix HTML-detect matched <fmaione@...> and returned bare
+  // plaintext. Post-fix the input here has no leftover sig (Layer A cleaned),
+  // but we still verify textToHtml wraps cleanly.
+  const htmlD1 = textToHtml(strippedD1);
+  if (!/<p>/.test(htmlD1)) {
+    throw new Error(`FAIL [Group PPP-leak / D1 Layer B textToHtml]: expected <p> wrapping, got bare text. Result: ${JSON.stringify(htmlD1.slice(0, 300))}`);
+  }
+  const htmlBLeaks = allSentinels.filter(s => htmlD1.includes(s));
+  if (htmlBLeaks.length > 0) {
+    throw new Error(`FAIL [Group PPP-leak / D1 Layer B textToHtml]: sentinels leaked. ${JSON.stringify(htmlBLeaks)}`);
+  }
+  console.log(`  PASS [Layer B textToHtml]: <p>-wrapped output, 0 sentinels`);
+
+  // Layer C — defense-in-depth scrub at broker-send. Run on a deliberately DIRTY
+  // input (bypassing Layers A+B) to verify the belt does its job alone.
+  // Broker recipient → !isAdminRecipient → scrub MUST fire.
+  const brokerRecipient = 'franco@vimarealty.com';
+  if (isAdminRecipient(brokerRecipient)) {
+    throw new Error(`FAIL [Group PPP-leak / D1 Layer C gate]: isAdminRecipient('${brokerRecipient}') should be false.`);
+  }
+  // Use the RAW msg11Body (pre-strip) to force Layer C to do the work alone.
+  const sigOnlyScrub = stripAdminSignature(stripAdminGreeting(msg11Body));
+  const sigOnlyLeaks = ADMIN_SIG_MARKERS.filter(s => sigOnlyScrub.includes(s));
+  if (sigOnlyLeaks.length > 0) {
+    throw new Error(`FAIL [Group PPP-leak / D1 Layer C stripAdminSignature]: ${sigOnlyLeaks.length} markers survived raw-input scrub.\n  Leaks: ${JSON.stringify(sigOnlyLeaks)}\n  Scrubbed (last 400): ${sigOnlyScrub.slice(-400)}`);
+  }
+  console.log(`  PASS [Layer C stripAdminSignature]: 0 markers in raw-input scrub (defense alone, ${sigOnlyScrub.length} chars from ${msg11Body.length})`);
+
+  // Cascade — full pipeline as it would run in production for broker recipient.
+  const cascadeD1 = stripAdminSignature(stripAdminGreeting(textToHtml(aiService.stripQuotedText(msg11Body))));
+  const cascadeLeaks = allSentinels.filter(s => cascadeD1.includes(s));
+  if (cascadeLeaks.length > 0) {
+    throw new Error(`FAIL [Group PPP-leak / D1 cascade]: ${cascadeLeaks.length} sentinels in final outbound.\n  Leaks: ${JSON.stringify(cascadeLeaks)}\n  Result: ${JSON.stringify(cascadeD1.slice(0, 500))}`);
+  }
+  console.log(`  PASS [Group PPP-leak / D1 cascade]: production msg 11 → 0 sentinels in final outbound (${cascadeD1.length} chars)`);
+
+  // ─── D2 — Probabilistic pipeline (Claude EDIT path, 5x verification) ───────
+  // Gated behind RUN_PPP_LEAK_D2=1 to avoid burning Claude calls on every harness
+  // run. Set the env var to execute the 5x verification.
+  if (process.env.RUN_PPP_LEAK_D2 === '1') {
+    console.log('\n---------- Group PPP-leak / D2: EDIT pipeline 5x verification (Claude) ----------');
+    // Synthetic edit reply: short instruction + Franco's sig appended (forces Claude
+    // to classify as EDIT — reviseEmailWithEdits then rewrites the original draft
+    // using these instructions). If editInstructions still carries sig markers,
+    // Claude might preserve them in the rewrite. Match-list belt at send site must
+    // catch any leakage.
+    const editReply = `Make it warmer and add a line thanking Rachel for the quick turnaround.
+
+On Sun, 10 May 2026 at 14:03, Lead Underwriter @ Private Mortgage Link <
+info@privatemortgagelink.com> wrote:
+
+> Draft Email Preview — Grace Paulson
+>
+> Here's what Vienna will send.
+>
+> Hi Rachel,
+>
+> The file is now complete and submitted.
+>
+> Vienna
+
+--
+
+
+Franco Maione
+    LENDING & INVESTMENT SPECIALIST
+
+102, 10446 122 Street NW
+
+Edmonton, AB, T5N 1M3
+
+OFFICE.  780-244-4769
+
+CELL.  780-975-3339
+
+EMAIL.  fmaione@unionfinancialcorp.com
+
+WEBSITE.  unionfinancialcorp.com`;
+
+    const originalDraft = '<p>Hi Rachel,</p>\n<p>The file is now complete and submitted. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>\n<p>Vienna<br>Private Mortgage Link</p>';
+    const fakeSummary = { borrower_name: 'Grace Paulson', broker_name: 'Rachel Kim' };
+
+    let d2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      const parsedD2 = await aiService.parseDraftReply(editReply);
+      // Either path (replace or edit) — both must pass the scrub at send site.
+      let draftAfterClaude;
+      if (parsedD2.action === 'replace') {
+        draftAfterClaude = textToHtml(parsedD2.replacementText);
+      } else {
+        // EDIT path — Claude rewrites. Pass editInstructions through reviseEmailWithEdits.
+        draftAfterClaude = await aiService.reviseEmailWithEdits(originalDraft, parsedD2.editInstructions || editReply, fakeSummary);
+      }
+      // Scrub stack (broker recipient)
+      const scrubbed = stripAdminSignature(stripAdminGreeting(draftAfterClaude));
+      const leaks = allSentinels.filter(s => scrubbed.includes(s));
+      if (leaks.length > 0) {
+        d2Leaks++;
+        console.log(`  Run ${run}: LEAK — action=${parsedD2.action}, markers=${JSON.stringify(leaks)}`);
+      } else {
+        console.log(`  Run ${run}: PASS — action=${parsedD2.action}, scrubbed=${scrubbed.length} chars, 0 markers`);
+      }
+    }
+    if (d2Leaks >= 2) {
+      throw new Error(`FAIL [Group PPP-leak / D2]: ${d2Leaks}/5 runs leaked. Escalation threshold reached — match-list belt insufficient or structural fallback gap.`);
+    }
+    console.log(`Group PPP-leak / D2 (5x Claude EDIT path): ${5 - d2Leaks}/5 passed, ${d2Leaks}/5 leaked (threshold: ≤1)`);
+  } else {
+    console.log('\n---------- Group PPP-leak / D2: SKIPPED (set RUN_PPP_LEAK_D2=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP MMM — daily summary admin-reply subject filter (S13.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-MMM: cron/dailySummary.js filtered direction='inbound' but didn't

@@ -33,14 +33,53 @@ const isAdminRecipient = (to) => {
   return !!(adminEmail && String(to || '').toLowerCase().includes(adminEmail));
 };
 
+// Group PPP-leak (S1.7): scrub admin's Union Financial signature from broker-facing
+// emails. Defense-in-depth Layer C — Layers A+B (stripQuotedText, textToHtml) live
+// in upstream paths. This is the last-stop scrub at the send site so any future
+// code path that bypasses A+B (a new Claude generator, an unanticipated REPLACE
+// shape) can't ship Franco's PII to a broker. Production failure: deal 9aa136aa
+// msg 14 shipped Franco's full office address, phones, email, website, and display
+// name to broker franco@vimarealty.com.
+//
+// Two-layer defense per Q4:
+//   1. Structural — truncate at `\n-- \n` (RFC 3676 sig separator) and its
+//      textToHtml-wrapped variant `<p>-- </p>`. Primary defense; robust to sig
+//      content changes as long as Franco's email client preserves the separator.
+//   2. Match-list belt — literal-replace each of 6 specific markers anywhere in
+//      body. Catches sig content even when separator is missing/eaten by an
+//      earlier strip. Over-scrubbing is acceptable per Q4 — worst case is broker
+//      sees an empty block, which is mild oddness not a privacy breach.
+const ADMIN_SIG_MARKERS = [
+  'fmaione@unionfinancialcorp.com',
+  'unionfinancialcorp.com',
+  '780-244-4769',
+  '780-975-3339',
+  '102, 10446 122 Street NW',
+  'Lead Underwriter @ Private Mortgage Link',
+];
+
+const stripAdminSignature = (body) => {
+  if (!body) return body;
+  // Layer 1: structural truncation at RFC 3676 separator (plaintext + HTML variants).
+  let result = body.replace(/\n--\s*\n[\s\S]*$/, '');
+  result = result.replace(/<p>\s*--\s*<\/p>[\s\S]*$/i, '');
+  // Layer 2: match-list belt — literal string removal, no regex needed.
+  for (const marker of ADMIN_SIG_MARKERS) {
+    result = result.split(marker).join('');
+  }
+  return result;
+};
+
 module.exports = {
   sendEmail: async (to, subject, textBody, htmlBody = null, attachments = [], headers = [], cc = null) => {
     try {
       // Group III: scrub admin-greeting opener for broker-facing sends. Admin sends
       // pass through unchanged (admin-facing emails legitimately reference Franco).
+      // Group PPP-leak (S1.7): stack sig scrub on top — order is independent (different
+      // regions of body) but kept consistent (greeting → sig) for call-site readability.
       const isAdmin = isAdminRecipient(to);
-      const scrubbedHtml = isAdmin ? htmlBody : stripAdminGreeting(htmlBody);
-      const scrubbedText = isAdmin ? textBody : stripAdminGreeting(textBody);
+      const scrubbedHtml = isAdmin ? htmlBody : stripAdminSignature(stripAdminGreeting(htmlBody));
+      const scrubbedText = isAdmin ? textBody : stripAdminSignature(stripAdminGreeting(textBody));
       const emailData = {
         From: config.postmark.senderEmail,
         To: to,
@@ -66,9 +105,10 @@ module.exports = {
     setTimeout(async () => {
       try {
         // Group III: same scrub policy as sendEmail above.
+        // Group PPP-leak (S1.7): same sig-scrub stack as sendEmail.
         const isAdmin = isAdminRecipient(to);
-        const scrubbedHtml = isAdmin ? htmlBody : stripAdminGreeting(htmlBody);
-        const scrubbedText = isAdmin ? textBody : stripAdminGreeting(textBody);
+        const scrubbedHtml = isAdmin ? htmlBody : stripAdminSignature(stripAdminGreeting(htmlBody));
+        const scrubbedText = isAdmin ? textBody : stripAdminSignature(stripAdminGreeting(textBody));
         const emailData = {
           From: config.postmark.senderEmail,
           To: to,
@@ -127,4 +167,6 @@ module.exports = {
 // Test-only exposure for the deterministic Group III scrub truth table.
 // Production callers use the local consts at module scope; this just makes the
 // pure-regex predicates reachable from test-trigger.js.
-module.exports.__test__ = { stripAdminGreeting, isAdminRecipient };
+// Group PPP-leak: expose stripAdminSignature + ADMIN_SIG_MARKERS for truth-table
+// and pipeline tests.
+module.exports.__test__ = { stripAdminGreeting, isAdminRecipient, stripAdminSignature, ADMIN_SIG_MARKERS };

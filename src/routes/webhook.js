@@ -104,9 +104,18 @@ const normalizeSenderName = (dealSummary, fromName) => {
 // broker-facing send. If the text already contains HTML (any tag), use as-is —
 // some email clients send HTML in the body. Otherwise wrap each \n\n-separated
 // paragraph in a <p> tag, with single \n inside a paragraph becoming <br>.
+//
+// Group PPP-leak (S1.6): pre-fix HTML detect was /<[a-z][^>]*>/i which falsely
+// matched email addresses in angle brackets like <fmaione@unionfinancialcorp.com>.
+// Franco's REPLACE in production (msg 11) included his auto-appended sig with
+// <email@x.com>, regex matched, function early-returned bare plaintext, and the
+// outbound to broker rendered as one collapsed paragraph (S1.6) AND carried the
+// sig (S1.7). Tightened to a known-tag whitelist so email-style angle brackets
+// don't match.
+const HTML_DETECT = /<(\/[a-z]+|p|div|br|h[1-6]|hr|ul|ol|li|strong|em|b|i|a|span|table|tr|td|th|tbody|thead|img|blockquote|pre|code)\b/i;
 const textToHtml = (text) => {
   if (!text) return '';
-  if (/<[a-z][^>]*>/i.test(text)) return text;
+  if (HTML_DETECT.test(text)) return text;
   return text
     .split(/\n\s*\n+/)
     .filter(p => p.trim().length > 0)
