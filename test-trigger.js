@@ -2256,7 +2256,10 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       console.log('  PASS [Group BBB B1]: executeDraft conditions branch stamps conditions_sent_at + clears draft fields + preserves status');
     }
 
-    // -------- B2: broker submission with conditions_sent_at routes to handoff --------
+    // -------- B2: broker submission with conditions_sent_at + all docs in routes to handoff --------
+    // Group NNN refactored the dispatch: pre-NNN BBB fired purely on conditions_sent_at,
+    // post-NNN it requires allDocsInNow=true (all required classifications + exit_strategy).
+    // This test sets up a complete-file scenario where BBB's handoff is the correct dispatch.
     {
       resetBbb();
       // Deal has conditions_sent_at populated (admin already sent conditions).
@@ -2265,11 +2268,29 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
         conditions_sent_at: '2026-05-07T15:00:00.000Z',
         draft_email: null,
       });
-      // Stub Claude analysis to return a hasNewDocs-like state.
+      // NNN: stub all 6 refinance-required classifications on file so allDocsInNow=true.
+      const bbbCompleteDocs = [
+        { classification: 'government_id', file_name: 'GovID.pdf' },
+        { classification: 'appraisal', file_name: 'Appraisal.pdf' },
+        { classification: 'property_tax', file_name: 'PropertyTax.pdf' },
+        { classification: 'mortgage_statement', file_name: 'Payout.pdf' },
+        { classification: 'income_proof', file_name: 'NOA.pdf' },
+        { classification: 'credit_report', file_name: 'CB.pdf' },
+      ];
+      dealsService.getDocumentsByDeal = async () => bbbCompleteDocs;
+      dealsService.getDocumentsWithText = async () => bbbCompleteDocs;
+      // Stub Claude analysis to return a hasNewDocs-like state. NNN: include
+      // exit_strategy + loan_type='refinance' so allDocsInNow gate passes.
       aiService.generateBrokerResponse = async () => ({
         responseEmail: '<p>Vienna would normally reply here.</p>',
-        updatedSummary: { ...bbbDeal.extracted_data, ltv_percent: 65 },
-        allDocsReceived: false,
+        updatedSummary: {
+          ...bbbDeal.extracted_data,
+          ltv_percent: 65,
+          loan_type: 'refinance',
+          purpose: 'debt consolidation',
+          exit_strategy: 'refi at maturity',
+        },
+        allDocsReceived: true,
         hasApplicationForm: true,
         hasPnwStatement: true,
         ownershipType: 'personal',
@@ -2318,7 +2339,10 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       console.log('  PASS [Group BBB B2]: conditions-fulfilled handoff fires (info + draft preview), Vienna reply suppressed, draft saved with approval_completed action');
     }
 
-    // -------- B3: broker submission WITHOUT conditions_sent_at keeps Fix 2 behavior --------
+    // -------- B3: broker submission WITHOUT conditions_sent_at + missing docs → preliminary-update --------
+    // Group NNN: Vienna's broker reply is now suppressed across the whole
+    // under_review/ltv_escalated branch (pre-NNN it fired here under Fix 2).
+    // [UPDATED] PRELIMINARY Review still fires when allDocsInNow=false.
     {
       resetBbb();
       // Same shape as B2 but conditions_sent_at = null (admin hasn't sent conditions).
@@ -2326,6 +2350,9 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
         status: 'under_review',
         conditions_sent_at: null,
       });
+      // Reset docs stub to a partial set (B2 set all 6); allDocsInNow must be false here.
+      dealsService.getDocumentsByDeal = async () => [{ classification: 'appraisal', file_name: 'Appraisal.pdf' }];
+      dealsService.getDocumentsWithText = async () => [{ classification: 'appraisal', file_name: 'Appraisal.pdf' }];
       aiService.generateBrokerResponse = async () => ({
         responseEmail: '<p>Vienna replies here.</p>',
         updatedSummary: { ...bbbDeal.extracted_data, ltv_percent: 65 },
@@ -2338,21 +2365,21 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
 
       await inboundHandler(buildBrokerReply('Sending more docs for James.'), mockRes(), () => {});
 
-      // Vienna's broker reply must FIRE (no conditions-fulfilled suppression).
-      if (bbb.sendEmailDelayed.length !== 1) {
-        throw new Error(`FAIL [Group BBB B3 Fix 2 regression]: expected 1 broker reply (Fix 2 path), got ${bbb.sendEmailDelayed.length}`);
+      // Group NNN: Vienna's broker reply must be SUPPRESSED across the whole branch.
+      if (bbb.sendEmailDelayed.length !== 0) {
+        throw new Error(`FAIL [Group BBB B3 NNN suppression]: expected 0 broker sends (Vienna suppressed across under_review branch), got ${bbb.sendEmailDelayed.length}`);
       }
       // [UPDATED] PRELIMINARY Review must fire.
       const updatedReview = bbb.sendEmail.find(e => /\[UPDATED\] ACTION REQUIRED: PRELIMINARY Review/.test(e.subject));
       if (!updatedReview) {
-        throw new Error(`FAIL [Group BBB B3 Fix 2 regression]: expected '[UPDATED] ACTION REQUIRED: PRELIMINARY Review' subject, got: ${JSON.stringify(bbb.sendEmail.map(e => e.subject))}`);
+        throw new Error(`FAIL [Group BBB B3 preliminary-update]: expected '[UPDATED] ACTION REQUIRED: PRELIMINARY Review' subject, got: ${JSON.stringify(bbb.sendEmail.map(e => e.subject))}`);
       }
       // No conditions-fulfilled informational notice.
-      const conditionsInfo = bbb.sendEmail.find(e => /\[Conditions Fulfilled\]/.test(e.subject));
+      const conditionsInfo = bbb.sendEmail.find(e => /\[Conditions Fulfilled\]|\[File Complete\]/.test(e.subject));
       if (conditionsInfo) {
-        throw new Error(`FAIL [Group BBB B3 path leak]: handoff path fired for non-conditions-fulfilled deal, got: ${conditionsInfo.subject}`);
+        throw new Error(`FAIL [Group BBB B3 path leak]: handoff path fired for incomplete-file deal, got: ${conditionsInfo.subject}`);
       }
-      console.log('  PASS [Group BBB B3]: original Fix 2 path preserved when conditions_sent_at is null (regression guard)');
+      console.log('  PASS [Group BBB B3]: NNN preliminary-update fires when allDocsInNow=false; Vienna suppressed');
     }
 
     // -------- B4: generateCompletionEmail deterministic template (no Claude) --------
@@ -2888,6 +2915,120 @@ WEBSITE.  unionfinancialcorp.com`;
   } else {
     console.log('\n---------- Group PPP-leak / D2: SKIPPED (set RUN_PPP_LEAK_D2=1 to run) ----------');
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP NNN — post-review broker activity dispatch matrix (S1.1–S1.3 + S2.3–S2.4)
+  // ════════════════════════════════════════════════════════════════
+  // Replaces Fix 2 + BBB's three-way split with a unified dispatch decision over
+  // four actions. Pre-NNN: hasNewDocs branched into BBB conditions-fulfilled vs
+  // Fix 2 [UPDATED] review; !hasNewDocs hit a passive [Broker Update] forward
+  // that gave admin no fresh signal when the deal's facts had changed.
+  // Post-NNN: decideReviewDispatch is a pure function returning
+  //   {action: 'completion-handoff' | 'noop' | 'escalation-update' | 'preliminary-update', ...}
+  // with allDocsInNow gating completion handoff and draft_email gating the no-op
+  // (Q7 — protect admin's mid-cycle drafts from clobber).
+  console.log('\n========== GROUP NNN — decideReviewDispatch truth table ==========');
+  const { decideReviewDispatch } = require('./src/routes/webhook').__test__;
+
+  // Helper to build a complete classifications list for "all docs in" cases.
+  const refinanceAllDocs = ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
+  const purchaseAllDocs = ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract'];
+
+  const nnnCases = [
+    {
+      name: '1. under_review + all docs in (refinance) + exit_strategy + no draft → completion-handoff (not BBB)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi at maturity' },
+      classifications: refinanceAllDocs,
+      expectAction: 'completion-handoff',
+      expectConditionsFulfilled: false,
+    },
+    {
+      name: '2. under_review + all docs in (purchase) + purchase_contract + exit_strategy → completion-handoff',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'refi at maturity' },
+      classifications: purchaseAllDocs,
+      expectAction: 'completion-handoff',
+      expectConditionsFulfilled: false,
+    },
+    {
+      name: '3. under_review + missing income_proof → preliminary-update',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs.filter(c => c !== 'income_proof'),
+      expectAction: 'preliminary-update',
+    },
+    {
+      name: '4. under_review + all docs in BUT missing exit_strategy → preliminary-update',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: null },
+      classifications: refinanceAllDocs,
+      expectAction: 'preliminary-update',
+    },
+    {
+      name: '5. under_review + missing docs + no new docs (text-only reply) → preliminary-update (drops passive [Broker Update])',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs.filter(c => c !== 'mortgage_statement'),
+      expectAction: 'preliminary-update',
+    },
+    {
+      name: '6. under_review + all docs in + text-only reply → completion-handoff (Q7 — avoids S1.3 noise shape)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs,
+      expectAction: 'completion-handoff',
+      expectConditionsFulfilled: false,
+    },
+    {
+      name: '7. under_review + all docs in + conditions_sent_at set → completion-handoff (BBB compatibility)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: '2026-05-09T12:00:00Z' },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs,
+      expectAction: 'completion-handoff',
+      expectConditionsFulfilled: true,
+    },
+    {
+      name: '8. ltv_escalated + new docs → escalation-update',
+      deal: { status: 'ltv_escalated', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs.slice(0, 3),
+      expectAction: 'escalation-update',
+    },
+    {
+      name: '9. ltv_escalated + text-only reply → escalation-update (drops passive [Broker Update])',
+      deal: { status: 'ltv_escalated', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs.slice(0, 3),
+      expectAction: 'escalation-update',
+    },
+    {
+      name: '10. under_review + all docs in + draft_email already set (admin mid-cycle) → noop (Q7 — protect drafts from clobber)',
+      deal: {
+        status: 'under_review',
+        draft_email: '<p>Hi Rachel, [existing closing draft]</p>',
+        draft_action: 'approval_completed',
+        conditions_sent_at: null,
+      },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs,
+      expectAction: 'noop',
+    },
+  ];
+
+  let nnnPassed = 0;
+  for (const tc of nnnCases) {
+    const result = decideReviewDispatch(tc.deal, tc.summary, tc.classifications);
+    if (result.action !== tc.expectAction) {
+      throw new Error(`FAIL [Group NNN ${tc.name}]:\n  expected action='${tc.expectAction}'\n  got action='${result.action}'\n  full result: ${JSON.stringify(result)}`);
+    }
+    if (tc.expectAction === 'completion-handoff' && result.conditionsFulfilled !== tc.expectConditionsFulfilled) {
+      throw new Error(`FAIL [Group NNN ${tc.name}]:\n  expected conditionsFulfilled=${tc.expectConditionsFulfilled}\n  got conditionsFulfilled=${result.conditionsFulfilled}`);
+    }
+    console.log(`  PASS [${tc.name}]: action=${result.action}${result.conditionsFulfilled !== undefined ? `, conditionsFulfilled=${result.conditionsFulfilled}` : ''}`);
+    nnnPassed++;
+  }
+  console.log(`Group NNN decideReviewDispatch: ${nnnPassed}/${nnnCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
   // GROUP MMM — daily summary admin-reply subject filter (S13.1)

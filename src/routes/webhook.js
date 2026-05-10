@@ -232,29 +232,36 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing)`);
 };
 
-// Group BBB (S9.1/S9.2/S9.3): conditions-fulfilled handoff. Fires when broker
-// submits new docs to a deal that already has conditions_sent_at stamped — i.e.
-// admin already approved with conditions, and the broker is now satisfying them.
+// Group BBB (S9.1/S9.2/S9.3) → generalized in Group NNN: completion handoff. Fires
+// when a deal in under_review reaches all-docs-complete on a broker turn, OR when
+// broker fulfills admin-sent conditions (the original BBB trigger). Pre-BBB this
+// path fired sendPreliminaryReviewToAdmin({ isUpdate: true }) which produced an
+// "[UPDATED] ACTION REQUIRED: COMPLETE Review" with redundant APPROVED/DECLINE
+// prompt — admin already gave APPROVE/DECLINE on the prior review, doubling the
+// buttons was noise.
 //
-// Pre-BBB this path fired sendPreliminaryReviewToAdmin({ isUpdate: true }) which
-// produced "[UPDATED] ACTION REQUIRED: PRELIMINARY Review" with redundant
-// APPROVED/DECLINE prompt — admin already moved past prelim by sending conditions.
-//
-// New shape (two emails per Porter's S9.2 framing, both in the broker submission's
-// thread for tidy admin inbox):
-//   1. [Conditions Fulfilled] informational notice — no action required
+// New shape (two emails, both in the broker submission's thread for tidy admin
+// inbox):
+//   1. Informational notice — no action required. Subject prefix varies by
+//      whether conditions had previously been sent: "[Conditions Fulfilled]" vs
+//      "[File Complete]".
 //   2. Closing draft preview — saveDraftAndPreview pattern with draft_action
-//      'approval_completed' so admin's SEND advances status to 'completed'
+//      'approval_completed' so admin's SEND advances status to 'completed'.
 //
-// Vienna's broker reply is suppressed in the call site (line ~846 — symmetric
-// with Group L / GGG). The next broker-facing message is the closing email
-// after admin SENDs the preview.
-const sendConditionsFulfilledHandoff = async (deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail) => {
+// Vienna's broker reply is suppressed in the call site (NNN extended this from
+// BBB-only to the whole under_review/ltv_escalated branch). The next broker-
+// facing message is the closing email after admin SENDs the preview.
+const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail, { conditionsFulfilled = false } = {}) => {
   const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
 
   // 1. Informational notice — no APPROVED/DECLINE, no action required.
-  const infoSubject = `[Conditions Fulfilled] ${borrowerName} — File Complete`;
-  const infoBody = `<p>Broker submitted the remaining condition docs for <strong>${borrowerName}</strong>. The file is now complete.</p><p>Closing draft preview will follow in this thread.</p>`;
+  const infoSubject = conditionsFulfilled
+    ? `[Conditions Fulfilled] ${borrowerName} — File Complete`
+    : `[File Complete] ${borrowerName} — Ready to Close`;
+  const infoBodyLead = conditionsFulfilled
+    ? `Broker submitted the remaining condition docs for <strong>${borrowerName}</strong>. The file is now complete.`
+    : `Broker submitted the remaining required docs for <strong>${borrowerName}</strong>. The file is now complete.`;
+  const infoBody = `<p>${infoBodyLead}</p><p>Closing draft preview will follow in this thread.</p>`;
   const infoResult = await emailService.sendEmail(
     config.adminEmail,
     infoSubject,
@@ -263,7 +270,7 @@ const sendConditionsFulfilledHandoff = async (deal, dealSummary, dealDocs, dealM
     []
   );
   await dealsService.saveMessage(deal.id, 'outbound', infoSubject, infoBody, infoResult.MessageID);
-  console.log('Conditions-fulfilled informational notice sent to admin');
+  console.log(`Completion-handoff informational notice sent to admin (conditionsFulfilled=${conditionsFulfilled})`);
 
   // 2. Closing draft preview — replicate saveDraftAndPreview pattern (the helper
   // is scoped inside the admin-reply branch, not reachable here). Sets draft_email,
@@ -277,8 +284,9 @@ const sendConditionsFulfilledHandoff = async (deal, dealSummary, dealDocs, dealM
     draft_subject: borrowerSubject,
     draft_action: 'approval_completed',
   });
+  const previewLead = conditionsFulfilled ? 'Conditions fulfilled' : 'File complete';
   const previewHtml = `<h3>Closing Draft Preview — ${borrowerName}</h3>
-<p>Conditions fulfilled. Here's the closing email Vienna will send to <strong>${deal.email}</strong>:</p>
+<p>${previewLead}. Here's the closing email Vienna will send to <strong>${deal.email}</strong>:</p>
 <hr>
 ${closingEmail}
 <hr>
@@ -292,6 +300,42 @@ ${closingEmail}
   );
   await dealsService.saveMessage(deal.id, 'outbound', `Re: ${infoSubject}`, previewHtml, previewResult.MessageID);
   console.log('Closing draft preview sent to admin (in-thread with informational notice)');
+};
+
+// Group NNN: pure dispatch decision for the under_review/ltv_escalated branch.
+// Extracted from the webhook handler so the truth-table tests can exercise it
+// without mocking the full request pipeline. Returns one of four actions:
+//   - 'completion-handoff' : file is complete (refinance: all 6 docs + exit_strategy;
+//                            purchase: 5 docs + purchase_contract + exit_strategy);
+//                            admin not mid-cycle on an existing draft. Caller
+//                            invokes sendCompletionHandoff with conditionsFulfilled
+//                            flag set from deal.conditions_sent_at presence.
+//   - 'noop'               : file is complete but draft_email is set (admin mid
+//                            preview-cycle). Caller does nothing — broker inbound
+//                            already saved to thread; admin sees it next look.
+//   - 'escalation-update'  : ltv_escalated status. Caller invokes
+//                            sendEscalationToAdmin({ isUpdate: true }).
+//   - 'preliminary-update' : default for under_review when file isn't complete.
+//                            Caller invokes sendPreliminaryReviewToAdmin({ isUpdate: true }).
+const decideReviewDispatch = (deal, reviewSummary, reviewClassifications) => {
+  const loanType = (reviewSummary?.loan_type || '').toLowerCase();
+  const isPurchase = /purchas/.test(loanType) || /purchas/.test(reviewSummary?.purpose || '');
+  const baseRequired = isPurchase
+    ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
+    : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
+  const stillMissing = baseRequired.filter(req => !isDocRequirementSatisfied(req, reviewClassifications));
+  const allDocsInNow = stillMissing.length === 0 && !!reviewSummary?.exit_strategy;
+
+  if (deal.status === 'under_review' && allDocsInNow) {
+    if (!deal.draft_email) {
+      return { action: 'completion-handoff', conditionsFulfilled: !!deal.conditions_sent_at, allDocsInNow: true, stillMissing };
+    }
+    return { action: 'noop', reason: 'admin mid-cycle (draft_email set)', allDocsInNow: true, stillMissing, draftAction: deal.draft_action };
+  }
+  if (deal.status === 'ltv_escalated') {
+    return { action: 'escalation-update', allDocsInNow, stillMissing };
+  }
+  return { action: 'preliminary-update', allDocsInNow, stillMissing };
 };
 
 // POST /webhook/inbound - receives incoming emails from Postmark
@@ -948,68 +992,63 @@ ${draftEmail}
           has_pnw_statement: reviewHasPnw,
         });
 
-        // Admin notification dispatch (Fix 2 + Group BBB):
-        if (hasNewDocs) {
-          if (existingDeal.conditions_sent_at) {
-            // Group BBB (S9.2): admin already moved past prelim by sending conditions.
-            // Broker is now fulfilling them — route to handoff (informational notice +
-            // closing draft preview), NOT another [UPDATED] ACTION REQUIRED prelim
-            // review. Reads conditions_sent_at column added in BBB migration; if column
-            // doesn't exist yet (pre-migration), value is undefined → falsy → falls
-            // through to legacy Fix 2 path. Safe deployment ordering.
-            console.log('hasNewDocs=true AND conditions_sent_at set → routing to conditions-fulfilled handoff');
-            const reviewDocs = await dealsService.getDocumentsWithText(existingDeal.id);
-            const reviewMessages = await dealsService.getMessages(existingDeal.id);
-            await sendConditionsFulfilledHandoff(existingDeal, reviewResult.updatedSummary, reviewDocs, reviewMessages, email);
-          } else {
-            // Original Fix 2 path: new docs arrived, admin hasn't sent conditions yet.
-            // Send UPDATED review/escalation with APPROVE/DECLINE.
-            console.log(`hasNewDocs=true → sending updated ${existingDeal.status === 'ltv_escalated' ? 'escalation' : 'preliminary review'} (replaces passive [Broker Update])`);
-            if (existingDeal.status === 'ltv_escalated') {
-              await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
-            } else {
-              await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true });
-            }
-          }
+        // Group NNN (S1.1–S1.3 + S2.3–S2.4): unified dispatch matrix for under_review
+        // and ltv_escalated. Replaces the Fix 2 + Group BBB three-way split with:
+        //   - under_review + allDocsInNow → sendCompletionHandoff (BBB-generalized
+        //     for non-conditions path; gated on !draft_email to avoid clobbering an
+        //     in-progress admin draft-edit cycle)
+        //   - ltv_escalated → sendEscalationToAdmin({isUpdate:true})
+        //   - under_review + !allDocsInNow → sendPreliminaryReviewToAdmin({isUpdate:true})
+        //
+        // The passive [Broker Update] forward is deleted entirely — every broker
+        // turn now triggers a fresh admin signal regardless of hasNewDocs. Per Q1,
+        // no rate-limit; brokers typically send one substantive turn at a time, and
+        // over-fire risk is low. If retest surfaces noise, add rate-limit then.
+        //
+        // Q7: allDocsInNow gate covers case 6 (text-only reply when file is already
+        // complete) — recovery from S1.3 noise shape (redundant [UPDATED] COMPLETE
+        // Review buttons). With draft_email already set, no-op silently — broker's
+        // inbound is saved to thread (line 781) and admin sees it on next look.
+        //
+        // Pure dispatch decision (decideReviewDispatch) — extracted helper so
+        // truth-table tests can exercise it without mocking the full request
+        // pipeline. See helper definition for action semantics.
+        const reviewClassifications = reviewDocumentsOnFile.map(d => d.classification).filter(Boolean);
+        const dispatch = decideReviewDispatch(existingDeal, reviewResult.updatedSummary, reviewClassifications);
+        console.log(`NNN dispatch decision: ${JSON.stringify(dispatch)}`);
+
+        if (dispatch.action === 'completion-handoff') {
+          const reviewDocsWithText = await dealsService.getDocumentsWithText(existingDeal.id);
+          const reviewMessagesForHandoff = await dealsService.getMessages(existingDeal.id);
+          await sendCompletionHandoff(existingDeal, reviewResult.updatedSummary, reviewDocsWithText, reviewMessagesForHandoff, email, {
+            conditionsFulfilled: dispatch.conditionsFulfilled,
+          });
+        } else if (dispatch.action === 'noop') {
+          // Admin mid-preview-cycle on an existing draft. Broker inbound already
+          // saved to thread (line 781); admin sees it when they finish the current
+          // cycle and looks at conversation history. No clobber of generated draft.
+        } else if (dispatch.action === 'escalation-update') {
+          await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
         } else {
-          // No attachments → broker sent a question/note, doc state unchanged. Keep
-          // the passive [Broker Update] notification so admin knows broker replied;
-          // no fresh review needed.
-          const statusLabel = existingDeal.status === 'ltv_escalated' ? 'Awaiting Your Approval' : 'Under Your Review';
-          const borrowerNameForUpdate = reviewResult.updatedSummary?.borrower_name || existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name;
-          const forwardBody = `<p><strong>Broker update for ${borrowerNameForUpdate}:</strong></p><p>${(email.textBody || '').replace(/\n/g, '<br>')}</p>`;
-          const fwdResult = await emailService.sendEmail(
-            config.adminEmail,
-            `[Broker Update] ${borrowerNameForUpdate} — ${statusLabel}`,
-            forwardBody.replace(/<[^>]*>/g, ''),
-            forwardBody
-          );
-          await dealsService.saveMessage(existingDeal.id, 'outbound', `[Broker Update] ${borrowerNameForUpdate}`, forwardBody, fwdResult.MessageID);
-          console.log('No new docs — sent passive [Broker Update] notification');
+          // 'preliminary-update' — under_review + !allDocsInNow
+          await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true });
         }
 
-        // Group BBB (S9.1): suppress Vienna's broker reply when conditions_sent_at
-        // set AND new docs landed — the closing draft preview is the next broker-
-        // facing message, after admin SENDs it. Symmetric with Group L / GGG
-        // suppression patterns. Vienna's reply still fires for non-conditions-
-        // fulfilled paths (broker question without docs, broker submitting before
-        // conditions sent, etc.) — original behavior preserved.
-        if (reviewResult.responseEmail && !(existingDeal.conditions_sent_at && hasNewDocs)) {
-          emailService.sendEmailDelayed(
-            email.from,
-            `Re: ${email.subject}`,
-            reviewResult.responseEmail.replace(/<[^>]*>/g, ''),
-            reviewResult.responseEmail,
-            [],
-            [],
-            async (sendResult) => {
-              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, reviewResult.responseEmail, sendResult.MessageID);
-              console.log('Conversational response sent to broker (during review)');
-            }
-          );
-        } else if (existingDeal.conditions_sent_at && hasNewDocs) {
-          console.log('Suppressing Vienna broker reply — conditions fulfilled, closing draft preview is the next broker-facing message');
-        }
+        // Group NNN: Vienna goes silent across the whole under_review/ltv_escalated
+        // branch. Admin's draft preview SEND is the next and only broker-facing
+        // message. Pre-NNN this branch suppressed Vienna only on the BBB path
+        // (conditions+hasNewDocs); NNN extends suppression to all paths — every
+        // broker turn flows through an admin HITL signal (or a no-op when admin is
+        // mid-cycle), and Vienna's conversational reply alongside would be
+        // redundant or misleading (S1.1 "Thanks for sending those through" while
+        // a fresh review email is also landing; S1.2 "I believe we have everything
+        // we need to send the file for review" when the file was already sent).
+        //
+        // reviewResult.responseEmail is still generated by generateBrokerResponse
+        // because the same call also produces updatedSummary/ltv/ownership/
+        // allDocsReceived — ~$0.005 of wasted generation per turn is acceptable to
+        // keep the call site simple. Future: skip-generation flag on the prompt.
+        console.log('NNN suppression — Vienna broker reply held; admin draft preview is next broker-facing message');
       } else if (existingDeal.status === 'active') {
         // CONVERSATIONAL HANDLER — respond to broker contextually
         console.log('Generating conversational response...');
@@ -1198,4 +1237,4 @@ ${draftEmail}
 });
 
 module.exports = router;
-module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, firstNameMatchesAdmin, isDocRequirementSatisfied, DOC_SYNONYMS, ADMIN_FIRST_NAME, textToHtml };
+module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, firstNameMatchesAdmin, isDocRequirementSatisfied, DOC_SYNONYMS, ADMIN_FIRST_NAME, textToHtml, decideReviewDispatch };
