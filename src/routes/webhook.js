@@ -91,6 +91,37 @@ const isPurchaseFromSummary = (summary) => {
   return /purchas/.test(loanType) || /purchas/.test(purpose);
 };
 
+// Group YYY (S5.3): build the References-header chain for a draft preview reply.
+// Pre-YYY chain was [...admin.references, admin.messageId] — relied on admin's
+// email client to echo Vienna's prior outbound IDs in its own References header.
+// If the client truncates the chain (Gmail does this on long threads) or strips
+// References entirely, the thread loses its anchor and Gmail/Outlook fall back
+// to subject-based threading — which fragments because each preview gets another
+// "Re:" prefix. S5.3 production observation: parallel near-identical threads
+// accumulated, broker risk of replying to the wrong thread.
+//
+// Post-YYY: anchor on Vienna's outbound IDs from the DB. Chain order is:
+//   1. All Vienna outbound IDs in chronological order (oldest first — RFC convention)
+//   2. Admin's incoming References (may overlap; deduped)
+//   3. Admin's latest messageId
+// Dedup key strips angle brackets and @domain so raw-UUID and wrapped/qualified
+// variants of the same ID are recognized as duplicates.
+//
+// Extracted as a pure function (no DB, no I/O) so the truth table can exercise
+// it without mocking the request pipeline. Caller fetches outbound IDs from the
+// DB and passes them in.
+const buildPreviewThreadChain = ({ outboundIds = [], inboundReferences = [], latestMessageId = null } = {}) => {
+  const raw = [...outboundIds, ...inboundReferences, latestMessageId].filter(Boolean);
+  const normalize = (id) => String(id).replace(/^</, '').replace(/>$/, '').split('@')[0];
+  const seen = new Set();
+  return raw.filter(id => {
+    const key = normalize(id);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 // Group SSS Site 4: JS-authoritative gate replacing Claude's allDocsReceived
 // flag for willFireFinalReview. Per Q1-SSS — Claude's flag was probabilistic;
 // JS classification + exit_strategy is deterministic. Extracted as a pure
@@ -483,11 +514,22 @@ ${draftEmail}
         // In-Reply-To + References headers to keep the conversation grouped in Franco's inbox.
         // Postmark outbound Message-IDs are <uuid@mtasv.net>; inbound IDs may already have a domain
         // (Gmail / Outlook), so only append @mtasv.net if there's no @ in the raw value.
+        // Group YYY (S5.3): anchor the References chain on Vienna's outbound IDs from
+        // the DB. Pre-YYY only echoed admin's References, which fragmented when admin's
+        // email client truncated/dropped the chain.
         const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
         const threadHeaders = [];
         if (email.messageId) {
+          const dealMessagesForThread = await dealsService.getMessages(existingDeal.id);
+          const viennaOutboundIds = dealMessagesForThread
+            .filter(m => m.direction === 'outbound' && m.external_message_id)
+            .map(m => m.external_message_id);
+          const chain = buildPreviewThreadChain({
+            outboundIds: viennaOutboundIds,
+            inboundReferences: email.references,
+            latestMessageId: email.messageId,
+          });
           threadHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(email.messageId) });
-          const chain = [...(email.references || []), email.messageId].filter(Boolean);
           threadHeaders.push({ Name: 'References', Value: chain.map(formatThreadId).join(' ') });
         }
 
@@ -1303,4 +1345,6 @@ module.exports.__test__ = {
   BASE_REQUIRED_INTAKE_REFINANCE, BASE_REQUIRED_INTAKE_PURCHASE, COMPLIANCE_REQUIRED_POSTAPPROVAL,
   intakeRequiredFor, allRequiredForCompletion, isPurchaseFromSummary,
   computeWillFireFinalReview,
+  // Group YYY: preview-thread chain builder
+  buildPreviewThreadChain,
 };

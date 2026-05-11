@@ -3314,6 +3314,89 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log(`Group SSS / D computeWillFireFinalReview: ${sssDPassed}/${sssDCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP YYY — draft-preview threading chain (S5.3)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-YYY saveDraftAndPreview built the References chain from admin's email
+  // (admin.references + admin.messageId). If admin's email client truncated or
+  // dropped the References header on long threads, the chain lost Vienna's
+  // outbound message-IDs and the thread fragmented in admin's inbox.
+  // Production S5.3: parallel near-identical threads accumulated; admin
+  // risked replying to the wrong (older) thread, reverting in-progress edits.
+  //
+  // YYY anchors the chain on Vienna's outbound IDs fetched from the DB
+  // (chronological order, oldest first), then appends admin's references and
+  // the latest admin messageId — deduped on normalized UUID key (strips
+  // angle brackets and @domain).
+  console.log('\n========== GROUP YYY — preview thread chain anchored on Vienna outbound IDs ==========');
+  const { buildPreviewThreadChain: yyyBuild } = require('./src/routes/webhook').__test__;
+
+  const yyyCases = [
+    {
+      name: 'E1: fresh deal, no prior outbound → latest only',
+      input: { outboundIds: [], inboundReferences: [], latestMessageId: 'admin-1' },
+      expect: ['admin-1'],
+    },
+    {
+      name: 'E2: prior prelim outbound, admin first reply (overlap with refs)',
+      input: { outboundIds: ['mid-1'], inboundReferences: ['mid-1'], latestMessageId: 'admin-1' },
+      expect: ['mid-1', 'admin-1'],
+    },
+    {
+      name: 'E3: three EDIT cycles, order preserved, no dupes',
+      input: {
+        outboundIds: ['mid-1', 'mid-3', 'mid-5'],
+        inboundReferences: ['mid-1', 'admin-1', 'mid-3', 'admin-3'],
+        latestMessageId: 'admin-5',
+      },
+      expect: ['mid-1', 'mid-3', 'mid-5', 'admin-1', 'admin-3', 'admin-5'],
+    },
+    {
+      name: 'E4: admin client drops References — Vienna IDs anchor the chain',
+      input: { outboundIds: ['mid-1', 'mid-3'], inboundReferences: [], latestMessageId: 'admin-3' },
+      expect: ['mid-1', 'mid-3', 'admin-3'],
+    },
+    {
+      name: 'E5: mixed formats — raw UUID vs wrapped <uuid@mtasv.net> dedupe correctly',
+      input: {
+        outboundIds: ['41be2245-aaaa-bbbb-cccc-dddddddddddd'],
+        inboundReferences: ['<41be2245-aaaa-bbbb-cccc-dddddddddddd@mtasv.net>'],
+        latestMessageId: 'admin-1',
+      },
+      expect: ['41be2245-aaaa-bbbb-cccc-dddddddddddd', 'admin-1'],
+    },
+    {
+      name: 'E6: empty inputs → empty chain',
+      input: { outboundIds: [], inboundReferences: [], latestMessageId: null },
+      expect: [],
+    },
+    {
+      name: 'E7: admin echoes Vienna IDs out-of-order — Vienna order wins',
+      input: {
+        outboundIds: ['mid-1', 'mid-2', 'mid-3'],
+        inboundReferences: ['mid-3', 'mid-1', 'mid-2'],
+        latestMessageId: 'admin-1',
+      },
+      expect: ['mid-1', 'mid-2', 'mid-3', 'admin-1'],
+    },
+    {
+      name: 'E8: no defaults required — call with no args returns []',
+      input: undefined,
+      expect: [],
+    },
+  ];
+
+  let yyyPassed = 0;
+  for (const tc of yyyCases) {
+    const got = tc.input === undefined ? yyyBuild() : yyyBuild(tc.input);
+    if (JSON.stringify(got) !== JSON.stringify(tc.expect)) {
+      throw new Error(`FAIL [Group YYY ${tc.name}]:\n  input=${JSON.stringify(tc.input)}\n  expected=${JSON.stringify(tc.expect)}\n  got=${JSON.stringify(got)}`);
+    }
+    console.log(`  PASS [${tc.name}]`);
+    yyyPassed++;
+  }
+  console.log(`Group YYY buildPreviewThreadChain: ${yyyPassed}/${yyyCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP OOO — payout vs balance vs discharge distinction (S1.4)
   // ════════════════════════════════════════════════════════════════
   // Reverses Group K's unification. Production failure: deal 9aa136aa accepted a
