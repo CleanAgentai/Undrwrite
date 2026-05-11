@@ -1,0 +1,24 @@
+-- Group EEEE (S12.2): snapshot intake-time ask list so cron reminders enumerate
+-- what Vienna ACTUALLY requested rather than what current policy dictates.
+--
+-- Production failure: Noah MacKenzie's deal (created pre-JJJ, pre-TTT) had
+-- intake asking for AML/PEP. Subsequent cron reminder enumerated current
+-- baseRequired (post-JJJ no AML/PEP, post-TTT adds gov ID + property tax) —
+-- mismatched what was originally asked. Franco's spec: "Reminders must
+-- reflect exactly what was requested in the original email and nothing more."
+--
+-- EEEE adds a per-deal intake_asked_items JSONB column stamped at intake time
+-- (new-client INITIAL branch, broker-path + non-deferred-intake states only).
+-- Cron reminder construction prefers the snapshot when set, falls back to
+-- current baseRequired when null/empty (Q6-EEEE: forward-only, let-it-go for
+-- pre-EEEE deals).
+--
+-- Shape: JSONB array of classification strings (Q5-EEEE: matches cron's
+-- existing missingDocs filter shape; deterministic; rendered via
+-- DOC_DISPLAY_NAMES). May also contain the non-classification string
+-- 'exit_strategy' when intake-time exit_strategy was null — same pattern
+-- as the existing exit_strategy push at cron/dailySummary.js:106.
+--
+-- Idempotent via IF NOT EXISTS. Safe to re-apply.
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS intake_asked_items JSONB;

@@ -4303,6 +4303,163 @@ renovations.`,
   console.log('  PASS [Group DDDD cron import]: cron/dailySummary.js imports from shared util (architectural cleanup)');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP EEEE — intake_asked_items snapshot for cron reminders (S12.2)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-EEEE cron reminders computed missingDocs from CURRENT baseRequired.
+  // Cross-policy drift: Noah MacKenzie's deal (pre-JJJ/pre-TTT intake asked
+  // AML/PEP) got a reminder enumerating items Vienna never asked for
+  // (post-JJJ no AML/PEP, post-TTT gov ID + property tax added). Franco's
+  // spec: "Reminders must reflect exactly what was requested in the
+  // original email and nothing more."
+  //
+  // EEEE stamps intake_asked_items JSONB snapshot at intake time (broker-path,
+  // non-deferred-intake only). Cron reminders use the snapshot when present;
+  // null/empty falls back to current baseRequired (Q6-EEEE: forward-only).
+  console.log('\n========== GROUP EEEE — intake_asked_items snapshot ==========');
+
+  // ─── Truth table — computeIntakeAskedItems ──────────────────────────────
+  console.log('\n---------- Group EEEE / Truth Table: computeIntakeAskedItems ----------');
+  const { computeIntakeAskedItems: eeeeCompute } = require('./src/routes/webhook').__test__;
+
+  const eeeeCases = [
+    {
+      name: 'E1: broker, refinance, no on-file docs, no exit_strategy → full intake list + exit_strategy',
+      summary: { sender_type: 'broker', loan_type: 'refinance' },
+      classifications: [],
+      expect: ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report', 'exit_strategy'],
+    },
+    {
+      name: 'E2: broker, refinance, broker pre-attached appraisal + credit_report + exit_strategy populated',
+      summary: { sender_type: 'broker', loan_type: 'refinance', exit_strategy: 'refi at maturity' },
+      classifications: ['appraisal', 'credit_report'],
+      expect: ['government_id', 'property_tax', 'mortgage_statement', 'income_proof'],
+    },
+    {
+      name: 'E3: broker, purchase, full intake on-file + exit_strategy set → empty array (everything asked already there)',
+      summary: { sender_type: 'broker', loan_type: 'purchase', exit_strategy: 'sale of subject' },
+      classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract'],
+      expect: [],
+    },
+    {
+      name: 'E4: borrower-direct → null (no snapshot — borrower-path doesn\'t ask docs at intake per RRR)',
+      summary: { sender_type: 'borrower', loan_type: 'refinance' },
+      classifications: [],
+      expect: null,
+    },
+    {
+      name: 'E5: broker, identity_clash → null (deferred-intake per HHH)',
+      summary: { sender_type: 'broker', loan_type: 'refinance', identity_clash: true },
+      classifications: [],
+      expect: null,
+    },
+    {
+      name: 'E6: broker, LTV > 80 → null (deferred-intake per Fix 7)',
+      summary: { sender_type: 'broker', loan_type: 'refinance', ltv_percent: 92 },
+      classifications: [],
+      expect: null,
+    },
+    {
+      name: 'E7: broker, LTV exactly 80 (boundary) → normal stamp (mirrors `> 80` predicate at line 1041)',
+      summary: { sender_type: 'broker', loan_type: 'refinance', ltv_percent: 80, exit_strategy: 'refi' },
+      classifications: [],
+      expect: ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'],
+    },
+    {
+      name: 'E8: broker, NOA on-file satisfies income_proof via DOC_SYNONYMS',
+      summary: { sender_type: 'broker', loan_type: 'refinance', exit_strategy: 'refi' },
+      classifications: ['noa'],
+      expect: ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'credit_report'],
+    },
+    {
+      name: 'E9: broker, purchase + identity_clash → null (identity_clash takes priority)',
+      summary: { sender_type: 'broker', loan_type: 'purchase', identity_clash: true },
+      classifications: [],
+      expect: null,
+    },
+    {
+      name: 'E10: broker, no loan_type → defaults to refinance tier (matches isPurchaseFromSummary fallback)',
+      summary: { sender_type: 'broker', exit_strategy: 'refi' },
+      classifications: [],
+      expect: ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'],
+    },
+    {
+      name: 'E11: null dealSummary → null (defensive — sender_type can\'t be determined)',
+      summary: null,
+      classifications: [],
+      expect: null,
+    },
+    {
+      name: 'E12: broker, empty-string exit_strategy → appends exit_strategy (whitespace not handled here; null/empty/undefined all push)',
+      summary: { sender_type: 'broker', loan_type: 'refinance', exit_strategy: '' },
+      classifications: ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'],
+      expect: ['exit_strategy'],
+    },
+  ];
+
+  let eeeePassed = 0;
+  for (const tc of eeeeCases) {
+    const got = eeeeCompute(tc.summary, tc.classifications);
+    if (JSON.stringify(got) !== JSON.stringify(tc.expect)) {
+      throw new Error(`FAIL [Group EEEE ${tc.name}]:\n  summary=${JSON.stringify(tc.summary)}\n  classifications=${JSON.stringify(tc.classifications)}\n  expected=${JSON.stringify(tc.expect)}\n  got=${JSON.stringify(got)}`);
+    }
+    console.log(`  PASS [${tc.name}]: → ${JSON.stringify(got)}`);
+    eeeePassed++;
+  }
+  console.log(`Group EEEE / Truth Table: ${eeeePassed}/${eeeeCases.length} passed`);
+
+  // ─── Cron snapshot-vs-fallback dispatch (source-string regression on cron) ──
+  console.log('\n---------- Group EEEE / Cron dispatch source-string regression ----------');
+  // cronSrc already loaded earlier (DDDD source-string regression)
+  if (!/Array\.isArray\(deal\.intake_asked_items\) && deal\.intake_asked_items\.length > 0/.test(cronSrc)) {
+    throw new Error(`FAIL [Group EEEE cron snapshot check]: cron/dailySummary.js must check Array.isArray(deal.intake_asked_items) && length > 0`);
+  }
+  console.log('  PASS [Group EEEE cron snapshot check]: cron prefers intake_asked_items when non-null/non-empty');
+
+  if (!/req === 'exit_strategy'\s*[?\n]/.test(cronSrc)) {
+    throw new Error(`FAIL [Group EEEE cron exit_strategy filter]: cron must branch req === 'exit_strategy' to check extracted_data.exit_strategy vs classifications`);
+  }
+  console.log('  PASS [Group EEEE cron exit_strategy filter]: cron handles exit_strategy non-classification entry separately');
+
+  // Fallback path still exists — preserves pre-EEEE behavior
+  if (!/Pre-EEEE/.test(cronSrc) && !/let-it-go/.test(cronSrc)) {
+    // Look for the structural marker — the else branch with baseRequired fallback
+    if (!/} else \{[\s\S]{0,500}baseRequired = reminderIsPurchase/.test(cronSrc)) {
+      throw new Error(`FAIL [Group EEEE fallback path]: cron must have an else-branch falling back to baseRequired when snapshot is null/empty`);
+    }
+  }
+  console.log('  PASS [Group EEEE fallback path]: cron preserves baseRequired fallback for null/empty snapshots (Q6-EEEE)');
+
+  // ─── webhook.js stamping source-string regression ───────────────────────
+  console.log('\n---------- Group EEEE / Webhook stamping source-string regression ----------');
+
+  if (!/computeIntakeAskedItems\(dealSummary, initialClassifications\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group EEEE webhook compute]: webhook.js INITIAL branch must call computeIntakeAskedItems(dealSummary, initialClassifications)`);
+  }
+  console.log('  PASS [Group EEEE webhook compute]: computeIntakeAskedItems called in INITIAL branch');
+
+  if (!/dealsService\.update\(deal\.id, \{ intake_asked_items:/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group EEEE webhook stamp]: webhook.js must update deal with intake_asked_items field`);
+  }
+  console.log('  PASS [Group EEEE webhook stamp]: dealsService.update writes intake_asked_items');
+
+  // Best-effort try/catch (Q2-EEEE)
+  if (!/try \{[\s\S]{0,500}dealsService\.update\(deal\.id, \{ intake_asked_items:[\s\S]{0,500}\} catch \(stampErr\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group EEEE best-effort]: intake_asked_items stamp must be wrapped in try/catch per Q2-EEEE`);
+  }
+  console.log('  PASS [Group EEEE best-effort]: stamp wrapped in try/catch — welcome email flow doesn\'t block on stamp failure');
+
+  // Migration file exists
+  const eeeeMigPath = path_qqq.join(__dirname, 'src/migrations/2026-05-11-intake-asked-items.sql');
+  if (!fs_qqq.existsSync(eeeeMigPath)) {
+    throw new Error(`FAIL [Group EEEE migration]: src/migrations/2026-05-11-intake-asked-items.sql does not exist`);
+  }
+  const eeeeMigSrc = fs_qqq.readFileSync(eeeeMigPath, 'utf8');
+  if (!/ALTER TABLE deals ADD COLUMN IF NOT EXISTS intake_asked_items JSONB/.test(eeeeMigSrc)) {
+    throw new Error(`FAIL [Group EEEE migration body]: migration must ALTER TABLE deals ADD COLUMN IF NOT EXISTS intake_asked_items JSONB`);
+  }
+  console.log('  PASS [Group EEEE migration]: SQL file present + correct ALTER TABLE statement');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed

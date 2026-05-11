@@ -112,6 +112,38 @@ const shouldSkipIntakeFormsForDeferredState = (dealSummary) => {
   return !!(ltv && ltv > 80);
 };
 
+// Group EEEE (S12.2): compute the intake_asked_items snapshot at intake time.
+// Pure function — caller passes dealSummary + classifications already on file.
+// Returns:
+//   - Array of classification strings (+ optional 'exit_strategy') for broker-
+//     path deals not in a deferred-intake state. Empty array if everything was
+//     pre-attached (broker submitted full package upfront).
+//   - null for borrower-path / identity_clash / high-LTV deals (Vienna's
+//     welcome doesn't ask for the standard intake doc list in those states —
+//     no snapshot to record; cron falls back to current baseRequired).
+//
+// Snapshot drives cron reminders post-EEEE: cron uses snapshot if non-null/
+// non-empty, else falls back to baseRequired (Q6-EEEE: forward-only, let-it-go
+// for pre-EEEE deals + deferred-intake states). Pre-EEEE failure mode:
+// cross-policy drift between intake-time baseRequired and reminder-time
+// baseRequired (post-JJJ AML/PEP removed, post-TTT gov ID + property tax
+// added) — reminders enumerated items Vienna never asked for.
+const computeIntakeAskedItems = (dealSummary, classificationsOnFile = []) => {
+  const isBrokerPath = dealSummary?.sender_type === 'broker';
+  if (!isBrokerPath) return null;
+  // Deferred-intake states: Vienna's welcome asks ONE specific question, not
+  // the doc list. No snapshot (cron falls back to baseRequired if the deal
+  // ever reaches a state where reminders fire).
+  if (dealSummary?.identity_clash) return null;
+  const ltv = dealSummary?.ltv_percent;
+  if (ltv && ltv > 80) return null;
+  // Broker-path, non-deferred-intake: compute the snapshot.
+  const intakeBase = intakeRequiredFor(isPurchaseFromSummary(dealSummary));
+  const askedItems = intakeBase.filter(req => !isDocRequirementSatisfied(req, classificationsOnFile));
+  if (!dealSummary?.exit_strategy) askedItems.push('exit_strategy');
+  return askedItems;
+};
+
 // Group DDDD (S6.2): pre-label messages JS-side so admin replies (stored as
 // direction='inbound' on under_review deals per the HITL pattern) get
 // attributed to "Admin (Franco)" rather than the broker_name when rendered
@@ -1061,6 +1093,25 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
       // review for ≤80% still requires at least one of income_proof / NOA / appraisal.
       const initialDocsForGate = await dealsService.getDocumentsByDeal(deal.id);
       const initialClassifications = initialDocsForGate.map(d => d.classification).filter(Boolean);
+
+      // Group EEEE (S12.2): stamp intake_asked_items snapshot so cron reminders
+      // enumerate what Vienna actually asked for (not what current policy
+      // dictates — cross-policy drift caused the Noah MacKenzie reminder
+      // mismatch). Best-effort per Q2-EEEE — try/catch + console.error;
+      // welcome email already sent to broker, stamping is internal optimization
+      // and fallback path is the pre-EEEE behavior (baseRequired recomputed
+      // at reminder time).
+      const intakeAskedItems = computeIntakeAskedItems(dealSummary, initialClassifications);
+      if (intakeAskedItems !== null) {
+        try {
+          await dealsService.update(deal.id, { intake_asked_items: intakeAskedItems });
+          console.log(`EEEE: stamped intake_asked_items=${JSON.stringify(intakeAskedItems)} on deal ${deal.id}`);
+        } catch (stampErr) {
+          console.error('EEEE: intake_asked_items stamp failed (best-effort; cron will fall back to baseRequired):', stampErr.message);
+        }
+      } else {
+        console.log(`EEEE: skipped intake_asked_items stamp (borrower-path or deferred-intake state — cron will fall back to baseRequired)`);
+      }
       const initialHasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => initialClassifications.includes(c));
       // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
       // Pre-BBBB prelim fired without exit_strategy → admin saw [MISSING] Exit Strategy
@@ -1568,4 +1619,6 @@ module.exports.__test__ = {
   shouldSkipIntakeFormsForDeferredState,
   // Group DDDD: message pre-labeling for lead-summary / broker-response rendering
   labelMessagesForLeadSummary,
+  // Group EEEE: intake_asked_items snapshot computation
+  computeIntakeAskedItems,
 };
