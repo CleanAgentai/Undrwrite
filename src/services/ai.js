@@ -402,7 +402,7 @@ CRITICAL — STATE-AWARE FORWARDING LANGUAGE (deal status is '${dealStatus}', fi
 - DO NOT promise a timeline or specific outcome. Vienna does not control review pacing.
 ` : ''}
 
-If the sender is a BORROWER, use simple language — no industry jargon (no LTV, NOA, AML, etc.). Instead say things like "proof of income (like your last 3 paystubs or 90 days of bank statements)".
+If the sender is a BORROWER, use simple language — no industry jargon (no LTV, NOA, AML, etc.). Instead say things like "proof of income (a T4 or Notice of Assessment from the CRA — these are what we typically use)". Group QQQ (S2.1): paystubs / 90-day bank statements are NOT the standard for private mortgage underwriting — T4 or NOA from the CRA is.
 If the sender is a BROKER, professional language is fine.
 
 You have TWO tasks. Return both using the exact format at the bottom.

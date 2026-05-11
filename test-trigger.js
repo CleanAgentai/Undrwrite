@@ -3261,6 +3261,40 @@ WEBSITE.  unionfinancialcorp.com`;
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP QQQ — borrower-path proof-of-income phrasing (S2.1)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-QQQ ai.js:405 told Vienna to ask borrowers for "last 3 paystubs or 90
+  // days of bank statements" as the income-doc example. Production deal S2
+  // (Marcus Webb, borrower-direct) saw Vienna pull from this example and ask
+  // for paystubs/bank-statements — wrong docs from day one. Per Franco, the
+  // private-mortgage standard is T4 or NOA from the CRA. Source-string
+  // regression check (no Claude needed for a phrase swap inside an existing
+  // well-tested rule).
+  console.log('\n========== GROUP QQQ — borrower-path proof-of-income phrasing ==========');
+  const fs_qqq = require('fs');
+  const path_qqq = require('path');
+  const aiSource = fs_qqq.readFileSync(path_qqq.join(__dirname, 'src/services/ai.js'), 'utf8');
+
+  // Negative — pre-QQQ phrasing must be gone
+  if (/like your last 3 paystubs or 90 days of bank statements/.test(aiSource)) {
+    throw new Error(`FAIL [Group QQQ negative]: pre-QQQ paystub/bank-statement borrower example still present in ai.js`);
+  }
+  console.log('  PASS [Group QQQ negative]: pre-QQQ paystub/bank-statement example removed');
+
+  // Positive — new T4/NOA phrasing must be present in the borrower-context rule
+  if (!/T4 or Notice of Assessment from the CRA/.test(aiSource)) {
+    throw new Error(`FAIL [Group QQQ positive]: T4/NOA borrower example missing from ai.js`);
+  }
+  console.log('  PASS [Group QQQ positive]: T4/NOA borrower example present');
+
+  // Regression guard — broker-facing rules MUST still allow paystubs in their menu
+  // (broker-context language stays as-is per Franco; this scrub was borrower-only).
+  if (!/Proof of Income \(NOA, pay stubs, T4, or employment letter/.test(aiSource)) {
+    throw new Error(`FAIL [Group QQQ broker regression]: broker-facing 'NOA, pay stubs, T4, or employment letter' rule was removed — should be untouched`);
+  }
+  console.log('  PASS [Group QQQ broker regression]: broker-facing pay-stubs-allowed rule untouched');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP MMM — daily summary admin-reply subject filter (S13.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-MMM: cron/dailySummary.js filtered direction='inbound' but didn't
