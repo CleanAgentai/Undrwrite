@@ -3737,6 +3737,60 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log('  PASS [Group QQQ broker regression]: broker-facing pay-stubs-allowed rule untouched');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP TTT — intake doc list completeness (S3.1)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed
+  // Government-Issued ID and Property Tax Assessment — both required by
+  // sendPreliminaryReviewToAdmin's baseRequired gate. Result: broker never
+  // asked at intake → prelim review always shows them as [MISSING].
+  // S3.1 production (Derek Olsen): Vienna asked for loan app, PNW, appraisal,
+  // payout statement, credit bureau, proof of income — no gov ID, no tax.
+  // TTT adds both to the broker-context list. Source-string check; the items
+  // are additive to an already-listed checklist, no Claude verification needed.
+  console.log('\n========== GROUP TTT — intake doc list completeness ==========');
+
+  // 1. Gov ID listed in broker-context WHAT TO ASK FOR
+  if (!/- Government-Issued ID \(driver's license, passport/.test(aiSource)) {
+    throw new Error(`FAIL [Group TTT gov ID]: 'Government-Issued ID' missing from WHAT TO ASK FOR list`);
+  }
+  console.log('  PASS [Group TTT gov ID]: Government-Issued ID present in WHAT TO ASK FOR list');
+
+  // 2. Property Tax Assessment listed
+  if (!/- Property Tax Assessment \(current year/.test(aiSource)) {
+    throw new Error(`FAIL [Group TTT property tax]: 'Property Tax Assessment' missing from WHAT TO ASK FOR list`);
+  }
+  console.log('  PASS [Group TTT property tax]: Property Tax Assessment present in WHAT TO ASK FOR list');
+
+  // 3. ONLY-IF-NOT-ALREADY-PROVIDED caveat preserved (regression guard against accidental
+  //    rewrite of the list header — the gate that suppresses asks when broker already
+  //    attached the doc).
+  if (!/WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED/.test(aiSource)) {
+    throw new Error(`FAIL [Group TTT caveat]: 'WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED' header missing`);
+  }
+  console.log('  PASS [Group TTT caveat]: ONLY-IF-NOT-ALREADY-PROVIDED header preserved');
+
+  // 4. Attachment recognition list updated (Q1-TTT polish)
+  if (!/government ID, property tax assessment/.test(aiSource)) {
+    throw new Error(`FAIL [Group TTT attachment recognition]: line 88 ANALYZING list missing 'government ID, property tax assessment'`);
+  }
+  console.log('  PASS [Group TTT attachment recognition]: line 88 ANALYZING list updated (Q1-TTT polish)');
+
+  // 5. Borrower section regression guard: gov ID + property tax must NOT appear
+  //    in the borrower checklist (borrower intake is conversational; docs come later).
+  const borrowerSectionMatch = aiSource.match(/=== IF SENDER IS A BORROWER ===([\s\S]*?)=== IF SENDER IS A BROKER ===/);
+  if (!borrowerSectionMatch) {
+    throw new Error(`FAIL [Group TTT borrower regression]: could not locate borrower section bounds`);
+  }
+  const borrowerSection = borrowerSectionMatch[1];
+  if (/Government-Issued ID/.test(borrowerSection)) {
+    throw new Error(`FAIL [Group TTT borrower regression]: 'Government-Issued ID' leaked into borrower section (should be broker-only)`);
+  }
+  if (/Property Tax Assessment/.test(borrowerSection)) {
+    throw new Error(`FAIL [Group TTT borrower regression]: 'Property Tax Assessment' leaked into borrower section (should be broker-only)`);
+  }
+  console.log('  PASS [Group TTT borrower regression]: gov ID + property tax scoped to broker section only');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP RRR — borrower-initial over-clarification (S2.2)
   // ════════════════════════════════════════════════════════════════
   // Production bug: Marcus Webb deal 0a815d91 — borrower-initial msg 0 stated

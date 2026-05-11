@@ -89,7 +89,7 @@ Carefully read the inbound email and extract any information already provided:
 - Purpose of the loan
 - Exit strategy
 - Borrower income / employment details
-- Attachments mentioned (application, credit bureau, appraisal, AML, PEP, financial statements, etc.)
+- Attachments mentioned (application, credit bureau, appraisal, government ID, property tax assessment, AML, PEP, financial statements, etc.)
 
 Only ask for what is MISSING from the initial email.
 
@@ -114,8 +114,10 @@ IDENTITY CLASH (when identity_clash=true per the IDENTITY CLASH DETECTION RULE i
 WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - A brief write-up or "story" about the deal — a high-level overview of what the client is looking for, how much they want to borrow and for how long, a bit of background on the borrowers, etc. If the broker already provided this kind of overview in their email, do NOT ask again. Only ask if the email is thin on context (e.g. just "here are the docs" with no explanation).
 - Exit strategy (how the borrower will repay / refinance out)
-- Current mortgage payout statement (do NOT ask "what is owing" as a question — request the actual payout statement document)
+- Government-Issued ID (driver's license, passport, or other photo ID for the borrower)
 - Current appraisal (do NOT ask for "appraised value" separately — that comes from the appraisal itself. Just ask for "a current appraisal" if one hasn't been provided)
+- Property Tax Assessment (current year — required for the file)
+- Current mortgage payout statement (do NOT ask "what is owing" as a question — request the actual payout statement document)
 - Proof of income — ask for "proof of income (an NOA works — or pay stubs / T4 / employment letter)" as a SINGLE item. Do NOT list NOA and Proof of Income as two separate asks — they're interchangeable for our initial review. We may follow up for additional income docs later (especially for self-employed borrowers where the NOA shows low income).
 - Credit bureau reports — if NO credit bureau (CB) documents were attached, ask "Have you pulled credit for the borrower(s)?" Do NOT ask if credit reports were already included in the attachments.
 - Loan amount (only if not stated)
