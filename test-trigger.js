@@ -3295,6 +3295,102 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log('  PASS [Group QQQ broker regression]: broker-facing pay-stubs-allowed rule untouched');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP RRR — borrower-initial over-clarification (S2.2)
+  // ════════════════════════════════════════════════════════════════
+  // Production bug: Marcus Webb deal 0a815d91 — borrower-initial msg 0 stated
+  // "I'm looking to take out a second mortgage on my property to consolidate
+  // some debt" + property/value/balance/amount details. Vienna's INITIAL welcome
+  // (msg 1) acknowledged "the debt consolidation" but then asked for "a brief
+  // write-up about your situation" anyway — near-verbatim repeat of what Marcus
+  // already gave. Investigation: bug is in INITIAL_EMAIL_PROMPT's borrower
+  // section (step 4 unconditional), NOT in generateBrokerResponse where FFF
+  // lives. Fix: add the same "skip if already provided" conditional to
+  // borrower step 4 that broker section line 111 already has.
+  console.log('\n========== GROUP RRR — borrower-initial over-clarification ==========');
+
+  // Source-string regression — the new conditional rule must appear in the
+  // borrower section, and the second example (skip-write-up behavior) must
+  // be present.
+  if (!/Ask them for a brief write-up or "story" about their situation ONLY IF/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRR rule]: borrower step 4 ONLY-IF conditional missing from INITIAL_EMAIL_PROMPT`);
+  }
+  console.log('  PASS [Group RRR rule]: borrower step 4 ONLY-IF conditional present');
+
+  if (!/Example borrower response when borrower ALREADY provided context/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRR example]: second borrower example (skip-write-up) missing from INITIAL_EMAIL_PROMPT`);
+  }
+  console.log('  PASS [Group RRR example]: second borrower example (skip-write-up) present');
+
+  // ─── D — Live Claude prompt verification (5x) ───────────────────────────
+  // Fixture: Marcus Webb's exact production msg 0 body (verbatim — cleanly
+  // demonstrates the over-clarification trigger). Pass criteria for each run:
+  //   1. Vienna acknowledges the debt consolidation purpose
+  //   2. Vienna asks for the forms (Loan Application + PNW)
+  //   3. Vienna does NOT ask for a brief write-up / overview / situation summary
+  // Threshold: 0-1 leaks ships, 2+ escalates.
+  if (process.env.RUN_RRR_D === '1') {
+    console.log('\n---------- Group RRR / D: 5x Claude prompt verification ----------');
+    const rrrInitialEmail = `Hi,
+
+My name is Marcus Webb. I'm a homeowner in Edmonton and I'm looking to take out a second mortgage on my property to consolidate some debt.
+
+Property: 1142 Tory Road NW, Edmonton, AB
+Property Value: ~$580,000
+Existing Mortgage Balance: $261,000 (RBC)
+Amount I'm Looking For: ~$87,000
+
+Please let me know what else you need from me.
+
+Thanks,
+Marcus Webb`;
+
+    let rrrLeaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      const result = await aiService.processInitialEmail(
+        'Marcus Webb',
+        rrrInitialEmail,
+        [],   // no attachments
+        [],   // no savedDocs
+        false, // hasOwnApplication
+        false, // hasOwnPnw
+        false  // nameCollidesWithAdmin
+      );
+      const reply = (result.welcomeEmail || '').toLowerCase();
+      // Check 1 — acknowledges the debt consolidation purpose
+      const acks = /debt consolidation|consolidat/.test(reply);
+      // Check 2 — asks for the forms
+      const asksForms = /(loan application|application form).{0,80}(personal net worth|pnw)|fill out the (two )?(attached )?forms/i.test(reply);
+      // Check 3 — does NOT ask for a write-up / overview / situation summary
+      const writeupPatterns = [
+        /\bwrite[- ]?up\b/i,
+        /\bbrief overview\b/i,
+        /\bhigh-level overview\b/i,
+        /\btell us about your situation\b/i,
+        /\bdescribe your situation\b/i,
+        /\bgive (us|me) a (quick )?(rundown|overview|summary)\b/i,
+        /\b(quick )?rundown\b/i,
+        /\b(your|the) story\b/i,
+      ];
+      const writeupAsk = writeupPatterns.some(re => re.test(reply));
+
+      const leaked = !acks || !asksForms || writeupAsk;
+      if (leaked) {
+        rrrLeaks++;
+        const triggered = writeupPatterns.filter(re => re.test(reply)).map(re => re.source);
+        console.log(`  Run ${run}: LEAK — acks=${acks}, asksForms=${asksForms}, writeupAsk=${writeupAsk}${triggered.length ? ` (matched: ${triggered.join(', ')})` : ''}\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+      } else {
+        console.log(`  Run ${run}: PASS — acks=${acks}, asksForms=${asksForms}, writeupAsk=${writeupAsk}`);
+      }
+    }
+    if (rrrLeaks >= 2) {
+      throw new Error(`FAIL [Group RRR / D]: ${rrrLeaks}/5 runs leaked. Escalation threshold reached — prompt rule needs tightening.`);
+    }
+    console.log(`Group RRR / D (5x Claude prompt): ${5 - rrrLeaks}/5 passed, ${rrrLeaks}/5 leaked (threshold: ≤1)`);
+  } else {
+    console.log('\n---------- Group RRR / D: SKIPPED (set RUN_RRR_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP MMM — daily summary admin-reply subject filter (S13.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-MMM: cron/dailySummary.js filtered direction='inbound' but didn't
