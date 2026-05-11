@@ -3791,6 +3791,186 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log('  PASS [Group TTT borrower regression]: gov ID + property tax scoped to broker section only');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP UUU — discrepancy detection tuning (S3.3 + S3.4)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-UUU the CRITICAL DATA DISCREPANCY RULE flagged any number/factual
+  // mismatch between email body and attached docs. Two production failures:
+  //   S3.3 over-fire: broker "~$112,000" (hedged estimate) vs loan app $110,000
+  //                   (1.8% delta) — Vienna flagged as discrepancy, noise.
+  //   S3.4 under-fire: broker "home renovations" vs loan app "business working
+  //                    capital and equipment purchase" — Vienna silently used
+  //                    loan-app value without flagging the categorical conflict.
+  // UUU tunes both directions across three prompt sites:
+  //   ai.js:172 INITIAL_EMAIL_PROMPT, ai.js:483 generateBrokerResponse,
+  //   ai.js:1210 generateLeadSummary.
+  console.log('\n========== GROUP UUU — discrepancy detection tuning ==========');
+
+  // ─── Source-string regression: all three sites must contain both sub-rules ──
+  const uuuHedgeMarker = /HEDGED NUMERIC ESTIMATES/g;
+  const uuuCategoricalMarker = /CATEGORICAL\/PURPOSE MISMATCHES MUST FLAG/g;
+  const uuuHedgeMatches = (aiSource.match(uuuHedgeMarker) || []).length;
+  const uuuCategoricalMatches = (aiSource.match(uuuCategoricalMarker) || []).length;
+  if (uuuHedgeMatches !== 3) {
+    throw new Error(`FAIL [Group UUU hedge sub-rule]: expected 3 occurrences (one per site: INITIAL, broker response, lead summary), got ${uuuHedgeMatches}`);
+  }
+  console.log(`  PASS [Group UUU hedge sub-rule]: HEDGED NUMERIC ESTIMATES rule present in all 3 sites (${uuuHedgeMatches}/3)`);
+  if (uuuCategoricalMatches !== 3) {
+    throw new Error(`FAIL [Group UUU categorical sub-rule]: expected 3 occurrences, got ${uuuCategoricalMatches}`);
+  }
+  console.log(`  PASS [Group UUU categorical sub-rule]: CATEGORICAL/PURPOSE MISMATCHES MUST FLAG rule present in all 3 sites (${uuuCategoricalMatches}/3)`);
+
+  // Hedge marker list completeness (Q1-UUU per Franco's response: includes
+  // "in the neighborhood of" and "ballpark"; excludes "more or less").
+  const hedgeMarkers = ['~', 'approximately', 'around', 'roughly', 'about', 'ish', 'give or take', 'in the neighborhood of', 'ballpark'];
+  for (const marker of hedgeMarkers) {
+    // Each marker should appear in the hedge sub-rule context. Use a generous
+    // surrounding window check — at minimum the marker should appear in the
+    // file at all (and we already verified the sub-rule header appears 3x).
+    if (!aiSource.includes(`"${marker}"`)) {
+      throw new Error(`FAIL [Group UUU hedge marker]: marker '${marker}' missing from prompt hedge-marker list (expected quoted)`);
+    }
+  }
+  console.log(`  PASS [Group UUU hedge marker list]: all ${hedgeMarkers.length} markers listed (Q1-UUU expanded set)`);
+
+  // ─── D1 + D2 — Live Claude 5x verification (per scenario) ──────────────
+  // Per Franco: finish both 5x runs before any escalation decision. Same cost
+  // either way (10 Claude calls); complete picture for triage. If both cross
+  // threshold, surface as two separate findings — they may need different fix
+  // shapes.
+  if (process.env.RUN_UUU_D === '1') {
+    console.log('\n---------- Group UUU / D1: hedged-estimate over-fire suppression (5x) ----------');
+
+    const d1ConversationHistory = [
+      {
+        direction: 'inbound',
+        body: `Hi Vienna,
+
+Looking at ~$112,000 for the second mortgage on Derek Olsen's property in Calgary. Loan application is attached — let me know what else you need.
+
+Thanks,
+Jason`,
+        created_at: '2026-05-10T10:00:00Z',
+      },
+    ];
+    const d1DealSummary = {
+      borrower_name: 'Derek Olsen',
+      broker_name: 'Jason Mercer',
+      sender_name: 'Jason Mercer',
+      sender_type: 'broker',
+      loan_amount: 110000,
+      property_value: 580000,
+      loan_type: 'second mortgage',
+      purpose: 'home renovation',
+      exit_strategy: 'refinance at maturity',
+      ltv_percent: 62,
+    };
+    const d1DocsOnFile = [
+      { classification: 'loan_application', file_name: 'LoanApp_Olsen.pdf' },
+    ];
+    const d1SavedDocs = [
+      { id: 'd1', file_name: 'LoanApp_Olsen.pdf', classification: 'loan_application', extracted_text: 'Borrower: Derek Olsen. Loan Amount: $110,000. Property: 432 Ranchlands Way NW, Calgary. Property Value: $580,000. Purpose: Home renovation.' },
+    ];
+
+    let d1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      const result = await aiService.generateBrokerResponse(
+        d1ConversationHistory[0].body,
+        [],
+        d1SavedDocs,
+        d1DealSummary,
+        d1ConversationHistory,
+        d1DocsOnFile,
+        'active'
+      );
+      const reply = (result.responseEmail || '').toLowerCase();
+      // Leak detection — Vienna flagged the hedged-estimate vs precise as a discrepancy.
+      // Look for both figures appearing together AND a flag-framing phrase.
+      const mentions112 = /112,?000|\$112k|~?\s*\$?112/.test(reply);
+      const mentions110 = /110,?000|\$110k|\$?110(?!,?000.{0,30}vs|\d)/.test(reply);
+      const flagFraming = /(doesn'?t match|differ|clarify which|confirm which|need.{0,20}clarif|inconsistency|mismatch)/.test(reply);
+      const leaked = mentions112 && mentions110 && flagFraming;
+      if (leaked) {
+        d1Leaks++;
+        console.log(`  Run ${run}: LEAK — flagged hedged $112K vs precise $110K as discrepancy\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+      } else {
+        console.log(`  Run ${run}: PASS — no false flag on hedged estimate (mentions112=${mentions112}, mentions110=${mentions110}, flagFraming=${flagFraming})`);
+      }
+    }
+    console.log(`Group UUU / D1: ${5 - d1Leaks}/5 passed, ${d1Leaks}/5 leaked (threshold: ≤1)`);
+
+    console.log('\n---------- Group UUU / D2: categorical-mismatch flag (5x) ----------');
+
+    const d2ConversationHistory = [
+      {
+        direction: 'inbound',
+        body: `Hi Vienna,
+
+Submitting a second mortgage for $95,000 on Derek Olsen's property in Calgary — funds are for home renovations. Loan application attached.
+
+Thanks,
+Jason`,
+        created_at: '2026-05-10T10:00:00Z',
+      },
+    ];
+    const d2DealSummary = {
+      borrower_name: 'Derek Olsen',
+      broker_name: 'Jason Mercer',
+      sender_name: 'Jason Mercer',
+      sender_type: 'broker',
+      loan_amount: 95000,
+      property_value: 580000,
+      loan_type: 'second mortgage',
+      purpose: 'business working capital and equipment purchase',
+      exit_strategy: 'refinance at maturity',
+      ltv_percent: 62,
+    };
+    const d2DocsOnFile = [
+      { classification: 'loan_application', file_name: 'LoanApp_Olsen.pdf' },
+    ];
+    const d2SavedDocs = [
+      { id: 'd2', file_name: 'LoanApp_Olsen.pdf', classification: 'loan_application', extracted_text: 'Borrower: Derek Olsen / Olsen Construction Inc. Loan Amount: $95,000. Property: 432 Ranchlands Way NW, Calgary. Purpose: Business working capital and equipment purchase for Olsen Construction Inc.' },
+    ];
+
+    let d2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      const result = await aiService.generateBrokerResponse(
+        d2ConversationHistory[0].body,
+        [],
+        d2SavedDocs,
+        d2DealSummary,
+        d2ConversationHistory,
+        d2DocsOnFile,
+        'active'
+      );
+      const reply = (result.responseEmail || '').toLowerCase();
+      // Pass criteria: reply mentions both purpose categories AND uses flag framing.
+      const mentionsRenovation = /renovation/.test(reply);
+      const mentionsBusiness = /business working capital|business.{0,30}equipment|business purpose|commercial purpose|business loan/.test(reply);
+      const flagFraming = /(doesn'?t match|differ|clarify which|confirm which|conflict|need.{0,30}clarif|mismatch|could you (clarify|confirm))/.test(reply);
+      const flagged = mentionsRenovation && mentionsBusiness && flagFraming;
+      // Leak = Vienna FAILED to flag the categorical mismatch
+      const leaked = !flagged;
+      if (leaked) {
+        d2Leaks++;
+        console.log(`  Run ${run}: LEAK — missed categorical mismatch (renovation=${mentionsRenovation}, business=${mentionsBusiness}, flagFraming=${flagFraming})\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+      } else {
+        console.log(`  Run ${run}: PASS — flagged renovation vs business mismatch`);
+      }
+    }
+    console.log(`Group UUU / D2: ${5 - d2Leaks}/5 passed, ${d2Leaks}/5 leaked (threshold: ≤1)`);
+
+    // ─── Escalation decision (after both 5x runs complete per Q2-UUU) ────────
+    if (d1Leaks >= 2 || d2Leaks >= 2) {
+      const findings = [];
+      if (d1Leaks >= 2) findings.push(`D1 (over-fire suppression): ${d1Leaks}/5 leaked — hedged-estimate tolerance not holding`);
+      if (d2Leaks >= 2) findings.push(`D2 (categorical mismatch flag): ${d2Leaks}/5 leaked — under-fire rule not strong enough`);
+      throw new Error(`FAIL [Group UUU / D escalation]: ${findings.length} scenario(s) crossed threshold.\n  - ${findings.join('\n  - ')}\nSurface escalation shape before commit per Q2-UUU.`);
+    }
+  } else {
+    console.log('\n---------- Group UUU / D1 + D2: SKIPPED (set RUN_UUU_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP RRR — borrower-initial over-clarification (S2.2)
   // ════════════════════════════════════════════════════════════════
   // Production bug: Marcus Webb deal 0a815d91 — borrower-initial msg 0 stated
