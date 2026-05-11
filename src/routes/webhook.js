@@ -142,18 +142,35 @@ const buildPreviewThreadChain = ({ outboundIds = [], inboundReferences = [], lat
   });
 };
 
-// Group SSS Site 4: JS-authoritative gate replacing Claude's allDocsReceived
-// flag for willFireFinalReview. Per Q1-SSS — Claude's flag was probabilistic;
-// JS classification + exit_strategy is deterministic. Extracted as a pure
-// function so the truth table can exercise it without mocking the full
-// request pipeline (matches NNN's decideReviewDispatch pattern).
-const computeWillFireFinalReview = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
-  if (deal?.status !== 'active') return false;
-  if (willGoToCollateralCheck || willReview || identityClashUnresolved) return false;
+// Group SSS Site 4 + Group CCCC (S6.1 + S7.2): JS-authoritative completion-path
+// dispatch for the active branch. Pre-SSS this was Claude's allDocsReceived
+// flag (probabilistic). Post-SSS: JS classifications + exit_strategy (deterministic).
+// Post-CCCC: also routes between FINAL REVIEW (defense-in-depth) and the
+// completion-handoff path (skip FINAL REVIEW when admin already approved at
+// prelim — prelim_approved_at signal mirrors BBB's conditions_sent_at).
+//
+// Returns one of three actions:
+//   - 'completion-handoff' : gates pass AND deal.prelim_approved_at is set.
+//                            Caller invokes sendCompletionHandoff(...,
+//                            { conditionsFulfilled: false }). Skips FINAL
+//                            REVIEW noise (S6.1 + S7.2).
+//   - 'final-review'       : gates pass AND deal.prelim_approved_at is null.
+//                            Defense-in-depth (Q3-CCCC): pre-CCCC deals,
+//                            write failures, or edge cases get the safe
+//                            fallback FINAL REVIEW HITL.
+//   - null                 : gates fail (not active, LTV/identity gate
+//                            firing, intake incomplete, exit_strategy missing).
+//
+// Extracted as a pure function so the truth table can exercise it without
+// mocking the full request pipeline (matches NNN's decideReviewDispatch pattern).
+const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
+  if (deal?.status !== 'active') return null;
+  if (willGoToCollateralCheck || willReview || identityClashUnresolved) return null;
   const required = allRequiredForCompletion(isPurchaseFromSummary(summary));
   const allDocsIn = required.every(req => isDocRequirementSatisfied(req, classifications || []));
   const hasExitStrategy = !!summary?.exit_strategy;
-  return allDocsIn && hasExitStrategy;
+  if (!(allDocsIn && hasExitStrategy)) return null;
+  return deal.prelim_approved_at ? 'completion-handoff' : 'final-review';
 };
 
 const normalizeSenderName = (dealSummary, fromName) => {
@@ -659,6 +676,15 @@ ${draftEmail}
         const dealMessages = await dealsService.getMessages(existingDeal.id);
 
         if (intent === 'approved') {
+          // Group CCCC (S6.1/S7.2): stamp prelim_approved_at on admin's APPROVED
+          // reply regardless of intake completeness (Q2-CCCC: signal is "admin
+          // approved at prelim" — true in both single-cycle and two-cycle paths).
+          // First-stamp-wins mirrors BBB's conditions_sent_at pattern.
+          if (!existingDeal.prelim_approved_at) {
+            const stampedAt = new Date().toISOString();
+            await dealsService.update(existingDeal.id, { prelim_approved_at: stampedAt });
+            existingDeal.prelim_approved_at = stampedAt;
+          }
           console.log('Deal approved by admin — generating draft doc request');
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
           const docRequestEmail = await aiService.generateDocumentRequestEmail(
@@ -687,6 +713,16 @@ ${draftEmail}
         const dealMessages = await dealsService.getMessages(existingDeal.id);
 
         if (intent === 'approved') {
+          // Group CCCC (S6.1/S7.2): stamp prelim_approved_at on admin's APPROVED
+          // reply regardless of intake completeness (Q2-CCCC). Subsequent broker
+          // activity in the active branch routes to sendCompletionHandoff via
+          // computeCompletionDispatch instead of FINAL REVIEW. First-stamp-wins
+          // mirrors BBB conditions_sent_at.
+          if (!existingDeal.prelim_approved_at) {
+            const stampedAt = new Date().toISOString();
+            await dealsService.update(existingDeal.id, { prelim_approved_at: stampedAt });
+            existingDeal.prelim_approved_at = stampedAt;
+          }
           // Check if all docs are already received — if so, this is a final completion, not a doc request
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
           const docClassifications = existingDocs.map(d => d.classification).filter(Boolean);
@@ -1309,8 +1345,11 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         // Group SSS (Q1-SSS): bypass Claude's probabilistic result.allDocsReceived. JS
         // is authoritative — intake + compliance (AML/PEP) + exit_strategy gate, computed
         // from the same classifications that drive sendPreliminaryReviewToAdmin's [MISSING]
-        // list. Extracted as computeWillFireFinalReview (module-scope, testable).
-        const willFireFinalReview = computeWillFireFinalReview({
+        // list.
+        // Group CCCC (S6.1/S7.2): two-action dispatch via computeCompletionDispatch.
+        // When deal.prelim_approved_at is set, route to sendCompletionHandoff (skip
+        // FINAL REVIEW noise). When null, fall back to FINAL REVIEW as defense-in-depth.
+        const completionDispatch = computeCompletionDispatch({
           deal: existingDeal,
           summary: result.updatedSummary,
           classifications: classificationsForGate,
@@ -1318,6 +1357,8 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           willReview,
           identityClashUnresolved,
         });
+        const willFireFinalReview = completionDispatch === 'final-review';
+        const willFireCompletionHandoff = completionDispatch === 'completion-handoff';
 
         if (ltv && ltv <= 80 && !hasReviewableDoc) {
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
@@ -1331,7 +1372,7 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         // the prelim review which fired ~49s later. willGoToCollateralCheck is NOT
         // suppressed — that path uses Vienna's reply to deliver the collateral question
         // to the broker (Fix 7).
-        if (result.responseEmail && !willFireFinalReview && !willReview) {
+        if (result.responseEmail && !willFireFinalReview && !willReview && !willFireCompletionHandoff) {
           emailService.sendEmailDelayed(
             email.from,
             `Re: ${email.subject}`,
@@ -1344,8 +1385,10 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
               console.log('Conversational response sent to broker');
             }
           );
-        } else if (willFireFinalReview || willReview) {
-          const gateLabel = willFireFinalReview ? 'FINAL REVIEW' : 'PRELIMINARY review';
+        } else if (willFireFinalReview || willReview || willFireCompletionHandoff) {
+          const gateLabel = willFireCompletionHandoff
+            ? 'COMPLETION HANDOFF (CCCC)'
+            : willFireFinalReview ? 'FINAL REVIEW' : 'PRELIMINARY review';
           console.log(`Suppressing Vienna broker reply — ${gateLabel} firing to Franco; admin-drafted reply will be the next broker-facing message`);
         }
         if (willGoToCollateralCheck) {
@@ -1371,6 +1414,21 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
             await dealsService.update(existingDeal.id, { status: 'active' });
           }
           console.log('Conversation continues — waiting for more docs/info');
+        }
+
+        // Group CCCC (S6.1/S7.2): when prelim_approved_at is set on the deal,
+        // skip the FINAL REVIEW step and fire the closing-draft handoff directly
+        // (mirrors NNN under_review→completion-handoff and BBB conditions path).
+        // The FINAL REVIEW block below stays as defense-in-depth (Q3-CCCC):
+        // pre-CCCC deals or write failures land on null prelim_approved_at and
+        // dispatch returns 'final-review' instead of 'completion-handoff'.
+        if (willFireCompletionHandoff) {
+          console.log('CCCC: prelim approved + all docs complete → closing handoff (non-conditions path)');
+          const handoffDocs = await dealsService.getDocumentsWithText(existingDeal.id);
+          const handoffMessages = await dealsService.getMessages(existingDeal.id);
+          await sendCompletionHandoff(existingDeal, result.updatedSummary, handoffDocs, handoffMessages, email, {
+            conditionsFulfilled: false,
+          });
         }
 
         // ALL DOCS RECEIVED — send Franco a final complete review
@@ -1438,7 +1496,7 @@ module.exports.__test__ = {
   // Group SSS: tier constants + helpers
   BASE_REQUIRED_INTAKE_REFINANCE, BASE_REQUIRED_INTAKE_PURCHASE, COMPLIANCE_REQUIRED_POSTAPPROVAL,
   intakeRequiredFor, allRequiredForCompletion, isPurchaseFromSummary,
-  computeWillFireFinalReview,
+  computeCompletionDispatch,
   // Group YYY: preview-thread chain builder
   buildPreviewThreadChain,
   // Group VVV: deferred-intake form-skip predicate

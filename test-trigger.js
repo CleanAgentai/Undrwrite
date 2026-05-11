@@ -2462,7 +2462,14 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
         // Admin's "APPROVED" reply — parseAdminReply has a fast-path for this exact word.
         await inboundHandler(buildAdminReply('APPROVED'), mockRes(), () => {});
         const savedDraftUpdate = bbb.update.find(u => u.patch.draft_action !== undefined);
-        return { calls: cCalls, draftAction: savedDraftUpdate?.patch?.draft_action };
+        // Group CCCC: capture prelim_approved_at stamp (should fire on every APPROVED
+        // reply regardless of intake completeness per Q2-CCCC).
+        const stampUpdate = bbb.update.find(u => u.patch.prelim_approved_at !== undefined);
+        return {
+          calls: cCalls,
+          draftAction: savedDraftUpdate?.patch?.draft_action,
+          prelimApprovedAt: stampUpdate?.patch?.prelim_approved_at,
+        };
       };
 
       // C1 — intake complete, NO AML/PEP → doc-request (asks AML/PEP)
@@ -2478,7 +2485,11 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       if (c1.calls.docRequest !== 1 || c1.calls.completion !== 0 || c1.draftAction !== 'approval_doc_request') {
         throw new Error(`FAIL [Group SSS / C1]: intake-only deal post-approval should fire generateDocumentRequestEmail (asks AML/PEP), got ${JSON.stringify(c1)}`);
       }
-      console.log('  PASS [Group SSS / C1]: admin APPROVED + intake complete + NO AML/PEP → generateDocumentRequestEmail fires (action=approval_doc_request)');
+      // Group CCCC (S6.1/S7.2): prelim_approved_at stamp fires on every APPROVED reply.
+      if (typeof c1.prelimApprovedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(c1.prelimApprovedAt)) {
+        throw new Error(`FAIL [Group SSS / C1 + CCCC stamp]: expected ISO prelim_approved_at timestamp, got ${JSON.stringify(c1.prelimApprovedAt)}`);
+      }
+      console.log('  PASS [Group SSS / C1]: admin APPROVED + intake complete + NO AML/PEP → generateDocumentRequestEmail fires (action=approval_doc_request); CCCC: prelim_approved_at stamped');
 
       // C2 — intake + AML + PEP all in (Q2 single-cycle path)
       const refiIntakePlusCompliance = [
@@ -2490,7 +2501,11 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       if (c2.calls.docRequest !== 0 || c2.calls.completion !== 1 || c2.draftAction !== 'approval_completed') {
         throw new Error(`FAIL [Group SSS / C2]: intake+compliance complete should fire generateCompletionEmail single-cycle (Q2), got ${JSON.stringify(c2)}`);
       }
-      console.log('  PASS [Group SSS / C2]: admin APPROVED + intake + AML + PEP → generateCompletionEmail fires (Q2 single-cycle path preserved)');
+      // Group CCCC: stamp fires even on single-cycle Q2 path (Q2-CCCC: regardless of intake completeness).
+      if (typeof c2.prelimApprovedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(c2.prelimApprovedAt)) {
+        throw new Error(`FAIL [Group SSS / C2 + CCCC stamp]: expected ISO prelim_approved_at timestamp on single-cycle path, got ${JSON.stringify(c2.prelimApprovedAt)}`);
+      }
+      console.log('  PASS [Group SSS / C2]: admin APPROVED + intake + AML + PEP → generateCompletionEmail fires (Q2 single-cycle path preserved); CCCC: prelim_approved_at stamped');
 
       // C3 — intake incomplete → doc-request (regression guard, unchanged from pre-SSS)
       const refiPartial = refiIntakeOnly.slice(0, 3); // only 3 intake docs
@@ -2498,7 +2513,10 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       if (c3.calls.docRequest !== 1 || c3.calls.completion !== 0 || c3.draftAction !== 'approval_doc_request') {
         throw new Error(`FAIL [Group SSS / C3]: intake-incomplete deal should still fire generateDocumentRequestEmail (regression guard), got ${JSON.stringify(c3)}`);
       }
-      console.log('  PASS [Group SSS / C3]: admin APPROVED + intake incomplete → generateDocumentRequestEmail fires (pre-SSS behavior preserved)');
+      if (typeof c3.prelimApprovedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(c3.prelimApprovedAt)) {
+        throw new Error(`FAIL [Group SSS / C3 + CCCC stamp]: expected ISO prelim_approved_at timestamp, got ${JSON.stringify(c3.prelimApprovedAt)}`);
+      }
+      console.log('  PASS [Group SSS / C3]: admin APPROVED + intake incomplete → generateDocumentRequestEmail fires (pre-SSS behavior preserved); CCCC: prelim_approved_at stamped');
 
       // C4 — purchase deal with intake + compliance (regression: pre-SSS Site 2 lacked purchase branch)
       const purchaseComplete = [
@@ -2515,7 +2533,10 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       if (c4.calls.docRequest !== 0 || c4.calls.completion !== 1 || c4.draftAction !== 'approval_completed') {
         throw new Error(`FAIL [Group SSS / C4]: purchase intake+compliance complete should fire generateCompletionEmail, got ${JSON.stringify(c4)}`);
       }
-      console.log('  PASS [Group SSS / C4]: purchase deal with intake + compliance + purchase_contract → generateCompletionEmail (purchase tier works post-SSS)');
+      if (typeof c4.prelimApprovedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(c4.prelimApprovedAt)) {
+        throw new Error(`FAIL [Group SSS / C4 + CCCC stamp]: expected ISO prelim_approved_at timestamp on purchase tier, got ${JSON.stringify(c4.prelimApprovedAt)}`);
+      }
+      console.log('  PASS [Group SSS / C4]: purchase deal with intake + compliance + purchase_contract → generateCompletionEmail (purchase tier works post-SSS); CCCC: prelim_approved_at stamped');
     }
 
     // Restore originals
@@ -3164,7 +3185,7 @@ WEBSITE.  unionfinancialcorp.com`;
     intakeRequiredFor: sssIntakeRequiredFor,
     allRequiredForCompletion: sssAllRequiredForCompletion,
     isPurchaseFromSummary: sssIsPurchaseFromSummary,
-    computeWillFireFinalReview: sssComputeWillFireFinalReview,
+    computeCompletionDispatch: sssComputeCompletionDispatch,
   } = require('./src/routes/webhook').__test__;
 
   // ─── Truth table A — tier constants + helpers ──────────────────────────
@@ -3203,95 +3224,102 @@ WEBSITE.  unionfinancialcorp.com`;
   assertSss('isPurchaseFromSummary null summary → false', sssIsPurchaseFromSummary(null), false);
   console.log(`Group SSS / A tier constants: ${sssAPassed} assertions passed`);
 
-  // ─── Truth table D — computeWillFireFinalReview ──────────────────────────
+  // ─── Truth table D — computeCompletionDispatch (renamed in CCCC) ──────
   // Replaces Claude's probabilistic result.allDocsReceived flag for the
   // willFireFinalReview gate (Q1-SSS). Pure-function test.
-  console.log('\n---------- Group SSS / D: computeWillFireFinalReview ----------');
+  // CCCC: helper now returns one of three actions:
+  //   'completion-handoff' — gates pass AND deal.prelim_approved_at is set
+  //   'final-review'       — gates pass AND deal.prelim_approved_at is null (defense-in-depth)
+  //   null                 — gates fail
+  // Existing D2/D8 cases (gates pass, no prelim_approved_at) now return
+  // 'final-review' instead of true. New D10-D12 cover the prelim_approved_at
+  // signal and the under_review-status no-fire case.
+  console.log('\n---------- Group SSS / D: computeCompletionDispatch ----------');
   const sssIntakeOnly = ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
   const sssIntakePlusCompliance = [...sssIntakeOnly, 'aml', 'pep'];
   const sssDCases = [
     {
-      name: 'D1: active + intake complete + exit_strategy + NO compliance → false (JS gate blocks)',
+      name: 'D1: active + intake complete + exit_strategy + NO compliance → null (gate fails)',
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
         classifications: sssIntakeOnly,
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: false,
+      expect: null,
     },
     {
-      name: 'D2: active + intake + AML + PEP + exit_strategy → true (full completion gate)',
+      name: "D2: active + intake + AML + PEP + exit_strategy, no prelim_approved_at → 'final-review' (CCCC defense-in-depth)",
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: true,
+      expect: 'final-review',
     },
     {
-      name: 'D3: active + intake + compliance, exit_strategy MISSING → false (exit_strategy gate)',
+      name: 'D3: active + intake + compliance, exit_strategy MISSING → null (exit_strategy gate)',
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'refinance', exit_strategy: null },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: false,
+      expect: null,
     },
     {
-      name: 'D4: status=under_review (not active) → false (active-only gate)',
+      name: 'D4: status=under_review (not active) → null (active-only gate)',
       input: {
         deal: { status: 'under_review' },
         summary: { loan_type: 'refinance', exit_strategy: 'refi' },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: false,
+      expect: null,
     },
     {
-      name: 'D5: willGoToCollateralCheck=true → false (LTV gate priority)',
+      name: 'D5: willGoToCollateralCheck=true → null (LTV gate priority)',
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'refinance', exit_strategy: 'refi' },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: true, willReview: false, identityClashUnresolved: false,
       },
-      expect: false,
+      expect: null,
     },
     {
-      name: 'D6: willReview=true → false (prelim review gate priority)',
+      name: 'D6: willReview=true → null (prelim review gate priority)',
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'refinance', exit_strategy: 'refi' },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: false, willReview: true, identityClashUnresolved: false,
       },
-      expect: false,
+      expect: null,
     },
     {
-      name: 'D7: identityClashUnresolved → false (identity gate priority)',
+      name: 'D7: identityClashUnresolved → null (identity gate priority)',
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'refinance', exit_strategy: 'refi' },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: true,
       },
-      expect: false,
+      expect: null,
     },
     {
-      name: 'D8: purchase deal + intake + compliance + exit_strategy → true (purchase tier works)',
+      name: "D8: purchase deal + intake + compliance + exit_strategy (no prelim_approved_at) → 'final-review'",
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale of subject' },
         classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract', 'aml', 'pep'],
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: true,
+      expect: 'final-review',
     },
     {
-      name: 'D9: purchase deal missing purchase_contract → false',
+      name: 'D9: purchase deal missing purchase_contract → null',
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale' },
@@ -3299,19 +3327,60 @@ WEBSITE.  unionfinancialcorp.com`;
         classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'aml', 'pep'],
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: false,
+      expect: null,
+    },
+    // CCCC new cases — prelim_approved_at signal
+    {
+      name: "D10: active + full completion gate + prelim_approved_at SET → 'completion-handoff' (CCCC primary path)",
+      input: {
+        deal: { status: 'active', prelim_approved_at: '2026-05-11T04:30:00.000Z' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: 'completion-handoff',
+    },
+    {
+      name: "D11: active + full completion gate + prelim_approved_at NULL → 'final-review' (CCCC defense-in-depth — explicit case)",
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: 'final-review',
+    },
+    {
+      name: 'D12: under_review + prelim_approved_at SET → null (only active branch fires completion paths)',
+      input: {
+        deal: { status: 'under_review', prelim_approved_at: '2026-05-11T04:30:00.000Z' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: null,
+    },
+    {
+      name: "D13: purchase + full completion gate + prelim_approved_at SET → 'completion-handoff' (purchase tier)",
+      input: {
+        deal: { status: 'active', prelim_approved_at: '2026-05-11T05:00:00.000Z' },
+        summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale of subject' },
+        classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract', 'aml', 'pep'],
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: 'completion-handoff',
     },
   ];
   let sssDPassed = 0;
   for (const tc of sssDCases) {
-    const got = sssComputeWillFireFinalReview(tc.input);
+    const got = sssComputeCompletionDispatch(tc.input);
     if (got !== tc.expect) {
-      throw new Error(`FAIL [Group SSS / D ${tc.name}]: expected ${tc.expect}, got ${got}`);
+      throw new Error(`FAIL [Group SSS / D ${tc.name}]: expected ${JSON.stringify(tc.expect)}, got ${JSON.stringify(got)}`);
     }
-    console.log(`  PASS [${tc.name}]: → ${got}`);
+    console.log(`  PASS [${tc.name}]: → ${JSON.stringify(got)}`);
     sssDPassed++;
   }
-  console.log(`Group SSS / D computeWillFireFinalReview: ${sssDPassed}/${sssDCases.length} passed`);
+  console.log(`Group SSS / D computeCompletionDispatch: ${sssDPassed}/${sssDCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
   // GROUP YYY — draft-preview threading chain (S5.3)

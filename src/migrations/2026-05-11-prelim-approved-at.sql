@@ -1,0 +1,25 @@
+-- Group CCCC (S6.1 + S7.2): persist the "admin approved at prelim" signal so
+-- the post-approval completion path can skip the redundant FINAL REVIEW step.
+--
+-- Production failure: SSS's FINAL REVIEW step fires "[UPDATED] ACTION REQUIRED:
+-- COMPLETE Review" with APPROVE/DECLINE buttons after AML/PEP arrive — but
+-- admin already approved the file at prelim. Franco's spec: at the complete-
+-- file stage, fire informational handoff + auto-draft closing email, no
+-- second approval gate.
+--
+-- The gate is parallel to BBB's conditions_sent_at: a persisted signal that
+-- "admin moved past prelim" so subsequent broker activity routes to
+-- sendCompletionHandoff instead of sendPreliminaryReviewToAdmin. CCCC stamps
+-- regardless of intake completeness (Q2-CCCC) — first-stamp-wins.
+--
+-- Behavior post-migration:
+--   - prelim_approved_at NULL  → defense-in-depth: FINAL REVIEW path still
+--                                fires when allDocsIn (Q3-CCCC). Handles
+--                                pre-CCCC deals (column-doesn't-exist returns
+--                                undefined; falsy → null branch).
+--   - prelim_approved_at SET   → active-branch dispatch routes to
+--                                sendCompletionHandoff(conditionsFulfilled=false).
+--
+-- Idempotent via IF NOT EXISTS. Safe to re-apply.
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS prelim_approved_at TIMESTAMPTZ;
