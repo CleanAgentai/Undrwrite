@@ -2005,7 +2005,13 @@ Format as clean HTML. Include these sections:
 
 5. **Stale Deals** — Flag any deals with no activity for 3+ days.
 
-6. **Automated Follow-Up Reminders** — If any automated reminders were sent today by Vienna, list them (borrower name, broker email, which reminder # it was, and how many days silent). Also flag any deals that have hit the maximum 3 reminders with no response — these need your personal attention or a decision to close.
+6. **Automated Follow-Up Reminders** — Group AAAA (S13.1): this section MUST always be rendered, even when both lists are empty. Read from \`summaryData.automatedReminders\`. Pre-AAAA the conditional opener ("If any automated reminders were sent today...") let Claude skip the section entirely when it judged lists empty — production output had zero "reminder" mentions in the daily summary. OMITTING the section entirely is NOT acceptable; empty-state strings are required when lists are empty.
+
+   (a) Reminders sent today: enumerate every entry in \`summaryData.automatedReminders.sentToday\`. For each: borrower name, broker email, reminder number (e.g. "Reminder #2 of 3"), and how many days silent. If the list is empty, render: "No automated reminders sent today."
+
+   (b) Deals at max reminders: enumerate every entry in \`summaryData.automatedReminders.dealsAtMaxReminders\`. For each: borrower name, email, current status. These need your personal attention or a decision to close. If the list is empty, render: "No deals at max-reminder threshold."
+
+   Render both sub-sections (a) and (b) every day, in that order. The section heading "Automated Follow-Up Reminders" is required regardless of list contents.
 
 Keep per-row content concise (short fields, no fluff). Use tables for sections 2, 4, 5, 6 (anything with multiple entries) — bullet points are fine for shorter sections.
 

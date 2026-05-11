@@ -3981,6 +3981,143 @@ renovations.`,
   console.log('  PASS [Group BBBB regression]: pre-BBBB bare-no-exit-check predicates removed at both sites');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP AAAA — Automated Reminders section restore in daily summary (S13.1)
+  // ════════════════════════════════════════════════════════════════
+  // Production diagnosis: May 9 daily summary outbound (Postmark MessageID
+  // acf11405-...) had ZERO "reminder" mentions despite the prompt's section 6
+  // asking for the rendering. Conditional opener ("If any automated reminders
+  // were sent today...") gave Claude permission to skip the section. AAAA
+  // rewrites section 6 as unconditional with explicit data-key references +
+  // empty-state strings + strong-form "OMITTING the section entirely is NOT
+  // acceptable" framing.
+  console.log('\n========== GROUP AAAA — Automated Reminders section restore ==========');
+
+  // ─── Source-string regression ───────────────────────────────────────────
+  console.log('\n---------- Group AAAA: source-string regression ----------');
+
+  // Strong-form unconditional framing must be present.
+  if (!/this section MUST always be rendered, even when both lists are empty/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA unconditional]: strong-form "MUST always be rendered" framing missing from section 6`);
+  }
+  console.log('  PASS [Group AAAA unconditional]: "MUST always be rendered" framing present');
+
+  if (!/OMITTING the section entirely is NOT acceptable/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA forbid-omit]: explicit "OMITTING the section entirely is NOT acceptable" forbidden-action rule missing`);
+  }
+  console.log('  PASS [Group AAAA forbid-omit]: explicit forbidden-action rule present');
+
+  // Explicit data-key references.
+  if (!/summaryData\.automatedReminders\.sentToday/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA data key]: 'summaryData.automatedReminders.sentToday' reference missing`);
+  }
+  if (!/summaryData\.automatedReminders\.dealsAtMaxReminders/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA data key]: 'summaryData.automatedReminders.dealsAtMaxReminders' reference missing`);
+  }
+  console.log('  PASS [Group AAAA data keys]: both data-key references present');
+
+  // Empty-state strings.
+  if (!/No automated reminders sent today/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA empty-state]: "No automated reminders sent today" empty-state string missing`);
+  }
+  if (!/No deals at max-reminder threshold/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA empty-state]: "No deals at max-reminder threshold" empty-state string missing`);
+  }
+  console.log('  PASS [Group AAAA empty-state]: both empty-state strings present');
+
+  // Negative regression: the pre-AAAA conditional opener must be gone.
+  if (/If any automated reminders were sent today by Vienna, list them/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA regression]: pre-AAAA conditional opener "If any automated reminders were sent today by Vienna, list them" still present`);
+  }
+  console.log('  PASS [Group AAAA regression]: pre-AAAA conditional opener removed');
+
+  // ─── D 5x — F1 (non-empty) and F2 (empty) live Claude verification ──────
+  if (process.env.RUN_AAAA_D === '1') {
+    console.log('\n---------- Group AAAA / D-F1: non-empty fixture 5x ----------');
+
+    const aaaaActiveDealsBase = [
+      { borrower: 'Michael Donovan', email: 'broker1@example.com', status: 'active', ltv: 65, reminderCount: 2, created: '2026-05-05T10:00:00Z', updated: '2026-05-06T10:00:00Z' },
+      { borrower: 'Lena Park', email: 'broker2@example.com', status: 'active', ltv: 70, reminderCount: 3, created: '2026-05-03T10:00:00Z', updated: '2026-05-04T10:00:00Z' },
+      { borrower: 'Noah MacKenzie', email: 'broker3@example.com', status: 'active', ltv: 60, reminderCount: 3, created: '2026-05-01T10:00:00Z', updated: '2026-05-02T10:00:00Z' },
+    ];
+
+    const f1SummaryData = {
+      date: 'Monday, May 11, 2026',
+      totalActiveDeals: 3,
+      dealsByStatus: { active: aaaaActiveDealsBase },
+      recentActivity: { inboundCount: 0, inboundMessages: [] },
+      dealsAwaitingAction: [],
+      activeDeals: aaaaActiveDealsBase,
+      automatedReminders: {
+        sentToday: [
+          { dealId: 'd1', borrower: 'Michael Donovan', email: 'broker1@example.com', reminderNumber: 2, daysSilent: 5 },
+          { dealId: 'd2', borrower: 'Lena Park', email: 'broker2@example.com', reminderNumber: 3, daysSilent: 7 },
+        ],
+        dealsAtMaxReminders: [
+          { borrower: 'Noah MacKenzie', email: 'broker3@example.com', status: 'active' },
+        ],
+      },
+    };
+
+    let f1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      const html = await aiService.generateDailySummary(f1SummaryData);
+      const lower = (html || '').toLowerCase();
+      const hasSectionHeading = /automated|reminder/i.test(html);
+      const namesAllPresent = /michael donovan/.test(lower) && /lena park/.test(lower) && /noah mackenzie/.test(lower);
+      // Reminder # rendered for sent-today entries (look for "2" or "3" near "Michael"/"Lena", or just "Reminder #" framing)
+      const reminderNumberCue = /reminder.{0,80}(#\s*[23]\b|number.{0,20}[23]\b|\b[23]\b.{0,20}reminder|of\s*3)/i.test(html);
+      const passed = hasSectionHeading && namesAllPresent && reminderNumberCue;
+      if (!passed) {
+        f1Leaks++;
+        console.log(`  Run ${run}: LEAK — heading=${hasSectionHeading}, allNames=${namesAllPresent}, reminderNum=${reminderNumberCue}\n    HTML (first 600): ${(html || '').slice(0, 600).replace(/\s+/g, ' ')}`);
+      } else {
+        console.log(`  Run ${run}: PASS — section rendered with all 3 borrower names + reminder # cue`);
+      }
+    }
+    console.log(`Group AAAA / D-F1: ${5 - f1Leaks}/5 passed, ${f1Leaks}/5 leaked (threshold: ≤1)`);
+
+    console.log('\n---------- Group AAAA / D-F2: empty fixture 5x ----------');
+
+    const f2SummaryData = {
+      date: 'Monday, May 11, 2026',
+      totalActiveDeals: 2,
+      dealsByStatus: { active: aaaaActiveDealsBase.slice(0, 2) },
+      recentActivity: { inboundCount: 0, inboundMessages: [] },
+      dealsAwaitingAction: [],
+      activeDeals: aaaaActiveDealsBase.slice(0, 2),
+      automatedReminders: {
+        sentToday: [],
+        dealsAtMaxReminders: [],
+      },
+    };
+
+    let f2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      const html = await aiService.generateDailySummary(f2SummaryData);
+      const hasSectionHeading = /automated.{0,30}reminder|follow[- ]up reminder/i.test(html);
+      const hasEmptyStateMessage = /no automated reminders sent today|no.{0,30}deals.{0,30}max|no.{0,30}reminders.{0,30}sent|threshold/i.test(html);
+      const passed = hasSectionHeading && hasEmptyStateMessage;
+      if (!passed) {
+        f2Leaks++;
+        console.log(`  Run ${run}: LEAK — heading=${hasSectionHeading}, emptyState=${hasEmptyStateMessage}\n    HTML (first 600): ${(html || '').slice(0, 600).replace(/\s+/g, ' ')}`);
+      } else {
+        console.log(`  Run ${run}: PASS — section rendered with heading + empty-state message`);
+      }
+    }
+    console.log(`Group AAAA / D-F2: ${5 - f2Leaks}/5 passed, ${f2Leaks}/5 leaked (threshold: ≤1)`);
+
+    // Escalation decision (per Round 2/3 pattern — both 5x runs complete first)
+    if (f1Leaks >= 2 || f2Leaks >= 2) {
+      const findings = [];
+      if (f1Leaks >= 2) findings.push(`F1 (non-empty fixture): ${f1Leaks}/5 leaked — section omitted or names dropped`);
+      if (f2Leaks >= 2) findings.push(`F2 (empty fixture): ${f2Leaks}/5 leaked — section omitted on empty state`);
+      throw new Error(`FAIL [Group AAAA / D escalation]: ${findings.length} fixture(s) crossed threshold.\n  - ${findings.join('\n  - ')}\nSurface escalation shape before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group AAAA / D: SKIPPED (set RUN_AAAA_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed
