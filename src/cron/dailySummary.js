@@ -200,8 +200,11 @@ const runFollowUpReminders = async () => {
 // admin-bound subject — awaiting_identity_confirmation is a silent-pending state
 // like Fix 7's awaiting_collateral. Admin sees no notification during the gate.
 // No regex update needed.
-const ADMIN_REPLY_SUBJECT_RE = /^(?:Re:\s+)+(?:\[UPDATED\]\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\[Conditions Fulfilled\]|\[Broker Update\])/i;
-const isAdminReplySubject = (subject) => ADMIN_REPLY_SUBJECT_RE.test(subject || '');
+//
+// Group DDDD (S6.2): heuristic extracted to src/lib/adminReply.js so webhook.js
+// can use it for conversation-log message attribution (admin replies stored as
+// inbound were being mis-attributed to broker in generateLeadSummary's render).
+const { ADMIN_REPLY_SUBJECT_RE, isAdminReplySubject } = require('../lib/adminReply');
 
 const runDailySummary = async () => {
   console.log('\n========== DAILY SUMMARY CRON ==========');

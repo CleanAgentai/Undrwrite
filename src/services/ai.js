@@ -338,9 +338,13 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
       // Group Q: parameterize message labels with broker name so Claude can't attribute
       // inbound bodies to "Franco" (the failure mode 9.6 in the admin-facing path; same
       // shape risk here in the conversational handler).
+      // Group DDDD (S6.2, Q1-DDDD): caller pre-labels admin replies via
+      // labelMessagesForLeadSummary — uses m.senderLabel when present so admin
+      // HITL replies (stored as direction='inbound') render as "Admin (Franco)"
+      // instead of being mis-attributed to the broker_name.
       const inboundSenderLabel = existingSummary?.broker_name || existingSummary?.sender_name || 'Broker';
       const convoText = conversationHistory.length > 0
-        ? conversationHistory.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\n${m.body}`).join('\n\n---\n\n')
+        ? conversationHistory.map(m => `[${m.senderLabel || (m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna')}] ${m.created_at}\n${m.body}`).join('\n\n---\n\n')
         : 'No previous messages';
 
       // Standard doc checklist — branched by deal type:
@@ -733,15 +737,17 @@ DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
 
 EMAIL CONVERSATION:
-${messages.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
+${messages.map(m => `[${m.senderLabel || (m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna')}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
 
 DOCUMENTS ON FILE:
 ${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n') || 'None yet'}
 
 ATTRIBUTION RULE (CRITICAL for the EMAIL CONVERSATION above):
-- INBOUND messages are FROM the broker (named in the labels: "INBOUND from ${inboundSenderLabel}"). NEVER attribute INBOUND content to "Franco" or anyone else, even if the body opens with "Hi Franco" — that's the broker addressing Franco, not Franco speaking. The broker is the SENDER.
-- OUTBOUND messages are FROM Vienna (the labels say so explicitly). Franco is the RECIPIENT of this notification email — he is not a sender in this conversation.
-- When the rendered conversation log appears in your output, preserve the "INBOUND from ${inboundSenderLabel}" / "OUTBOUND from Vienna" attribution exactly as labeled.
+- Each message above is labeled with one of: "OUTBOUND from Vienna" / "INBOUND from ${inboundSenderLabel}" (broker) / "INBOUND from Admin (Franco)" (Group DDDD: admin's HITL replies, detected JS-side by subject pattern). The labels are deterministic — preserve them exactly.
+- INBOUND messages labeled "from ${inboundSenderLabel}" are FROM the broker. NEVER re-attribute to Franco/Admin even if the body opens with "Hi Franco" — that's the broker addressing Franco.
+- INBOUND messages labeled "from Admin (Franco)" are FROM Franco — his APPROVED/DECLINE/conditions/notes replies on Vienna's HITL emails. NEVER re-attribute to the broker.
+- OUTBOUND messages are FROM Vienna. Franco is the RECIPIENT of this notification email and also a sender when his admin-labeled messages appear.
+- CRITICAL — RENDER EVERY ENTRY (Group DDDD S6.3): the messages array above is authoritative; render every entry in the order given. Do NOT omit the latest message regardless of perceived redundancy.
 
 Return only the HTML email body.`,
         }],
@@ -1202,12 +1208,20 @@ ${missingDocs.map(d => `- [MISSING] ${module.exports.DOC_DISPLAY_NAMES[d] || d}`
 ${!isComplete ? `\nIMPORTANT: This file is pending approval. The following documents are still outstanding: ${missingDocs.map(d => module.exports.DOC_DISPLAY_NAMES[d] || d).join(', ')}. Start the summary with: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"` : 'This file is COMPLETE — all required documents have been received.'}
 
 === SECTION 10: EMAIL CONVERSATION ===
-Include the full email conversation so Franco can review all broker communications. Each entry in the input data below is labeled with its direction AND sender (e.g. "INBOUND from ${inboundSenderLabel}" or "OUTBOUND from Vienna"). Preserve those attributions exactly — they are deterministic, not your inference.
+Include the full email conversation so Franco can review all broker communications. Each entry in the input data below is labeled with its direction AND sender — the label is one of:
+  - "OUTBOUND from Vienna" (Vienna's outbound emails)
+  - "INBOUND from ${inboundSenderLabel}" (broker's inbound emails — broker_name)
+  - "INBOUND from Admin (Franco)" (Group DDDD: admin's replies to Vienna's HITL emails, detected JS-side via subject pattern — these are Franco's APPROVED/DECLINE/conditions replies on prelim/escalation/[Conditions Fulfilled]/[File Complete] threads, stored as direction='inbound' but originate from the admin email address)
+Preserve those attributions exactly — they are deterministic JS-side labels, not your inference.
 
 ATTRIBUTION RULE (CRITICAL):
-- INBOUND messages are FROM the broker (${inboundSenderLabel}). NEVER attribute INBOUND content to "Franco" / "Franco Maione" or anyone else, even if the body opens with "Hi Franco" — that's the broker addressing Franco, not Franco speaking. The broker is the SENDER.
-- OUTBOUND messages are FROM Vienna. Franco is the RECIPIENT of this summary email — he is not a sender in this conversation.
-- When you render the conversation log in your output, use the exact sender names from the input labels. Do NOT relabel, paraphrase, or substitute Franco for the broker.
+- INBOUND messages labeled "from ${inboundSenderLabel}" are FROM the broker. NEVER attribute these to "Franco" / "Franco Maione" / "Admin" — even if the body opens with "Hi Franco", that's the broker addressing Franco, not Franco speaking.
+- INBOUND messages labeled "from Admin (Franco)" are FROM Franco (admin) — his HITL responses (e.g. "approved", "send", conditions notes). NEVER re-attribute these to the broker even when they appear in the conversation flow alongside broker messages. The JS label is authoritative.
+- OUTBOUND messages are FROM Vienna. Franco is the RECIPIENT of THIS summary email — but Franco IS also a sender in the conversation when his HITL replies appear with the "Admin (Franco)" label.
+- When you render the conversation log in your output, use the exact sender labels from the input. Do NOT relabel, paraphrase, or substitute. If the input says "INBOUND from Admin (Franco)", render it exactly that way.
+
+CRITICAL — RENDER EVERY ENTRY (Group DDDD S6.3 defensive guard):
+The messages array below is authoritative. Render every entry in the order given. Do NOT omit the latest message or any message regardless of perceived redundancy. Franco scans the log to verify the most recent broker turn; omitting the latest creates the appearance that the file is stale or the trigger wasn't received. If the input has 14 messages, render 14; if 30, render 30.
 
 At the bottom, include this action section:
 <hr>
@@ -1227,7 +1241,7 @@ EXTRACTED DOCUMENT TEXT:
 ${docSections || 'No extracted text available from documents.'}
 
 EMAIL CONVERSATION:
-${messages.length > 0 ? messages.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n') : 'No messages yet.'}
+${messages.length > 0 ? messages.map(m => `[${m.senderLabel || (m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna')}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n') : 'No messages yet.'}
 
 === INSTRUCTIONS ===
 - Read EVERYTHING — the deal summary AND all document text

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { isAdminReplySubject } = require('../lib/adminReply');
 const config = require('../config');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
@@ -109,6 +110,38 @@ const shouldSkipIntakeFormsForDeferredState = (dealSummary) => {
   if (dealSummary.identity_clash) return true;
   const ltv = dealSummary.ltv_percent;
   return !!(ltv && ltv > 80);
+};
+
+// Group DDDD (S6.2): pre-label messages JS-side so admin replies (stored as
+// direction='inbound' on under_review deals per the HITL pattern) get
+// attributed to "Admin (Franco)" rather than the broker_name when rendered
+// in the conversation log. Pre-DDDD the rendering loop in generateLeadSummary
+// labeled EVERY inbound as "INBOUND from [broker_name]" — production case
+// Kevin Tran 65676a8f: Franco's "approved" reply on the [UPDATED] PRELIMINARY
+// Review (msg 5, subject "Re: [UPDATED] ACTION REQUIRED: PRELIMINARY Review")
+// rendered in admin's COMPLETE Review log as "INBOUND from Sarah Okonkwo —
+// approved". Mis-attribution.
+//
+// Heuristic via shared isAdminReplySubject (src/lib/adminReply.js) — same
+// pattern MMM uses to filter admin replies from daily summary's broker
+// activity. Outbound messages always get "OUTBOUND from Vienna". Inbound
+// messages with admin-pattern subjects get "INBOUND from Admin (Franco)";
+// non-admin inbounds get the broker_name fallback (existing default).
+// Applied at the call sites that pass messages to generateLeadSummary +
+// generateBrokerResponse — pre-labeling is deterministic; prompts use
+// `m.senderLabel || <fallback>` with backward-compat fallback to the
+// inline label logic for callers that don't pre-label.
+const labelMessagesForLeadSummary = (messages, brokerName) => {
+  const fallbackBroker = brokerName || 'Broker';
+  return (messages || []).map(m => {
+    if (m.direction !== 'inbound') {
+      return { ...m, senderLabel: 'OUTBOUND from Vienna' };
+    }
+    if (isAdminReplySubject(m.subject)) {
+      return { ...m, senderLabel: 'INBOUND from Admin (Franco)' };
+    }
+    return { ...m, senderLabel: `INBOUND from ${fallbackBroker}` };
+  });
 };
 
 // Group YYY (S5.3): build the References-header chain for a draft preview reply.
@@ -248,7 +281,11 @@ const sendEscalationToAdmin = async (deal, dealSummary, ltv, options = {}) => {
   console.log(`LTV ${ltv}% > 80 — escalating to admin for approval${options.isUpdate ? ' (updated)' : ''}`);
   const dealMessages = await dealsService.getMessages(deal.id);
   const dealDocs = await dealsService.getDocumentsWithText(deal.id);
-  const escalationEmail = await aiService.generateEscalationNotification(dealSummary, dealMessages, dealDocs);
+  // Group DDDD (S6.2): pre-label admin replies so the escalation log doesn't
+  // mis-attribute Franco's admin-direction inbounds to the broker.
+  const escalationBrokerName = dealSummary?.broker_name || dealSummary?.sender_name || deal.borrower_name;
+  const labeledEscalationMessages = labelMessagesForLeadSummary(dealMessages, escalationBrokerName);
+  const escalationEmail = await aiService.generateEscalationNotification(dealSummary, labeledEscalationMessages, dealDocs);
 
   let escalationAttachments = [];
   if (dealDocs.length > 0) {
@@ -309,12 +346,17 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   if (!dealSummary?.exit_strategy) missingDocs.push('exit_strategy');
 
   const dealMessages = await dealsService.getMessages(deal.id);
+  // Group DDDD (S6.2): pre-label messages so admin "approved" / "send" replies
+  // render as "INBOUND from Admin (Franco)" instead of being mis-attributed to
+  // the broker (existing production bug at Kevin Tran 65676a8f).
+  const leadSummaryBrokerName = dealSummary?.broker_name || dealSummary?.sender_name || deal.borrower_name;
+  const labeledMessages = labelMessagesForLeadSummary(dealMessages, leadSummaryBrokerName);
   const leadSummary = await aiService.generateLeadSummary(
     dealSummary,
     ownershipType,
     dealDocs,
     missingDocs,
-    dealMessages
+    labeledMessages
   );
 
   let reviewAttachments = [];
@@ -1189,6 +1231,11 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
 
         // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
         const reviewSummaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);
+        // Group DDDD (S6.2): pre-label admin replies so generateBrokerResponse's
+        // conversation history doesn't mis-attribute them to the broker — same
+        // root cause + fix shape as generateLeadSummary's S6.2 (Q1-DDDD: symmetric).
+        const reviewBrokerName = reviewSummaryIn?.broker_name || reviewSummaryIn?.sender_name || existingDeal.borrower_name;
+        const labeledReviewHistory = labelMessagesForLeadSummary(reviewConversationHistory, reviewBrokerName);
         // Items 3+4: pass deal status so Vienna's reply is state-aware (no future-tense
         // forwarding language when the file has already been sent to admin).
         const reviewResult = await aiService.generateBrokerResponse(
@@ -1196,7 +1243,7 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           email.attachments,
           savedDocs,
           reviewSummaryIn,
-          reviewConversationHistory,
+          labeledReviewHistory,
           reviewDocumentsOnFile,
           existingDeal.status
         );
@@ -1285,6 +1332,10 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
 
         // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
         const summaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);
+        // Group DDDD (S6.2): pre-label admin replies for the active-branch
+        // conversation history too. Symmetric with under_review branch.
+        const activeBrokerName = summaryIn?.broker_name || summaryIn?.sender_name || existingDeal.borrower_name;
+        const labeledActiveHistory = labelMessagesForLeadSummary(conversationHistory, activeBrokerName);
         // Items 3+4: pass deal status (active here, since this is the active branch).
         // Status drives the FILE STATE block in the prompt — gates state-aware forwarding rules.
         const result = await aiService.generateBrokerResponse(
@@ -1292,7 +1343,7 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           email.attachments,
           savedDocs,
           summaryIn,
-          conversationHistory,
+          labeledActiveHistory,
           documentsOnFile,
           existingDeal.status
         );
@@ -1515,4 +1566,6 @@ module.exports.__test__ = {
   buildPreviewThreadChain,
   // Group VVV: deferred-intake form-skip predicate
   shouldSkipIntakeFormsForDeferredState,
+  // Group DDDD: message pre-labeling for lead-summary / broker-response rendering
+  labelMessagesForLeadSummary,
 };

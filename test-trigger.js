@@ -4118,6 +4118,191 @@ renovations.`,
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP DDDD — admin attribution + render-every-entry (S6.2 + S6.3)
+  // ════════════════════════════════════════════════════════════════
+  // Production diagnosis: Kevin Tran deal 65676a8f's [UPDATED] PRELIMINARY +
+  // COMPLETE Review conversation logs rendered admin "approved" reply (msg 5)
+  // as "INBOUND from Sarah Okonkwo" — admin direction='inbound' on under_review
+  // deals, generateLeadSummary's rendering loop labels every inbound with
+  // broker_name. DDDD pre-labels messages JS-side via the shared
+  // isAdminReplySubject heuristic (extracted to src/lib/adminReply.js from
+  // cron/dailySummary.js). S6.3 (latest broker inbound missing): not
+  // reproducible in current production data but defensive prompt addition
+  // mirrors AAAA strong-form pattern.
+  console.log('\n========== GROUP DDDD — admin attribution + render-every-entry ==========');
+
+  // ─── Truth table — labelMessagesForLeadSummary ──────────────────────────
+  console.log('\n---------- Group DDDD / Truth Table: labelMessagesForLeadSummary ----------');
+  const { labelMessagesForLeadSummary: ddddLabel } = require('./src/routes/webhook').__test__;
+
+  const ddddCases = [
+    {
+      name: 'D1: outbound message → "OUTBOUND from Vienna"',
+      messages: [{ direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Kevin Tran' }],
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: 'OUTBOUND from Vienna',
+    },
+    {
+      name: 'D2: inbound broker reply → "INBOUND from Sarah Okonkwo"',
+      messages: [{ direction: 'inbound', subject: 'Re: Second Mortgage Submission — Kevin Tran' }],
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: 'INBOUND from Sarah Okonkwo',
+    },
+    {
+      name: 'D3: admin reply to PRELIMINARY Review → "INBOUND from Admin (Franco)"',
+      messages: [{ direction: 'inbound', subject: 'Re: [UPDATED] ACTION REQUIRED: PRELIMINARY Review — Kevin Minh Tran — 58.8% LTV' }],
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: 'INBOUND from Admin (Franco)',
+    },
+    {
+      name: 'D4: admin reply to FINAL REVIEW → "INBOUND from Admin (Franco)"',
+      messages: [{ direction: 'inbound', subject: 'Re: FINAL REVIEW: All Documents Received — Kevin Tran' }],
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: 'INBOUND from Admin (Franco)',
+    },
+    {
+      name: 'D5: admin reply to BBB conditions handoff → "INBOUND from Admin (Franco)"',
+      messages: [{ direction: 'inbound', subject: 'Re: [Conditions Fulfilled] James Okafor — File Complete' }],
+      brokerName: 'Tyler Bennett',
+      expectLabel: 'INBOUND from Admin (Franco)',
+    },
+    {
+      name: 'D6: admin reply to NNN/CCCC [File Complete] handoff → "INBOUND from Admin (Franco)"',
+      messages: [{ direction: 'inbound', subject: 'Re: [File Complete] Patricia Simmons — Ready to Close' }],
+      brokerName: 'Jason Mercer',
+      expectLabel: 'INBOUND from Admin (Franco)',
+    },
+    {
+      name: 'D7: nested Re: Re: admin reply still detected → "INBOUND from Admin (Franco)"',
+      messages: [{ direction: 'inbound', subject: 'Re: Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Tran' }],
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: 'INBOUND from Admin (Franco)',
+    },
+    {
+      name: 'D8: broker reply with "ACTION REQUIRED" in body but not subject → broker_name',
+      messages: [{ direction: 'inbound', subject: 'Re: Kevin Tran — quick update' }],
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: 'INBOUND from Sarah Okonkwo',
+    },
+    {
+      name: 'D9: null brokerName → "INBOUND from Broker" fallback',
+      messages: [{ direction: 'inbound', subject: 'Re: New deal' }],
+      brokerName: null,
+      expectLabel: 'INBOUND from Broker',
+    },
+    {
+      name: 'D10: empty messages array → empty array',
+      messages: [],
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: null, // empty result, no per-message label
+      expectLength: 0,
+    },
+    {
+      name: 'D11: null messages → empty array (defensive)',
+      messages: null,
+      brokerName: 'Sarah Okonkwo',
+      expectLabel: null,
+      expectLength: 0,
+    },
+  ];
+
+  let ddddPassed = 0;
+  for (const tc of ddddCases) {
+    const got = ddddLabel(tc.messages, tc.brokerName);
+    if (tc.expectLength !== undefined) {
+      if (got.length !== tc.expectLength) {
+        throw new Error(`FAIL [Group DDDD ${tc.name}]: expected length ${tc.expectLength}, got ${got.length}`);
+      }
+      console.log(`  PASS [${tc.name}]`);
+    } else {
+      if (got.length !== 1 || got[0].senderLabel !== tc.expectLabel) {
+        throw new Error(`FAIL [Group DDDD ${tc.name}]: expected senderLabel ${JSON.stringify(tc.expectLabel)}, got ${JSON.stringify(got[0]?.senderLabel)}`);
+      }
+      console.log(`  PASS [${tc.name}]: → "${got[0].senderLabel}"`);
+    }
+    ddddPassed++;
+  }
+  console.log(`Group DDDD / Truth Table: ${ddddPassed}/${ddddCases.length} passed`);
+
+  // ─── Multi-message ordering + originals preserved ────────────────────────
+  console.log('\n---------- Group DDDD / Multi-message ordering ----------');
+  const ddddMixedConversation = [
+    { id: 'm0', direction: 'inbound', subject: 'Second Mortgage Submission — Kevin Tran', body: 'Hi, submitting Kevin...' },
+    { id: 'm1', direction: 'outbound', subject: 'Re: Second Mortgage Submission — Kevin Tran', body: 'Hi Sarah!' },
+    { id: 'm2', direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Kevin Minh Tran — 58.8% LTV', body: '<prelim>' },
+    { id: 'm3', direction: 'inbound', subject: 'Re: Second Mortgage Submission — Kevin Tran', body: 'Exit strategy: refinance with CIBC...' },
+    { id: 'm4', direction: 'inbound', subject: 'Re: [UPDATED] ACTION REQUIRED: PRELIMINARY Review — Kevin Minh Tran — 58.8% LTV', body: 'approved' },
+  ];
+  const ddddLabeled = ddddLabel(ddddMixedConversation, 'Sarah Okonkwo');
+  if (ddddLabeled.length !== 5) throw new Error(`FAIL [Group DDDD ordering]: expected 5 labeled messages, got ${ddddLabeled.length}`);
+  const expectedLabels = [
+    'INBOUND from Sarah Okonkwo',
+    'OUTBOUND from Vienna',
+    'OUTBOUND from Vienna',
+    'INBOUND from Sarah Okonkwo',
+    'INBOUND from Admin (Franco)',
+  ];
+  ddddLabeled.forEach((m, i) => {
+    if (m.senderLabel !== expectedLabels[i]) {
+      throw new Error(`FAIL [Group DDDD ordering position ${i}]: expected ${expectedLabels[i]}, got ${m.senderLabel}`);
+    }
+    // Preserve original fields
+    if (m.id !== ddddMixedConversation[i].id) {
+      throw new Error(`FAIL [Group DDDD field preservation]: original fields lost at position ${i}`);
+    }
+  });
+  console.log('  PASS [Group DDDD ordering]: 5 messages labeled correctly, original fields preserved');
+
+  // ─── Source-string regression: prompts use m.senderLabel || fallback ────
+  console.log('\n---------- Group DDDD / Source-string regression ----------');
+
+  // generateLeadSummary prompt — line ~1230 — uses m.senderLabel || fallback
+  if (!/m\.senderLabel \|\| \(m\.direction === 'inbound' \? `INBOUND from \$\{inboundSenderLabel\}` : 'OUTBOUND from Vienna'\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group DDDD prompt wiring]: prompt rendering loop missing m.senderLabel || fallback pattern`);
+  }
+  // Count of senderLabel fallback occurrences should be at least 3 — generateLeadSummary,
+  // generateEscalationNotification, generateBrokerResponse all use the same pattern.
+  const senderLabelOccurrences = (aiSource.match(/m\.senderLabel \|\|/g) || []).length;
+  if (senderLabelOccurrences < 3) {
+    throw new Error(`FAIL [Group DDDD prompt wiring]: expected at least 3 prompt sites using m.senderLabel fallback (generateLeadSummary, generateEscalationNotification, generateBrokerResponse), got ${senderLabelOccurrences}`);
+  }
+  console.log(`  PASS [Group DDDD prompt wiring]: m.senderLabel || fallback pattern present at ${senderLabelOccurrences} prompt sites`);
+
+  // RENDER EVERY ENTRY defensive guard
+  if (!/RENDER EVERY ENTRY/.test(aiSource)) {
+    throw new Error(`FAIL [Group DDDD render-every-entry]: 'RENDER EVERY ENTRY' strong-form defensive guard missing`);
+  }
+  const renderEveryOccurrences = (aiSource.match(/RENDER EVERY ENTRY/g) || []).length;
+  if (renderEveryOccurrences < 2) {
+    throw new Error(`FAIL [Group DDDD render-every-entry coverage]: expected at least 2 sites (generateLeadSummary, generateEscalationNotification), got ${renderEveryOccurrences}`);
+  }
+  console.log(`  PASS [Group DDDD render-every-entry]: defensive guard present at ${renderEveryOccurrences} prompt sites`);
+
+  // Admin label string referenced in prompts
+  if (!/INBOUND from Admin \(Franco\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group DDDD admin label]: prompt must reference "INBOUND from Admin (Franco)" label so Claude knows the meaning`);
+  }
+  console.log('  PASS [Group DDDD admin label]: "INBOUND from Admin (Franco)" label referenced in prompts');
+
+  // Shared utility module exists
+  const adminReplyPath = path_qqq.join(__dirname, 'src/lib/adminReply.js');
+  if (!fs_qqq.existsSync(adminReplyPath)) {
+    throw new Error(`FAIL [Group DDDD shared util]: src/lib/adminReply.js does not exist`);
+  }
+  const adminReplySrc = fs_qqq.readFileSync(adminReplyPath, 'utf8');
+  if (!/module\.exports = \{ ADMIN_REPLY_SUBJECT_RE, isAdminReplySubject \}/.test(adminReplySrc)) {
+    throw new Error(`FAIL [Group DDDD shared util exports]: src/lib/adminReply.js missing expected exports`);
+  }
+  console.log('  PASS [Group DDDD shared util]: src/lib/adminReply.js exists with correct exports');
+
+  // cron/dailySummary.js imports from shared util (not inline regex anymore)
+  const cronSrc = fs_qqq.readFileSync(path_qqq.join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  if (!/require\('\.\.\/lib\/adminReply'\)/.test(cronSrc)) {
+    throw new Error(`FAIL [Group DDDD cron import]: cron/dailySummary.js must import from shared util`);
+  }
+  console.log('  PASS [Group DDDD cron import]: cron/dailySummary.js imports from shared util (architectural cleanup)');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed
