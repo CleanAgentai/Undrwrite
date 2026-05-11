@@ -27,7 +27,27 @@ const classifyDocument = (fileName, extractedText) => {
   if (/tax.?bill|property.?tax/i.test(name)) return 'property_tax';
   if (/survey/i.test(name)) return 'survey';
   if (/environmental/i.test(name)) return 'environmental';
-  if (/mortgage.?balance|mortgage.?statement|current.?mortgage|payout.?statement|payout.?letter|mortgage.?payout|discharge.?statement|mortgage.?discharge/i.test(name)) return 'mortgage_statement';
+  // Group OOO (S1.4): split mortgage docs into payout-vs-balance. Pre-OOO this was
+  // a single 'mortgage_statement' bucket; production deal 9aa136aa accepted a
+  // "TD_MortgageBalance_Grace_Paulson.pdf" as sufficient, marking the file complete
+  // before broker had submitted the actual payout statement (which carries payoff
+  // amount + prepayment penalty + interest-to-date + validity window — the balance
+  // statement carries only current outstanding). Insufficient-first ordering: balance
+  // patterns get caught before the payout fallthrough, so explicit "Balance" filenames
+  // route to mortgage_balance_statement (insufficient).
+  if (/mortgage.?balance|balance.?statement.*mortgage|current.?balance.*mortgage/i.test(name)) return 'mortgage_balance_statement';
+  if (/payout.?statement|payout.?letter|mortgage.?payout|discharge.?statement|mortgage.?discharge|mortgage.?statement|current.?mortgage/i.test(name)) {
+    // Sub-fix 1.5: ambiguous filename refinement. Generic "Mortgage_Statement.pdf"
+    // without a balance cue would default to sufficient — but if the text body shows
+    // balance-only content with no payoff/penalty/validity markers, downgrade to
+    // mortgage_balance_statement so the file isn't prematurely marked complete.
+    if (text) {
+      const hasSufficientMarker = /payoff amount|payout amount|prepayment penalty|interest to.*date|validity (period|date|window)|discharge/i.test(text);
+      const hasBalanceCue       = /current balance|outstanding balance|mortgage balance/i.test(text);
+      if (hasBalanceCue && !hasSufficientMarker) return 'mortgage_balance_statement';
+    }
+    return 'mortgage_statement';
+  }
   if (/corporate.?financial|corp.?financ/i.test(name)) return 'corporate_financials';
   if (/t1.?general|tax.?return/i.test(name)) return 'tax_return';
   if (/resume|cv|experience/i.test(name)) return 'borrower_resume';
@@ -43,7 +63,12 @@ const classifyDocument = (fileName, extractedText) => {
     if (/notice of assessment|canada revenue|income tax.*return/i.test(text)) return 'noa';
     if (/anti-money laundering|proceeds of crime|fintrac/i.test(text)) return 'aml';
     if (/politically exposed person/i.test(text)) return 'pep';
-    if (/mortgage balance|mortgage statement|outstanding balance.*mortgage|payout statement|payout letter|mortgage payout|discharge statement|mortgage discharge/i.test(text)) return 'mortgage_statement';
+    // Group OOO: text-content layer mirrors the filename split. Sufficient-first
+    // here — strong markers (payoff amount, prepayment penalty, interest-to-date,
+    // validity, discharge) reliably indicate a real payout/discharge statement.
+    // Balance-only content without those markers routes to mortgage_balance_statement.
+    if (/payoff amount|payout amount|prepayment penalty|interest to.*date|validity (period|date|window)|payout statement|payout letter|mortgage payout|discharge statement|mortgage discharge/i.test(text)) return 'mortgage_statement';
+    if (/mortgage balance|outstanding balance.*mortgage|current balance/i.test(text)) return 'mortgage_balance_statement';
     if (/corporate financial|balance sheet.*income statement|fiscal year/i.test(text) && /corporation|inc\.|ltd\.|corp\./i.test(text)) return 'corporate_financials';
     if (/t1 general|tax return|taxable income.*federal/i.test(text)) return 'tax_return';
     if (/resume|curriculum vitae|professional experience|building experience|development experience/i.test(text)) return 'borrower_resume';

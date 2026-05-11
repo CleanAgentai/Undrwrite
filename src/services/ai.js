@@ -458,7 +458,11 @@ CONVERSATIONAL RULES:
 - CRITICAL — DO NOT RE-ACKNOWLEDGE PREVIOUSLY-CONFIRMED DOCUMENTS: acknowledge ONLY documents that arrived in the broker's MOST RECENT message (the latest inbound in the conversation history). Do NOT re-thank for documents already acknowledged in a prior Vienna outbound message. Read the conversation history: if a prior [OUTBOUND from Vienna] message already said "thanks for the appraisal and NOA" or similar, the broker has already heard the thank-you — do NOT repeat it. Repeating acknowledgments makes Vienna sound robotic and forgetful, and pads the email with content the broker doesn't need.
 - CRITICAL — DO NOT FABRICATE DOCUMENT RECEIPT: The DOCUMENTS ALREADY ON FILE list passed below is the AUTHORITATIVE record of what we have actually received and saved. Do NOT acknowledge, thank, confirm, or reference receipt of any document that is NOT in that list. Even if the broker's email body says "Government ID enclosed", "see attached appraisal", "I've sent the NOA", "tax bill is attached", or any other claim of attachment — if the document does NOT appear in DOCUMENTS ALREADY ON FILE, treat it as MISSING and ask the broker to send it again (their attachment may not have come through). Never infer receipt from broker mentions, attachment claims in the email body, or context. The on-file list is the only source of truth.
 - Do NOT ask for both "appraised value" and "current appraisal" — these are the same thing. Just ask for "a current appraisal."
-- Do NOT ask for "Current Mortgage Payout Statement" AND "current balance" / "mortgage balance statement" / "current mortgage balance" / "discharge statement" as separate items — they are the SAME single document. The mortgage payout statement IS the current mortgage balance, and is functionally the same document a discharge statement provides. Canonical name: "Current Mortgage Payout Statement". Always list it once, never twice under different names.
+- MORTGAGE PAYOUT STATEMENT vs MORTGAGE BALANCE STATEMENT — these are NOT the same document (Group OOO reverses the prior unification rule).
+  - PAYOUT STATEMENT (sufficient): includes the payoff amount, prepayment penalty, interest to a specific date, and validity window. Discharge statements are equivalent and acceptable. Canonical name when asking: "Current Mortgage Payout Statement".
+  - BALANCE STATEMENT (insufficient): shows current outstanding balance only. Does NOT include penalty, interest-to-date, or validity. CANNOT substitute for a payout statement.
+  - If the broker submitted a balance statement when a payout statement is needed (i.e. DOCUMENTS ALREADY ON FILE shows a "Mortgage Balance Statement" but the missing-items list still includes the Current Mortgage Payout Statement): ACKNOWLEDGE receipt by name ("Thanks for sending the mortgage balance statement"), CLARIFY the gap, and request the proper payout statement: "we'll also need the actual payout statement, which includes the payoff amount, prepayment penalty, interest to a specific date, and validity window — the balance statement on its own doesn't cover those."
+  - Never ask for "balance statement", "current balance", or "mortgage statement" as the canonical request — always "Current Mortgage Payout Statement".
 - Do NOT ask for "Credit Report" AND "Credit Bureau" / "Credit Bureau Report" / "Credit Bureau Reports" / "CB" / "CB report" as separate items — they are the SAME single document (the Equifax/TransUnion report). Pick ONE phrasing for your email and use it consistently. Never list the same doc twice under two different names.
 - Do NOT ask for "Personal Net Worth Statement" AND "PNW Statement" / "PNW Statement Form" / "PNW" / "net worth statement" as separate items — they are the SAME single document. Pick ONE phrasing for your email and use it consistently. Never list the same doc twice under two different names.
 - CRITICAL — DO NOT NAME UNSTATED LENDERS: never reference a specific bank, credit union, or lender by name (e.g. "TD Bank", "RBC", "Royal Bank", "Scotiabank", "BMO", "Bank of Montreal", "CIBC", "National Bank", "Tangerine", "Manulife", "Equitable", "Haventree", "MCAP", "ATB") unless the broker EXPLICITLY stated that institution in their correspondence (email body or prior thread). If you don't know who holds the existing mortgage or who the exit lender is, do NOT fill in a guess — ask the broker to confirm. Pattern: "Could you confirm who holds the current mortgage?" — NOT "could you send the TD Bank payout statement?". Same rule for exit lenders: never assume a specific name; if the broker said "refi at maturity" without naming a lender, ask which one.
@@ -780,7 +784,11 @@ REQUIRED DOCUMENTS — request ONLY what has NOT been received.
 STRICT RULE: You are ONLY allowed to request documents from the checklist below. Do NOT ask for anything outside this list — no property insurance binders, no lawyer's undertaking letters, no title insurance, no purchase agreements, no void cheques, no commitment letters, no survey reports, no environmental reports, no anything else — even if you think they are standard mortgage documents. If Franco wants something additional, he will tell you.
 
 UNIFICATION RULES — Same doc, different names. Pick ONE phrasing per item and use it consistently in this email. Never list the same doc twice under two different names — that creates the appearance of two missing items when only one is missing:
-- MORTGAGE PAYOUT vs CURRENT BALANCE vs DISCHARGE STATEMENT: "Current Mortgage Payout Statement" = "current mortgage balance" = "mortgage balance statement" = "discharge statement". Same single document. Canonical: "Current Mortgage Payout Statement".
+- MORTGAGE PAYOUT vs MORTGAGE BALANCE — these are NOT the same document (Group OOO).
+  - PAYOUT STATEMENT (sufficient): payoff amount + prepayment penalty + interest-to-date + validity window. Discharge statements are equivalent.
+  - BALANCE STATEMENT (insufficient): current outstanding balance only. Cannot substitute for a payout statement.
+  - If broker submitted a balance statement (DOCUMENTS ON FILE shows "Mortgage Balance Statement") but the payout statement is still missing: acknowledge the balance statement by name, explain the gap, request the proper payout statement.
+  - Canonical request name: "Current Mortgage Payout Statement". Never ask for "balance statement" / "current balance" alone.
 - CREDIT REPORT vs CREDIT BUREAU: "Credit Report" = "Credit Bureau" = "Credit Bureau Report" = "Credit Bureau Reports" = "CB" = "CB report". Same single document (Equifax/TransUnion).
 - PNW STATEMENT vs PERSONAL NET WORTH: "Personal Net Worth Statement" = "PNW Statement" = "PNW Statement Form" = "PNW" = "net worth statement". Same single document.
 
@@ -995,9 +1003,13 @@ Return only the HTML email body.`,
             {
               type: 'text',
               text: `Classify this document image. Reply with ONLY one of these categories, nothing else:
-government_id, appraisal, property_tax, noa, mortgage_statement, income_proof, credit_report, insurance, corporate_financials, tax_return, borrower_resume, loan_application, pnw_statement, other
+government_id, appraisal, property_tax, noa, mortgage_statement, mortgage_balance_statement, income_proof, credit_report, insurance, corporate_financials, tax_return, borrower_resume, loan_application, pnw_statement, other
 
-File name: ${fileName}`,
+File name: ${fileName}
+
+Classification guidance:
+- mortgage_statement: payout statement (includes payoff amount, prepayment penalty, interest to a date, validity window) OR discharge statement
+- mortgage_balance_statement: balance statement showing current outstanding balance only, no payoff/penalty/validity (insufficient for a payout request)`,
             },
           ],
         }],
@@ -1006,6 +1018,7 @@ File name: ${fileName}`,
       const result = response.content[0].text.trim().toLowerCase();
       const validCategories = [
         'government_id', 'appraisal', 'property_tax', 'noa', 'mortgage_statement',
+        'mortgage_balance_statement',
         'income_proof', 'credit_report', 'insurance', 'corporate_financials',
         'tax_return', 'borrower_resume', 'loan_application', 'pnw_statement', 'other',
       ];
@@ -1023,6 +1036,7 @@ File name: ${fileName}`,
     property_tax: 'Property Tax Assessment',
     noa: 'Notice of Assessment (NOA)',
     mortgage_statement: 'Current Mortgage Payout Statement',
+    mortgage_balance_statement: 'Mortgage Balance Statement',
     income_proof: 'Proof of Income',
     loan_application: 'Loan Application Form',
     pnw_statement: 'Personal Net Worth Statement',

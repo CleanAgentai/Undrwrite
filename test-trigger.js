@@ -2466,7 +2466,10 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     // Pre-existing positives that must still classify (regression guards)
     ['Mortgage_Statement.pdf',                         'mortgage_statement'],
     ['Current_Mortgage.pdf',                           'mortgage_statement'],
-    ['Mortgage_Balance_Apr2026.pdf',                   'mortgage_statement'],
+    // Group OOO update: this filename now correctly routes to mortgage_balance_statement
+    // (was mortgage_statement under Group K's unified bucket — that was the S1.4 bug).
+    // Full Group OOO classifier coverage lives below in the GROUP OOO section.
+    ['Mortgage_Balance_Apr2026.pdf',                   'mortgage_balance_statement'],
     // Negative — must NOT trip mortgage_statement (Q4 scoping: bare "discharge"
     // patterns from non-mortgage contexts must stay 'other')
     ['Bankruptcy_Discharge.pdf',                       'other'],
@@ -3029,6 +3032,225 @@ WEBSITE.  unionfinancialcorp.com`;
     nnnPassed++;
   }
   console.log(`Group NNN decideReviewDispatch: ${nnnPassed}/${nnnCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP OOO — payout vs balance vs discharge distinction (S1.4)
+  // ════════════════════════════════════════════════════════════════
+  // Reverses Group K's unification. Production failure: deal 9aa136aa accepted a
+  // "TD_MortgageBalance_Grace_Paulson.pdf" as sufficient under the unified
+  // 'mortgage_statement' classification, marking the file complete before broker
+  // had submitted the actual payout statement (which carries payoff amount +
+  // prepayment penalty + interest-to-date + validity window — the balance
+  // statement carries only current outstanding).
+  //
+  // Per Q2: payout/discharge merged (sufficient), balance separate (insufficient).
+  // Per Q3: deals.js classifier is authoritative.
+  // Per Q1: text-content refinement (sub-fix 1.5) downgrades ambiguous
+  //         "Mortgage_Statement.pdf" filenames when text shows balance-only content.
+  console.log('\n========== GROUP OOO — mortgage payout vs balance classifier ==========');
+  // classifyDocument already imported earlier in the harness from deals.__test__
+
+  // ─── Truth table A — filename layer ────────────────────────────────────
+  console.log('\n---------- Group OOO / A: filename classifier ----------');
+  const oooFilenameCases = [
+    // Insufficient — "Balance" filenames route to mortgage_balance_statement (Q2)
+    ['TD_MortgageBalance_Grace_Paulson.pdf', '', 'mortgage_balance_statement', 'production S1.4 case'],
+    ['MortgageBalance_2026.pdf',             '', 'mortgage_balance_statement', 'leading-name balance variant'],
+    ['Current_Balance_Mortgage.pdf',         '', 'mortgage_balance_statement', '"current balance + mortgage"'],
+    // Sufficient — payout/discharge filenames
+    ['Scotia_Payout_Statement_Smith.pdf',    '', 'mortgage_statement',         'explicit payout statement'],
+    ['TD_Payout_Letter.pdf',                 '', 'mortgage_statement',         'payout letter'],
+    ['Mortgage_Discharge.pdf',               '', 'mortgage_statement',         'mortgage discharge filename'],
+    ['Discharge_Statement.pdf',              '', 'mortgage_statement',         'discharge statement filename'],
+    ['MortgagePayout.pdf',                   '', 'mortgage_statement',         'no separator, mortgage payout'],
+    // Ambiguous — generic filenames default to mortgage_statement (sufficient)
+    ['Mortgage_Statement.pdf',               '', 'mortgage_statement',         'generic filename, no balance cue → sufficient default'],
+    ['Current_Mortgage.pdf',                 '', 'mortgage_statement',         '"current mortgage" alone → sufficient default'],
+  ];
+  let oooFilenamePassed = 0;
+  for (const [fileName, text, expected, label] of oooFilenameCases) {
+    const got = classifyDocument(fileName, text);
+    if (got === expected) {
+      console.log(`  PASS [${label}]: ${fileName} → ${got}`);
+      oooFilenamePassed++;
+    } else {
+      throw new Error(`FAIL [Group OOO / A filename ${label}]: ${fileName} → expected '${expected}', got '${got}'`);
+    }
+  }
+  console.log(`Group OOO / A filename: ${oooFilenamePassed}/${oooFilenameCases.length} passed`);
+
+  // ─── Truth table B — text-content layer + ambiguity refinement ──────────
+  console.log('\n---------- Group OOO / B: text-content layer + sub-fix 1.5 refinement ----------');
+  const oooTextCases = [
+    // Sub-fix 1.5: ambiguous filename + balance-only text → DOWNGRADE to mortgage_balance_statement.
+    // Real balance statements list current balance + account info only; they don't mention
+    // payoff/penalty/validity at all (real payout statements DO).
+    [
+      'Mortgage_Statement.pdf',
+      'Statement of mortgage account. Account: 4521-9876. Current balance: $342,180 as of May 1, 2026. Last payment received: April 15. Next payment due: May 15.',
+      'mortgage_balance_statement',
+      'sub-fix 1.5: ambiguous filename downgrades when text shows balance-only content',
+    ],
+    // Sub-fix 1.5: ambiguous filename + payoff markers → STAYS mortgage_statement
+    [
+      'Mortgage_Statement.pdf',
+      'Payoff amount: $342,180. Prepayment penalty: $1,250. Interest to May 15: $850. Total: $344,280. Valid through May 15, 2026.',
+      'mortgage_statement',
+      'sub-fix 1.5: ambiguous filename + payoff markers → stays sufficient',
+    ],
+    // Text-fallback layer (filename → 'other'): payoff markers route to mortgage_statement
+    [
+      'GenericFile.pdf',
+      'Mortgage discharge statement. Payoff amount calculated to maturity of the term, $342,180, with prepayment penalty of $1,250.',
+      'mortgage_statement',
+      'text-fallback: discharge + payoff text → sufficient',
+    ],
+    // Text-fallback layer: balance-only content routes to mortgage_balance_statement
+    [
+      'Document.pdf',
+      'Current outstanding balance of mortgage: $342,180. As of statement date.',
+      'mortgage_balance_statement',
+      'text-fallback: balance-only text → insufficient',
+    ],
+    // Negative regression: random text doesn't match either
+    [
+      'GenericFile.pdf',
+      'This document discusses property valuation methodology and comparable sales analysis from the regional MLS.',
+      'appraisal',
+      'unrelated text matches earlier classifier rule (appraisal) — not mortgage_*',
+    ],
+  ];
+  let oooTextPassed = 0;
+  for (const [fileName, text, expected, label] of oooTextCases) {
+    const got = classifyDocument(fileName, text);
+    if (got === expected) {
+      console.log(`  PASS [${label}]: → ${got}`);
+      oooTextPassed++;
+    } else {
+      throw new Error(`FAIL [Group OOO / B text ${label}]: ${fileName} + "${text.slice(0, 80)}..." → expected '${expected}', got '${got}'`);
+    }
+  }
+  console.log(`Group OOO / B text-content: ${oooTextPassed}/${oooTextCases.length} passed`);
+
+  // ─── Truth table C — DOC_DISPLAY_NAMES regression ───────────────────────
+  console.log('\n---------- Group OOO / C: DOC_DISPLAY_NAMES regression ----------');
+  const aiServiceForOoo = require('./src/services/ai');
+  const oooDisplayCases = [
+    ['mortgage_statement',         'Current Mortgage Payout Statement', 'sufficient — canonical name unchanged'],
+    ['mortgage_balance_statement', 'Mortgage Balance Statement',         'insufficient — new key added'],
+  ];
+  let oooDisplayPassed = 0;
+  for (const [key, expected, label] of oooDisplayCases) {
+    const got = aiServiceForOoo.DOC_DISPLAY_NAMES?.[key];
+    if (got === expected) {
+      console.log(`  PASS [${label}]: DOC_DISPLAY_NAMES.${key} === '${got}'`);
+      oooDisplayPassed++;
+    } else {
+      throw new Error(`FAIL [Group OOO / C display ${label}]: expected '${expected}', got '${got}'`);
+    }
+  }
+  console.log(`Group OOO / C DOC_DISPLAY_NAMES: ${oooDisplayPassed}/${oooDisplayCases.length} passed`);
+
+  // ─── D — Live Claude prompt verification (5x) ───────────────────────────
+  // Synthetic scenario: refinance deal with all docs received EXCEPT
+  // mortgage_statement (payout). Documents on file include the production
+  // production-shape "TD_MortgageBalance_Grace_Paulson.pdf" classified as
+  // mortgage_balance_statement. Vienna's reply MUST:
+  //   1. ACKNOWLEDGE the mortgage balance statement by name
+  //   2. EXPLAIN the gap (payout includes payoff amount / penalty / interest-to-date / validity)
+  //   3. REQUEST the proper payout statement
+  //   4. NOT treat the mortgage requirement as satisfied
+  // 5x verification: 0-1 leaks ships, 2+ escalates.
+  if (process.env.RUN_OOO_D === '1') {
+    console.log('\n---------- Group OOO / D: 5x Claude prompt verification ----------');
+    const oooDealSummary = {
+      borrower_name: 'Grace Paulson',
+      sender_name: 'Rachel Kim',
+      broker_name: 'Rachel Kim',
+      sender_type: 'broker',
+      property_value: 615000,
+      loan_amount: 87000,
+      existing_mortgage_balance: 290000,
+      ltv_percent: 61,
+      loan_type: 'second mortgage',
+      purpose: 'debt consolidation',
+      exit_strategy: 'refi at maturity',
+    };
+    const oooDocsOnFile = [
+      { classification: 'loan_application', file_name: 'LoanApp.pdf' },
+      { classification: 'credit_report',    file_name: 'CB.pdf' },
+      { classification: 'appraisal',        file_name: 'Appraisal.pdf' },
+      { classification: 'noa',              file_name: 'NOA.pdf' },
+      { classification: 'pnw_statement',    file_name: 'PNW.pdf' },
+      { classification: 'government_id',    file_name: 'GovID.pdf' },
+      { classification: 'property_tax',     file_name: 'PropertyTax.pdf' },
+      { classification: 'mortgage_balance_statement', file_name: 'TD_MortgageBalance_Grace_Paulson.pdf' },
+    ];
+    const oooConversationHistory = [
+      { direction: 'inbound', subject: 'Second Mortgage — Grace Paulson', body: 'Hi, submitting Grace for a second mortgage. Docs attached.', created_at: '2026-05-10T10:00:00Z' },
+      { direction: 'outbound', subject: 'Re: Second Mortgage — Grace Paulson', body: '<p>Thanks Rachel! We have the application, credit, appraisal, NOA, PNW. Still need: gov ID, property tax, payout statement.</p>', created_at: '2026-05-10T10:05:00Z' },
+      { direction: 'inbound', subject: 'Re: Second Mortgage — Grace Paulson', body: 'Sending the gov ID, property tax, and TD mortgage balance statement.', created_at: '2026-05-10T11:00:00Z' },
+    ];
+    // Scenario: broker already submitted docs in prior turns (now on file). This
+    // turn is a follow-up text-only message. No fresh attachments → no PDF base64
+    // needed; Claude reads documentsOnFile to decide what to ask for. The
+    // production-shape mortgage_balance_statement is in the on-file list (NOT in
+    // mortgage_statement) — Vienna's prompt rule must catch this and ask for the
+    // proper payout statement.
+    const oooBrokerReplyText = 'Sent over the rest of the file earlier today — let me know if anything else is needed for Grace.';
+    const oooAttachments = [];
+    const oooSavedDocs = [];
+
+    let oooLeaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      const result = await aiService.generateBrokerResponse(
+        oooBrokerReplyText,
+        oooAttachments,
+        oooSavedDocs,
+        oooDealSummary,
+        oooConversationHistory,
+        oooDocsOnFile,
+        'active'
+      );
+      const reply = (result.responseEmail || '').toLowerCase();
+      // Check 1 — acknowledges the balance statement by name
+      const acks = /balance statement|mortgage balance/.test(reply);
+      // Check 2 — explains the gap (mentions at least one of the payout-distinguishing markers)
+      const explains = /payoff amount|prepayment penalty|interest to|validity/.test(reply);
+      // Check 3 — requests the payout statement
+      const requests = /payout statement|payout letter|mortgage payout|payoff statement/.test(reply);
+      // Check 4 — does NOT make an UNCONDITIONAL present-tense claim that the file is complete.
+      // S1.4 production failure: "I believe we have everything we need to send the file for review"
+      // (unconditional, file wasn't actually complete). That's what we catch here.
+      // CONDITIONAL future framing ("once we have the payout statement, we'll be all set") is
+      // CORRECT broker-comms behavior — tells the broker what to expect after they send the
+      // missing item, which the conditional clearly indicates ISN'T in yet. The conditional
+      // exclusion below prevents false positives on that pattern.
+      const completeClaimPattern = /(\bwe have everything\b|\bthe file is (now )?complete\b|\bnothing else (is )?(needed|required|missing|outstanding)\b|\ball documents (are )?(received|in)\b|\bready to send for review\b|\bready for approval\b)/i;
+      const conditionalPrefix = /\b(once|after|when|if) we (have|receive|get|see)\b/i;
+      let claimsComplete = false;
+      const completeMatch = reply.match(completeClaimPattern);
+      if (completeMatch) {
+        const lookbackStart = Math.max(0, completeMatch.index - 80);
+        const preceding = reply.slice(lookbackStart, completeMatch.index);
+        claimsComplete = !conditionalPrefix.test(preceding);
+      }
+
+      const leaked = !acks || !explains || !requests || claimsComplete;
+      if (leaked) {
+        oooLeaks++;
+        console.log(`  Run ${run}: LEAK — acks=${acks}, explains=${explains}, requests=${requests}, claimsComplete=${claimsComplete}\n    Reply (first 400): ${reply.slice(0, 400)}`);
+      } else {
+        console.log(`  Run ${run}: PASS — acks=${acks}, explains=${explains}, requests=${requests}, claimsComplete=${claimsComplete}`);
+      }
+    }
+    if (oooLeaks >= 2) {
+      throw new Error(`FAIL [Group OOO / D]: ${oooLeaks}/5 runs leaked. Escalation threshold reached — prompt rule needs tightening.`);
+    }
+    console.log(`Group OOO / D (5x Claude prompt): ${5 - oooLeaks}/5 passed, ${oooLeaks}/5 leaked (threshold: ≤1)`);
+  } else {
+    console.log('\n---------- Group OOO / D: SKIPPED (set RUN_OOO_D=1 to run) ----------');
+  }
 
   // ════════════════════════════════════════════════════════════════
   // GROUP MMM — daily summary admin-reply subject filter (S13.1)
