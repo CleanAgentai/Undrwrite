@@ -3971,6 +3971,89 @@ Jason`,
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP WWW — deterministic exit_strategy gating (S5.1)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-WWW the ADDITIONAL ITEMS block in generateDocumentRequestEmail was
+  // always injected; Claude was supposed to skip the exit-strategy ask when
+  // dealSummary.exit_strategy was populated, but over-fired probabilistically
+  // (Patricia Simmons deal 3a9a3532 — exit_strategy was set yet Vienna asked
+  // anyway). Post-WWW the JS gate omits the block from the prompt entirely
+  // when exit_strategy is set — removes the probabilistic miss by removing
+  // the instruction. Pure-function truth table; no live Claude needed
+  // (structural fix per Franco's "no live Claude verification" approval).
+  console.log('\n========== GROUP WWW — deterministic exit_strategy gating ==========');
+  const { buildAdditionalItemsBlock: wwwBuild } = aiService;
+
+  const wwwCases = [
+    {
+      name: 'W1: exit_strategy populated string → block absent (\'\')',
+      input: { exit_strategy: 'refinance with TD at maturity' },
+      expectEmpty: true,
+    },
+    {
+      name: 'W2: exit_strategy null → block present',
+      input: { exit_strategy: null },
+      expectEmpty: false,
+    },
+    {
+      name: 'W3: exit_strategy undefined (missing key) → block present',
+      input: {},
+      expectEmpty: false,
+    },
+    {
+      name: 'W4: exit_strategy empty string → block present',
+      input: { exit_strategy: '' },
+      expectEmpty: false,
+    },
+    {
+      name: 'W5: exit_strategy whitespace-only → block present (whitespace treated as empty)',
+      input: { exit_strategy: '   ' },
+      expectEmpty: false,
+    },
+    {
+      name: 'W6: null dealSummary → block present (defensive default — better to over-ask than miss when summary malformed)',
+      input: null,
+      expectEmpty: false,
+    },
+    {
+      name: 'W7: Patricia Simmons production value → block absent (the production failure case)',
+      input: { exit_strategy: 'refinance into a single first at maturity once renovation is complete' },
+      expectEmpty: true,
+    },
+  ];
+
+  let wwwPassed = 0;
+  for (const tc of wwwCases) {
+    const got = wwwBuild(tc.input);
+    const isEmpty = got === '';
+    if (isEmpty !== tc.expectEmpty) {
+      throw new Error(`FAIL [Group WWW ${tc.name}]:\n  input=${JSON.stringify(tc.input)}\n  expectEmpty=${tc.expectEmpty}\n  got=${JSON.stringify(got)}`);
+    }
+    // Sanity: when block IS present, it must contain the expected markers.
+    if (!tc.expectEmpty) {
+      if (!/EXIT STRATEGY/.test(got)) {
+        throw new Error(`FAIL [Group WWW ${tc.name} block content]: expected 'EXIT STRATEGY' in block, got: ${JSON.stringify(got)}`);
+      }
+      if (!/Could you also let us know the exit strategy/.test(got)) {
+        throw new Error(`FAIL [Group WWW ${tc.name} block content]: expected canonical phrasing in block, got: ${JSON.stringify(got)}`);
+      }
+    }
+    console.log(`  PASS [${tc.name}]${tc.expectEmpty ? '' : ` (block ${got.length} chars)`}`);
+    wwwPassed++;
+  }
+  console.log(`Group WWW buildAdditionalItemsBlock: ${wwwPassed}/${wwwCases.length} passed`);
+
+  // Q1-WWW regression guard: the block body must NOT carry the conditional
+  // language (per Q1-WWW Franco approved simplification). Belt-and-suspenders
+  // re-introduces the probabilistic miss vector by giving Claude a second
+  // signal to second-guess. JS gate is the sole condition.
+  const wwwBlockPresent = wwwBuild({ exit_strategy: null });
+  if (/If dealSummary\.exit_strategy is null\/empty/.test(wwwBlockPresent)) {
+    throw new Error(`FAIL [Group WWW Q1 simplification]: block body still contains pre-WWW conditional language "If dealSummary.exit_strategy is null/empty" — Q1-WWW approved dropping this. Got: ${wwwBlockPresent.slice(0, 300)}`);
+  }
+  console.log('  PASS [Group WWW Q1 simplification]: block body simplified — conditional language removed, JS gate is sole condition');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP RRR — borrower-initial over-clarification (S2.2)
   // ════════════════════════════════════════════════════════════════
   // Production bug: Marcus Webb deal 0a815d91 — borrower-initial msg 0 stated

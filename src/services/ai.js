@@ -753,6 +753,27 @@ Return only the HTML email body.`,
     }
   },
 
+  // Group WWW (S5.1): deterministic gate for the ADDITIONAL ITEMS prompt block
+  // in generateDocumentRequestEmail. Pre-WWW the block was always injected and
+  // Claude was supposed to skip it when dealSummary.exit_strategy was populated,
+  // but over-fired probabilistically in production (Patricia Simmons deal
+  // 3a9a3532 — exit_strategy was populated yet Vienna asked anyway).
+  // Post-WWW: the block is omitted from the prompt entirely when exit_strategy
+  // is set — removes the probabilistic miss by removing the instruction. When
+  // exit_strategy is missing, the block is injected with simplified body
+  // (Q1-WWW: dropped conditional language since the JS gate handles the
+  // condition deterministically; belt-and-suspenders re-introduces the miss
+  // vector). Exported via module.exports so test-trigger.js can exercise the
+  // helper directly.
+  buildAdditionalItemsBlock: (dealSummary) => {
+    const exitStrategySet = !!(dealSummary?.exit_strategy && String(dealSummary.exit_strategy).trim());
+    if (exitStrategySet) return '';
+    return `
+
+ADDITIONAL ITEMS — items to ask for at the end of the doc list:
+- EXIT STRATEGY: ALSO ask the broker for the exit strategy. Phrase it as a clear question — example: "Could you also let us know the exit strategy on this — how the borrower plans to repay or refinance out of the loan at maturity?". The STRICT DOCS RULE above does not exclude this — exit strategy is an information ask, not a document.`;
+  },
+
   // Generate Stage 3 document request email — different checklist for personal vs corporate,
   // and different items for purchase vs refinance
   generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = []) => {
@@ -831,8 +852,7 @@ ${propertySpecificDoc}${complianceDocs}
 - Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine. Do NOT list NOA and Proof of Income as separate items)
 ${propertySpecificDoc}${complianceDocs}`}
 
-ADDITIONAL ITEMS — ask for these only when MISSING from the deal summary AND not already stated by the broker in the conversation history above:
-- EXIT STRATEGY: If dealSummary.exit_strategy is null/empty AND the broker has not stated an exit strategy in the conversation history, ALSO ask the broker for the exit strategy at the end of the doc list. Phrase it as a clear question — example: "Could you also let us know the exit strategy on this — how the borrower plans to repay or refinance out of the loan at maturity?". The STRICT DOCS RULE above does not exclude this — exit strategy is an information ask, not a document, and is always permitted when missing. Skip this ask if the broker has already provided an exit strategy (it would be in dealSummary.exit_strategy or stated in conversation history).
+${module.exports.buildAdditionalItemsBlock(dealSummary)}
 
 DEAL SUMMARY:
 ${JSON.stringify(dealSummary, null, 2)}
