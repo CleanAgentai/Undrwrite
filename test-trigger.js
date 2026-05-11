@@ -3397,6 +3397,93 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log(`Group YYY buildPreviewThreadChain: ${yyyPassed}/${yyyCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP VVV — skip intake forms during deferred-intake states (S4.1)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-VVV the new-client INITIAL branch attached Loan Application + PNW
+  // Statement forms to every welcome email (unless broker provided their own).
+  // S4.1 production: high-LTV submissions got Vienna's collateral question
+  // (Fix 7 suppresses the doc-list text) AND blank forms shipped — wasted
+  // broker effort when admin declines on collateral.
+  // Per Q1-VVV, VVV extends symmetrically to identity_clash (HHH state).
+  // Per Q3-VVV, applies regardless of sender_type.
+  console.log('\n========== GROUP VVV — skip intake forms in deferred-intake states ==========');
+  const { shouldSkipIntakeFormsForDeferredState: vvvSkip } = require('./src/routes/webhook').__test__;
+
+  const vvvCases = [
+    {
+      name: 'V1: LTV > 80, no identity_clash → skip forms (Fix 7 awaiting_collateral)',
+      input: { ltv_percent: 92 },
+      expect: true,
+    },
+    {
+      name: 'V2: LTV exactly 80 (boundary, not high-LTV) → ship forms',
+      input: { ltv_percent: 80 },
+      expect: false,
+    },
+    {
+      name: 'V3: LTV well below 80 → ship forms',
+      input: { ltv_percent: 65 },
+      expect: false,
+    },
+    {
+      name: 'V4: identity_clash=true (overrides LTV check) → skip forms (HHH)',
+      input: { ltv_percent: 65, identity_clash: true },
+      expect: true,
+    },
+    {
+      name: 'V5: identity_clash=true AND LTV > 80 → skip forms (both deferred conditions)',
+      input: { ltv_percent: 92, identity_clash: true },
+      expect: true,
+    },
+    {
+      name: 'V6: LTV null/undefined (broker did not state, no docs to compute) → ship forms',
+      input: { ltv_percent: null },
+      expect: false,
+    },
+    {
+      name: 'V7: null summary → ship forms (defensive default)',
+      input: null,
+      expect: false,
+    },
+    {
+      name: 'V8: empty summary → ship forms (no signal to defer)',
+      input: {},
+      expect: false,
+    },
+    {
+      name: 'V9: borrower sender_type + LTV > 80 → skip forms (Q3-VVV: applies regardless of sender_type)',
+      input: { ltv_percent: 92, sender_type: 'borrower' },
+      expect: true,
+    },
+    {
+      name: 'V10: broker + LTV > 80 + collateral_offered=true (mid-cycle re-evaluated deal) → still skip (initial-submission predicate; collateral_offered is an existing-deal flag)',
+      input: { ltv_percent: 92, collateral_offered: true },
+      expect: true,
+    },
+    {
+      name: 'V11: LTV just over threshold (80.01) → skip',
+      input: { ltv_percent: 80.01 },
+      expect: true,
+    },
+    {
+      name: 'V12: LTV=0 (degenerate) → ship forms (falsy-ltv branch)',
+      input: { ltv_percent: 0 },
+      expect: false,
+    },
+  ];
+
+  let vvvPassed = 0;
+  for (const tc of vvvCases) {
+    const got = vvvSkip(tc.input);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group VVV ${tc.name}]:\n  input=${JSON.stringify(tc.input)}\n  expected=${tc.expect}\n  got=${got}`);
+    }
+    console.log(`  PASS [${tc.name}]`);
+    vvvPassed++;
+  }
+  console.log(`Group VVV shouldSkipIntakeFormsForDeferredState: ${vvvPassed}/${vvvCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP OOO — payout vs balance vs discharge distinction (S1.4)
   // ════════════════════════════════════════════════════════════════
   // Reverses Group K's unification. Production failure: deal 9aa136aa accepted a

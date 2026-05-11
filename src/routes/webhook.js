@@ -91,6 +91,26 @@ const isPurchaseFromSummary = (summary) => {
   return /purchas/.test(loanType) || /purchas/.test(purpose);
 };
 
+// Group VVV (S4.1): skip blank intake forms (Loan Application + PNW Statement)
+// on the welcome email when the deal will route to a "deferred-intake" state.
+// Currently two deferred-intake states:
+//   - awaiting_collateral (Fix 7): LTV > 80 + no collateral_offered yet — Vienna's
+//     welcome asks ONLY the collateral question. Most high-LTV deals get declined
+//     → forms wasted (S4.1 production observation).
+//   - awaiting_identity_confirmation (HHH): identity_clash=true — Vienna's welcome
+//     asks ONLY the borrower-name clarification. Forms wasted if the docs turn
+//     out to belong to a different borrower's file.
+// Predicate matches the state-transition logic at the new-client INITIAL gate
+// (identity_clash takes priority over LTV per HHH). Pure function — caller passes
+// the freshly-extracted dealSummary. Per Q3-VVV: applies regardless of
+// sender_type (borrowers in deferred state skip forms too).
+const shouldSkipIntakeFormsForDeferredState = (dealSummary) => {
+  if (!dealSummary) return false;
+  if (dealSummary.identity_clash) return true;
+  const ltv = dealSummary.ltv_percent;
+  return !!(ltv && ltv > 80);
+};
+
 // Group YYY (S5.3): build the References-header chain for a draft preview reply.
 // Pre-YYY chain was [...admin.references, admin.messageId] — relied on admin's
 // email client to echo Vienna's prior outbound IDs in its own References header.
@@ -843,15 +863,24 @@ ${draftEmail}
       console.log('Welcome email + deal summary generated');
 
       // Get form attachments.
-      // Borrowers always get both forms (they don't have their own).
-      // Brokers skip whichever form they already provided.
+      // Group VVV (S4.1): if the deal will route to a deferred-intake state
+      // (awaiting_collateral or awaiting_identity_confirmation), skip both
+      // forms — Vienna's welcome asks ONE specific question and forms ship
+      // wasted if the deal is declined or the borrower turns out wrong.
+      // Q3-VVV: applies regardless of sender_type (borrowers in deferred
+      // state skip forms too).
+      // Otherwise: borrowers always get both forms (they don't have their own);
+      // brokers skip whichever form they already provided.
+      const deferredIntake = shouldSkipIntakeFormsForDeferredState(dealSummary);
       const isBorrower = dealSummary?.sender_type === 'borrower';
-      const skipApp = isBorrower ? false : hasOwnApplication;
-      const skipPnw = isBorrower ? false : hasOwnPnw;
+      const skipApp = deferredIntake || (isBorrower ? false : hasOwnApplication);
+      const skipPnw = deferredIntake || (isBorrower ? false : hasOwnPnw);
       const formAttachments = emailService.getFormAttachments({ skipApplicationForm: skipApp, skipPnwForm: skipPnw });
-      const skipNote = isBorrower
-        ? '(borrower — always attach both)'
-        : [hasOwnApplication && 'skipping Application Form', hasOwnPnw && 'skipping PNW Form'].filter(Boolean).join(', ') || '';
+      const skipNote = deferredIntake
+        ? `(VVV — deferred-intake state, skipping forms; identity_clash=${!!dealSummary?.identity_clash} ltv=${dealSummary?.ltv_percent})`
+        : (isBorrower
+          ? '(borrower — always attach both)'
+          : [hasOwnApplication && 'skipping Application Form', hasOwnPnw && 'skipping PNW Form'].filter(Boolean).join(', ') || '');
       console.log('Attaching', formAttachments.length, 'forms', skipNote ? `(${skipNote})` : '');
 
       // Send the AI-generated response with forms attached (HTML formatted)
@@ -1347,4 +1376,6 @@ module.exports.__test__ = {
   computeWillFireFinalReview,
   // Group YYY: preview-thread chain builder
   buildPreviewThreadChain,
+  // Group VVV: deferred-intake form-skip predicate
+  shouldSkipIntakeFormsForDeferredState,
 };
