@@ -1,5 +1,6 @@
 const claude = require('../lib/claude');
 const { buildContentBlocks } = require('../lib/pdf');
+const config = require('../config');
 
 // Retry wrapper for Claude API calls (handles rate limits)
 const callClaude = async (params, maxRetries = 3) => {
@@ -1881,11 +1882,46 @@ If you cannot find a name, set referred_name to null.`,
       if (text.startsWith('```')) {
         text = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
       }
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      // Group ZZZ Layer 2 (S11.1): regex fallback when Claude missed the email
+      // address. Pre-ZZZ if parseReferralEmail returned referred_email=null, the
+      // webhook short-circuited silently — referral lost. Now: scan the body for
+      // any email-like pattern that isn't admin's own or Vienna's send address,
+      // use the first match. Skip obvious system addresses (info@, no-reply@,
+      // support@) to avoid false positives. If Claude already extracted an email,
+      // skip the fallback entirely — Claude's semantic pick is preferred.
+      if (!parsed.referred_email) {
+        parsed.referred_email = module.exports.regexExtractReferralEmail(emailBody);
+        if (parsed.referred_email) {
+          console.log('ZZZ Layer 2 regex fallback extracted referred_email:', parsed.referred_email);
+        }
+      }
+      return parsed;
     } catch (error) {
       console.error('Claude referral parse error:', error);
       throw error;
     }
+  },
+
+  // Group ZZZ Layer 2: regex-based referral-email extractor. Exposed as a sibling
+  // method so the truth table can exercise it directly. Filters out admin's own
+  // address (config.adminEmail), Vienna's send address (config.postmark.senderEmail),
+  // and common system-mailbox patterns (info@, no-reply@, support@, noreply@).
+  regexExtractReferralEmail: (emailBody) => {
+    if (!emailBody) return null;
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+    const candidates = String(emailBody).match(emailRegex) || [];
+    const adminAddr = (config.adminEmail || '').toLowerCase();
+    const senderAddr = (config.postmark?.senderEmail || '').toLowerCase();
+    const systemPrefixes = /^(info|no-?reply|support|noreply|postmaster|mailer-daemon)@/i;
+    for (const candidate of candidates) {
+      const lower = candidate.toLowerCase();
+      if (lower === adminAddr) continue;
+      if (lower === senderAddr) continue;
+      if (systemPrefixes.test(candidate)) continue;
+      return candidate;
+    }
+    return null;
   },
 
   // Generate a welcome email for a referred person (Franco sent them to Vienna)

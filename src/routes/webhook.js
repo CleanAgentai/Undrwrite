@@ -738,68 +738,133 @@ ${draftEmail}
 
     // If admin sends a new email (no thread match), treat as a referral
     if (isAdmin && !existingDeal) {
+      // Group ZZZ (S11.1): wrap the referral branch in its own try/catch so
+      // transient failures (Claude API errors, Supabase blips, email-send
+      // failures) get surfaced as an alert email to admin instead of silently
+      // swallowed by the outer webhook catch. Production case: Sophie Larsson
+      // referral 2026-05-11 03:52 UTC arrived in Postmark stream cleanly but
+      // never created a deal — most plausibly a transient Claude error during
+      // parseReferralEmail or generateReferralWelcomeEmail. Pre-ZZZ left no
+      // forensic trace; ZZZ alerts Franco with the Postmark MessageID so he
+      // can retry.
       console.log('Admin sent new email with no thread match — treating as referral');
+      try {
+        // Parse referral details from Franco's email
+        const referral = await aiService.parseReferralEmail(email.textBody);
+        console.log('Referral parsed:', JSON.stringify(referral));
 
-      // Parse referral details from Franco's email
-      const referral = await aiService.parseReferralEmail(email.textBody);
-      console.log('Referral parsed:', JSON.stringify(referral));
+        if (!referral.referred_email) {
+          // Group ZZZ Layer 3 (S11.1): pre-ZZZ this silently dropped the
+          // referral. Now alert Franco with the parsed snapshot so he can
+          // retry with the referred person's email explicitly in the body.
+          console.log('No email address found in referral — alerting Franco (ZZZ Layer 3)');
+          const layer3AlertBody = `Vienna couldn't find an email address in your referral.
 
-      if (!referral.referred_email) {
-        console.log('No email address found in referral — ignoring');
-        return;
+Parsed snapshot:
+${JSON.stringify(referral, null, 2)}
+
+Original referral body (first 500 chars):
+${(email.textBody || '').slice(0, 500)}
+
+Postmark MessageID: ${email.messageId}
+
+Please reply with the referred person's email address explicitly stated.
+
+(This alert is automatic — Group ZZZ defensive bundle.)`;
+          await emailService.sendEmail(
+            config.adminEmail,
+            `Referral missing email — ${email.subject || 'unknown subject'}`,
+            layer3AlertBody,
+            null,
+            [],
+            []
+          );
+          return;
+        }
+
+        // Create a new deal for the referred person
+        const deal = await dealsService.create({
+          email: referral.referred_email,
+          borrower_name: referral.referred_name || 'Unknown',
+        });
+        console.log('Referral deal created:', deal.id);
+
+        // Save Franco's referral email as the first message
+        await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
+
+        // Save any attachments Franco included
+        let savedDocs = [];
+        if (email.attachments.length > 0) {
+          console.log('Saving referral attachments to Supabase...');
+          savedDocs = await dealsService.saveAttachments(deal.id, email.attachments);
+        }
+
+        // Generate welcome email for the referred person
+        const welcomeEmail = await aiService.generateReferralWelcomeEmail(referral);
+        console.log('Referral welcome email generated');
+
+        // Referrals always get both forms regardless of broker or borrower
+        const formAttachments = emailService.getFormAttachments({ skipApplicationForm: false });
+        console.log('Attaching', formAttachments.length, 'forms for referral');
+
+        // Send welcome email to referred person, CC Franco
+        const result = await emailService.sendEmail(
+          referral.referred_email,
+          `Private Mortgage Link — ${referral.referred_name || 'Your Loan Inquiry'}`,
+          welcomeEmail.replace(/<[^>]*>/g, ''),
+          welcomeEmail,
+          formAttachments,
+          [],
+          config.adminEmail
+        );
+        await dealsService.saveMessage(deal.id, 'outbound', `Private Mortgage Link — ${referral.referred_name || 'Your Loan Inquiry'}`, welcomeEmail, result.MessageID);
+
+        // Save deal summary
+        await dealsService.update(deal.id, {
+          status: 'active',
+          extracted_data: {
+            sender_type: referral.sender_type,
+            sender_name: referral.referred_name,
+            borrower_name: referral.referred_name,
+            referred_by: 'Franco Maione',
+            deal_details: referral.deal_details,
+            notes: referral.notes,
+          },
+        });
+
+        console.log('Referral welcome email sent to', referral.referred_email, '(CC:', config.adminEmail, ')');
+      } catch (err) {
+        // Group ZZZ Layer 1: any unhandled error in the referral dispatch path
+        // gets surfaced as an alert email. Pre-ZZZ this was silently swallowed
+        // by the outer webhook try/catch, leaving zero forensic trace. Now
+        // Franco knows the referral failed and can retry. Best-effort: if the
+        // alert send itself fails, the console.error in the outer catch still
+        // logs.
+        console.error('ZZZ Layer 1 — referral dispatch failed:', err);
+        const layer1AlertBody = `Vienna encountered an error processing your referral email.
+
+Error: ${err.message}
+
+Original referral subject: ${email.subject}
+Postmark MessageID: ${email.messageId}
+Time: ${new Date().toISOString()}
+
+The referred person did NOT receive a welcome email. Please retry by re-sending the referral.
+
+(This alert is automatic — Group ZZZ defensive bundle.)`;
+        try {
+          await emailService.sendEmail(
+            config.adminEmail,
+            `Referral dispatch failed — ${email.subject || 'unknown subject'}`,
+            layer1AlertBody,
+            null,
+            [],
+            []
+          );
+        } catch (alertErr) {
+          console.error('ZZZ Layer 1 alert send also failed:', alertErr);
+        }
       }
-
-      // Create a new deal for the referred person
-      const deal = await dealsService.create({
-        email: referral.referred_email,
-        borrower_name: referral.referred_name || 'Unknown',
-      });
-      console.log('Referral deal created:', deal.id);
-
-      // Save Franco's referral email as the first message
-      await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
-
-      // Save any attachments Franco included
-      let savedDocs = [];
-      if (email.attachments.length > 0) {
-        console.log('Saving referral attachments to Supabase...');
-        savedDocs = await dealsService.saveAttachments(deal.id, email.attachments);
-      }
-
-      // Generate welcome email for the referred person
-      const welcomeEmail = await aiService.generateReferralWelcomeEmail(referral);
-      console.log('Referral welcome email generated');
-
-      // Referrals always get both forms regardless of broker or borrower
-      const formAttachments = emailService.getFormAttachments({ skipApplicationForm: false });
-      console.log('Attaching', formAttachments.length, 'forms for referral');
-
-      // Send welcome email to referred person, CC Franco
-      const result = await emailService.sendEmail(
-        referral.referred_email,
-        `Private Mortgage Link — ${referral.referred_name || 'Your Loan Inquiry'}`,
-        welcomeEmail.replace(/<[^>]*>/g, ''),
-        welcomeEmail,
-        formAttachments,
-        [],
-        config.adminEmail
-      );
-      await dealsService.saveMessage(deal.id, 'outbound', `Private Mortgage Link — ${referral.referred_name || 'Your Loan Inquiry'}`, welcomeEmail, result.MessageID);
-
-      // Save deal summary
-      await dealsService.update(deal.id, {
-        status: 'active',
-        extracted_data: {
-          sender_type: referral.sender_type,
-          sender_name: referral.referred_name,
-          borrower_name: referral.referred_name,
-          referred_by: 'Franco Maione',
-          deal_details: referral.deal_details,
-          notes: referral.notes,
-        },
-      });
-
-      console.log('Referral welcome email sent to', referral.referred_email, '(CC:', config.adminEmail, ')');
       return;
     }
 

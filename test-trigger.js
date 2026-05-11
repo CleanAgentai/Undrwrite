@@ -3737,6 +3737,125 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log('  PASS [Group QQQ broker regression]: broker-facing pay-stubs-allowed rule untouched');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP ZZZ — referral dispatch defensive bundle (S11.1)
+  // ════════════════════════════════════════════════════════════════
+  // Production diagnosis: Sophie Larsson referral 2026-05-11 03:52 UTC arrived
+  // in Postmark stream cleanly but no deal was ever created. parseReferralEmail
+  // succeeds when re-run locally on the exact production body. Most plausible
+  // root cause: transient Claude error during processing, silently swallowed
+  // by the outer webhook try/catch. ZZZ ships a 3-layer defensive bundle:
+  //   Layer 1: inner try/catch around referral branch → alert Franco on error
+  //   Layer 2: regexExtractReferralEmail fallback when Claude misses the email
+  //   Layer 3: alert Franco when no email found (was silent short-circuit)
+  console.log('\n========== GROUP ZZZ — referral dispatch defensive bundle ==========');
+
+  // ─── Layer 2 truth table — regexExtractReferralEmail ────────────────────
+  console.log('\n---------- Group ZZZ / Layer 2: regexExtractReferralEmail ----------');
+  const { regexExtractReferralEmail: zzzRegex } = aiService;
+
+  const zzzCases = [
+    {
+      name: "Z1: Sophie's exact production body — extracts franco@vimarealty.com",
+      input: `Hey Vienna, I met a woman named Sophie Larsson who might need a second
+mortgage. Her email is franco@vimarealty.com. She owns a home in
+Edmonton and is looking to pull out some equity to cover some
+renovations.`,
+      expect: 'franco@vimarealty.com',
+    },
+    {
+      name: 'Z2: explicit "her email is X"',
+      input: "Sophie's email is sophie@example.com",
+      expect: 'sophie@example.com',
+    },
+    {
+      name: 'Z3: skip admin own address (config.adminEmail filter)',
+      input: 'Reach Sophie via franco@privatemortgagelink.com',
+      expect: null,
+    },
+    {
+      name: 'Z4: skip admin AND use first non-admin email',
+      input: 'Contact: franco@privatemortgagelink.com OR alt@example.com',
+      expect: 'alt@example.com',
+    },
+    {
+      name: "Z5: skip Vienna's send address (info@privatemortgagelink.com)",
+      input: 'Forward to info@privatemortgagelink.com and sophie@example.com',
+      expect: 'sophie@example.com',
+    },
+    {
+      name: 'Z6: skip system mailbox prefixes (no-reply@, support@)',
+      input: 'CC no-reply@example.com and support@example.com — actual contact: jane@example.com',
+      expect: 'jane@example.com',
+    },
+    {
+      name: 'Z7: no emails at all',
+      input: 'Please reach out to Sophie about her mortgage.',
+      expect: null,
+    },
+    {
+      name: 'Z8: empty body',
+      input: '',
+      expect: null,
+    },
+    {
+      name: 'Z9: null body',
+      input: null,
+      expect: null,
+    },
+    {
+      name: 'Z10: email with periods + plus signs in local part',
+      input: 'Email: john.q.public+mortgage@example.co.uk',
+      expect: 'john.q.public+mortgage@example.co.uk',
+    },
+    {
+      name: 'Z11: skip "noreply" without hyphen',
+      input: 'CC noreply@example.com, contact jane@example.com',
+      expect: 'jane@example.com',
+    },
+  ];
+
+  let zzzL2Passed = 0;
+  for (const tc of zzzCases) {
+    const got = zzzRegex(tc.input);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group ZZZ / Layer 2 ${tc.name}]:\n  input=${JSON.stringify(tc.input)}\n  expected=${JSON.stringify(tc.expect)}\n  got=${JSON.stringify(got)}`);
+    }
+    console.log(`  PASS [${tc.name}]: → ${JSON.stringify(got)}`);
+    zzzL2Passed++;
+  }
+  console.log(`Group ZZZ / Layer 2 regexExtractReferralEmail: ${zzzL2Passed}/${zzzCases.length} passed`);
+
+  // ─── Layer 1 + Layer 3 source-string regression ──────────────────────────
+  // The Layer 1 (try/catch around referral branch) and Layer 3 (alert on no
+  // email) live inside webhook.js's request handler. Integration-mock tests
+  // would require building a referral-specific BBB-style scaffold. For ZZZ
+  // we use source-string regression to confirm the defenses are wired in;
+  // a future Round can add full integration mocks if a referral path
+  // regression surfaces.
+  console.log('\n---------- Group ZZZ / Layers 1+3: source-string regression ----------');
+  const webhookSrc = fs_qqq.readFileSync(path_qqq.join(__dirname, 'src/routes/webhook.js'), 'utf8');
+
+  // Layer 1: inner try/catch around the referral branch (the `try {` after the
+  // `if (isAdmin && !existingDeal) {` opener) AND the matching catch with
+  // Layer 1 alert email subject.
+  if (!/Group ZZZ \(S11\.1\): wrap the referral branch in its own try\/catch/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group ZZZ Layer 1 comment]: missing comment marker for inner try/catch`);
+  }
+  if (!/Referral dispatch failed —/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group ZZZ Layer 1 alert subject]: missing 'Referral dispatch failed —' alert subject`);
+  }
+  console.log('  PASS [Group ZZZ Layer 1]: inner try/catch + alert subject wired in');
+
+  // Layer 3: alert when referred_email is null (replaces the silent return)
+  if (!/Referral missing email —/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group ZZZ Layer 3]: missing 'Referral missing email —' alert subject`);
+  }
+  if (!/ZZZ Layer 3/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group ZZZ Layer 3 marker]: missing 'ZZZ Layer 3' comment marker`);
+  }
+  console.log('  PASS [Group ZZZ Layer 3]: alert-on-no-email path wired in (replaces silent return)');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed
