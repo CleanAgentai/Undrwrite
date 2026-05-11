@@ -1020,6 +1020,13 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
       const initialDocsForGate = await dealsService.getDocumentsByDeal(deal.id);
       const initialClassifications = initialDocsForGate.map(d => d.classification).filter(Boolean);
       const initialHasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => initialClassifications.includes(c));
+      // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
+      // Pre-BBBB prelim fired without exit_strategy → admin saw [MISSING] Exit Strategy
+      // → broker provided exit → NNN's preliminary-update dispatch fired a SECOND prelim.
+      // Post-BBBB: hold prelim until exit_strategy lands. Vienna's welcome email already
+      // asks for it (INITIAL_EMAIL_PROMPT WHAT TO ASK FOR list); when broker provides,
+      // existing-deal active branch fires the (single) prelim.
+      const initialHasExitStrategy = !!(dealSummary?.exit_strategy && String(dealSummary.exit_strategy).trim());
       const initialLtv = dealSummary?.ltv_percent;
 
       if (dealSummary?.identity_clash) {
@@ -1038,8 +1045,8 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         // Reverses Bradley's e93f657 parallel-fire model per Franco's S4 retest.
         console.log(`Initial submission LTV ${initialLtv}% > 80 — entering awaiting_collateral state (Fix 7)`);
         await dealsService.update(deal.id, { status: 'awaiting_collateral' });
-      } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
-        console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately`);
+      } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy) {
+        console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc + exit_strategy — sending preliminary review immediately (BBBB-gated)`);
         // ownership_type is null on initial submission (only set later by generateBrokerResponse).
         // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
         // when null. The remaining (deferred) enhancement is to extract ownership_type directly
@@ -1335,7 +1342,14 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         const identityClashUnresolved = !!existingDeal.extracted_data?.identity_clash
           || !!result.updatedSummary?.identity_clash;
         const willGoToCollateralCheck = ltv && ltv > 80 && existingDeal.status === 'active' && !collateralAlreadyOffered && !identityClashUnresolved;
-        const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc && !identityClashUnresolved;
+        // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
+        // Mirrors the initial-branch gate at line 1041. Pre-BBBB prelim fired with
+        // exit_strategy: null → admin saw [MISSING] Exit Strategy → broker provided
+        // exit → NNN's preliminary-update dispatch fired a second prelim. Now: held
+        // until exit_strategy lands; generateBrokerResponse's existing ADDITIONAL
+        // ITEMS prompt block asks for exit_strategy when missing.
+        const hasExitStrategy = !!(result.updatedSummary?.exit_strategy && String(result.updatedSummary.exit_strategy).trim());
+        const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved;
 
         // Group L: when the FINAL REVIEW HITL is about to fire (all docs in, no LTV gate
         // active, deal currently active), Vienna goes silent on the broker side. Per Franco:

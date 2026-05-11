@@ -2005,7 +2005,10 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
         ggg.generateBrokerResponse.push(args.length);
         return {
           responseEmail: '<p>Test response — should be suppressed by GGG.</p>',
-          updatedSummary: { ...gggDeal.extracted_data, ltv_percent: 65 },
+          // Group BBBB (S7.1/S9.1): willReview now requires exit_strategy populated.
+          // GGG G1 verifies suppression when willReview fires — fixture must set
+          // exit_strategy so the predicate evaluates true.
+          updatedSummary: { ...gggDeal.extracted_data, ltv_percent: 65, exit_strategy: 'refinance at maturity with B lender' },
           allDocsReceived: false,
           hasApplicationForm: true,
           hasPnwStatement: true,
@@ -3923,6 +3926,59 @@ renovations.`,
     throw new Error(`FAIL [Group ZZZ Layer 3 marker]: missing 'ZZZ Layer 3' comment marker`);
   }
   console.log('  PASS [Group ZZZ Layer 3]: alert-on-no-email path wired in (replaces silent return)');
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP BBBB — exit_strategy gate on initial prelim trigger (S7.1 + S9.1)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-BBBB the prelim-review trigger gated on `ltv <= 80 && hasReviewableDoc`
+  // at both the new-client INITIAL branch and the existing-deal active branch.
+  // No exit_strategy check → prelim fired with exit_strategy: null → admin's
+  // prelim review showed [MISSING] Exit Strategy → broker provided exit →
+  // NNN's preliminary-update dispatch fired a SECOND prelim. Production S7.1
+  // (Ethan Broussard) + S9.1 (James Okafor): one deal, two prelim reviews.
+  //
+  // BBBB adds `&& exit_strategy_populated` to both gates. Vienna's welcome
+  // email + generateBrokerResponse's ADDITIONAL ITEMS block already ask for
+  // exit_strategy when missing (Group C + WWW prompt rules); BBBB just delays
+  // the prelim fire until the answer lands. Net effect: one prelim per deal,
+  // fired only after reviewable docs AND exit_strategy are captured.
+  console.log('\n========== GROUP BBBB — exit_strategy gate on initial prelim trigger ==========');
+
+  // webhookSrc already loaded earlier (in ZZZ source-string regression block)
+
+  // Initial branch gate: `else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy)`
+  if (!/initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB initial gate]: initial-branch prelim predicate missing 'initialHasExitStrategy' clause`);
+  }
+  console.log('  PASS [Group BBBB initial gate]: initial-branch prelim gate requires initialHasExitStrategy');
+
+  // Initial branch defines initialHasExitStrategy from dealSummary?.exit_strategy
+  if (!/const initialHasExitStrategy = !!\(dealSummary\?\.exit_strategy && String\(dealSummary\.exit_strategy\)\.trim\(\)\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB initial const]: initialHasExitStrategy must be derived from dealSummary?.exit_strategy with whitespace trim`);
+  }
+  console.log('  PASS [Group BBBB initial const]: initialHasExitStrategy correctly derives from dealSummary?.exit_strategy (whitespace-trim)');
+
+  // Active branch gate: `willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved`
+  if (!/willReview = ltv && ltv <= 80 && existingDeal\.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB active gate]: active-branch willReview predicate missing 'hasExitStrategy' clause`);
+  }
+  console.log('  PASS [Group BBBB active gate]: active-branch willReview gate requires hasExitStrategy');
+
+  // Active branch defines hasExitStrategy from result.updatedSummary?.exit_strategy
+  if (!/const hasExitStrategy = !!\(result\.updatedSummary\?\.exit_strategy && String\(result\.updatedSummary\.exit_strategy\)\.trim\(\)\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB active const]: hasExitStrategy must be derived from result.updatedSummary?.exit_strategy with whitespace trim`);
+  }
+  console.log('  PASS [Group BBBB active const]: hasExitStrategy correctly derives from result.updatedSummary?.exit_strategy (whitespace-trim)');
+
+  // Negative regression: the pre-BBBB bare predicates (no exit_strategy clause)
+  // must NOT exist anywhere. Catches accidental rewrite that drops the gate.
+  if (/initialLtv && initialLtv <= 80 && initialHasReviewableDoc\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB regression]: pre-BBBB bare initial-prelim predicate (no exit_strategy) still present in webhook.js`);
+  }
+  if (/willReview = ltv && ltv <= 80 && existingDeal\.status === 'active' && hasReviewableDoc && !identityClashUnresolved/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB regression]: pre-BBBB bare willReview predicate (no exit_strategy) still present in webhook.js`);
+  }
+  console.log('  PASS [Group BBBB regression]: pre-BBBB bare-no-exit-check predicates removed at both sites');
 
   // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
