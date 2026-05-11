@@ -668,8 +668,12 @@ Private Mortgage Link`,
     const brokerName = dealSummary?.broker_name || dealSummary?.sender_name || '';
     const firstName = brokerName.split(/\s+/)[0] || '';
     const greeting = firstName ? `Hi ${firstName},` : 'Hi there,';
+    // Group PPP-content (S1.5): admin email address baked in. Franco's own
+    // correction in production deal 9aa136aa msg 11 added this exact phrasing —
+    // his QA confirmed the expected canonical wording. Hardcoded per BBB Q5
+    // precedent (consistent with Franco's name being hardcoded already).
     return `<p>${greeting}</p>
-<p>The file is now complete and submitted. Please direct any further questions to Franco.</p>
+<p>The file is now complete and submitted. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>
 <p>Vienna<br>Private Mortgage Link</p>`;
   },
 

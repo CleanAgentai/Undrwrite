@@ -2387,8 +2387,9 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       // Pure JS test — no API key needed, no stubs touched.
       const realCompletionEmail = origBbb.aiGenerateCompletionEmail;
       const tylerOutput = await realCompletionEmail({ broker_name: 'Tyler Bennett', borrower_name: 'James Okafor' });
+      // Group PPP-content (S1.5): admin email address is now baked into the template.
       const expected = `<p>Hi Tyler,</p>
-<p>The file is now complete and submitted. Please direct any further questions to Franco.</p>
+<p>The file is now complete and submitted. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>
 <p>Vienna<br>Private Mortgage Link</p>`;
       if (tylerOutput !== expected) {
         throw new Error(`FAIL [Group BBB B4 deterministic template]: output != expected.\n  EXPECTED: ${JSON.stringify(expected)}\n  GOT:      ${JSON.stringify(tylerOutput)}`);
@@ -2419,7 +2420,14 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       if (!/Franco/.test(tylerOutput)) {
         throw new Error(`FAIL [Group BBB B4 Franco hardcode]: expected 'Franco' literal in template, got: ${tylerOutput}`);
       }
-      console.log('  PASS [Group BBB B4]: deterministic closing template — exact match for Tyler, fallbacks work, no legacy prompt phrases, Franco hardcoded');
+      // Group PPP-content (S1.5) regression guard: admin email address must appear.
+      if (!/franco@privatemortgagelink\.com/.test(tylerOutput)) {
+        throw new Error(`FAIL [Group BBB B4 PPP-content S1.5]: expected 'franco@privatemortgagelink.com' in template, got: ${tylerOutput}`);
+      }
+      if (!/franco@privatemortgagelink\.com/.test(fallbackOutput)) {
+        throw new Error(`FAIL [Group BBB B4 PPP-content S1.5 fallback]: expected admin email address in 'Hi there,' fallback variant too, got: ${fallbackOutput}`);
+      }
+      console.log('  PASS [Group BBB B4]: deterministic closing template — exact match, fallbacks work, no legacy phrases, Franco + admin email hardcoded');
     }
 
     // Restore originals
