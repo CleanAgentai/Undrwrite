@@ -6379,16 +6379,69 @@ Brian`;
     }
 
     // ════════════════════════════════════════════════════════════════
-    // GROUP CCC — admin-response no "thanks for confirming" leak when broker did not confirm
+    // GROUP CCC + XXX — admin-response no "thanks for confirming" leak when broker did not confirm
     // ════════════════════════════════════════════════════════════════
-    // S9.4: Tyler's last message was passive (just sending docs). Vienna wrote
-    // "Thanks for confirming those details" — attributing Franco's internal
-    // approval-with-conditions decision to the broker. Pre-CCC the prompt
-    // EXPLICITLY suggested "Thanks for confirming the details" as an allowed
-    // alternative — Vienna picked it up. CCC fix: precondition-gate the framing
-    // to broker-actually-confirmed-something cases. Negative-case live smoke
-    // verifies the leak doesn't fire when broker hasn't confirmed anything.
-    console.log('\n========== GROUP CCC — admin-response no-leak when broker did not confirm ==========');
+    // CCC origin (S9.4): Tyler's last message was passive (just sending docs).
+    // Vienna wrote "Thanks for confirming those details" — attributing Franco's
+    // internal approval-with-conditions decision to the broker. CCC fix:
+    // precondition-gate the framing to broker-actually-confirmed-something cases.
+    //
+    // XXX upgrade (S5.2): production deal Patricia Simmons — Vienna's conditions
+    // draft opened with "Thanks for the quick confirmation!" The "quick" modifier
+    // between "for" and "confirmation" slipped both the prompt rule (no explicit
+    // forbidden variant) and the CCC test regex /thanks for (the\s+)?confirm/i
+    // (requires "confirm" directly after optional "the"). XXX strengthens the
+    // prompt at all 4 FORBIDDEN APPROVAL PHRASES sites with explicit adjective-
+    // modifier variants + extends the verbose CCC rule body. Test regex tightened
+    // to allow 0-3 modifier words between "for" and "confirm". Test upgraded in
+    // place to 5x (Q1-XXX) since this scenario is now the canonical XXX guard.
+    console.log('\n========== GROUP CCC + XXX — admin-response no-leak when broker did not confirm (5x) ==========');
+
+    // Layer 2 — Test regex unit cases: confirm the tightened regex catches the
+    // S5.2 variant while still catching the original CCC patterns.
+    const cccTighterRegex = /thanks for (the\s+)?(\w+\s+){0,3}confirm/i;
+    const cccTighterAppreciateRegex = /appreciate (the\s+)?(\w+\s+){0,3}confirm/i;
+    const regexCases = [
+      // [input, shouldMatch, label]
+      ['Thanks for confirming the details', true,  'original CCC pattern (no modifier)'],
+      ['Thanks for the confirmation',       true,  'original CCC pattern (with "the")'],
+      ['Thanks for the quick confirmation', true,  'S5.2 variant — adjective between "the" and "confirmation"'],
+      ['Thanks for the prompt confirm',     true,  'variant: prompt + confirm'],
+      ['Thanks for the speedy swift confirmation', true, 'two modifiers stacked'],
+      ['Thanks for sending those through',  false, 'negative: no confirm word'],
+      ['Thanks for the package',            false, 'negative: "the package" (no confirm)'],
+      ['Thanks for the appraisal',          false, 'negative: "the appraisal" (no confirm)'],
+    ];
+    let cccRegexPassed = 0;
+    for (const [input, shouldMatch, label] of regexCases) {
+      const got = cccTighterRegex.test(input);
+      if (got !== shouldMatch) {
+        throw new Error(`FAIL [Group XXX regex / ${label}]: input=${JSON.stringify(input)} shouldMatch=${shouldMatch} got=${got}`);
+      }
+      console.log(`  PASS [regex / ${label}]: → ${got}`);
+      cccRegexPassed++;
+    }
+    // "Appreciate" variant catches the same shape
+    if (!cccTighterAppreciateRegex.test('Appreciate the quick confirmation')) {
+      throw new Error(`FAIL [Group XXX regex / appreciate variant]: did not match "Appreciate the quick confirmation"`);
+    }
+    console.log(`  PASS [regex / appreciate variant]: catches "Appreciate the quick confirmation"`);
+    console.log(`Group XXX regex truth table: ${cccRegexPassed + 1}/${regexCases.length + 1} passed`);
+
+    // Layer 1 — Source-string regression: assert all 4 FORBIDDEN APPROVAL PHRASES
+    // sites carry the new adjective-modifier variants + the catch-all generalization.
+    const xxxVariantMatches = (aiSource.match(/thanks for the quick confirmation/g) || []).length;
+    if (xxxVariantMatches < 4) {
+      throw new Error(`FAIL [Group XXX source-string]: expected at least 4 occurrences of "thanks for the quick confirmation" (one per FORBIDDEN list site + the verbose CCC rule body), got ${xxxVariantMatches}`);
+    }
+    console.log(`  PASS [Group XXX source-string]: "thanks for the quick confirmation" variant present at all sites (${xxxVariantMatches} occurrences)`);
+    const xxxCatchAll = (aiSource.match(/ANY (?:variant matching|pattern matching) "thanks for the \[adjective\] confirmation\/confirm"/g) || []).length;
+    if (xxxCatchAll < 4) {
+      throw new Error(`FAIL [Group XXX catch-all]: expected at least 4 occurrences of the "[adjective] confirmation" catch-all generalization, got ${xxxCatchAll}`);
+    }
+    console.log(`  PASS [Group XXX catch-all]: "[adjective] confirmation" catch-all generalization present (${xxxCatchAll} occurrences)`);
+
+    // Y 5x — Live Claude verification with the tightened regex.
     try {
       const cccSummary = {
         sender_type: 'broker',
@@ -6405,25 +6458,29 @@ Brian`;
       // Admin's notes — Franco's internal decision, NOT broker's confirmation.
       const cccAdminNotes = 'Approve subject to receiving the appraisal and confirming the exit strategy. Once those land we can move forward to terms.';
 
-      const cccOutput = await realAi.generateAdminResponseEmail(cccSummary, cccAdminNotes, cccConvo);
-      console.log('Group CCC output (first 500 chars):');
-      console.log(`  ${(cccOutput || '').slice(0, 500).replace(/\n/g, ' ')}`);
-
-      // Negative assertion: broker did NOT confirm anything in their last message —
-      // Vienna must NOT use "thanks for confirming" / "appreciate the confirmation"
-      // framing in the opening (first 400 chars covers greeting + opening).
-      const cccGreetingRegion = (cccOutput || '').slice(0, 400);
-      if (/thanks for (the\s+)?confirm/i.test(cccGreetingRegion) || /appreciate (the\s+)?confirm/i.test(cccGreetingRegion)) {
-        throw new Error(`FAIL [Group CCC]: "thanks for confirming" / "appreciate the confirmation" framing leaked when broker did not confirm anything. First 400 chars: "${cccGreetingRegion.replace(/\s+/g, ' ')}"`);
+      let cccLeaks = 0;
+      for (let run = 1; run <= 5; run++) {
+        const cccOutput = await realAi.generateAdminResponseEmail(cccSummary, cccAdminNotes, cccConvo);
+        const cccGreetingRegion = (cccOutput || '').slice(0, 400);
+        const leakedThanks = cccTighterRegex.test(cccGreetingRegion);
+        const leakedAppreciate = cccTighterAppreciateRegex.test(cccGreetingRegion);
+        // Regression guard: existing F7-reliability rule (Franco-as-actor) still holds.
+        const francoAsActor = /(?:^|>|\n)\s*Franco\s+(has|said|approved|'s decision)/i.test(cccOutput || '');
+        const leaked = leakedThanks || leakedAppreciate || francoAsActor;
+        if (leaked) {
+          cccLeaks++;
+          console.log(`  Run ${run}: LEAK — thanks=${leakedThanks}, appreciate=${leakedAppreciate}, francoActor=${francoAsActor}\n    Greeting (first 400): ${cccGreetingRegion.replace(/\s+/g, ' ').slice(0, 400)}`);
+        } else {
+          console.log(`  Run ${run}: PASS — no thanks-for-confirming/appreciate-confirm variants; F7 Franco-attribution holding`);
+        }
       }
-      // Regression guard: existing F7-reliability rule (Franco-as-actor) still holds.
-      if (/(?:^|>|\n)\s*Franco\s+(has|said|approved|'s decision)/i.test(cccOutput || '')) {
-        throw new Error(`FAIL [Group CCC Franco-attribution regression]: Franco-as-actor leaked. Got: "${(cccOutput || '').slice(0, 400).replace(/\s+/g, ' ')}"`);
+      if (cccLeaks >= 2) {
+        throw new Error(`FAIL [Group CCC + XXX live 5x]: ${cccLeaks}/5 runs leaked. Escalation threshold reached — prompt strengthening insufficient.`);
       }
-      console.log('  PASS [Group CCC]: no "thanks for confirming" leak when broker did not confirm; F7 Franco-attribution rule still holding');
+      console.log(`Group CCC + XXX live 5x: ${5 - cccLeaks}/5 passed, ${cccLeaks}/5 leaked (threshold: ≤1)`);
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
-      console.warn(`  Group CCC smoke skipped due to API error: ${e.message}`);
+      console.warn(`  Group CCC + XXX smoke skipped due to API error: ${e.message}`);
     }
 
     // ════════════════════════════════════════════════════════════════
