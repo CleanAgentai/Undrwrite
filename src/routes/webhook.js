@@ -60,6 +60,51 @@ const isDocRequirementSatisfied = (req, classifications) => {
   return accepted.some(c => classifications.includes(c));
 };
 
+// Group SSS (S3.2): two-tier required-doc model. JJJ moved AML/PEP from intake
+// (prelim review) to post-approval (generateDocumentRequestEmail). But four code
+// paths gated "file complete" using intake-only constants — when intake docs
+// were in, the closing handoff fired before AML/PEP were ever requested
+// (Derek Olsen S3 retest production case). SSS extends the completion-tier
+// gates to require compliance docs too. Prelim review stays intake-only — JJJ
+// preserved (AML/PEP must not appear in the prelim [MISSING] list).
+const BASE_REQUIRED_INTAKE_REFINANCE = [
+  'government_id', 'appraisal', 'property_tax', 'mortgage_statement',
+  'income_proof', 'credit_report',
+];
+const BASE_REQUIRED_INTAKE_PURCHASE = [
+  'government_id', 'appraisal', 'property_tax',
+  'income_proof', 'credit_report', 'purchase_contract',
+];
+const COMPLIANCE_REQUIRED_POSTAPPROVAL = ['aml', 'pep'];
+
+const intakeRequiredFor = (isPurchase) =>
+  isPurchase ? BASE_REQUIRED_INTAKE_PURCHASE : BASE_REQUIRED_INTAKE_REFINANCE;
+
+const allRequiredForCompletion = (isPurchase) => [
+  ...intakeRequiredFor(isPurchase),
+  ...COMPLIANCE_REQUIRED_POSTAPPROVAL,
+];
+
+const isPurchaseFromSummary = (summary) => {
+  const loanType = (summary?.loan_type || '').toLowerCase();
+  const purpose = (summary?.purpose || '').toLowerCase();
+  return /purchas/.test(loanType) || /purchas/.test(purpose);
+};
+
+// Group SSS Site 4: JS-authoritative gate replacing Claude's allDocsReceived
+// flag for willFireFinalReview. Per Q1-SSS — Claude's flag was probabilistic;
+// JS classification + exit_strategy is deterministic. Extracted as a pure
+// function so the truth table can exercise it without mocking the full
+// request pipeline (matches NNN's decideReviewDispatch pattern).
+const computeWillFireFinalReview = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
+  if (deal?.status !== 'active') return false;
+  if (willGoToCollateralCheck || willReview || identityClashUnresolved) return false;
+  const required = allRequiredForCompletion(isPurchaseFromSummary(summary));
+  const allDocsIn = required.every(req => isDocRequirementSatisfied(req, classifications || []));
+  const hasExitStrategy = !!summary?.exit_strategy;
+  return allDocsIn && hasExitStrategy;
+};
+
 const normalizeSenderName = (dealSummary, fromName) => {
   if (!dealSummary) return dealSummary;
   const normalized = { ...dealSummary };
@@ -180,13 +225,12 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // Branch the required-doc list on deal type: purchase deals don't have an existing
   // mortgage on the subject property, so no mortgage payout is needed; instead a purchase
   // contract and proof of down payment apply. Refinance/2nd mortgage need the payout.
-  const loanType = (dealSummary?.loan_type || '').toLowerCase();
-  const isPurchase = /purchas/.test(loanType) || /purchas/.test(dealSummary?.purpose || '');
-  const baseRequired = isPurchase
-    ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
-    : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
-  // Fix 4: use isDocRequirementSatisfied so NOA satisfies income_proof per Bradley's intent.
-  const missingDocs = baseRequired.filter(req => !isDocRequirementSatisfied(req, classifications));
+  // Group SSS: prelim uses intakeRequiredFor (Tier 1 only — JJJ preserved, AML/PEP
+  // do NOT appear in the prelim [MISSING] list).
+  // Fix 4: isDocRequirementSatisfied makes NOA satisfy income_proof per Bradley's intent.
+  const isPurchase = isPurchaseFromSummary(dealSummary);
+  const missingDocs = intakeRequiredFor(isPurchase)
+    .filter(req => !isDocRequirementSatisfied(req, classifications));
 
   // Group C (S6.3/S7.3): exit_strategy is a deal-summary field, not a document
   // classification. Surface it here when null/empty so it appears in the admin's
@@ -318,12 +362,11 @@ ${closingEmail}
 //   - 'preliminary-update' : default for under_review when file isn't complete.
 //                            Caller invokes sendPreliminaryReviewToAdmin({ isUpdate: true }).
 const decideReviewDispatch = (deal, reviewSummary, reviewClassifications) => {
-  const loanType = (reviewSummary?.loan_type || '').toLowerCase();
-  const isPurchase = /purchas/.test(loanType) || /purchas/.test(reviewSummary?.purpose || '');
-  const baseRequired = isPurchase
-    ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
-    : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
-  const stillMissing = baseRequired.filter(req => !isDocRequirementSatisfied(req, reviewClassifications));
+  // Group SSS: allDocsInNow requires intake + compliance (AML/PEP) per JJJ's
+  // post-approval flow. Pre-SSS this used intake-only, which fired completion-handoff
+  // before AML/PEP had been requested.
+  const required = allRequiredForCompletion(isPurchaseFromSummary(reviewSummary));
+  const stillMissing = required.filter(req => !isDocRequirementSatisfied(req, reviewClassifications));
   const allDocsInNow = stillMissing.length === 0 && !!reviewSummary?.exit_strategy;
 
   if (deal.status === 'under_review' && allDocsInNow) {
@@ -585,12 +628,17 @@ ${draftEmail}
           // Check if all docs are already received — if so, this is a final completion, not a doc request
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
           const docClassifications = existingDocs.map(d => d.classification).filter(Boolean);
-          // Fix 4: drop stale 'noa' from list (Bradley's e4f6b89 made NOA satisfy
-          // income_proof; the duplicate item was an oversight in this site). Use
-          // isDocRequirementSatisfied so NOA-only deals correctly classify as
-          // all-docs-received → completion path instead of doc-request loop.
-          const requiredDocs = ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report'];
-          const stillMissing = requiredDocs.filter(req => !isDocRequirementSatisfied(req, docClassifications));
+          // Group SSS (S3.2): require intake + compliance (AML/PEP) for completion.
+          // Pre-SSS this checked intake only — admin approving a deal with all intake
+          // in fired generateCompletionEmail directly, bypassing JJJ's post-approval
+          // AML/PEP request. Now: stillMissing includes AML/PEP if they aren't on
+          // file → generateDocumentRequestEmail fires (which asks only the missing
+          // items per its existing logic, typically just AML/PEP).
+          // Pre-SSS also forgot the purchase/refinance branch (purchase deals would
+          // never satisfy mortgage_statement). Fixed incidentally by allRequiredForCompletion.
+          // Fix 4: isDocRequirementSatisfied so NOA satisfies income_proof.
+          const stillMissing = allRequiredForCompletion(isPurchaseFromSummary(existingDeal.extracted_data))
+            .filter(req => !isDocRequirementSatisfied(req, docClassifications));
 
           if (stillMissing.length === 0) {
             // FINAL COMPLETION — all docs received, Franco confirms the file is good
@@ -1122,7 +1170,18 @@ ${draftEmail}
         // "When all docs are in, Vienna should silently trigger the preliminary review to
         // admin and wait. No broker reply at this stage. The admin-approved closing draft
         // is the one and only broker-facing message."
-        const willFireFinalReview = result.allDocsReceived && !willGoToCollateralCheck && !willReview && existingDeal.status === 'active' && !identityClashUnresolved;
+        // Group SSS (Q1-SSS): bypass Claude's probabilistic result.allDocsReceived. JS
+        // is authoritative — intake + compliance (AML/PEP) + exit_strategy gate, computed
+        // from the same classifications that drive sendPreliminaryReviewToAdmin's [MISSING]
+        // list. Extracted as computeWillFireFinalReview (module-scope, testable).
+        const willFireFinalReview = computeWillFireFinalReview({
+          deal: existingDeal,
+          summary: result.updatedSummary,
+          classifications: classificationsForGate,
+          willGoToCollateralCheck,
+          willReview,
+          identityClashUnresolved,
+        });
 
         if (ltv && ltv <= 80 && !hasReviewableDoc) {
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
@@ -1185,14 +1244,13 @@ ${draftEmail}
           const finalDocsList = await dealsService.getDocumentsByDeal(existingDeal.id);
           const finalClassifications = finalDocsList.map(d => d.classification).filter(Boolean);
 
-          // Same purchase/refinance branch for the final review checklist
-          const finalLoanType = (result.updatedSummary?.loan_type || '').toLowerCase();
-          const finalIsPurchase = /purchas/.test(finalLoanType) || /purchas/.test(result.updatedSummary?.purpose || '');
-          const finalBaseRequired = finalIsPurchase
-            ? ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']
-            : ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
-          // Fix 4: use isDocRequirementSatisfied so NOA satisfies income_proof.
-          const finalMissing = finalBaseRequired.filter(req => !isDocRequirementSatisfied(req, finalClassifications));
+          // Group SSS: final review's [MISSING] list checks intake + compliance.
+          // When this path fires, computeWillFireFinalReview already gated on the
+          // same set, so finalMissing should be empty in the normal path; the
+          // array exists as a defensive belt for the rare case where doc inventory
+          // shifted between the gate check and this point. Fix 4: NOA satisfies income_proof.
+          const finalMissing = allRequiredForCompletion(isPurchaseFromSummary(result.updatedSummary))
+            .filter(req => !isDocRequirementSatisfied(req, finalClassifications));
 
           const finalMessages = await dealsService.getMessages(existingDeal.id);
           const finalSummary = await aiService.generateLeadSummary(
@@ -1237,4 +1295,12 @@ ${draftEmail}
 });
 
 module.exports = router;
-module.exports.__test__ = { sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName, isUnreliableName, firstNameMatchesAdmin, isDocRequirementSatisfied, DOC_SYNONYMS, ADMIN_FIRST_NAME, textToHtml, decideReviewDispatch };
+module.exports.__test__ = {
+  sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName,
+  isUnreliableName, firstNameMatchesAdmin, isDocRequirementSatisfied,
+  DOC_SYNONYMS, ADMIN_FIRST_NAME, textToHtml, decideReviewDispatch,
+  // Group SSS: tier constants + helpers
+  BASE_REQUIRED_INTAKE_REFINANCE, BASE_REQUIRED_INTAKE_PURCHASE, COMPLIANCE_REQUIRED_POSTAPPROVAL,
+  intakeRequiredFor, allRequiredForCompletion, isPurchaseFromSummary,
+  computeWillFireFinalReview,
+};

@@ -2172,6 +2172,7 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       aiGenerateBrokerResponse: aiService.generateBrokerResponse,
       aiGenerateLeadSummary: aiService.generateLeadSummary,
       aiGenerateCompletionEmail: aiService.generateCompletionEmail,
+      aiGenerateDocumentRequestEmail: aiService.generateDocumentRequestEmail,
       aiParseDraftReply: aiService.parseDraftReply,
       emailSendEmail: emailService.sendEmail,
       emailSendEmailDelayed: emailService.sendEmailDelayed,
@@ -2269,6 +2270,9 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
         draft_email: null,
       });
       // NNN: stub all 6 refinance-required classifications on file so allDocsInNow=true.
+      // Group SSS extension: completion-handoff gate now requires AML + PEP too — without
+      // them the dispatch falls through to preliminary-update. Add compliance classifications
+      // to keep this test exercising the conditions-fulfilled handoff path.
       const bbbCompleteDocs = [
         { classification: 'government_id', file_name: 'GovID.pdf' },
         { classification: 'appraisal', file_name: 'Appraisal.pdf' },
@@ -2276,6 +2280,8 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
         { classification: 'mortgage_statement', file_name: 'Payout.pdf' },
         { classification: 'income_proof', file_name: 'NOA.pdf' },
         { classification: 'credit_report', file_name: 'CB.pdf' },
+        { classification: 'aml', file_name: 'AML.pdf' },
+        { classification: 'pep', file_name: 'PEP.pdf' },
       ];
       dealsService.getDocumentsByDeal = async () => bbbCompleteDocs;
       dealsService.getDocumentsWithText = async () => bbbCompleteDocs;
@@ -2430,6 +2436,88 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       console.log('  PASS [Group BBB B4]: deterministic closing template — exact match, fallbacks work, no legacy phrases, Franco + admin email hardcoded');
     }
 
+    // -------- Group SSS / C: admin-approved dispatch (intake-only vs intake+compliance) --------
+    // Pre-SSS the admin-approved branch (webhook.js:584) checked intake-only docs:
+    // when all intake in, generateCompletionEmail fired — JJJ's AML/PEP ask bypassed.
+    // Post-SSS the branch requires intake + compliance for completion. Three cases:
+    //   C1: intake complete, NO AML/PEP → generateDocumentRequestEmail (asks AML/PEP)
+    //   C2: intake + AML + PEP all in → generateCompletionEmail (single-cycle, Q2)
+    //   C3: intake incomplete → generateDocumentRequestEmail (unchanged from pre-SSS)
+    {
+      // Captures which Claude function got called by the admin-approved branch.
+      let cCalls = { docRequest: 0, completion: 0 };
+      aiService.generateDocumentRequestEmail = async () => { cCalls.docRequest++; return '<p>Doc request (mocked)</p>'; };
+      aiService.generateCompletionEmail = async () => { cCalls.completion++; return '<p>Completion (mocked)</p>'; };
+
+      const runApprovedDispatch = async (docsOnFile, loanType) => {
+        cCalls = { docRequest: 0, completion: 0 };
+        resetBbb();
+        setBbbDeal({
+          status: 'under_review',
+          extracted_data: { ...bbbDeal?.extracted_data, loan_type: loanType, broker_name: 'Tyler Bennett', borrower_name: 'James Okafor', sender_type: 'broker' },
+        });
+        // Override docs stub for this case
+        dealsService.getDocumentsByDeal = async () => docsOnFile;
+        dealsService.getDocumentsWithText = async () => docsOnFile;
+        // Admin's "APPROVED" reply — parseAdminReply has a fast-path for this exact word.
+        await inboundHandler(buildAdminReply('APPROVED'), mockRes(), () => {});
+        const savedDraftUpdate = bbb.update.find(u => u.patch.draft_action !== undefined);
+        return { calls: cCalls, draftAction: savedDraftUpdate?.patch?.draft_action };
+      };
+
+      // C1 — intake complete, NO AML/PEP → doc-request (asks AML/PEP)
+      const refiIntakeOnly = [
+        { classification: 'government_id', file_name: 'GovID.pdf' },
+        { classification: 'appraisal', file_name: 'Appraisal.pdf' },
+        { classification: 'property_tax', file_name: 'PropertyTax.pdf' },
+        { classification: 'mortgage_statement', file_name: 'Payout.pdf' },
+        { classification: 'income_proof', file_name: 'NOA.pdf' },
+        { classification: 'credit_report', file_name: 'CB.pdf' },
+      ];
+      const c1 = await runApprovedDispatch(refiIntakeOnly, 'second mortgage');
+      if (c1.calls.docRequest !== 1 || c1.calls.completion !== 0 || c1.draftAction !== 'approval_doc_request') {
+        throw new Error(`FAIL [Group SSS / C1]: intake-only deal post-approval should fire generateDocumentRequestEmail (asks AML/PEP), got ${JSON.stringify(c1)}`);
+      }
+      console.log('  PASS [Group SSS / C1]: admin APPROVED + intake complete + NO AML/PEP → generateDocumentRequestEmail fires (action=approval_doc_request)');
+
+      // C2 — intake + AML + PEP all in (Q2 single-cycle path)
+      const refiIntakePlusCompliance = [
+        ...refiIntakeOnly,
+        { classification: 'aml', file_name: 'AML.pdf' },
+        { classification: 'pep', file_name: 'PEP.pdf' },
+      ];
+      const c2 = await runApprovedDispatch(refiIntakePlusCompliance, 'second mortgage');
+      if (c2.calls.docRequest !== 0 || c2.calls.completion !== 1 || c2.draftAction !== 'approval_completed') {
+        throw new Error(`FAIL [Group SSS / C2]: intake+compliance complete should fire generateCompletionEmail single-cycle (Q2), got ${JSON.stringify(c2)}`);
+      }
+      console.log('  PASS [Group SSS / C2]: admin APPROVED + intake + AML + PEP → generateCompletionEmail fires (Q2 single-cycle path preserved)');
+
+      // C3 — intake incomplete → doc-request (regression guard, unchanged from pre-SSS)
+      const refiPartial = refiIntakeOnly.slice(0, 3); // only 3 intake docs
+      const c3 = await runApprovedDispatch(refiPartial, 'second mortgage');
+      if (c3.calls.docRequest !== 1 || c3.calls.completion !== 0 || c3.draftAction !== 'approval_doc_request') {
+        throw new Error(`FAIL [Group SSS / C3]: intake-incomplete deal should still fire generateDocumentRequestEmail (regression guard), got ${JSON.stringify(c3)}`);
+      }
+      console.log('  PASS [Group SSS / C3]: admin APPROVED + intake incomplete → generateDocumentRequestEmail fires (pre-SSS behavior preserved)');
+
+      // C4 — purchase deal with intake + compliance (regression: pre-SSS Site 2 lacked purchase branch)
+      const purchaseComplete = [
+        { classification: 'government_id', file_name: 'GovID.pdf' },
+        { classification: 'appraisal', file_name: 'Appraisal.pdf' },
+        { classification: 'property_tax', file_name: 'PropertyTax.pdf' },
+        { classification: 'income_proof', file_name: 'NOA.pdf' },
+        { classification: 'credit_report', file_name: 'CB.pdf' },
+        { classification: 'purchase_contract', file_name: 'APS.pdf' },
+        { classification: 'aml', file_name: 'AML.pdf' },
+        { classification: 'pep', file_name: 'PEP.pdf' },
+      ];
+      const c4 = await runApprovedDispatch(purchaseComplete, 'purchase');
+      if (c4.calls.docRequest !== 0 || c4.calls.completion !== 1 || c4.draftAction !== 'approval_completed') {
+        throw new Error(`FAIL [Group SSS / C4]: purchase intake+compliance complete should fire generateCompletionEmail, got ${JSON.stringify(c4)}`);
+      }
+      console.log('  PASS [Group SSS / C4]: purchase deal with intake + compliance + purchase_contract → generateCompletionEmail (purchase tier works post-SSS)');
+    }
+
     // Restore originals
     dealsService.findByMessageId = origBbb.dealsFindByMessageId;
     dealsService.saveMessage = origBbb.dealsSaveMessage;
@@ -2442,11 +2530,12 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     aiService.generateBrokerResponse = origBbb.aiGenerateBrokerResponse;
     aiService.generateLeadSummary = origBbb.aiGenerateLeadSummary;
     aiService.generateCompletionEmail = origBbb.aiGenerateCompletionEmail;
+    aiService.generateDocumentRequestEmail = origBbb.aiGenerateDocumentRequestEmail;
     aiService.parseDraftReply = origBbb.aiParseDraftReply;
     emailService.sendEmail = origBbb.emailSendEmail;
     emailService.sendEmailDelayed = origBbb.emailSendEmailDelayed;
 
-    console.log('Group BBB: 4/4 passed');
+    console.log('Group BBB: 4/4 passed; Group SSS / C: 4/4 passed');
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -2942,8 +3031,9 @@ WEBSITE.  unionfinancialcorp.com`;
   const { decideReviewDispatch } = require('./src/routes/webhook').__test__;
 
   // Helper to build a complete classifications list for "all docs in" cases.
-  const refinanceAllDocs = ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
-  const purchaseAllDocs = ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract'];
+  // Group SSS extension: completion gate requires intake + compliance (AML/PEP).
+  const refinanceAllDocs = ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report', 'aml', 'pep'];
+  const purchaseAllDocs = ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract', 'aml', 'pep'];
 
   const nnnCases = [
     {
@@ -3025,6 +3115,22 @@ WEBSITE.  unionfinancialcorp.com`;
       classifications: refinanceAllDocs,
       expectAction: 'noop',
     },
+    // Group SSS extension cases
+    {
+      name: '11. under_review + intake complete + exit_strategy + NO AML/PEP → preliminary-update (SSS gates completion on compliance)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      // intake only (no aml, no pep)
+      classifications: ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'],
+      expectAction: 'preliminary-update',
+    },
+    {
+      name: '12. under_review + intake complete + AML only (PEP missing) + exit_strategy → preliminary-update (partial compliance insufficient)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report', 'aml'],
+      expectAction: 'preliminary-update',
+    },
   ];
 
   let nnnPassed = 0;
@@ -3040,6 +3146,172 @@ WEBSITE.  unionfinancialcorp.com`;
     nnnPassed++;
   }
   console.log(`Group NNN decideReviewDispatch: ${nnnPassed}/${nnnCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP SSS — two-tier required-doc completion gate (S3.2)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
+  // because four completion-gate sites used intake-only required-doc lists.
+  // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
+  // approval with intake docs in — AML/PEP never requested. SSS extends the
+  // gate to require intake + compliance; prelim review stays intake-only
+  // (JJJ preserved).
+  console.log('\n========== GROUP SSS — two-tier required-doc completion gate ==========');
+  const {
+    BASE_REQUIRED_INTAKE_REFINANCE: sssIntakeRefi,
+    BASE_REQUIRED_INTAKE_PURCHASE: sssIntakePurchase,
+    COMPLIANCE_REQUIRED_POSTAPPROVAL: sssCompliance,
+    intakeRequiredFor: sssIntakeRequiredFor,
+    allRequiredForCompletion: sssAllRequiredForCompletion,
+    isPurchaseFromSummary: sssIsPurchaseFromSummary,
+    computeWillFireFinalReview: sssComputeWillFireFinalReview,
+  } = require('./src/routes/webhook').__test__;
+
+  // ─── Truth table A — tier constants + helpers ──────────────────────────
+  console.log('\n---------- Group SSS / A: tier constants ----------');
+  let sssAPassed = 0;
+  const assertSss = (label, got, expected) => {
+    if (JSON.stringify(got) !== JSON.stringify(expected)) {
+      throw new Error(`FAIL [Group SSS / A ${label}]:\n  expected ${JSON.stringify(expected)}\n  got      ${JSON.stringify(got)}`);
+    }
+    console.log(`  PASS [${label}]`);
+    sssAPassed++;
+  };
+  assertSss('intake refinance = 6 items, no AML/PEP', sssIntakeRefi,
+    ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report']);
+  assertSss('intake purchase = 6 items, no AML/PEP', sssIntakePurchase,
+    ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract']);
+  assertSss("compliance = ['aml', 'pep']", sssCompliance, ['aml', 'pep']);
+  assertSss('intakeRequiredFor(false) === refinance intake', sssIntakeRequiredFor(false), sssIntakeRefi);
+  assertSss('intakeRequiredFor(true) === purchase intake', sssIntakeRequiredFor(true), sssIntakePurchase);
+  assertSss('allRequiredForCompletion(false) = refi intake + compliance (8 items)',
+    sssAllRequiredForCompletion(false),
+    [...sssIntakeRefi, ...sssCompliance]);
+  assertSss('allRequiredForCompletion(true) = purchase intake + compliance (8 items)',
+    sssAllRequiredForCompletion(true),
+    [...sssIntakePurchase, ...sssCompliance]);
+  // Clean separation: compliance items must not be in intake (otherwise tier breaks).
+  if (sssCompliance.some(c => sssIntakeRefi.includes(c) || sssIntakePurchase.includes(c))) {
+    throw new Error(`FAIL [Group SSS / A separation]: compliance items leaked into intake tier`);
+  }
+  console.log('  PASS [clean tier separation: compliance ∩ intake = ∅]');
+  sssAPassed++;
+  // isPurchaseFromSummary helper
+  assertSss('isPurchaseFromSummary loan_type=purchase → true', sssIsPurchaseFromSummary({ loan_type: 'purchase' }), true);
+  assertSss('isPurchaseFromSummary loan_type=refinance → false', sssIsPurchaseFromSummary({ loan_type: 'refinance' }), false);
+  assertSss('isPurchaseFromSummary purpose contains purchas → true', sssIsPurchaseFromSummary({ purpose: 'purchase investment property' }), true);
+  assertSss('isPurchaseFromSummary null summary → false', sssIsPurchaseFromSummary(null), false);
+  console.log(`Group SSS / A tier constants: ${sssAPassed} assertions passed`);
+
+  // ─── Truth table D — computeWillFireFinalReview ──────────────────────────
+  // Replaces Claude's probabilistic result.allDocsReceived flag for the
+  // willFireFinalReview gate (Q1-SSS). Pure-function test.
+  console.log('\n---------- Group SSS / D: computeWillFireFinalReview ----------');
+  const sssIntakeOnly = ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report'];
+  const sssIntakePlusCompliance = [...sssIntakeOnly, 'aml', 'pep'];
+  const sssDCases = [
+    {
+      name: 'D1: active + intake complete + exit_strategy + NO compliance → false (JS gate blocks)',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
+        classifications: sssIntakeOnly,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'D2: active + intake + AML + PEP + exit_strategy → true (full completion gate)',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: true,
+    },
+    {
+      name: 'D3: active + intake + compliance, exit_strategy MISSING → false (exit_strategy gate)',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'refinance', exit_strategy: null },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'D4: status=under_review (not active) → false (active-only gate)',
+      input: {
+        deal: { status: 'under_review' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'D5: willGoToCollateralCheck=true → false (LTV gate priority)',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: true, willReview: false, identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'D6: willReview=true → false (prelim review gate priority)',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: true, identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'D7: identityClashUnresolved → false (identity gate priority)',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+        classifications: sssIntakePlusCompliance,
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: true,
+      },
+      expect: false,
+    },
+    {
+      name: 'D8: purchase deal + intake + compliance + exit_strategy → true (purchase tier works)',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale of subject' },
+        classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract', 'aml', 'pep'],
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: true,
+    },
+    {
+      name: 'D9: purchase deal missing purchase_contract → false',
+      input: {
+        deal: { status: 'active' },
+        summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale' },
+        // missing purchase_contract
+        classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'aml', 'pep'],
+        willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+  ];
+  let sssDPassed = 0;
+  for (const tc of sssDCases) {
+    const got = sssComputeWillFireFinalReview(tc.input);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group SSS / D ${tc.name}]: expected ${tc.expect}, got ${got}`);
+    }
+    console.log(`  PASS [${tc.name}]: → ${got}`);
+    sssDPassed++;
+  }
+  console.log(`Group SSS / D computeWillFireFinalReview: ${sssDPassed}/${sssDCases.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
   // GROUP OOO — payout vs balance vs discharge distinction (S1.4)
