@@ -4642,6 +4642,131 @@ renovations.`,
   console.log('  PASS [Group GGGG startup banner]: console.warn fires with revert reminder when flag is set');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP IIII — daily-summary 21:00 gate (GGGG regression fix)
+  // ════════════════════════════════════════════════════════════════
+  // GGGG sped up CRON_SCHEDULE to '*/30 * * * *' under REMINDER_TESTING_MODE
+  // so reminders fire every 30 min for testing. Regression: the cron handler
+  // runDailySummary does BOTH reminders AND the daily-summary email in one
+  // tick, so the summary email also fired every 30 min. Franco received two
+  // summaries 30 min apart on 2026-05-12 (9:32 + 10:02 AM Edmonton).
+  //
+  // IIII gates the daily-summary email phase to the 21:00 Edmonton tick only,
+  // via the pure helper shouldFireDailySummaryNow(now, timezone). Production
+  // cron '0 21 * * *' fires only at 21:00 so the gate is a no-op. Testing-
+  // mode cron '*/30 * * * *' fires 48× per day; the gate filters to the
+  // single 21:00 tick. Reminders run BEFORE the gate so they still fire on
+  // every tick.
+  console.log('\n========== GROUP IIII — daily-summary 21:00 gate ==========');
+
+  // ─── Truth table on the pure helper ──────────────────────────────────
+  console.log('\n---------- Group IIII / Truth Table: shouldFireDailySummaryNow ----------');
+  const { shouldFireDailySummaryNow } = require('./src/cron/dailySummary');
+
+  const iiiiCases = [
+    // 21:00 Edmonton wall clock — production tick, FIRES summary
+    { name: 'MDT 21:00 (summer 9 PM Edmonton = UTC 03:00 next day)',
+      now: new Date('2026-05-13T03:00:00Z'), expect: true },
+    { name: 'MST 21:00 (winter 9 PM Edmonton = UTC 04:00 next day)',
+      now: new Date('2026-01-13T04:00:00Z'), expect: true },
+
+    // 21:30 Edmonton — testing-mode :30 tick, MUST NOT fire
+    { name: 'MDT 21:30 (testing :30 tick at 9:30 PM)',
+      now: new Date('2026-05-13T03:30:00Z'), expect: false },
+
+    // 20:30 Edmonton — testing-mode tick 30 min before summary, MUST NOT fire
+    { name: 'MDT 20:30 (testing tick 30 min before summary)',
+      now: new Date('2026-05-13T02:30:00Z'), expect: false },
+
+    // 09:00 Edmonton — testing-mode tick mid-morning, MUST NOT fire
+    { name: 'MDT 09:00 (morning testing tick)',
+      now: new Date('2026-05-12T15:00:00Z'), expect: false },
+
+    // 09:32 Edmonton — the exact wall-clock of Franco's first duplicate
+    { name: 'MDT 09:32 (regression repro — Franco duplicate #1 timestamp)',
+      now: new Date('2026-05-12T15:32:00Z'), expect: false },
+
+    // 10:02 Edmonton — the exact wall-clock of Franco's second duplicate
+    { name: 'MDT 10:02 (regression repro — Franco duplicate #2 timestamp)',
+      now: new Date('2026-05-12T16:02:00Z'), expect: false },
+
+    // 00:00 Edmonton — midnight tick, MUST NOT fire (different day boundary)
+    { name: 'MDT 00:00 (midnight Edmonton)',
+      now: new Date('2026-05-12T06:00:00Z'), expect: false },
+
+    // DST boundary: spring-forward day at "21:00" Edmonton
+    // 2026-03-08 spring-forward; 9 PM MDT (post-shift) = 03:00 UTC Mar 9
+    { name: 'DST spring-forward day 21:00 MDT',
+      now: new Date('2026-03-09T03:00:00Z'), expect: true },
+
+    // DST boundary: fall-back day at 21:00 Edmonton (MST takes over)
+    // 2026-11-01 fall-back; 9 PM MST = 04:00 UTC Nov 2
+    { name: 'DST fall-back day 21:00 MST',
+      now: new Date('2026-11-02T04:00:00Z'), expect: true },
+  ];
+
+  let iiiiPassed = 0;
+  for (const tc of iiiiCases) {
+    const got = shouldFireDailySummaryNow(tc.now, 'America/Edmonton');
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group IIII ${tc.name}]: now=${tc.now.toISOString()}, expected=${tc.expect}, got=${got}`);
+    }
+    console.log(`  PASS [${tc.name}]: → ${got}`);
+    iiiiPassed++;
+  }
+  console.log(`Group IIII / Truth Table: ${iiiiPassed}/${iiiiCases.length} passed`);
+
+  // ─── Source-string regression: gate wired in correctly ────────────────
+  console.log('\n---------- Group IIII / Source-string regression ----------');
+  // cronSrc already loaded earlier
+
+  // 1. Pure helper defined and exported
+  if (!/const shouldFireDailySummaryNow = \(now, timezone\) =>/.test(cronSrc)) {
+    throw new Error(`FAIL [Group IIII helper definition]: shouldFireDailySummaryNow(now, timezone) must be defined in cron/dailySummary.js`);
+  }
+  console.log('  PASS [Group IIII helper definition]: shouldFireDailySummaryNow(now, timezone) defined');
+
+  if (!/module\.exports = \{[^}]*shouldFireDailySummaryNow[^}]*\}/.test(cronSrc)) {
+    throw new Error(`FAIL [Group IIII helper export]: shouldFireDailySummaryNow must be exported from cron/dailySummary.js`);
+  }
+  console.log('  PASS [Group IIII helper export]: shouldFireDailySummaryNow exported');
+
+  // 2. Helper uses Intl.DateTimeFormat with timezone (not toLocaleString locale-fragile path)
+  if (!/Intl\.DateTimeFormat\('en-CA',[\s\S]{0,200}timeZone: timezone/.test(cronSrc)) {
+    throw new Error(`FAIL [Group IIII Intl path]: shouldFireDailySummaryNow must use Intl.DateTimeFormat with 'en-CA' locale and timeZone parameter`);
+  }
+  console.log("  PASS [Group IIII Intl path]: helper uses Intl.DateTimeFormat('en-CA', { timeZone })");
+
+  // 3. Helper checks hour === 21 && minute === 0
+  if (!/return hour === 21 && minute === 0/.test(cronSrc)) {
+    throw new Error(`FAIL [Group IIII gate predicate]: helper must return 'hour === 21 && minute === 0'`);
+  }
+  console.log('  PASS [Group IIII gate predicate]: helper checks hour === 21 && minute === 0');
+
+  // 4. Gate is called inside runDailySummary AFTER runFollowUpReminders (reminders not gated)
+  //    and BEFORE the dealsService.getActiveDeals() call (summary phase IS gated).
+  // getActiveDeals is called in TWO places — inside runFollowUpReminders (line ~43)
+  // and inside runDailySummary's summary-email phase (after the gate). The relevant
+  // one for ordering is the summary-phase call, which is the LATER occurrence.
+  const reminderCallIdx = cronSrc.search(/await runFollowUpReminders\(\)/);
+  const gateCallIdx = cronSrc.search(/if \(!shouldFireDailySummaryNow\(new Date\(\), ADMIN_TIMEZONE\)\)/);
+  const activeDealsIdx = cronSrc.lastIndexOf('const activeDeals = await dealsService.getActiveDeals()');
+
+  if (reminderCallIdx === -1) throw new Error(`FAIL [Group IIII gate ordering]: 'await runFollowUpReminders()' not found in cron`);
+  if (gateCallIdx === -1) throw new Error(`FAIL [Group IIII gate ordering]: 'if (!shouldFireDailySummaryNow(new Date(), ADMIN_TIMEZONE))' not found in cron`);
+  if (activeDealsIdx === -1) throw new Error(`FAIL [Group IIII gate ordering]: 'const activeDeals = await dealsService.getActiveDeals()' not found in cron`);
+
+  if (!(reminderCallIdx < gateCallIdx && gateCallIdx < activeDealsIdx)) {
+    throw new Error(`FAIL [Group IIII gate ordering]: expected runFollowUpReminders → gate → getActiveDeals (so reminders run unconditionally, summary phase is gated). Got positions: reminders=${reminderCallIdx}, gate=${gateCallIdx}, summary-phase getActiveDeals=${activeDealsIdx}`);
+  }
+  console.log('  PASS [Group IIII gate ordering]: reminders run BEFORE gate (unconditional); summary phase runs AFTER gate (gated)');
+
+  // 5. Gate's failure branch returns early (skips summary email phase entirely)
+  if (!/if \(!shouldFireDailySummaryNow\(new Date\(\), ADMIN_TIMEZONE\)\) \{[\s\S]{0,400}return;\s*\n\s*\}/.test(cronSrc)) {
+    throw new Error(`FAIL [Group IIII gate return]: gate's failure branch must 'return;' to skip the summary phase`);
+  }
+  console.log('  PASS [Group IIII gate return]: gate returns early when current time is not 21:00 Edmonton');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP HHHH — copy-pasteable admin review emails (Franco lender hand-off)
   // ════════════════════════════════════════════════════════════════
   // Pre-HHHH the admin-facing review emails (PRELIMINARY/COMPLETE Review via

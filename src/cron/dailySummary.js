@@ -233,13 +233,46 @@ const runFollowUpReminders = async () => {
 // inbound were being mis-attributed to broker in generateLeadSummary's render).
 const { ADMIN_REPLY_SUBJECT_RE, isAdminReplySubject } = require('../lib/adminReply');
 
+// Group IIII: pure-helper gate for the daily-summary email phase. Returns true
+// iff the given clock instant falls on the 21:00 wall-clock minute in the
+// given IANA timezone. Used by runDailySummary to keep the summary email
+// firing once per day even when CRON_SCHEDULE is sped up to '*/30 * * * *'
+// for REMINDER_TESTING_MODE — without this gate, every cron tick (48/day)
+// would emit a duplicate summary. Uses Intl.DateTimeFormat with the IANA
+// timezone so DST transitions handle themselves; 'en-CA' + 2-digit hour12=false
+// returns deterministic "HH:MM" strings.
+const shouldFireDailySummaryNow = (now, timezone) => {
+  const clock = new Intl.DateTimeFormat('en-CA', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: timezone,
+  }).format(now);
+  const [hour, minute] = clock.split(':').map(n => parseInt(n, 10));
+  return hour === 21 && minute === 0;
+};
+
 const runDailySummary = async () => {
   console.log('\n========== DAILY SUMMARY CRON ==========');
   console.log('Timestamp:', new Date().toISOString());
 
   try {
-    // Send follow-up reminders first and capture which deals got them
+    // Send follow-up reminders first and capture which deals got them.
+    // Reminders fire on EVERY cron tick — the cadence is the cron schedule
+    // itself (daily in production, every 30 min in REMINDER_TESTING_MODE).
     const remindersLog = await runFollowUpReminders();
+
+    // Group IIII: gate the daily-summary email to the 21:00 Edmonton tick
+    // only. Production cron pattern '0 21 * * *' fires only at 21:00 so the
+    // gate is a no-op there. Testing-mode cron pattern '*/30 * * * *' fires
+    // 48× per day to drive the reminder cadence; the gate filters the daily-
+    // summary email to the single 21:00 tick. Regression source: GGGG
+    // 2026-05-12 — Franco received two summaries 30 min apart.
+    if (!shouldFireDailySummaryNow(new Date(), ADMIN_TIMEZONE)) {
+      const edmClock = new Intl.DateTimeFormat('en-CA', {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: ADMIN_TIMEZONE,
+      }).format(new Date());
+      console.log(`Daily summary skipped — current Edmonton time ${edmClock}, not 21:00`);
+      return;
+    }
 
     const activeDeals = await dealsService.getActiveDeals();
     const recentMessages = await dealsService.getRecentMessages(24);
@@ -337,4 +370,4 @@ if (REMINDER_TESTING_MODE) {
 
 // Export for manual triggering/testing. formatAdminDate is exposed for the
 // harness to pin Bug 13.1 (timezone wrap on date header).
-module.exports = { runDailySummary, runFollowUpReminders, formatAdminDate, ADMIN_TIMEZONE, isAdminReplySubject };
+module.exports = { runDailySummary, runFollowUpReminders, formatAdminDate, ADMIN_TIMEZONE, isAdminReplySubject, shouldFireDailySummaryNow };
