@@ -4460,6 +4460,131 @@ renovations.`,
   console.log('  PASS [Group EEEE migration]: SQL file present + correct ALTER TABLE statement');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP FFFF — silent-fail defensive wrap on new-client INITIAL (S14.1)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-FFFF a transient Claude error during processInitialEmail (or any
+  // unhandled throw in the new-client path) was swallowed by the outer
+  // webhook catch — left an orphan scaffold deal with empty extracted_data,
+  // wrong borrower_name (FROM-name fallback), and no welcome email.
+  // Production case: Lena Park 2026-05-11 22:35 UTC (deal ff84e998). Same
+  // class as Sophie/ZZZ but in a different branch. Local verification
+  // confirmed 3/3 processInitialEmail runs succeed → transient, not
+  // content-specific. Fix mirrors ZZZ Layer 1: inner try/catch wraps the
+  // new-client branch; catch tears down the partial scaffold (deleteDeal
+  // cascade), then alerts admin with Postmark MessageID. No regex fallback
+  // (Layer 2 doesn't translate — no useful regex substitute for the full
+  // processInitialEmail call). No auto-retry (sender re-sends manually).
+  //
+  // Test strategy: source-string regression on webhook.js + deals.js
+  // structure. No truth table — the catch logic is imperative side-effect
+  // (delete + email), and the happy path is unchanged. Existing harness
+  // verifies the happy path didn't regress.
+  console.log('\n========== GROUP FFFF — silent-fail defensive wrap on new-client INITIAL ==========');
+
+  // 1. webhook.js: new-client branch is wrapped in try
+  //    Anchor on the FFFF comment marker + `let createdDeal = null;` + `try {`
+  if (!/Group FFFF \(S14\.1\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF marker]: missing 'Group FFFF (S14.1)' comment marker in webhook.js`);
+  }
+  console.log('  PASS [Group FFFF marker]: FFFF comment block present');
+
+  if (!/let createdDeal = null;\s*\n\s*try \{/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF try wrap]: new-client INITIAL branch must declare 'let createdDeal = null;' then open try {`);
+  }
+  console.log('  PASS [Group FFFF try wrap]: createdDeal scaffold tracker + try block opener present');
+
+  // 2. createdDeal assignment inside try (so cleanup knows the id)
+  if (!/createdDeal = deal;/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF createdDeal assign]: webhook must assign 'createdDeal = deal' after dealsService.create so cleanup has the id`);
+  }
+  console.log('  PASS [Group FFFF createdDeal assign]: scaffold id captured after create');
+
+  // 3. catch block exists and calls deleteDeal + alert
+  if (!/FFFF Layer 1 — new-client INITIAL dispatch failed/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF catch log]: catch block must log 'FFFF Layer 1 — new-client INITIAL dispatch failed'`);
+  }
+  console.log('  PASS [Group FFFF catch log]: catch block error log present');
+
+  if (!/dealsService\.deleteDeal\(createdDeal\.id\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF cleanup call]: catch block must call dealsService.deleteDeal(createdDeal.id)`);
+  }
+  console.log('  PASS [Group FFFF cleanup call]: deleteDeal invoked on orphan scaffold');
+
+  // 4. Cleanup wrapped in inner try/catch — cleanup failure must not stop alert send
+  if (!/await dealsService\.deleteDeal\(createdDeal\.id\)[\s\S]{0,200}\} catch \(cleanupErr\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF cleanup try/catch]: deleteDeal call must be wrapped in try/catch so cleanup failure doesn't suppress alert`);
+  }
+  console.log('  PASS [Group FFFF cleanup try/catch]: cleanup failure logged but alert still fires');
+
+  // 5. Alert email subject
+  if (!/New-client dispatch failed —/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF alert subject]: alert email must use New-client dispatch failed —' subject prefix`);
+  }
+  console.log('  PASS [Group FFFF alert subject]: alert subject present');
+
+  // 6. Alert body includes Postmark MessageID + error + From + scaffold id
+  const alertBodyRequiredMarkers = [
+    /Postmark MessageID: \$\{email\.messageId\}/,
+    /Error: \$\{err\.message\}/,
+    /From: \$\{email\.fromName\} <\$\{email\.from\}>/,
+    /Partial deal scaffold \$\{createdDeal \? createdDeal\.id : '\(not created\)'\}/,
+  ];
+  for (const re of alertBodyRequiredMarkers) {
+    if (!re.test(webhookSrc)) {
+      throw new Error(`FAIL [Group FFFF alert body]: alert body missing required forensic marker: ${re}`);
+    }
+  }
+  console.log('  PASS [Group FFFF alert body]: error + From + Postmark MessageID + scaffold id all surfaced');
+
+  // 7. Alert send wrapped in inner try/catch — alert failure doesn't crash webhook
+  if (!/try \{[\s\S]{0,600}New-client dispatch failed[\s\S]{0,800}\} catch \(alertErr\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF alert try/catch]: alert send must be wrapped in inner try/catch`);
+  }
+  console.log('  PASS [Group FFFF alert try/catch]: alert send protected against its own failure');
+
+  // 8. Catch block returns (matches ZZZ pattern; defensive against future fall-through code)
+  if (!/\} catch \(alertErr\) \{[\s\S]{0,200}\}\s*\n\s*return;\s*\n\s*\}/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group FFFF return]: catch block must end with 'return;' before closing brace`);
+  }
+  console.log('  PASS [Group FFFF return]: catch block returns (matches ZZZ Layer 1 pattern)');
+
+  // 9. deals.js: deleteDeal method exists with correct cascade order
+  const dealsSrc = fs_qqq.readFileSync(path_qqq.join(__dirname, 'src/services/deals.js'), 'utf8');
+
+  if (!/deleteDeal: async \(dealId\) => \{/.test(dealsSrc)) {
+    throw new Error(`FAIL [Group FFFF deleteDeal method]: deals.js must export deleteDeal(dealId) method`);
+  }
+  console.log('  PASS [Group FFFF deleteDeal method]: present');
+
+  // Cascade order: storage → documents → messages → deals
+  const cascadeMatch = dealsSrc.match(/deleteDeal: async[\s\S]*?(?=^\s{2}[a-zA-Z_]+:|^\};)/m);
+  if (!cascadeMatch) {
+    throw new Error(`FAIL [Group FFFF cascade extract]: could not extract deleteDeal body for cascade verification`);
+  }
+  const cascadeBody = cascadeMatch[0];
+
+  const storageRemoveIdx = cascadeBody.search(/\.storage\.from\('documents'\)\.remove\(/);
+  const documentsDeleteIdx = cascadeBody.search(/from\('documents'\)\.delete\(\)\.eq\('deal_id'/);
+  const messagesDeleteIdx = cascadeBody.search(/from\('messages'\)\.delete\(\)\.eq\('deal_id'/);
+  const dealsDeleteIdx = cascadeBody.search(/from\('deals'\)\.delete\(\)\.eq\('id', dealId\)/);
+
+  if (storageRemoveIdx === -1) throw new Error(`FAIL [Group FFFF cascade]: missing storage.remove for documents bucket`);
+  if (documentsDeleteIdx === -1) throw new Error(`FAIL [Group FFFF cascade]: missing documents-table delete`);
+  if (messagesDeleteIdx === -1) throw new Error(`FAIL [Group FFFF cascade]: missing messages-table delete`);
+  if (dealsDeleteIdx === -1) throw new Error(`FAIL [Group FFFF cascade]: missing deals-table delete`);
+
+  if (!(storageRemoveIdx < documentsDeleteIdx && documentsDeleteIdx < messagesDeleteIdx && messagesDeleteIdx < dealsDeleteIdx)) {
+    throw new Error(`FAIL [Group FFFF cascade order]: expected storage → documents → messages → deals; got positions ${storageRemoveIdx}, ${documentsDeleteIdx}, ${messagesDeleteIdx}, ${dealsDeleteIdx}`);
+  }
+  console.log('  PASS [Group FFFF cascade order]: storage → documents → messages → deals (parent-last, FK-safe)');
+
+  // 10. Storage cleanup wrapped in inner try/catch — non-critical, must not block DB cleanup
+  if (!/try \{[\s\S]{0,200}supabase\.storage\.from\('documents'\)\.remove\(paths\)[\s\S]{0,200}\} catch \(e\)/.test(dealsSrc)) {
+    throw new Error(`FAIL [Group FFFF storage try/catch]: storage cleanup must be wrapped in try/catch (best-effort; orphaned blobs are tolerable, broken DB cascade is not)`);
+  }
+  console.log('  PASS [Group FFFF storage try/catch]: storage cleanup is best-effort, DB cleanup proceeds regardless');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed

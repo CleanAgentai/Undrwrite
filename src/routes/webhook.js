@@ -980,171 +980,228 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
 
     if (!existingDeal) {
       // NEW CLIENT - first contact
-      console.log('New client detected, creating deal...');
+      // Group FFFF (S14.1): wrap the new-client INITIAL dispatch in its own
+      // try/catch — same defensive pattern as ZZZ Layer 1 (referral branch).
+      // Pre-FFFF a transient Claude error during processInitialEmail (or any
+      // other unhandled throw in this path) was silently swallowed by the
+      // outer webhook catch, leaving an orphan scaffold deal with empty
+      // extracted_data + wrong borrower_name fallback and no welcome email.
+      // Production case: Lena Park 2026-05-11 22:35 UTC — credit-bureau
+      // classification call succeeded but the larger processInitialEmail
+      // call flaked; sender got no response and admin had no forensic trace.
+      // FFFF tears down the scaffold (so retry doesn't shadow-match via
+      // findActiveByEmail) and alerts Franco with the Postmark MessageID.
+      let createdDeal = null;
+      try {
+        console.log('New client detected, creating deal...');
 
-      // Create deal in database
-      const deal = await dealsService.create({
-        email: email.from,
-        borrower_name: email.fromName,
-      });
+        // Create deal in database
+        const deal = await dealsService.create({
+          email: email.from,
+          borrower_name: email.fromName,
+        });
+        createdDeal = deal;
 
-      // Save inbound message
-      await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
+        // Save inbound message
+        await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
 
-      // Save attachments first — extracts text once, stores in Supabase
-      let savedDocs = [];
-      if (email.attachments.length > 0) {
-        console.log('Saving attachments to Supabase...');
-        savedDocs = await dealsService.saveAttachments(deal.id, email.attachments);
-      }
-
-      // Check if broker already sent a loan application form / PNW statement.
-      // Group S+W: detect own-PNW alongside own-application — pre-fix the PNW form
-      // was always attached even when the broker submitted their own (Bug 9.2).
-      const hasOwnApplication = email.attachments.some(a =>
-        /application|loan.?app|summary/i.test(a.Name)
-      );
-      const hasOwnPnw = email.attachments.some(a =>
-        /pnw|personal.?net.?worth|net.?worth/i.test(a.Name)
-      );
-
-      // F2 — Detect Franco-collision in the From-header BEFORE calling Claude.
-      // Use firstNameMatchesAdmin (Franco-pattern only) — NOT isUnreliableName,
-      // which over-fires on empty/Unknown FromName and triggered the Chris/Marcus/Brian
-      // generic-greeting regression. Empty FromName means "no display name", which is
-      // common; it does not mean "Franco-collision".
-      const initialFromCollision = firstNameMatchesAdmin(email.fromName);
-
-      // Single Claude call: generate welcome email + deal summary together
-      // Passes pre-extracted text from savedDocs — no second pdf-parse run
-      console.log('Processing initial email with Claude...');
-      console.log('Passing', email.attachments.length, 'attachments for analysis');
-      if (initialFromCollision) console.log('From-header collides with admin first name — instructing generic greeting');
-      // eslint-disable-next-line prefer-const
-      let { welcomeEmail, dealSummary } = await aiService.processInitialEmail(
-        email.fromName,
-        email.textBody,
-        email.attachments,
-        savedDocs,
-        hasOwnApplication,
-        hasOwnPnw,
-        initialFromCollision
-      );
-      // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
-      // when Claude's extraction is null/Unknown/Franco-collision. F2 adds the
-      // both-Franco branch — sets name_collides_with_admin: true on the summary
-      // for downstream prompts (generateBrokerResponse) to read.
-      dealSummary = normalizeSenderName(dealSummary, email.fromName);
-      console.log('Welcome email + deal summary generated');
-
-      // Get form attachments.
-      // Group VVV (S4.1): if the deal will route to a deferred-intake state
-      // (awaiting_collateral or awaiting_identity_confirmation), skip both
-      // forms — Vienna's welcome asks ONE specific question and forms ship
-      // wasted if the deal is declined or the borrower turns out wrong.
-      // Q3-VVV: applies regardless of sender_type (borrowers in deferred
-      // state skip forms too).
-      // Otherwise: borrowers always get both forms (they don't have their own);
-      // brokers skip whichever form they already provided.
-      const deferredIntake = shouldSkipIntakeFormsForDeferredState(dealSummary);
-      const isBorrower = dealSummary?.sender_type === 'borrower';
-      const skipApp = deferredIntake || (isBorrower ? false : hasOwnApplication);
-      const skipPnw = deferredIntake || (isBorrower ? false : hasOwnPnw);
-      const formAttachments = emailService.getFormAttachments({ skipApplicationForm: skipApp, skipPnwForm: skipPnw });
-      const skipNote = deferredIntake
-        ? `(VVV — deferred-intake state, skipping forms; identity_clash=${!!dealSummary?.identity_clash} ltv=${dealSummary?.ltv_percent})`
-        : (isBorrower
-          ? '(borrower — always attach both)'
-          : [hasOwnApplication && 'skipping Application Form', hasOwnPnw && 'skipping PNW Form'].filter(Boolean).join(', ') || '');
-      console.log('Attaching', formAttachments.length, 'forms', skipNote ? `(${skipNote})` : '');
-
-      // Send the AI-generated response with forms attached (HTML formatted)
-      emailService.sendEmailDelayed(
-        email.from,
-        `Re: ${email.subject}`,
-        welcomeEmail.replace(/<[^>]*>/g, ''),
-        welcomeEmail,
-        formAttachments,
-        [],
-        async (result) => {
-          await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject}`, welcomeEmail, result.MessageID);
+        // Save attachments first — extracts text once, stores in Supabase
+        let savedDocs = [];
+        if (email.attachments.length > 0) {
+          console.log('Saving attachments to Supabase...');
+          savedDocs = await dealsService.saveAttachments(deal.id, email.attachments);
         }
-      );
 
-      // Save summary and update status
-      await dealsService.update(deal.id, {
-        status: 'active',
-        extracted_data: dealSummary,
-        ltv: dealSummary ? dealSummary.ltv_percent : null,
-        borrower_name: dealSummary?.borrower_name || email.fromName,
-        has_application_form: hasOwnApplication || false,
-        has_pnw_statement: hasOwnPnw || false,
-      });
+        // Check if broker already sent a loan application form / PNW statement.
+        // Group S+W: detect own-PNW alongside own-application — pre-fix the PNW form
+        // was always attached even when the broker submitted their own (Bug 9.2).
+        const hasOwnApplication = email.attachments.some(a =>
+          /application|loan.?app|summary/i.test(a.Name)
+        );
+        const hasOwnPnw = email.attachments.some(a =>
+          /pnw|personal.?net.?worth|net.?worth/i.test(a.Name)
+        );
 
-      console.log('Welcome email sent, deal status: active');
+        // F2 — Detect Franco-collision in the From-header BEFORE calling Claude.
+        // Use firstNameMatchesAdmin (Franco-pattern only) — NOT isUnreliableName,
+        // which over-fires on empty/Unknown FromName and triggered the Chris/Marcus/Brian
+        // generic-greeting regression. Empty FromName means "no display name", which is
+        // common; it does not mean "Franco-collision".
+        const initialFromCollision = firstNameMatchesAdmin(email.fromName);
 
-      // Same HITL gate as the existing-deal `active` branch: if the broker submitted
-      // an explicit LTV in the very first email, route Franco's escalation (>80%) or
-      // preliminary review (≤80%) immediately. The welcome email to the broker still
-      // goes — both fire in parallel.
-      //
-      // Predicate matches Bradley's commit e93f657: high-LTV escalation does NOT require
-      // a reviewable doc (Franco wants to see those deals immediately); preliminary
-      // review for ≤80% still requires at least one of income_proof / NOA / appraisal.
-      const initialDocsForGate = await dealsService.getDocumentsByDeal(deal.id);
-      const initialClassifications = initialDocsForGate.map(d => d.classification).filter(Boolean);
+        // Single Claude call: generate welcome email + deal summary together
+        // Passes pre-extracted text from savedDocs — no second pdf-parse run
+        console.log('Processing initial email with Claude...');
+        console.log('Passing', email.attachments.length, 'attachments for analysis');
+        if (initialFromCollision) console.log('From-header collides with admin first name — instructing generic greeting');
+        // eslint-disable-next-line prefer-const
+        let { welcomeEmail, dealSummary } = await aiService.processInitialEmail(
+          email.fromName,
+          email.textBody,
+          email.attachments,
+          savedDocs,
+          hasOwnApplication,
+          hasOwnPnw,
+          initialFromCollision
+        );
+        // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
+        // when Claude's extraction is null/Unknown/Franco-collision. F2 adds the
+        // both-Franco branch — sets name_collides_with_admin: true on the summary
+        // for downstream prompts (generateBrokerResponse) to read.
+        dealSummary = normalizeSenderName(dealSummary, email.fromName);
+        console.log('Welcome email + deal summary generated');
 
-      // Group EEEE (S12.2): stamp intake_asked_items snapshot so cron reminders
-      // enumerate what Vienna actually asked for (not what current policy
-      // dictates — cross-policy drift caused the Noah MacKenzie reminder
-      // mismatch). Best-effort per Q2-EEEE — try/catch + console.error;
-      // welcome email already sent to broker, stamping is internal optimization
-      // and fallback path is the pre-EEEE behavior (baseRequired recomputed
-      // at reminder time).
-      const intakeAskedItems = computeIntakeAskedItems(dealSummary, initialClassifications);
-      if (intakeAskedItems !== null) {
+        // Get form attachments.
+        // Group VVV (S4.1): if the deal will route to a deferred-intake state
+        // (awaiting_collateral or awaiting_identity_confirmation), skip both
+        // forms — Vienna's welcome asks ONE specific question and forms ship
+        // wasted if the deal is declined or the borrower turns out wrong.
+        // Q3-VVV: applies regardless of sender_type (borrowers in deferred
+        // state skip forms too).
+        // Otherwise: borrowers always get both forms (they don't have their own);
+        // brokers skip whichever form they already provided.
+        const deferredIntake = shouldSkipIntakeFormsForDeferredState(dealSummary);
+        const isBorrower = dealSummary?.sender_type === 'borrower';
+        const skipApp = deferredIntake || (isBorrower ? false : hasOwnApplication);
+        const skipPnw = deferredIntake || (isBorrower ? false : hasOwnPnw);
+        const formAttachments = emailService.getFormAttachments({ skipApplicationForm: skipApp, skipPnwForm: skipPnw });
+        const skipNote = deferredIntake
+          ? `(VVV — deferred-intake state, skipping forms; identity_clash=${!!dealSummary?.identity_clash} ltv=${dealSummary?.ltv_percent})`
+          : (isBorrower
+            ? '(borrower — always attach both)'
+            : [hasOwnApplication && 'skipping Application Form', hasOwnPnw && 'skipping PNW Form'].filter(Boolean).join(', ') || '');
+        console.log('Attaching', formAttachments.length, 'forms', skipNote ? `(${skipNote})` : '');
+
+        // Send the AI-generated response with forms attached (HTML formatted)
+        emailService.sendEmailDelayed(
+          email.from,
+          `Re: ${email.subject}`,
+          welcomeEmail.replace(/<[^>]*>/g, ''),
+          welcomeEmail,
+          formAttachments,
+          [],
+          async (result) => {
+            await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject}`, welcomeEmail, result.MessageID);
+          }
+        );
+
+        // Save summary and update status
+        await dealsService.update(deal.id, {
+          status: 'active',
+          extracted_data: dealSummary,
+          ltv: dealSummary ? dealSummary.ltv_percent : null,
+          borrower_name: dealSummary?.borrower_name || email.fromName,
+          has_application_form: hasOwnApplication || false,
+          has_pnw_statement: hasOwnPnw || false,
+        });
+
+        console.log('Welcome email sent, deal status: active');
+
+        // Same HITL gate as the existing-deal `active` branch: if the broker submitted
+        // an explicit LTV in the very first email, route Franco's escalation (>80%) or
+        // preliminary review (≤80%) immediately. The welcome email to the broker still
+        // goes — both fire in parallel.
+        //
+        // Predicate matches Bradley's commit e93f657: high-LTV escalation does NOT require
+        // a reviewable doc (Franco wants to see those deals immediately); preliminary
+        // review for ≤80% still requires at least one of income_proof / NOA / appraisal.
+        const initialDocsForGate = await dealsService.getDocumentsByDeal(deal.id);
+        const initialClassifications = initialDocsForGate.map(d => d.classification).filter(Boolean);
+
+        // Group EEEE (S12.2): stamp intake_asked_items snapshot so cron reminders
+        // enumerate what Vienna actually asked for (not what current policy
+        // dictates — cross-policy drift caused the Noah MacKenzie reminder
+        // mismatch). Best-effort per Q2-EEEE — try/catch + console.error;
+        // welcome email already sent to broker, stamping is internal optimization
+        // and fallback path is the pre-EEEE behavior (baseRequired recomputed
+        // at reminder time).
+        const intakeAskedItems = computeIntakeAskedItems(dealSummary, initialClassifications);
+        if (intakeAskedItems !== null) {
+          try {
+            await dealsService.update(deal.id, { intake_asked_items: intakeAskedItems });
+            console.log(`EEEE: stamped intake_asked_items=${JSON.stringify(intakeAskedItems)} on deal ${deal.id}`);
+          } catch (stampErr) {
+            console.error('EEEE: intake_asked_items stamp failed (best-effort; cron will fall back to baseRequired):', stampErr.message);
+          }
+        } else {
+          console.log(`EEEE: skipped intake_asked_items stamp (borrower-path or deferred-intake state — cron will fall back to baseRequired)`);
+        }
+        const initialHasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => initialClassifications.includes(c));
+        // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
+        // Pre-BBBB prelim fired without exit_strategy → admin saw [MISSING] Exit Strategy
+        // → broker provided exit → NNN's preliminary-update dispatch fired a SECOND prelim.
+        // Post-BBBB: hold prelim until exit_strategy lands. Vienna's welcome email already
+        // asks for it (INITIAL_EMAIL_PROMPT WHAT TO ASK FOR list); when broker provides,
+        // existing-deal active branch fires the (single) prelim.
+        const initialHasExitStrategy = !!(dealSummary?.exit_strategy && String(dealSummary.exit_strategy).trim());
+        const initialLtv = dealSummary?.ltv_percent;
+
+        if (dealSummary?.identity_clash) {
+          // Group HHH (S15.1): identity gate runs FIRST, before LTV gates. Vienna's
+          // welcome email asks ONLY for the borrower-name clarification (per the
+          // IDENTITY CLASH block in INITIAL_EMAIL_PROMPT); doc requests and the
+          // collateral question are deferred until identity is resolved. Admin sees
+          // nothing during this state — same silent-pending pattern as Fix 7.
+          console.log('Initial submission identity_clash=true — entering awaiting_identity_confirmation state (HHH)');
+          await dealsService.update(deal.id, { status: 'awaiting_identity_confirmation' });
+        } else if (initialLtv && initialLtv > 80) {
+          // Fix 7: do NOT escalate immediately. Set status to 'awaiting_collateral'
+          // and let Vienna's welcome email carry the collateral question. Admin sees
+          // nothing until the broker confirms no-collateral (then we silently
+          // escalate) or offers collateral (then status flips back to active).
+          // Reverses Bradley's e93f657 parallel-fire model per Franco's S4 retest.
+          console.log(`Initial submission LTV ${initialLtv}% > 80 — entering awaiting_collateral state (Fix 7)`);
+          await dealsService.update(deal.id, { status: 'awaiting_collateral' });
+        } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy) {
+          console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc + exit_strategy — sending preliminary review immediately (BBBB-gated)`);
+          // ownership_type is null on initial submission (only set later by generateBrokerResponse).
+          // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
+          // when null. The remaining (deferred) enhancement is to extract ownership_type directly
+          // in INITIAL_EMAIL_PROMPT's TASK 2 JSON so it's populated on day 1.
+          await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv);
+        }
+      } catch (err) {
+        // Group FFFF Layer 1: any unhandled error in the new-client INITIAL
+        // dispatch tears down the partial scaffold and alerts Franco. Pre-FFFF
+        // this was silently swallowed by the outer webhook catch — Lena Park
+        // pattern. Cleanup runs first so a retry email from the same sender
+        // doesn't shadow-match the orphan via findActiveByEmail (which would
+        // route to the existing-deal active branch and skip processInitialEmail
+        // entirely — different silent failure on retry).
+        console.error('FFFF Layer 1 — new-client INITIAL dispatch failed:', err);
+        if (createdDeal) {
+          try {
+            await dealsService.deleteDeal(createdDeal.id);
+            console.log(`FFFF: cleaned up orphan scaffold deal ${createdDeal.id}`);
+          } catch (cleanupErr) {
+            console.error('FFFF: scaffold cleanup also failed (manual cleanup required):', cleanupErr.message);
+          }
+        }
+        const ffffAlertBody = `Vienna encountered an error processing a new-client email.
+
+Error: ${err.message}
+
+Original subject: ${email.subject}
+From: ${email.fromName} <${email.from}>
+Postmark MessageID: ${email.messageId}
+Time: ${new Date().toISOString()}
+
+The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal ? createdDeal.id : '(not created)'} has been cleaned up — sender can retry by re-sending the email.
+
+(This alert is automatic — Group FFFF defensive bundle.)`;
         try {
-          await dealsService.update(deal.id, { intake_asked_items: intakeAskedItems });
-          console.log(`EEEE: stamped intake_asked_items=${JSON.stringify(intakeAskedItems)} on deal ${deal.id}`);
-        } catch (stampErr) {
-          console.error('EEEE: intake_asked_items stamp failed (best-effort; cron will fall back to baseRequired):', stampErr.message);
+          await emailService.sendEmail(
+            config.adminEmail,
+            `New-client dispatch failed — ${email.subject || 'unknown subject'}`,
+            ffffAlertBody,
+            null,
+            [],
+            []
+          );
+        } catch (alertErr) {
+          console.error('FFFF Layer 1 alert send also failed:', alertErr);
         }
-      } else {
-        console.log(`EEEE: skipped intake_asked_items stamp (borrower-path or deferred-intake state — cron will fall back to baseRequired)`);
-      }
-      const initialHasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => initialClassifications.includes(c));
-      // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
-      // Pre-BBBB prelim fired without exit_strategy → admin saw [MISSING] Exit Strategy
-      // → broker provided exit → NNN's preliminary-update dispatch fired a SECOND prelim.
-      // Post-BBBB: hold prelim until exit_strategy lands. Vienna's welcome email already
-      // asks for it (INITIAL_EMAIL_PROMPT WHAT TO ASK FOR list); when broker provides,
-      // existing-deal active branch fires the (single) prelim.
-      const initialHasExitStrategy = !!(dealSummary?.exit_strategy && String(dealSummary.exit_strategy).trim());
-      const initialLtv = dealSummary?.ltv_percent;
-
-      if (dealSummary?.identity_clash) {
-        // Group HHH (S15.1): identity gate runs FIRST, before LTV gates. Vienna's
-        // welcome email asks ONLY for the borrower-name clarification (per the
-        // IDENTITY CLASH block in INITIAL_EMAIL_PROMPT); doc requests and the
-        // collateral question are deferred until identity is resolved. Admin sees
-        // nothing during this state — same silent-pending pattern as Fix 7.
-        console.log('Initial submission identity_clash=true — entering awaiting_identity_confirmation state (HHH)');
-        await dealsService.update(deal.id, { status: 'awaiting_identity_confirmation' });
-      } else if (initialLtv && initialLtv > 80) {
-        // Fix 7: do NOT escalate immediately. Set status to 'awaiting_collateral'
-        // and let Vienna's welcome email carry the collateral question. Admin sees
-        // nothing until the broker confirms no-collateral (then we silently
-        // escalate) or offers collateral (then status flips back to active).
-        // Reverses Bradley's e93f657 parallel-fire model per Franco's S4 retest.
-        console.log(`Initial submission LTV ${initialLtv}% > 80 — entering awaiting_collateral state (Fix 7)`);
-        await dealsService.update(deal.id, { status: 'awaiting_collateral' });
-      } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy) {
-        console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc + exit_strategy — sending preliminary review immediately (BBBB-gated)`);
-        // ownership_type is null on initial submission (only set later by generateBrokerResponse).
-        // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
-        // when null. The remaining (deferred) enhancement is to extract ownership_type directly
-        // in INITIAL_EMAIL_PROMPT's TASK 2 JSON so it's populated on day 1.
-        await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv);
+        return;
       }
     } else {
       // EXISTING CLIENT - follow-up email

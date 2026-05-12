@@ -451,6 +451,40 @@ module.exports = {
     return data || [];
   },
 
+  // Group FFFF (S14.1): tear down an orphan deal scaffold created by the
+  // new-client INITIAL branch when processInitialEmail throws. Pre-FFFF the
+  // partial scaffold (empty extracted_data, wrong borrower_name fallback,
+  // status=active) would shadow a retry via findActiveByEmail. Order: storage
+  // files → documents rows → messages rows → deal row. Storage cleanup is
+  // best-effort; DB rows must come down so the next email from the same
+  // sender starts fresh.
+  deleteDeal: async (dealId) => {
+    const { data: docs } = await supabase
+      .from('documents')
+      .select('storage_path')
+      .eq('deal_id', dealId);
+
+    if (docs && docs.length > 0) {
+      const paths = docs.map(d => d.storage_path).filter(Boolean);
+      if (paths.length > 0) {
+        try {
+          await supabase.storage.from('documents').remove(paths);
+        } catch (e) {
+          console.error('deleteDeal: storage cleanup failed (continuing with DB cleanup):', e.message);
+        }
+      }
+    }
+
+    const { error: docErr } = await supabase.from('documents').delete().eq('deal_id', dealId);
+    if (docErr) throw docErr;
+
+    const { error: msgErr } = await supabase.from('messages').delete().eq('deal_id', dealId);
+    if (msgErr) throw msgErr;
+
+    const { error: dealErr } = await supabase.from('deals').delete().eq('id', dealId);
+    if (dealErr) throw dealErr;
+  },
+
   // Get all messages from the past N hours
   getRecentMessages: async (hours = 24) => {
     const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
