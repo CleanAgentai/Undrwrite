@@ -4,7 +4,18 @@ const dealsService = require('../services/deals');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
 
-const FOLLOW_UP_AFTER_DAYS = 2;
+// Group GGGG: REMINDER_TESTING_MODE env var. When set, accelerates the full
+// reminder cadence so Franco can validate all 3 reminders end-to-end within
+// a single testing session instead of waiting 4 calendar days. Three knobs
+// flip together — cron schedule, silence threshold, and resend guard — so
+// they don't drift apart. Default (env var unset) preserves the production
+// cadence: daily 9 PM Edmonton cron, 2-day silence threshold, 20-hour guard.
+// Revert path: unset REMINDER_TESTING_MODE on Render; next cron tick reads
+// the production defaults. No deploy needed.
+const REMINDER_TESTING_MODE = !!process.env.REMINDER_TESTING_MODE;
+const FOLLOW_UP_AFTER_DAYS = REMINDER_TESTING_MODE ? (1 / 24) : 2;   // 1h vs 2d
+const RESEND_GUARD_HOURS   = REMINDER_TESTING_MODE ? 0.5         : 20;   // 30m vs 20h
+const CRON_SCHEDULE        = REMINDER_TESTING_MODE ? '*/30 * * * *' : '0 21 * * *';
 const MAX_REMINDERS = 3;
 
 // Single source of truth for "Franco's timezone." Used by both the cron
@@ -62,7 +73,7 @@ const runFollowUpReminders = async () => {
     const lastOut = lastOutbound.filter(m => m.direction === 'outbound').pop();
     if (lastOut) {
       const hoursSinceLastOut = (Date.now() - new Date(lastOut.created_at).getTime()) / (1000 * 60 * 60);
-      if (hoursSinceLastOut < 20) {
+      if (hoursSinceLastOut < RESEND_GUARD_HOURS) {
         console.log(`Deal ${deal.id} (${deal.borrower_name}) — outbound sent ${Math.round(hoursSinceLastOut)}h ago, skipping`);
         continue;
       }
@@ -311,12 +322,18 @@ const runDailySummary = async () => {
 };
 
 // Run every day at 9:00 PM in the admin's timezone (handles DST automatically
-// via IANA TZ — 9 PM MST in winter, 9 PM MDT in summer).
-cron.schedule('0 21 * * *', runDailySummary, {
+// via IANA TZ — 9 PM MST in winter, 9 PM MDT in summer). When
+// REMINDER_TESTING_MODE is set, the cron pattern is overridden above and
+// fires every 30 minutes for end-to-end testing.
+cron.schedule(CRON_SCHEDULE, runDailySummary, {
   timezone: ADMIN_TIMEZONE,
 });
 
-console.log(`Daily summary cron scheduled — runs at 9:00 PM ${ADMIN_TIMEZONE}`);
+if (REMINDER_TESTING_MODE) {
+  console.warn(`⚠️  REMINDER_TESTING_MODE active — cron='${CRON_SCHEDULE}', silence_threshold=${FOLLOW_UP_AFTER_DAYS} days (~1h), resend_guard=${RESEND_GUARD_HOURS}h. UNSET ON RENDER BEFORE GOING LIVE.`);
+} else {
+  console.log(`Daily summary cron scheduled — runs at 9:00 PM ${ADMIN_TIMEZONE}`);
+}
 
 // Export for manual triggering/testing. formatAdminDate is exposed for the
 // harness to pin Bug 13.1 (timezone wrap on date header).

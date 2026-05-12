@@ -4585,6 +4585,63 @@ renovations.`,
   console.log('  PASS [Group FFFF storage try/catch]: storage cleanup is best-effort, DB cleanup proceeds regardless');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP GGGG — REMINDER_TESTING_MODE env toggle (short-lived testing speedup)
+  // ════════════════════════════════════════════════════════════════
+  // Temporary speedup so Franco can validate all 3 reminders end-to-end in a
+  // single testing session instead of waiting 4 calendar days. Three knobs
+  // (cron schedule, silence threshold, resend guard) flip together so they
+  // don't drift apart. Default (env unset) preserves the 9 PM daily / 2-day
+  // / 20h production cadence. Revert path: unset REMINDER_TESTING_MODE on
+  // Render. Source-string regression only — the actual cadence is exercised
+  // in staging, not the harness.
+  console.log('\n========== GROUP GGGG — REMINDER_TESTING_MODE env toggle ==========');
+
+  // cronSrc already loaded earlier (EEEE block)
+  if (!/const REMINDER_TESTING_MODE = !!process\.env\.REMINDER_TESTING_MODE;/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG env read]: cron must read REMINDER_TESTING_MODE from process.env`);
+  }
+  console.log('  PASS [Group GGGG env read]: REMINDER_TESTING_MODE read from process.env');
+
+  if (!/FOLLOW_UP_AFTER_DAYS = REMINDER_TESTING_MODE \? \(1 \/ 24\) : 2/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG threshold ternary]: FOLLOW_UP_AFTER_DAYS must flip between 1/24 (testing) and 2 (production)`);
+  }
+  console.log('  PASS [Group GGGG threshold ternary]: 1h silence threshold under flag, 2d in production');
+
+  if (!/RESEND_GUARD_HOURS\s*= REMINDER_TESTING_MODE \? 0\.5\s*: 20/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG resend ternary]: RESEND_GUARD_HOURS must flip between 0.5 (testing) and 20 (production)`);
+  }
+  console.log('  PASS [Group GGGG resend ternary]: 30m guard under flag, 20h in production');
+
+  if (!/CRON_SCHEDULE\s*= REMINDER_TESTING_MODE \? '\*\/30 \* \* \* \*' : '0 21 \* \* \*'/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG cron ternary]: CRON_SCHEDULE must flip between '*/30 * * * *' (testing) and '0 21 * * *' (production)`);
+  }
+  console.log("  PASS [Group GGGG cron ternary]: '*/30 * * * *' under flag, '0 21 * * *' in production");
+
+  // The literal 20 must no longer appear as the hard-coded resend guard
+  if (/hoursSinceLastOut < 20\b/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG resend hardcode]: resend guard still hard-codes '< 20', must use RESEND_GUARD_HOURS`);
+  }
+  if (!/hoursSinceLastOut < RESEND_GUARD_HOURS/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG resend wiring]: resend guard must read RESEND_GUARD_HOURS`);
+  }
+  console.log('  PASS [Group GGGG resend wiring]: 20h literal removed, RESEND_GUARD_HOURS sourced');
+
+  // cron.schedule must now consume CRON_SCHEDULE, not the literal pattern
+  if (/cron\.schedule\('0 21 \* \* \*'/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG cron.schedule hardcode]: cron.schedule still hard-codes '0 21 * * *', must use CRON_SCHEDULE`);
+  }
+  if (!/cron\.schedule\(CRON_SCHEDULE,/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG cron.schedule wiring]: cron.schedule must consume CRON_SCHEDULE`);
+  }
+  console.log('  PASS [Group GGGG cron.schedule wiring]: literal pattern removed, CRON_SCHEDULE sourced');
+
+  // Startup banner must fire (console.warn) when flag is set, with the revert reminder
+  if (!/REMINDER_TESTING_MODE active[\s\S]{0,400}UNSET ON RENDER BEFORE GOING LIVE/.test(cronSrc)) {
+    throw new Error(`FAIL [Group GGGG startup banner]: console.warn must include 'REMINDER_TESTING_MODE active' + 'UNSET ON RENDER BEFORE GOING LIVE' revert reminder`);
+  }
+  console.log('  PASS [Group GGGG startup banner]: console.warn fires with revert reminder when flag is set');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed
