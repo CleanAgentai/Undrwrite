@@ -4642,6 +4642,84 @@ renovations.`,
   console.log('  PASS [Group GGGG startup banner]: console.warn fires with revert reminder when flag is set');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP HHHH — copy-pasteable admin review emails (Franco lender hand-off)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-HHHH the admin-facing review emails (PRELIMINARY/COMPLETE Review via
+  // generateLeadSummary, high-LTV escalation via generateEscalationNotification)
+  // rendered Section 1 (Deal Snapshot) as an HTML <table>. Tables don't survive
+  // copy-paste cleanly across email clients — borders drop, columns misalign,
+  // plain-text fallback breaks. Franco forwards sections 1-9 of these emails
+  // to lenders as part of presenting deals.
+  //
+  // HHHH does three things in both review prompts:
+  //   1. Replace the <table> instruction with a stack of <p><strong>Label:</strong> Value</p>.
+  //   2. Add an explicit anti-<table> directive in FORMAT.
+  //   3. Mark the conversation log + Action Required block as INTERNAL — DO NOT
+  //      FORWARD, with a visual <hr> + "do not forward to lenders" cliff
+  //      between the last lender-facing section and the internal sections, so
+  //      Franco knows where to stop selecting when copy-pasting.
+  //
+  // No PDF generation (per Porter's call decision — Claude PDF layout would
+  // need 4-5 iterations per email).
+  console.log('\n========== GROUP HHHH — copy-pasteable admin review emails ==========');
+
+  // aiSource already loaded earlier (Group AAAA / Q source-string regressions)
+
+  // 1. generateLeadSummary FORMAT line forbids <table>
+  if (!/DO NOT use <table> anywhere/.test(aiSource)) {
+    throw new Error(`FAIL [Group HHHH anti-table directive]: ai.js prompt must contain 'DO NOT use <table> anywhere' directive`);
+  }
+  console.log('  PASS [Group HHHH anti-table directive]: anti-<table> directive present in prompt');
+
+  // 2. The OLD instruction "<table> for the deal snapshot" must be gone
+  if (/<table> for the deal snapshot/.test(aiSource)) {
+    throw new Error(`FAIL [Group HHHH old table instruction]: pre-HHHH '<table> for the deal snapshot' phrasing still present`);
+  }
+  console.log('  PASS [Group HHHH old table instruction]: pre-HHHH table phrasing removed');
+
+  // 3. Section 1 instructs <p><strong>Label:</strong> Value pattern
+  if (!/Present as a stack of <p> elements, one per field, with the field label in <strong>/.test(aiSource)) {
+    throw new Error(`FAIL [Group HHHH Section 1 stack]: Section 1 must instruct '<p> stack with <strong> label' pattern`);
+  }
+  console.log('  PASS [Group HHHH Section 1 stack]: <p><strong>Label:</strong> Value pattern instructed');
+
+  // 4. Concrete example of the new shape exists in prompt
+  if (!/<p><strong>Property Address:<\/strong>/.test(aiSource)) {
+    throw new Error(`FAIL [Group HHHH Section 1 example]: prompt must include concrete '<p><strong>Property Address:</strong>' example`);
+  }
+  console.log('  PASS [Group HHHH Section 1 example]: concrete example present');
+
+  // 5. Visual cliff separator instruction before §10 in generateLeadSummary
+  if (!/sections below are internal — do not forward to lenders/.test(aiSource)) {
+    throw new Error(`FAIL [Group HHHH visual cliff]: prompt must instruct insertion of 'sections below are internal — do not forward to lenders' separator`);
+  }
+  console.log('  PASS [Group HHHH visual cliff]: separator block instruction present');
+
+  // 6. §10 heading carries INTERNAL — DO NOT FORWARD marker
+  const internalHeadingMatches = aiSource.match(/Email Conversation \(Internal — Do Not Forward\)/g) || [];
+  if (internalHeadingMatches.length < 2) {
+    throw new Error(`FAIL [Group HHHH §10 heading]: expected 'Email Conversation (Internal — Do Not Forward)' in BOTH generateLeadSummary AND generateEscalationNotification (2+ occurrences), got ${internalHeadingMatches.length}`);
+  }
+  console.log(`  PASS [Group HHHH §10 heading]: 'Email Conversation (Internal — Do Not Forward)' present in ${internalHeadingMatches.length} prompts (symmetric across review generators)`);
+
+  // 7. Action Required heading carries the internal marker
+  const actionInternalMatches = aiSource.match(/Action Required \(Internal — Do Not Forward\)/g) || [];
+  if (actionInternalMatches.length < 2) {
+    throw new Error(`FAIL [Group HHHH Action Required heading]: expected 'Action Required (Internal — Do Not Forward)' in BOTH generators (2+ occurrences), got ${actionInternalMatches.length}`);
+  }
+  console.log(`  PASS [Group HHHH Action Required heading]: '(Internal — Do Not Forward)' marker present in ${actionInternalMatches.length} Action Required headings`);
+
+  // 8. Escalation notification got the symmetric treatment (anti-table directive
+  //    must appear inside generateEscalationNotification's prompt body, not just
+  //    in generateLeadSummary's). The aiSource match for 'DO NOT use <table>' should
+  //    fire at least twice — once per generator.
+  const antiTableMatches = aiSource.match(/DO NOT use <table> anywhere/g) || [];
+  if (antiTableMatches.length < 2) {
+    throw new Error(`FAIL [Group HHHH symmetric anti-table]: anti-<table> directive must appear in BOTH generateLeadSummary AND generateEscalationNotification (2+ occurrences), got ${antiTableMatches.length}`);
+  }
+  console.log(`  PASS [Group HHHH symmetric anti-table]: anti-<table> directive in ${antiTableMatches.length} prompts (LeadSummary + EscalationNotification)`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP TTT — intake doc list completeness (S3.1)
   // ════════════════════════════════════════════════════════════════
   // Pre-TTT INITIAL_EMAIL_PROMPT's broker-context WHAT TO ASK FOR list missed
@@ -7151,6 +7229,25 @@ Brian`;
       const actionSection = (f3LeadHtml || '').match(/Action Required[\s\S]*?<\/ul>/i);
       console.log(`  ${actionSection ? actionSection[0].replace(/\s+/g, ' ').slice(0, 400) : '(no action section found)'}`);
       checkActionOptions('generateLeadSummary preliminary review', f3LeadHtml);
+
+      // GROUP HHHH live assertions on the same generated HTML (no extra Claude call)
+      if (/<table[\s>]/i.test(f3LeadHtml || '')) {
+        const tableSnippet = (f3LeadHtml.match(/<table[\s\S]{0,200}/i) || ['?'])[0];
+        throw new Error(`FAIL [Group HHHH live LeadSummary anti-table]: output must NOT contain <table> tag. Found: ${tableSnippet}`);
+      }
+      console.log('  PASS [Group HHHH live LeadSummary anti-table]: no <table> tag in generated output');
+
+      const hasParaStrong = /<p><strong>[A-Z][^<]+:<\/strong>\s+[^<]+<\/p>/i.test(f3LeadHtml || '');
+      if (!hasParaStrong) {
+        throw new Error(`FAIL [Group HHHH live LeadSummary §1 shape]: output missing <p><strong>Label:</strong> Value</p> pattern in Section 1`);
+      }
+      console.log('  PASS [Group HHHH live LeadSummary §1 shape]: at least one <p><strong>Label:</strong> Value</p> present (Section 1 label/value rows)');
+
+      const hasInternalMarker = /(internal[^<]{0,40}do not forward|do not forward[^<]{0,40}to lenders)/i.test(f3LeadHtml || '');
+      if (!hasInternalMarker) {
+        throw new Error(`FAIL [Group HHHH live LeadSummary internal marker]: output missing 'internal — do not forward' marker between §9 and §10 or in headings`);
+      }
+      console.log('  PASS [Group HHHH live LeadSummary internal marker]: visual cliff / internal marker rendered');
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Fix 3 generateLeadSummary smoke skipped due to API error: ${e.message}`);
@@ -7181,6 +7278,25 @@ Brian`;
       const escActionSection = (f3EscHtml || '').match(/Action Required[\s\S]*?<\/ul>/i);
       console.log(`  ${escActionSection ? escActionSection[0].replace(/\s+/g, ' ').slice(0, 400) : '(no action section found)'}`);
       checkActionOptions('generateEscalationNotification', f3EscHtml);
+
+      // GROUP HHHH live assertions on the same generated HTML (symmetric to LeadSummary)
+      if (/<table[\s>]/i.test(f3EscHtml || '')) {
+        const tableSnippet = (f3EscHtml.match(/<table[\s\S]{0,200}/i) || ['?'])[0];
+        throw new Error(`FAIL [Group HHHH live Escalation anti-table]: output must NOT contain <table> tag. Found: ${tableSnippet}`);
+      }
+      console.log('  PASS [Group HHHH live Escalation anti-table]: no <table> tag in generated output');
+
+      const hasEscParaStrong = /<p><strong>[A-Z][^<]+:<\/strong>\s+[^<]+<\/p>/i.test(f3EscHtml || '');
+      if (!hasEscParaStrong) {
+        throw new Error(`FAIL [Group HHHH live Escalation deal-facts shape]: output missing <p><strong>Label:</strong> Value</p> pattern for deal facts`);
+      }
+      console.log('  PASS [Group HHHH live Escalation deal-facts shape]: at least one <p><strong>Label:</strong> Value</p> present');
+
+      const hasEscInternalMarker = /(internal[^<]{0,40}do not forward|do not forward[^<]{0,40}to lenders)/i.test(f3EscHtml || '');
+      if (!hasEscInternalMarker) {
+        throw new Error(`FAIL [Group HHHH live Escalation internal marker]: output missing 'internal — do not forward' marker`);
+      }
+      console.log('  PASS [Group HHHH live Escalation internal marker]: internal marker rendered');
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Fix 3 generateEscalationNotification smoke skipped due to API error: ${e.message}`);

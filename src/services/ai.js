@@ -711,22 +711,28 @@ This is an internal email — not written as Franco, just a clear summary for re
 
 IMPORTANT: Do NOT start with raw HTML tags. Start with a clean heading text. Format as clean HTML email.
 
+FORMAT: Use <h2>/<h3> for section headers, <p> for text and label/value rows (with the field label in <strong>), <ul>/<li> for lists. DO NOT use <table> anywhere — tables don't survive copy-paste from this email into outgoing lender emails (borders drop, columns misalign across clients). Group HHHH: Franco forwards the deal-fact sections to lenders; the markup must be paragraph-based so the paste lands clean.
+
 Sections to include:
 1. Heading: "Deal Review Required — LTV: X%" where X is the actual LTV percentage from the deal summary (e.g. "Deal Review Required — LTV: 90%")
-2. Borrower, broker, property address, loan amount, actual LTV percentage
+2. Borrower, broker, property address, loan amount, actual LTV percentage (one <p><strong>Label:</strong> Value</p> per field)
 3. Loan type and purpose
 4. Exit strategy
 5. Documents received — list EACH document by name and classification. Note that all documents are also attached as a zip file.
 6. Key risks or notes
 7. A brief recommendation on what to look for
 
-8. FULL EMAIL CONVERSATION — include all broker emails below so Franco can review the full context. Label each with date and direction (inbound/outbound).
+Before section 8 begins, insert this exact separator block — it signals where the lender-forwardable content ends:
+<hr>
+<p><em>The sections below are internal — do not forward to lenders.</em></p>
+
+8. FULL EMAIL CONVERSATION (INTERNAL — DO NOT FORWARD) — render the heading exactly as "<h2>Email Conversation (Internal — Do Not Forward)</h2>". Include all broker emails below so Franco can review the full context. Label each with date and direction (inbound/outbound).
 
 Note: All documents are attached to this email as a zip file for Franco's review.
 
-At the bottom, include this action section:
+At the bottom, include this action section (the heading must carry the internal marker so Franco doesn't include it when forwarding):
 <hr>
-<h3>Action Required</h3>
+<h3>Action Required (Internal — Do Not Forward)</h3>
 <p>Reply to this email with one of the following:</p>
 <ul>
 <li><strong>APPROVED</strong> — deal will move forward and broker will be asked for full document package</li>
@@ -1133,10 +1139,17 @@ This summary must be usable in three ways:
 2. Exported as a one-page (or two-page) PDF
 3. Stored as the authoritative snapshot of the file
 
-FORMAT: Return the summary as HTML using the exact sections below. Use <h2> for section headers, <p> for text, <table> for the deal snapshot, <ul>/<li> for lists.
+FORMAT: Return the summary as HTML. Use <h2> for section headers, <p> for text and label/value rows, <ul>/<li> for lists. DO NOT use <table> anywhere — tables don't survive copy-paste from this email into outgoing lender emails (borders drop, columns misalign across clients). Group HHHH: Franco forwards Sections 1-9 to lenders; the markup must be paragraph-based so the paste lands clean.
 
 === SECTION 1: DEAL SNAPSHOT (Top of Page) ===
-Present as a clean HTML table with label/value rows:
+Present as a stack of <p> elements, one per field, with the field label in <strong> followed by a colon and the value on the same line. Renders top-to-bottom like a label/value table without the <table> tag.
+
+Example shape (use exactly this pattern — one <p> per field, label in <strong>):
+<p><strong>Property Address:</strong> 412 Windermere Close SW, Edmonton, AB</p>
+<p><strong>City / Province:</strong> Edmonton / Alberta</p>
+<p><strong>Loan Amount Requested:</strong> $68,000</p>
+
+Fields to render (in this order):
 - Property Address
 - City / Province
 - Loan Amount Requested
@@ -1207,7 +1220,13 @@ ${missingDocs.map(d => `- [MISSING] ${module.exports.DOC_DISPLAY_NAMES[d] || d}`
 
 ${!isComplete ? `\nIMPORTANT: This file is pending approval. The following documents are still outstanding: ${missingDocs.map(d => module.exports.DOC_DISPLAY_NAMES[d] || d).join(', ')}. Start the summary with: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"` : 'This file is COMPLETE — all required documents have been received.'}
 
-=== SECTION 10: EMAIL CONVERSATION ===
+Before SECTION 10 begins, insert this exact separator block — it signals to Franco where the lender-forwardable content ends:
+<hr>
+<p><em>The sections below are internal — do not forward to lenders.</em></p>
+
+=== SECTION 10: EMAIL CONVERSATION (INTERNAL — DO NOT FORWARD) ===
+Render the heading EXACTLY as "<h2>Email Conversation (Internal — Do Not Forward)</h2>" so Franco sees the internal marker in the rendered email.
+
 Include the full email conversation so Franco can review all broker communications. Each entry in the input data below is labeled with its direction AND sender — the label is one of:
   - "OUTBOUND from Vienna" (Vienna's outbound emails)
   - "INBOUND from ${inboundSenderLabel}" (broker's inbound emails — broker_name)
@@ -1223,9 +1242,9 @@ ATTRIBUTION RULE (CRITICAL):
 CRITICAL — RENDER EVERY ENTRY (Group DDDD S6.3 defensive guard):
 The messages array below is authoritative. Render every entry in the order given. Do NOT omit the latest message or any message regardless of perceived redundancy. Franco scans the log to verify the most recent broker turn; omitting the latest creates the appearance that the file is stale or the trigger wasn't received. If the input has 14 messages, render 14; if 30, render 30.
 
-At the bottom, include this action section:
+At the bottom, include this action section (the heading must carry the internal marker so Franco doesn't include it when forwarding):
 <hr>
-<h3>Action Required</h3>
+<h3>Action Required (Internal — Do Not Forward)</h3>
 <p>Reply to this email with one of the following:</p>
 <ul>
 <li><strong>APPROVED</strong> — preliminary approval granted, Vienna will request remaining documents from the broker</li>
