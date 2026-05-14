@@ -144,6 +144,29 @@ const computeIntakeAskedItems = (dealSummary, classificationsOnFile = []) => {
   return askedItems;
 };
 
+// Group JJJJ (S15.2): exclude misattached docs from the prelim-review gate.
+// Vienna's processInitialEmail / generateBrokerResponse emit
+// misattached_documents — an array of EXACT filenames whose CONTENT doesn't
+// belong to the canonical deal file (either wrong borrower name OR wrong
+// property address OR both — any axis is sufficient). The gate's
+// hasReviewableDoc check (income_proof/noa/appraisal) must filter those out, or
+// the prelim fires on docs that don't apply (Anna Bergstrom production case:
+// Grace Paulson's appraisal for 88 Harvest Hills triggered prelim despite
+// Vienna correctly annotating it as wrong-property in §9; the gate had no
+// concept of misattachment). Re-evaluated by Claude every turn — if broker
+// resends a correct replacement, the old filename stays in the array (still
+// on file, still misattached) but the new doc is NOT in it, so the gate sees
+// the new doc as eligible.
+const eligibleDocsForGate = (docs, dealSummary) => {
+  const misattached = new Set(
+    Array.isArray(dealSummary?.misattached_documents)
+      ? dealSummary.misattached_documents
+      : []
+  );
+  if (misattached.size === 0) return docs;
+  return docs.filter(d => !misattached.has(d.file_name));
+};
+
 // Group DDDD (S6.2): pre-label messages JS-side so admin replies (stored as
 // direction='inbound' on under_review deals per the HITL pattern) get
 // attributed to "Admin (Franco)" rather than the broker_name when rendered
@@ -1105,7 +1128,13 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         // Predicate matches Bradley's commit e93f657: high-LTV escalation does NOT require
         // a reviewable doc (Franco wants to see those deals immediately); preliminary
         // review for ≤80% still requires at least one of income_proof / NOA / appraisal.
-        const initialDocsForGate = await dealsService.getDocumentsByDeal(deal.id);
+        const initialDocsForGateRaw = await dealsService.getDocumentsByDeal(deal.id);
+        // Group JJJJ (S15.2): filter out misattached docs (wrong borrower OR
+        // wrong property) before computing the reviewable-doc gate. Vienna's
+        // dealSummary.misattached_documents lists filenames whose content doesn't
+        // belong to the canonical deal file; gate must not count them or prelim
+        // fires on docs that don't apply to the transaction.
+        const initialDocsForGate = eligibleDocsForGate(initialDocsForGateRaw, dealSummary);
         const initialClassifications = initialDocsForGate.map(d => d.classification).filter(Boolean);
 
         // Group EEEE (S12.2): stamp intake_asked_items snapshot so cron reminders
@@ -1480,7 +1509,16 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // For LTV ≤ 80% (preliminary review), require at least ONE of: proof of income, NOA, or appraisal.
         // For LTV > 80% (escalation), do NOT wait for any of those — Franco wants to see high-LTV deals
         // immediately so he can decide if there's room to work with additional collateral, etc.
-        const docsForGate = await dealsService.getDocumentsByDeal(existingDeal.id);
+        const docsForGateRaw = await dealsService.getDocumentsByDeal(existingDeal.id);
+        // Group JJJJ (S15.2): filter out misattached docs (wrong borrower OR
+        // wrong property) before computing the reviewable-doc gate. Anna
+        // Bergstrom production case 2026-05-13: Grace Paulson's appraisal for
+        // 88 Harvest Hills (correctly classified at the doc-level) triggered
+        // prelim review on an Anna deal at 1801 Varsity Estates because the
+        // gate had no concept of misattachment. Vienna's
+        // updatedSummary.misattached_documents now surfaces the structured
+        // signal; gate filters those filenames out.
+        const docsForGate = eligibleDocsForGate(docsForGateRaw, result.updatedSummary);
         const classificationsForGate = docsForGate.map(d => d.classification).filter(Boolean);
         const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => classificationsForGate.includes(c));
 
@@ -1678,4 +1716,6 @@ module.exports.__test__ = {
   labelMessagesForLeadSummary,
   // Group EEEE: intake_asked_items snapshot computation
   computeIntakeAskedItems,
+  // Group JJJJ: misattached doc filter for prelim-review gate
+  eligibleDocsForGate,
 };

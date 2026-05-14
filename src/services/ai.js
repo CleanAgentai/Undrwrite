@@ -209,6 +209,7 @@ Use this exact JSON structure (use null for unknown fields, do not guess):
   "income_details": "string or null",
   "documents_received": ["list of document names received"],
   "documents_still_needed": ["list of documents still missing"],
+  "misattached_documents": ["EXACT filenames (as listed in the attachment list) of any attached documents that do not belong to this deal's canonical file — meaning the doc's CONTENT names a different applicant (wrong borrower), describes a different property (wrong property address), or otherwise doesn't apply to this transaction. Either axis is sufficient: a doc with the correct borrower name but a different property address belongs in this array; a doc with the correct property but a different applicant also belongs. Empty array when all attached docs match BOTH the canonical borrower AND the canonical property. See MISATTACHED DOC DETECTION RULE below for worked examples."],
   "key_risks_or_notes": "string - any red flags, urgency, or notable details",
   "identity_clash": true | false,
   "summary": "9-10 sentence plain English summary of the deal so far"
@@ -219,6 +220,16 @@ The accurate LTV will be confirmed once we review the appraisal, NOT from the ap
 Be specific about documents received vs still needed.
 EXIT STRATEGY RULE: Only set exit_strategy to a value if the broker EXPLICITLY stated the exit strategy in their email (e.g. "exit strategy: refinance with B lender at maturity" or "the borrower plans to sell the property after 12 months"). Do NOT infer, guess, or reconstruct an exit strategy from loan purpose, loan type, or any other context. If the exit strategy is not explicitly stated, set exit_strategy to null — and the missing exit strategy should appear in documents_still_needed.
 IDENTITY CLASH DETECTION RULE (Group HHH): set identity_clash=true ONLY when the borrower name in the email body is CLEARLY DIFFERENT from the borrower name in the attached loan application (or any other doc that names a borrower) — i.e. they refer to two different people. Compare full names, not just first names. A typo, missing middle name, or initial-vs-full-name difference is NOT a clash (e.g. "Anna Bergstrom" vs "Anna M. Bergstrom" is the same person; "Anna Bergstrom" vs "Grace Paulson" IS a clash). Set identity_clash=false for any of: no attached doc with a borrower name, names match, names are minor variants of the same person, only one name source available. When identity_clash=true, also add a note to key_risks_or_notes with both names (e.g. "Email body says 'Anna Bergstrom' but loan application is for 'Grace Paulson' — needs clarification before doc requests").
+MISATTACHED DOC DETECTION RULE (Group JJJJ): for each attached document, determine whether the document's CONTENT belongs to this deal's canonical file. A doc is misattached if EITHER (a) the applicant/borrower named on the doc differs from the canonical borrower_name above, OR (b) the property address described on the doc differs from the canonical property_address above. Either axis alone is sufficient — the semantic is "this doc doesn't belong to this transaction", not "this doc is for a different person."
+
+Worked examples (canonical borrower "Anna Bergstrom", canonical property "1801 Varsity Estates Dr NW"):
+  - Doc shows applicant "Grace Paulson" AND property "88 Harvest Hills Blvd NE" → FLAG (both axes mismatch).
+  - Doc shows applicant "Anna Bergstrom" but property "88 Harvest Hills Blvd NE" → FLAG (right person, wrong file — the doc is for a different transaction Anna may also be involved in).
+  - Doc shows applicant "Grace Paulson" but property "1801 Varsity Estates Dr NW" → FLAG (wrong person on the right property — still doesn't belong to this deal).
+  - Doc shows applicant "Anna Bergstrom" AND property "1801 Varsity Estates Dr NW" → DO NOT FLAG (matches canonical on both axes).
+  - Doc has no clear applicant info but the property address matches canonical → DO NOT FLAG (no evidence of mismatch).
+
+Add the EXACT filename (from the attachment list) to misattached_documents. RULES: (1) match on document CONTENT, not filename — a file called "appraisal.pdf" whose content shows a different property IS misattached; a file called "Grace_Paulson.pdf" whose content actually matches Anna + canonical property is NOT misattached. (2) Be conservative — when unsure on BOTH axes, do NOT flag. False positives suppress the prelim gate and the broker hangs. False negatives let prelim fire on docs that don't apply (the Anna Bergstrom production bug). (3) Set to an empty array when all attached docs match canonical on both axes. (4) Use the exact filename string from the attachment list. (5) This field is independent of identity_clash — identity_clash is about the email body vs the docs, while misattached_documents is about doc content vs the canonical deal. When identity_clash=true the docs causing the clash typically also go into misattached_documents.
 If any number stated in the email (credit scores, property value, loan amount, balances) differs from what an attached document shows, add a note to key_risks_or_notes flagging the discrepancy — e.g. "Email stated credit scores 531/519 but credit bureau shows 583/608 — needs clarification."
 The summary field should read like a brief to a lender — include all key facts.
 
@@ -545,6 +556,21 @@ CRITICAL — DO NOT CORRUPT BROKER_NAME OR SENDER_NAME:
 - The existing deal summary below already has broker_name and sender_name set correctly. PRESERVE these values in updated_summary unless the latest email provides clear new information about who the broker is.
 - 'Franco' is the LENDER we work for. Franco is NEVER the broker. Even if the latest email starts with 'Hi Franco' or 'Hello Franco' (because the broker is writing TO Franco), do NOT change broker_name to 'Franco'. The broker is the SENDER of these emails, not the recipient.
 - If existing broker_name is already populated, keep it as-is unless you have strong evidence from the conversation context that the existing value is wrong.
+
+MISATTACHED DOC RE-EVALUATION (Group JJJJ): updated_summary MUST include a misattached_documents field — an array of EXACT filenames (matching DOCUMENTS ALREADY ON FILE below + any new attachments) whose CONTENT does not belong to this deal's canonical file. A doc is misattached if EITHER (a) the applicant named on the doc differs from the canonical borrower_name, OR (b) the property address on the doc differs from the canonical property_address. Either axis alone is sufficient — the semantic is "this doc doesn't belong to this transaction."
+
+Worked examples (canonical borrower "Anna Bergstrom", canonical property "1801 Varsity Estates Dr NW"):
+- "Grace Paulson" + "88 Harvest Hills Blvd NE" → FLAG (both axes mismatch).
+- "Anna Bergstrom" + "88 Harvest Hills Blvd NE" → FLAG (right person, wrong property — different transaction).
+- "Grace Paulson" + "1801 Varsity Estates Dr NW" → FLAG (right property, wrong person).
+- "Anna Bergstrom" + "1801 Varsity Estates Dr NW" → DO NOT FLAG (matches canonical).
+
+Re-evaluate this field every turn from scratch — do not just copy the previous value:
+- If a doc from a prior turn is still on file and still mismatches canonical on EITHER axis, keep its filename in the array.
+- If the broker sent a correct replacement this turn (e.g. previously had "LoanApp_Grace.pdf" for an Anna deal, this turn broker sent "LoanApp_Anna.pdf" matching canonical on both axes), the new doc is NOT in the array; the old "LoanApp_Grace.pdf" stays in the array (it's still on file and still misattached).
+- If broker conversationally claims an earlier-flagged doc was actually correct, only remove from the array if the doc's content actually matches canonical on both axes. Do not remove based on conversational claim alone — the doc content is authoritative.
+- Empty array when no docs on file are misattached.
+- This field gates the preliminary-review trigger downstream. False positives suppress the gate (broker hangs); false negatives let prelim fire on docs that don't apply (the Anna Bergstrom production bug). Be conservative — flag only when content clearly mismatches canonical.
 
 EXISTING DEAL SUMMARY:
 ${JSON.stringify(existingSummary, null, 2)}
