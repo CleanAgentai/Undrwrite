@@ -5331,6 +5331,324 @@ Crown Mortgage Group Lic. #MB556291`;
   // regression below catches anyone wiring computeWillReview into the
   // initial branch.
   // ════════════════════════════════════════════════════════════════
+  // GROUP OOOO — pre-approval gate/conversation mismatch (S6.1)
+  // ════════════════════════════════════════════════════════════════
+  // Production case 2026-05-16 (deal ef05f551, Kevin Tran): broker submitted
+  // a complete 10-doc package, Vienna flagged a loan-amount discrepancy,
+  // broker confirmed $72K. Vienna's reply at msg 4 said "I believe we have
+  // everything we need to send the file for review" verbatim — but
+  // exit_strategy was null, BBBB's gate correctly held willReview=false,
+  // and no prelim ever fired. File stalled until cron reminders kicked in
+  // an hour later asking for exit_strategy.
+  //
+  // RECLASSIFICATION from triage: this is NOT a third instance of the
+  // ZZZ/FFFF silent-swallow class. It's a gate/conversation mismatch —
+  // the JS gate is correct; Vienna's prompt template at ai.js:570
+  // unconditionally hands her the over-promising phrase.
+  //
+  // OOOO fix shape (mirrors KKKK's JS-flag-into-prompt pattern):
+  //   1. computeStillMissingForReview pure helper, sibling to NNNN's
+  //      computeWillReview. Enumerates broker-actionable items blocking
+  //      the gate (exit_strategy / appraisal / reviewable doc). Returns
+  //      [] when out-of-scope (status not 'active', prelim_approved_at,
+  //      identityClashUnresolved, LTV > 80 — different flows own those).
+  //   2. Active-branch call site computes the list, passes via options
+  //      to generateBrokerResponse alongside KKKK's postApprovalAmlPepAsk.
+  //   3. generateBrokerResponse injects stillMissingBlock when list non-
+  //      empty — enumerates items AND bans the verbatim over-promising
+  //      template + paraphrases (7-pattern ban list, BANNED OPENERS
+  //      precedent for exhaustive enumeration of probabilistic leaks).
+  //
+  // Forward-note (out of scope): ai.js:570 unconditionally hands Vienna
+  // the over-promising template. OOOO addresses the symptom via override-
+  // block. Cleaner long-term: make the template conditional at its
+  // source. Tracked, not actioned here.
+  console.log('\n========== GROUP OOOO — pre-approval gate/conversation mismatch ==========');
+
+  // ─── Truth table on computeStillMissingForReview ────────────────────
+  console.log('\n---------- Group OOOO / Truth Table: computeStillMissingForReview ----------');
+  const { computeStillMissingForReview } = require('./src/routes/webhook').__test__;
+
+  const ooooCases = [
+    // ── Out-of-scope: empty arrays (different flows handle these states) ──
+    {
+      name: 'out-of-scope: status under_review → [] (NNN dispatch handles)',
+      input: { deal: { status: 'under_review', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: 'refi' }, classifications: ['appraisal'], identityClashUnresolved: false },
+      expectLength: 0,
+    },
+    {
+      name: 'out-of-scope: prelim_approved_at set → [] (KKKK handles post-approval)',
+      input: { deal: { status: 'active', prelim_approved_at: '2026-05-17T00:00:00Z' }, summary: { ltv_percent: 65, exit_strategy: 'refi' }, classifications: ['appraisal'], identityClashUnresolved: false },
+      expectLength: 0,
+    },
+    {
+      name: 'out-of-scope: identityClashUnresolved → [] (HHH handles)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: 'refi' }, classifications: ['appraisal'], identityClashUnresolved: true },
+      expectLength: 0,
+    },
+    {
+      name: 'out-of-scope: LTV > 80 → [] (Fix 7 collateral path)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 85, exit_strategy: 'refi' }, classifications: ['appraisal'], identityClashUnresolved: false },
+      expectLength: 0,
+    },
+    {
+      name: 'out-of-scope: status awaiting_collateral → [] (Fix 7 awaiting state)',
+      input: { deal: { status: 'awaiting_collateral', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: 'refi' }, classifications: ['appraisal'], identityClashUnresolved: false },
+      expectLength: 0,
+    },
+
+    // ── All gates pass: empty (willReview would fire, conversational reply suppressed) ──
+    {
+      name: 'all gates pass → [] (willReview fires, conversational suppressed)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: 'refi at maturity' }, classifications: ['appraisal', 'loan_application'], identityClashUnresolved: false },
+      expectLength: 0,
+    },
+
+    // ── In-scope, gate fails: enumerate ──
+    {
+      name: 'KEVIN PRODUCTION SHAPE: only exit_strategy missing → 1 item',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 59.2, exit_strategy: null }, classifications: ['appraisal', 'income_proof', 'loan_application', 'credit_report'], identityClashUnresolved: false },
+      expectLength: 1,
+      expectIncludes: ['exit strategy'],
+    },
+    {
+      name: 'only LTV missing (no ltv_percent yet, reviewable doc + exit_strategy present) → 1 item (appraisal for LTV)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: null, exit_strategy: 'refi' }, classifications: ['appraisal'], identityClashUnresolved: false },
+      expectLength: 1,
+      expectIncludes: ['appraisal'],
+    },
+    {
+      name: 'no reviewable doc → 1 item (reviewable document ask)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: 'refi' }, classifications: ['loan_application'], identityClashUnresolved: false },
+      expectLength: 1,
+      expectIncludes: ['reviewable document'],
+    },
+    {
+      name: 'NOA satisfies hasReviewableDoc (synonym) → [] (gate passes)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: 'refi' }, classifications: ['noa'], identityClashUnresolved: false },
+      expectLength: 0,
+    },
+    {
+      name: 'reviewable doc + exit_strategy both missing → 2 items',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: null }, classifications: ['loan_application'], identityClashUnresolved: false },
+      expectLength: 2,
+      expectIncludes: ['reviewable document', 'exit strategy'],
+    },
+    {
+      name: 'LTV + reviewable + exit_strategy all missing → 3 items',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: null, exit_strategy: null }, classifications: [], identityClashUnresolved: false },
+      expectLength: 3,
+      expectIncludes: ['appraisal', 'reviewable document', 'exit strategy'],
+    },
+    {
+      name: 'whitespace-only exit_strategy → 1 item (trim() rejection, BBBB invariant)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: '   ' }, classifications: ['appraisal'], identityClashUnresolved: false },
+      expectLength: 1,
+      expectIncludes: ['exit strategy'],
+    },
+    {
+      name: 'defensive: null classifications → enumerates missing reviewable doc',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: { ltv_percent: 65, exit_strategy: 'refi' }, classifications: null, identityClashUnresolved: false },
+      expectLength: 1,
+      expectIncludes: ['reviewable document'],
+    },
+  ];
+
+  let ooooPassed = 0;
+  for (const tc of ooooCases) {
+    const got = computeStillMissingForReview(tc.input);
+    if (got.length !== tc.expectLength) {
+      throw new Error(`FAIL [Group OOOO ${tc.name}]:\n  input=${JSON.stringify(tc.input)}\n  expected length=${tc.expectLength}\n  got length=${got.length}\n  got items=${JSON.stringify(got)}`);
+    }
+    if (tc.expectIncludes) {
+      for (const token of tc.expectIncludes) {
+        const found = got.some(item => item.toLowerCase().includes(token.toLowerCase()));
+        if (!found) {
+          throw new Error(`FAIL [Group OOOO ${tc.name}]: expected item containing '${token}' in result. Got: ${JSON.stringify(got)}`);
+        }
+      }
+    }
+    console.log(`  PASS [${tc.name}]: → ${got.length} item(s)`);
+    ooooPassed++;
+  }
+  console.log(`Group OOOO / Truth Table: ${ooooPassed}/${ooooCases.length} passed`);
+
+  // ─── Source-string regressions on webhook.js wiring ────────────────
+  console.log('\n---------- Group OOOO / Source-string regression on webhook.js ----------');
+
+  // Helper defined
+  if (!/const computeStillMissingForReview = \(\{ deal, summary, classifications, identityClashUnresolved \}\) =>/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group OOOO helper definition]: computeStillMissingForReview must be defined with destructured object signature`);
+  }
+  console.log('  PASS [Group OOOO helper definition]: signature present');
+
+  // Helper exported via __test__
+  if (!/module\.exports\.__test__ = \{[\s\S]*computeStillMissingForReview,?[\s\S]*\};/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group OOOO helper export]: computeStillMissingForReview must be in webhook.js __test__ exports`);
+  }
+  console.log('  PASS [Group OOOO helper export]: exported via __test__');
+
+  // Active-branch call site computes the list
+  if (!/const stillMissingForReview = computeStillMissingForReview\(\{[\s\S]{0,400}deal: existingDeal,[\s\S]{0,400}\}\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group OOOO active-branch computation]: active branch must call computeStillMissingForReview({ deal: existingDeal, ... })`);
+  }
+  console.log('  PASS [Group OOOO active-branch computation]: computed at active-branch call site');
+
+  // Pass via options (alongside KKKK's postApprovalAmlPepAsk)
+  if (!/\{ postApprovalAmlPepAsk, stillMissingForReview \}/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group OOOO options pass-through]: webhook.js must pass { postApprovalAmlPepAsk, stillMissingForReview } as options to generateBrokerResponse`);
+  }
+  console.log('  PASS [Group OOOO options pass-through]: flag passed via options object');
+
+  // ─── Source-string regressions on generateBrokerResponse + ai.js ────
+  console.log('\n---------- Group OOOO / Source-string regression on ai.js prompt ----------');
+
+  // Signature accepts stillMissingForReview in options
+  if (!/generateBrokerResponse: async \([\s\S]{0,400}stillMissingForReview = \[\][\s\S]{0,100}\}\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group OOOO signature]: generateBrokerResponse signature must accept { ..., stillMissingForReview = [] } in options`);
+  }
+  console.log('  PASS [Group OOOO signature]: generateBrokerResponse accepts stillMissingForReview option');
+
+  // stillMissingBlock conditional on the option
+  if (!/const stillMissingBlock = \(Array\.isArray\(stillMissingForReview\) && stillMissingForReview\.length > 0\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group OOOO block conditional]: stillMissingBlock must be conditionally injected based on stillMissingForReview.length > 0 (with Array.isArray defensive check)`);
+  }
+  console.log('  PASS [Group OOOO block conditional]: block fires only when list non-empty (with Array.isArray defense)');
+
+  // STILL-MISSING-FOR-REVIEW header anchors the block
+  if (!/STILL-MISSING-FOR-REVIEW \(Group OOOO/.test(aiSource)) {
+    throw new Error(`FAIL [Group OOOO block header]: block must include 'STILL-MISSING-FOR-REVIEW (Group OOOO' header`);
+  }
+  console.log('  PASS [Group OOOO block header]: header anchor present');
+
+  // 7-pattern FORBIDDEN PHRASES ban list — assert all 7 verbatim entries
+  // (KKKK BANNED OPENERS precedent: exhaustive enumeration of probabilistic leaks)
+  const ooooBannedPhrases = [
+    '"I believe we have everything we need to send the file for review"',
+    '"we have everything we need"',
+    '"I\'ll get this over for review"',
+    '"I\'ll send the file for review"',
+    '"ready to send for review"',
+    '"file is ready to go to underwriting"',
+    '"all set to send for review"',
+  ];
+  for (const phrase of ooooBannedPhrases) {
+    if (!aiSource.includes(phrase)) {
+      throw new Error(`FAIL [Group OOOO ban list]: FORBIDDEN PHRASES list must include verbatim ${phrase}`);
+    }
+  }
+  console.log(`  PASS [Group OOOO ban list]: all 7 verbatim FORBIDDEN PHRASES present`);
+
+  // Block injected into prompt body (anchored on TASK 1 RESPOND TO THE SENDER section)
+  if (!/=== TASK 1: RESPOND TO THE SENDER ===[\s\S]{0,500}\$\{stillMissingBlock\}/.test(aiSource)) {
+    throw new Error(`FAIL [Group OOOO block injection]: \${stillMissingBlock} must be interpolated into the TASK 1 section of the prompt (adjacent to KKKK's postApprovalAmlPepBlock)`);
+  }
+  console.log('  PASS [Group OOOO block injection]: block interpolated into TASK 1 prompt section');
+
+  // ─── Live verification — single 5x on Kevin's shape under RUN_OOOO_D=1 ──
+  if (process.env.RUN_OOOO_D === '1') {
+    console.log('\n---------- Group OOOO / D1: Kevin-shape exit_strategy-missing 5x ----------');
+
+    // Replay Kevin's exact production turn (msg 4 was the over-promising leak).
+    // existingSummary mirrors Kevin's extracted_data at that moment: full doc
+    // package received, exit_strategy null, post-discrepancy-clarification.
+    const ooooSummary = {
+      sender_type: 'broker',
+      sender_name: 'Robert Fairweather',
+      broker_name: 'Robert Fairweather',
+      broker_company: 'Clearview Mortgage Group',
+      borrower_name: 'Kevin Minh Tran',
+      loan_type: 'second mortgage',
+      is_purchase: false,
+      property_address: '3312 Brentwood Road NW, Calgary, AB T2L 1L1',
+      property_value: 595000,
+      loan_amount_requested: 72000,
+      existing_mortgage_balance: 280000,
+      ltv_percent: 59.2,
+      purpose: 'Home renovation',
+      exit_strategy: null,  // ← THE LOAD-BEARING PRE-CONDITION
+      income_details: 'Senior Software Engineer at ATB Financial, $108,600 annual income',
+      identity_clash: false,
+      key_risks_or_notes: 'Complete documentation package provided. Strong credit scores. Initial loan amount discrepancy clarified - correct amount is $72,000.',
+    };
+    const ooooDocsOnFile = [
+      { file_name: 'LoanApp_Tran.pdf', classification: 'loan_application' },
+      { file_name: 'PNW_Tran.pdf', classification: 'pnw_statement' },
+      { file_name: 'Appraisal_Tran.pdf', classification: 'appraisal' },
+      { file_name: 'CB_Tran.pdf', classification: 'credit_report' },
+      { file_name: 'T4_Tran_2025.pdf', classification: 'income_proof' },
+      { file_name: 'GovID_Tran.pdf', classification: 'government_id' },
+      { file_name: 'PropertyTax_Tran.pdf', classification: 'property_tax' },
+      { file_name: 'CIBC_Payout_Tran.pdf', classification: 'mortgage_statement' },
+      { file_name: 'AML_Tran.pdf', classification: 'aml' },
+      { file_name: 'PEP_Tran.pdf', classification: 'pep' },
+    ];
+    const ooooConvoHistory = [
+      { direction: 'inbound', subject: 'New Mortgage Submission — Kevin Tran', body: 'Hi, Please find attached a complete file for your review. Borrower: Kevin Minh Tran. Property: 3312 Brentwood Road NW, Calgary. Appraised Value: $595,000. Loan Request: $70,000 (second mortgage). Existing First Mortgage (CIBC): ~$280,000. Combined LTV: ~58.8%. Purpose: Home renovation.', created_at: '2026-05-16T23:48:41Z' },
+      { direction: 'outbound', subject: 'Re: New Mortgage Submission — Kevin Tran', body: 'Hi Robert! I noticed a discrepancy — your email mentions $70,000 loan request but the loan application shows $72,000. Could you confirm which is correct?', created_at: '2026-05-16T23:49:03Z' },
+      // Broker's latest message — the one Vienna is responding to (msg 3 in production)
+      { direction: 'inbound', subject: 'Re: New Mortgage Submission — Kevin Tran', body: 'Hi Vienna, Thanks for catching that — the loan application is correct. The loan request is $72,000. Robert Fairweather, Clearview Mortgage Group Lic. #MB552917', created_at: '2026-05-16T23:50:51Z' },
+    ];
+    // JS-side: with exit_strategy=null, computeStillMissingForReview returns
+    // ['exit strategy ...']. Pass through as production webhook would.
+    const ooooStillMissing = ['exit strategy (how the borrower plans to repay or refinance out at maturity)'];
+
+    // Forbidden phrase patterns (loose match — Claude may paraphrase slightly;
+    // the verbatim ban list is exhaustive but the test catches the semantic).
+    const ooooForbiddenPatterns = [
+      /\bwe have everything we need\b/i,
+      /\bI'?ll get this over (?:for|to)\s+\w+\s+for review\b/i,
+      /\bI'?ll get this over for review\b/i,
+      /\bI'?ll send the file for review\b/i,
+      /\bready to send (?:for|the file for) review\b/i,
+      /\ball set to send for review\b/i,
+      /\bfile is ready to (?:go to|send to) (?:underwriting|review)\b/i,
+      /\bI believe we have everything we need\b/i,
+    ];
+
+    let d1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const result = await aiService.generateBrokerResponse(
+          ooooConvoHistory[ooooConvoHistory.length - 1].body,
+          [],
+          [],
+          ooooSummary,
+          ooooConvoHistory,
+          ooooDocsOnFile,
+          'active',
+          { postApprovalAmlPepAsk: false, stillMissingForReview: ooooStillMissing }
+        );
+        const reply = (result?.responseEmail || '').toLowerCase();
+
+        // Two leak conditions: (a) any forbidden phrase appears, (b) reply does NOT mention exit strategy.
+        const leakedPhrase = ooooForbiddenPatterns.find(p => p.test(reply));
+        const mentionsExitStrategy = /exit strategy/i.test(reply);
+
+        if (leakedPhrase) {
+          d1Leaks++;
+          console.log(`  Run ${run}: LEAK — forbidden over-promising phrase matched: ${leakedPhrase}\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+        } else if (!mentionsExitStrategy) {
+          d1Leaks++;
+          console.log(`  Run ${run}: LEAK — reply does NOT mention 'exit strategy' (the one outstanding item Vienna must ask for)\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — no forbidden phrase, reply asks for exit strategy`);
+        }
+      } catch (e) {
+        d1Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group OOOO / D1 (Kevin-shape exit_strategy-missing 5x): ${5 - d1Leaks}/5 passed, ${d1Leaks}/5 leaked (threshold: ≤1)`);
+
+    if (d1Leaks > 1) {
+      throw new Error(`FAIL [Group OOOO / D escalation]: D1 crossed threshold (${d1Leaks}/5 leaked). The OOOO block + ban list isn't strong enough to override the unconditional ai.js:570 template. Escalation per pre-authorization: tighten the ban list (add paraphrases Claude actually leaked) OR make the ai.js:570 template conditional at its source (the forward-noted long-term cleanup). Surface diagnosis before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group OOOO / D1: SKIPPED (set RUN_OOOO_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP KKKK — AML/PEP sequencing gate in generateDocumentRequestEmail (S1.1/S2.1/S5.1)
   // ════════════════════════════════════════════════════════════════
   // This bug has been counted "fixed" three times. KKKK closes it for good
@@ -5545,8 +5863,10 @@ Crown Mortgage Group Lic. #MB556291`;
   console.log('\n---------- Group KKKK / D3 escalation: explicit POST-APPROVAL AML/PEP block ----------');
 
   // generateBrokerResponse signature accepts the postApprovalAmlPepAsk flag
-  if (!/generateBrokerResponse: async \([\s\S]{0,300}\{ postApprovalAmlPepAsk = false \} = \{\}\)/.test(aiSource)) {
-    throw new Error(`FAIL [Group KKKK D3-block signature]: generateBrokerResponse must accept { postApprovalAmlPepAsk = false } options object as the trailing arg`);
+  // (options object pattern — may contain additional fields like OOOO's
+  // stillMissingForReview; assert postApprovalAmlPepAsk is destructured within)
+  if (!/generateBrokerResponse: async \([\s\S]{0,400}\{[\s\S]{0,200}postApprovalAmlPepAsk = false[\s\S]{0,200}\} = \{\}\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK D3-block signature]: generateBrokerResponse must accept { postApprovalAmlPepAsk = false, ...} options object as the trailing arg`);
   }
   console.log('  PASS [Group KKKK D3-block signature]: generateBrokerResponse accepts postApprovalAmlPepAsk flag');
 
@@ -5580,10 +5900,12 @@ Crown Mortgage Group Lic. #MB556291`;
   }
   console.log('  PASS [Group KKKK D3-block flag computation]: webhook.js computes postApprovalAmlPepAsk from JS-side signals');
 
-  if (!/\{ postApprovalAmlPepAsk \}/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group KKKK D3-block flag pass-through]: webhook.js must pass { postApprovalAmlPepAsk } as the 8th arg to generateBrokerResponse`);
+  // Options object pass-through — webhook passes an object that destructures
+  // postApprovalAmlPepAsk. May contain other fields (OOOO's stillMissingForReview).
+  if (!/\{[\s\S]{0,200}postApprovalAmlPepAsk[\s\S]{0,200}\}/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group KKKK D3-block flag pass-through]: webhook.js must pass { postApprovalAmlPepAsk, ... } options object as the trailing arg to generateBrokerResponse`);
   }
-  console.log('  PASS [Group KKKK D3-block flag pass-through]: flag passed to generateBrokerResponse');
+  console.log('  PASS [Group KKKK D3-block flag pass-through]: postApprovalAmlPepAsk present in options object pass-through');
 
   // ─── Live verification — 5x3 scenarios under RUN_KKKK_D=1 ──────────
   if (process.env.RUN_KKKK_D === '1') {

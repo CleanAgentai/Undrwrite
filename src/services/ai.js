@@ -356,7 +356,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   },
 
   // Conversational broker response — reads full context and responds naturally
-  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false } = {}) => {
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [] } = {}) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -377,6 +377,49 @@ POST-APPROVAL AML/PEP ASK (Group KKKK — load-bearing for the conversational fo
 - PEP form (Politically Exposed Person — broker compliance, required)
 
 Acknowledge what's already received (intake is complete) and request AML + PEP as the final items needed. Do NOT skip this — the pre-KKKK conversational flow omitted AML/PEP because the STANDARD DOCUMENT CHECKLIST below doesn't include them. This block is the explicit instruction for the post-approval-intake-complete state and OVERRIDES any prior rule about "AML/PEP not asked at intake" (this is not intake — this is the post-approval compliance ask).`
+        : '';
+
+      // Group OOOO (S6.1): pre-approval gate/conversation mismatch fix. When
+      // JS computes that the willReview gate would hold (one or more items
+      // still missing), inject a block that (1) enumerates the outstanding
+      // items so Vienna can ask for them in this conversational reply, and
+      // (2) explicitly BANS the over-promising "we have everything we need
+      // to send the file for review" template + paraphrases. Production case
+      // (Kevin Tran 2026-05-16, deal ef05f551): exit_strategy null → JS
+      // gate held correctly, but Vienna's reply said "I believe we have
+      // everything we need to send the file for review" verbatim (matching
+      // the template at line ~570 of this prompt). File then stalled with
+      // no prelim ever firing.
+      //
+      // Same primer pattern as KKKK: JS-computed signal → prompt-block
+      // injection overrides Claude's default phrasing.
+      //
+      // Forward-note (out of OOOO scope, logged for future cleanup): the
+      // "say something like..." template later in this prompt unconditionally
+      // hands Claude the over-promising phrase. The cleaner long-term
+      // structure is making that template conditional at its source rather
+      // than overriding via injection. Tracked, not actioned here.
+      const stillMissingBlock = (Array.isArray(stillMissingForReview) && stillMissingForReview.length > 0)
+        ? `
+
+STILL-MISSING-FOR-REVIEW (Group OOOO — load-bearing for the gate/conversation match): the JS-side review gate has computed that the file is NOT yet ready to send for review. The following items are still outstanding:
+${stillMissingForReview.map(item => `- ${item}`).join('\n')}
+
+Your reply MUST acknowledge what was received (if any new docs/info came in this turn) and then explicitly list these outstanding items so the broker can provide them. The file cannot move forward until these are in.
+
+FORBIDDEN PHRASES while this block is active (do NOT use any of these — they over-promise relative to the JS gate state and stall the file when the gate holds):
+- "I believe we have everything we need to send the file for review"
+- "we have everything we need"
+- "I'll get this over for review"
+- "I'll send the file for review"
+- "ready to send for review"
+- "file is ready to go to underwriting"
+- "all set to send for review"
+- any variant that claims the file is complete or about to be sent for review
+
+This block OVERRIDES the general template later in this prompt that suggests phrasing like "I believe we have everything we need to send the file for review." That template applies ONLY when this block is absent (JS gate would pass — willReview fires and your conversational reply gets suppressed at the dispatch anyway). When this block is present (the gate holds), enumerate the missing items above instead.
+
+Production case driving this rule: Kevin Tran 2026-05-16 — exit_strategy was null, JS gate correctly held, but Vienna said "I believe we have everything we need to send the file for review" verbatim. File stalled with no prelim ever firing; only cron reminders nudged Vienna into asking for exit_strategy on subsequent turns.`
         : '';
 
       const attachmentNames = attachments.length > 0
@@ -475,7 +518,7 @@ You have TWO tasks. Return both using the exact format at the bottom.
 
 === TASK 1: RESPOND TO THE SENDER ===
 
-Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.${postApprovalAmlPepBlock}
+Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.${postApprovalAmlPepBlock}${stillMissingBlock}
 
 PRIORITY ORDER — handle these in order:
 1. ANSWER any questions the sender asked — this is your #1 job. Never ignore a question.

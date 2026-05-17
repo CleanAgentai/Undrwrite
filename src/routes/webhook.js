@@ -309,6 +309,62 @@ const computeWillReview = ({ deal, summary, classifications, identityClashUnreso
   );
 };
 
+// Group OOOO (S6.1): pre-approval enumeration of items blocking the willReview
+// gate. Used by generateBrokerResponse to suppress Vienna's over-promising
+// "we have everything we need to send the file for review" template when the
+// JS gate would actually hold. Production case (Kevin Tran 2026-05-16, deal
+// ef05f551): exit_strategy null → willReview correctly held, but Vienna's
+// conversational reply said "I believe we have everything we need to send
+// the file for review" — file stalled with no prelim ever firing; only cron
+// reminders nudged Vienna into asking for exit_strategy on subsequent turns.
+//
+// Same primer pattern as KKKK: JS-computed signal → prompt-block injection
+// instructs Claude on what to say (enumerate items) and what to NOT say
+// (FORBIDDEN PHRASES — the verbatim over-promising template + paraphrases).
+//
+// Returns array of broker-actionable item strings. Empty when:
+//   - Out-of-scope (status not 'active', or prelim_approved_at set [KKKK
+//     handles post-approval conversational follow-up], or
+//     identityClashUnresolved [HHH handles identity-clash re-ask], or
+//     LTV > 80 [Fix 7 collateral path — different conversation]).
+//   - All gate conditions pass — willReview would fire on this turn and
+//     Vienna's conversational reply gets suppressed at the active-branch
+//     dispatch anyway.
+//
+// Non-empty when in-scope (active, pre-approval, no identity clash, LTV
+// in range) AND one or more gate predicates fails on broker-actionable
+// items. Sibling helper to computeWillReview — both consume the same
+// inputs; this one enumerates what's missing, that one returns the
+// boolean gate decision.
+//
+// Forward-note (logged for future cleanup, NOT in OOOO's scope): the
+// generateBrokerResponse prompt at ai.js:570 unconditionally hands Claude
+// the over-promising template; OOOO's override-block + ban-list addresses
+// the symptom. The cleaner long-term structure is making that template
+// conditional at its source rather than handing it unconditionally then
+// forbidding it via injection. Out of scope for this commit.
+const computeStillMissingForReview = ({ deal, summary, classifications, identityClashUnresolved }) => {
+  // Out-of-scope branches: different states own these flows.
+  if (deal?.status !== 'active') return [];
+  if (deal?.prelim_approved_at) return [];     // KKKK handles post-approval
+  if (identityClashUnresolved) return [];      // HHH handles identity-clash re-ask
+
+  const ltv = summary?.ltv_percent;
+  // LTV > 80 routes through Fix 7's awaiting_collateral state — different
+  // conversation (collateral question, not missing-docs ask). Suppress.
+  if (ltv && ltv > 80) return [];
+
+  const items = [];
+  const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
+  const hasExitStrategy = !!(summary?.exit_strategy && String(summary.exit_strategy).trim());
+
+  if (!ltv) items.push('a current property appraisal (so we can confirm LTV)');
+  if (!hasReviewableDoc) items.push('a reviewable document (current appraisal, NOA, or proof of income)');
+  if (!hasExitStrategy) items.push('exit strategy (how the borrower plans to repay or refinance out at maturity)');
+
+  return items;
+};
+
 const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
   if (deal?.status !== 'active') return null;
   if (willGoToCollateralCheck || willReview || identityClashUnresolved) return null;
@@ -1578,6 +1634,23 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         const postApprovalAmlPepAsk = !!existingDeal.prelim_approved_at
           && activeIntakeComplete
           && (!activeAmlOnFile || !activePepOnFile);
+
+        // Group OOOO (S6.1): pre-approval enumeration of items blocking the
+        // willReview gate. JS-computed signal → generateBrokerResponse's
+        // stillMissingBlock injection. Same JS-flag-into-prompt pattern as
+        // KKKK's postApprovalAmlPepAsk. Production case (Kevin Tran
+        // 2026-05-16, deal ef05f551): exit_strategy null → willReview held
+        // correctly but Vienna over-promised "we have everything we need
+        // to send the file for review", stalling the file. OOOO suppresses
+        // that template + enumerates the actual outstanding items.
+        const activeIdentityClashUnresolved = !!summaryIn?.identity_clash;
+        const stillMissingForReview = computeStillMissingForReview({
+          deal: existingDeal,
+          summary: summaryIn,
+          classifications: activeDocsClassifications,
+          identityClashUnresolved: activeIdentityClashUnresolved,
+        });
+
         const result = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -1586,7 +1659,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           labeledActiveHistory,
           documentsOnFile,
           existingDeal.status,
-          { postApprovalAmlPepAsk }
+          { postApprovalAmlPepAsk, stillMissingForReview }
         );
         // Normalize the freshly-updated summary on the way back, before persisting.
         result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);
@@ -1838,4 +1911,6 @@ module.exports.__test__ = {
   buildBrokerThreadInputs,
   // Group NNNN: active-branch willReview gate with prelim_approved_at suppression
   computeWillReview,
+  // Group OOOO: pre-approval enumeration of items blocking the willReview gate
+  computeStillMissingForReview,
 };
