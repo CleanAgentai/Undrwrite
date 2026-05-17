@@ -292,6 +292,49 @@ const buildBrokerThreadInputs = (allMessages = []) => {
 //
 // Extracted as a pure function so the truth table can exercise it without
 // mocking the full request pipeline (matches NNN's decideReviewDispatch pattern).
+// Group NNNN (S3.3/S3.4 residual gap): active-branch willReview gate. Pre-NNNN
+// the gate had no prelim_approved_at suppression — after admin approved at
+// prelim and status flipped back to 'active' for post-approval doc collection,
+// the FIRST partial-doc broker turn would re-fire willReview (gates pass: LTV
+// ≤ 80, hasReviewableDoc carried over from intake, hasExitStrategy) BEFORE
+// completion-handoff could fire (allDocsIn still false until the LAST broker
+// turn submits the remaining intake/compliance docs). The post-MMMM Derek-
+// shape bug (S3.3/S3.4) collapsed onto the false-positive purchase
+// classification; NNNN closes the residual gap for correctly-classified
+// refinances where post-approval doc collection splits across multiple
+// broker turns. Production pattern: admin approves prelim → broker submits
+// gov ID turn 1 → spurious second prelim → broker submits AML/PEP turn 2 →
+// completion-handoff. Post-NNNN: turn 1 falls through to conversational
+// handler (broker gets acknowledgment + ask for remaining docs); turn 2
+// triggers completion-handoff correctly.
+//
+// Extracted as a pure function so the 12+ truth-table cases (including the
+// exact split-turn regression repro) can exercise the gate without mocking
+// the full request pipeline. This gate has now been wrong twice — BBBB's
+// exit_strategy gap and NNNN's prelim_approved_at gap — and earns the truth
+// table as a regression-prevention investment.
+//
+// INTENTIONAL ASYMMETRY: the initial branch (new-client INITIAL at
+// webhook.js's `if (!existingDeal)` block) does NOT use this helper. The
+// initial branch's gate is inline because prelim_approved_at is null by
+// construction on a deal just created — the !deal.prelim_approved_at clause
+// would be a no-op there, and a no-op clause is confusing dead code. The
+// asymmetry is asserted by a source-string regression test that catches any
+// future attempt to wire computeWillReview into the initial branch.
+const computeWillReview = ({ deal, summary, classifications, identityClashUnresolved }) => {
+  const ltv = summary?.ltv_percent;
+  const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
+  const hasExitStrategy = !!(summary?.exit_strategy && String(summary.exit_strategy).trim());
+  return !!(
+    ltv && ltv <= 80
+    && deal?.status === 'active'
+    && hasReviewableDoc
+    && hasExitStrategy
+    && !identityClashUnresolved
+    && !deal?.prelim_approved_at
+  );
+};
+
 const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
   if (deal?.status !== 'active') return null;
   if (willGoToCollateralCheck || willReview || identityClashUnresolved) return null;
@@ -1617,7 +1660,19 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // until exit_strategy lands; generateBrokerResponse's existing ADDITIONAL
         // ITEMS prompt block asks for exit_strategy when missing.
         const hasExitStrategy = !!(result.updatedSummary?.exit_strategy && String(result.updatedSummary.exit_strategy).trim());
-        const willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved;
+        // Group NNNN (S3.3/S3.4 residual gap): active-branch willReview gate
+        // via pure helper. Post-NNNN includes !deal.prelim_approved_at
+        // suppression so willReview cannot re-fire after admin approval —
+        // post-approval doc-collection turns fall through to the
+        // conversational handler (or completion-handoff when allDocsIn) instead
+        // of triggering a spurious second prelim. See helper definition above
+        // for INTENTIONAL ASYMMETRY note re: initial branch.
+        const willReview = computeWillReview({
+          deal: existingDeal,
+          summary: result.updatedSummary,
+          classifications: classificationsForGate,
+          identityClashUnresolved,
+        });
 
         // Group L: when the FINAL REVIEW HITL is about to fire (all docs in, no LTV gate
         // active, deal currently active), Vienna goes silent on the broker side. Per Franco:
@@ -1791,4 +1846,6 @@ module.exports.__test__ = {
   eligibleDocsForGate,
   // Group LLLL: broker-thread input extraction for executeDraft header construction
   buildBrokerThreadInputs,
+  // Group NNNN: active-branch willReview gate with prelim_approved_at suppression
+  computeWillReview,
 };

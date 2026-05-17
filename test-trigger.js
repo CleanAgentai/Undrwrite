@@ -3974,17 +3974,26 @@ renovations.`,
   }
   console.log('  PASS [Group BBBB initial const]: initialHasExitStrategy correctly derives from dealSummary?.exit_strategy (whitespace-trim)');
 
-  // Active branch gate: `willReview = ltv && ltv <= 80 && existingDeal.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved`
-  if (!/willReview = ltv && ltv <= 80 && existingDeal\.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group BBBB active gate]: active-branch willReview predicate missing 'hasExitStrategy' clause`);
+  // Active branch gate: post-NNNN the active willReview is computed via the
+  // computeWillReview pure helper. The BBBB invariant — "active willReview
+  // requires hasExitStrategy" — still holds: computeWillReview's body computes
+  // hasExitStrategy from summary.exit_strategy (with trim()) and gates on it.
+  // We assert the helper body contains the hasExitStrategy clause.
+  const bbbbHelperBody = webhookSrc.match(/const computeWillReview = [\s\S]*?\n\};/);
+  if (!bbbbHelperBody || !/&& hasExitStrategy/.test(bbbbHelperBody[0])) {
+    throw new Error(`FAIL [Group BBBB active gate]: computeWillReview helper must include hasExitStrategy clause in its gate expression (BBBB invariant: active-branch willReview requires exit_strategy populated)`);
   }
-  console.log('  PASS [Group BBBB active gate]: active-branch willReview gate requires hasExitStrategy');
+  console.log('  PASS [Group BBBB active gate]: computeWillReview helper gates on hasExitStrategy (BBBB invariant preserved post-NNNN refactor)');
 
-  // Active branch defines hasExitStrategy from result.updatedSummary?.exit_strategy
-  if (!/const hasExitStrategy = !!\(result\.updatedSummary\?\.exit_strategy && String\(result\.updatedSummary\.exit_strategy\)\.trim\(\)\)/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group BBBB active const]: hasExitStrategy must be derived from result.updatedSummary?.exit_strategy with whitespace trim`);
+  // Active branch hasExitStrategy is computed inside the computeWillReview
+  // helper (post-NNNN refactor). Pre-NNNN it was an inline const at the active-
+  // branch call site; the const still exists at the call site for the
+  // willGoToCollateralCheck context, but the willReview gate's authoritative
+  // hasExitStrategy is the one inside the helper.
+  if (!bbbbHelperBody || !/const hasExitStrategy = !!\(summary\?\.exit_strategy && String\(summary\.exit_strategy\)\.trim\(\)\)/.test(bbbbHelperBody[0])) {
+    throw new Error(`FAIL [Group BBBB active const]: computeWillReview helper must define hasExitStrategy from summary?.exit_strategy with whitespace trim — the trim() check is BBBB's whitespace-only-exit_strategy rejection`);
   }
-  console.log('  PASS [Group BBBB active const]: hasExitStrategy correctly derives from result.updatedSummary?.exit_strategy (whitespace-trim)');
+  console.log('  PASS [Group BBBB active const]: hasExitStrategy correctly derives from summary?.exit_strategy (whitespace-trim) inside computeWillReview');
 
   // Negative regression: the pre-BBBB bare predicates (no exit_strategy clause)
   // must NOT exist anywhere. Catches accidental rewrite that drops the gate.
@@ -5294,6 +5303,289 @@ Crown Mortgage Group Lic. #MB556291`;
   } else {
     console.log('\n---------- Group MMMM / D1 + D2: SKIPPED (set RUN_MMMM_D=1 to run) ----------');
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP NNNN — active-branch willReview gate prelim_approved_at suppression (S3.3/S3.4 residual)
+  // ════════════════════════════════════════════════════════════════
+  // Pre-NNNN the active-branch willReview gate at webhook.js:1511 had no
+  // prelim_approved_at suppression — after admin approved at prelim and
+  // status flipped back to 'active' for post-approval doc collection, the
+  // FIRST partial-doc broker turn would re-fire willReview because all
+  // other gates passed (LTV ≤ 80, hasReviewableDoc carried over from intake,
+  // hasExitStrategy). The completion-handoff path only fires when allDocsIn,
+  // so partial post-approval turns fell through to willReview.
+  //
+  // MMMM closed Derek's specific bug shape (the false-positive purchase
+  // classification artificially kept allDocsIn=false). NNNN closes the
+  // residual for correctly-classified refinances where post-approval doc
+  // collection naturally splits across multiple broker turns.
+  //
+  // The gate has now been a bug source TWICE — BBBB's exit_strategy gap and
+  // NNNN's prelim_approved_at gap. Per user directive, a gate that keeps
+  // biting earns a truth table. computeWillReview extracted as pure helper.
+  //
+  // INTENTIONAL ASYMMETRY: the initial branch's willReview construction does
+  // NOT use computeWillReview (and does NOT have the prelim_approved_at
+  // clause) — prelim_approved_at is null by construction on a deal just
+  // created, so the clause would be a no-op. Source-string-on-absence
+  // regression below catches anyone wiring computeWillReview into the
+  // initial branch.
+  console.log('\n========== GROUP NNNN — active-branch willReview prelim_approved_at suppression ==========');
+
+  // ─── Truth table on computeWillReview ─────────────────────────────
+  console.log('\n---------- Group NNNN / Truth Table: computeWillReview ----------');
+  const { computeWillReview } = require('./src/routes/webhook').__test__;
+
+  const nnnnCases = [
+    {
+      name: 'pre-approval, all gates pass → true (the standard prelim trigger)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi at maturity' },
+        classifications: ['appraisal', 'loan_application'],
+        identityClashUnresolved: false,
+      },
+      expect: true,
+    },
+    {
+      name: 'NNNN CORE: post-approval, all gates pass → false (prelim_approved_at suppresses)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: '2026-05-17T00:00:00.000Z' },
+        summary: { ltv_percent: 65, exit_strategy: 'refi at maturity' },
+        classifications: ['appraisal', 'loan_application'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'NNNN SPLIT-TURN: prelim_approved_at SET + intake partial (appraisal+gov_id, AML/PEP missing) → false',
+      input: {
+        deal: { status: 'active', prelim_approved_at: '2026-05-17T00:00:00.000Z' },
+        summary: { ltv_percent: 65, exit_strategy: 'refi at maturity' },
+        classifications: ['appraisal', 'government_id'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'LTV > 80 → false (high-LTV escalation path, not willReview)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 85, exit_strategy: 'refi' },
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'LTV null → false (no LTV yet, conversational handler keeps going)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: null, exit_strategy: 'refi' },
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'LTV exactly 80 (boundary) → true (≤80 inclusive)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 80, exit_strategy: 'refi' },
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: true,
+    },
+    {
+      name: 'status under_review → false (only active branch fires willReview)',
+      input: {
+        deal: { status: 'under_review', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi' },
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'status awaiting_collateral → false (collateral gate has priority)',
+      input: {
+        deal: { status: 'awaiting_collateral', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi' },
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'no reviewable doc → false (classifications has loan_application only)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi' },
+        classifications: ['loan_application'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'reviewable=noa via classification → true (synonym for income_proof)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi' },
+        classifications: ['noa'],
+        identityClashUnresolved: false,
+      },
+      expect: true,
+    },
+    {
+      name: 'no exit_strategy (null) → false (BBBB gate)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: null },
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'whitespace-only exit_strategy → false (trim() check)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: '   ' },
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'identityClashUnresolved=true → false (identity gate priority over LTV)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi' },
+        classifications: ['appraisal'],
+        identityClashUnresolved: true,
+      },
+      expect: false,
+    },
+    {
+      name: 'defensive: null classifications array',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi' },
+        classifications: null,
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'defensive: empty classifications array',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi' },
+        classifications: [],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+  ];
+
+  let nnnnPassed = 0;
+  for (const tc of nnnnCases) {
+    const got = computeWillReview(tc.input);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group NNNN ${tc.name}]:\n  input=${JSON.stringify(tc.input)}\n  expected=${tc.expect}\n  got=${got}`);
+    }
+    console.log(`  PASS [${tc.name}]: → ${got}`);
+    nnnnPassed++;
+  }
+  console.log(`Group NNNN / Truth Table: ${nnnnPassed}/${nnnnCases.length} passed`);
+
+  // ─── Source-string regression: helper definition + clause ───────
+  console.log('\n---------- Group NNNN / Source-string regression on webhook.js ----------');
+  // webhookSrc already loaded earlier
+
+  if (!/const computeWillReview = \(\{ deal, summary, classifications, identityClashUnresolved \}\) =>/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group NNNN helper definition]: computeWillReview must be defined with destructured object signature`);
+  }
+  console.log('  PASS [Group NNNN helper definition]: computeWillReview signature present');
+
+  // Helper's body must include the load-bearing prelim_approved_at clause.
+  // Anchor on the helper function's body specifically (between its declaration
+  // and the next top-level const).
+  const helperBodyMatch = webhookSrc.match(/const computeWillReview = [\s\S]*?\n\};/);
+  if (!helperBodyMatch || !/!\s*deal\??\.prelim_approved_at/.test(helperBodyMatch[0])) {
+    throw new Error(`FAIL [Group NNNN prelim_approved_at clause]: computeWillReview must include '!deal?.prelim_approved_at' suppression clause — this is the load-bearing fix that closes the residual post-approval gap`);
+  }
+  console.log('  PASS [Group NNNN prelim_approved_at clause]: !deal?.prelim_approved_at present in helper body');
+
+  // Helper computes hasReviewableDoc + hasExitStrategy internally (per Q2-NNNN
+  // — internal computation gives the truth table real end-to-end coverage of
+  // the classification + whitespace logic, not just a trivial AND chain).
+  if (!/const hasReviewableDoc = \['income_proof', 'noa', 'appraisal'\]\.some/.test(helperBodyMatch[0])) {
+    throw new Error(`FAIL [Group NNNN internal hasReviewableDoc]: helper must compute hasReviewableDoc internally from classifications — taking a precomputed boolean would skip truth-table coverage of the classification-synonym logic`);
+  }
+  console.log('  PASS [Group NNNN internal hasReviewableDoc]: hasReviewableDoc computed internally from classifications');
+
+  if (!/const hasExitStrategy = !!\(summary\?\.exit_strategy && String\(summary\.exit_strategy\)\.trim\(\)\)/.test(helperBodyMatch[0])) {
+    throw new Error(`FAIL [Group NNNN internal hasExitStrategy]: helper must compute hasExitStrategy internally with trim() — taking a precomputed boolean would skip truth-table coverage of the whitespace-only rejection`);
+  }
+  console.log('  PASS [Group NNNN internal hasExitStrategy]: hasExitStrategy computed internally with trim()');
+
+  // Helper exported via __test__
+  if (!/module\.exports\.__test__ = \{[\s\S]*computeWillReview,?[\s\S]*\};/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group NNNN helper export]: computeWillReview must be in webhook.js __test__ exports`);
+  }
+  console.log('  PASS [Group NNNN helper export]: computeWillReview exported via __test__');
+
+  // ─── Source-string regression: active branch wired to helper ────
+  console.log('\n---------- Group NNNN / Source-string regression: active-branch wiring ----------');
+
+  // Active branch (existing-deal active branch around the prelim trigger)
+  // must use computeWillReview, not the pre-NNNN inline expression.
+  if (!/const willReview = computeWillReview\(\{[\s\S]{0,200}deal: existingDeal,[\s\S]{0,200}\}\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group NNNN active-branch wiring]: active branch must call computeWillReview({ deal: existingDeal, ... })`);
+  }
+  console.log('  PASS [Group NNNN active-branch wiring]: active branch calls computeWillReview');
+
+  // Pre-NNNN inline pattern must be GONE.
+  if (/const willReview = ltv && ltv <= 80 && existingDeal\.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved;/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group NNNN pre-NNNN bug shape]: active branch still has the pre-NNNN inline 'const willReview = ltv && ltv <= 80 && ...' expression — must be replaced with computeWillReview helper call`);
+  }
+  console.log('  PASS [Group NNNN no pre-NNNN bug shape]: active branch no longer has pre-NNNN inline willReview');
+
+  // ─── INTENTIONAL ASYMMETRY: initial branch must NOT use computeWillReview ─
+  // This is the load-bearing invariant test. The initial branch (new-client
+  // INITIAL at the `if (!existingDeal)` block) constructs its willReview gate
+  // inline because prelim_approved_at is null by construction on a freshly-
+  // created deal — adding the helper there would couple the gate to a clause
+  // that's always trivially satisfied. Confusing dead code. The test catches
+  // anyone tidying the asymmetry.
+  console.log('\n---------- Group NNNN / Intentional asymmetry: initial branch must NOT use computeWillReview ----------');
+
+  // Extract the initial branch's code region. Boundaries: from
+  // `if (!existingDeal) {` to its matching `} else {` (existing-client branch).
+  // The initial branch is several hundred lines including the EEEE intake-asked
+  // stamp + the BBBB exit_strategy gate + the HHH identity_clash routing.
+  const initialBranchMatch = webhookSrc.match(/if \(!existingDeal\) \{[\s\S]*?\n    \} else \{\n      \/\/ EXISTING CLIENT/);
+  if (!initialBranchMatch) {
+    throw new Error(`FAIL [Group NNNN initial branch extract]: could not locate initial branch region for asymmetry check`);
+  }
+  const initialBranchSrc = initialBranchMatch[0];
+
+  if (/computeWillReview/.test(initialBranchSrc)) {
+    throw new Error(`FAIL [Group NNNN intentional asymmetry]: initial branch must NOT call computeWillReview. INTENTIONAL ASYMMETRY: prelim_approved_at is null by construction on a freshly-created deal — the helper's !deal.prelim_approved_at clause would be a no-op there. Wiring computeWillReview into the initial branch creates confusing dead code. Catch: revert the initial-branch refactor.`);
+  }
+  console.log('  PASS [Group NNNN intentional asymmetry]: initial branch does NOT call computeWillReview (asymmetry preserved)');
+
+  // The initial branch's own willReview-shaped condition (inline) should still
+  // exist — verify it's still computed via the initialLtv/initialHasReviewableDoc
+  // shape per the existing comment + structure at the initial-branch sendPreliminaryReviewToAdmin
+  // call site. This confirms the initial branch's gate logic is intact post-NNNN
+  // (NNNN should ONLY touch the active branch).
+  if (!/initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy/.test(initialBranchSrc)) {
+    throw new Error(`FAIL [Group NNNN initial branch gate intact]: initial branch's inline willReview-shaped condition (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy) must still exist — NNNN should ONLY touch the active branch`);
+  }
+  console.log('  PASS [Group NNNN initial branch gate intact]: initialLtv/initialHasReviewableDoc/initialHasExitStrategy inline condition preserved');
 
   // ════════════════════════════════════════════════════════════════
   // GROUP LLLL — broker-facing thread anchor on executeDraft (S15.3+)
