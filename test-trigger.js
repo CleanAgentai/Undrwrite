@@ -4290,10 +4290,14 @@ renovations.`,
     throw new Error(`FAIL [Group DDDD shared util]: src/lib/adminReply.js does not exist`);
   }
   const adminReplySrc = fs_qqq.readFileSync(adminReplyPath, 'utf8');
-  if (!/module\.exports = \{ ADMIN_REPLY_SUBJECT_RE, isAdminReplySubject \}/.test(adminReplySrc)) {
-    throw new Error(`FAIL [Group DDDD shared util exports]: src/lib/adminReply.js missing expected exports`);
+  // DDDD's required exports — must remain even after LLLL added isAdminFacingSubject
+  if (!/ADMIN_REPLY_SUBJECT_RE/.test(adminReplySrc) || !/isAdminReplySubject/.test(adminReplySrc)) {
+    throw new Error(`FAIL [Group DDDD shared util exports]: src/lib/adminReply.js missing ADMIN_REPLY_SUBJECT_RE / isAdminReplySubject — these are DDDD's required exports`);
   }
-  console.log('  PASS [Group DDDD shared util]: src/lib/adminReply.js exists with correct exports');
+  if (!/module\.exports = \{[^}]*ADMIN_REPLY_SUBJECT_RE[^}]*isAdminReplySubject[^}]*\}/.test(adminReplySrc)) {
+    throw new Error(`FAIL [Group DDDD shared util exports]: src/lib/adminReply.js must export ADMIN_REPLY_SUBJECT_RE + isAdminReplySubject`);
+  }
+  console.log('  PASS [Group DDDD shared util]: src/lib/adminReply.js exists with DDDD exports (additional LLLL exports tolerated)');
 
   // cron/dailySummary.js imports from shared util (not inline regex anymore)
   const cronSrc = fs_qqq.readFileSync(path_qqq.join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
@@ -4908,7 +4912,7 @@ renovations.`,
   }
   console.log('  PASS [Group JJJJ helper definition]: eligibleDocsForGate(docs, dealSummary) defined');
 
-  if (!/eligibleDocsForGate,\s*\n\s*\}/.test(webhookSrc)) {
+  if (!/module\.exports\.__test__ = \{[\s\S]*eligibleDocsForGate,?[\s\S]*\};/.test(webhookSrc)) {
     throw new Error(`FAIL [Group JJJJ helper export]: eligibleDocsForGate must be in webhook.js __test__ exports`);
   }
   console.log('  PASS [Group JJJJ helper export]: eligibleDocsForGate exported via __test__');
@@ -4974,6 +4978,290 @@ renovations.`,
     throw new Error(`FAIL [Group JJJJ both-axes semantic]: detection/re-evaluation rules must explicitly state that EITHER borrower-name OR property-address mismatch is sufficient to flag — not borrower-name alone`);
   }
   console.log('  PASS [Group JJJJ both-axes semantic]: both-axes (name OR property) language present in rules');
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP LLLL — broker-facing thread anchor on executeDraft (S15.3+)
+  // ════════════════════════════════════════════════════════════════
+  // Production case 2026-05-16 (deal b1ba76b0, Derek Olsen): Karen's
+  // submission subject was "Derek Olsen — Potential Deal". After admin
+  // approved the prelim and SEND'd the doc-request draft, executeDraft
+  // sent it to broker with Claude-composed draft_subject "Re: Derek Olsen"
+  // (no descriptor) and empty headers. Karen's mail client saw it as a
+  // new conversation — broker thread split. Pattern repeated across 4
+  // scenarios (S1.2 / S2.2 / S4.1 / S5.2: doc-request, decline, and
+  // closing draft all carried the bug).
+  //
+  // Counterpart to YYY (admin-thread on draft preview). YYY anchors on
+  // admin's current reply + Vienna's full outbound chain. LLLL anchors on
+  // earliest broker-direction inbound + Vienna's broker-direction outbound
+  // chain. Filter inversion: !isAdminFacingSubject(m.subject) catches both
+  // directions of admin-side traffic (Vienna outbound originals + admin
+  // replies + draft-preview cycles) regardless of Re: depth.
+  //
+  // In-Reply-To anchored on Vienna's last broker-direction outbound (not
+  // broker's last inbound) because saveMessage doesn't currently persist
+  // external_message_id for inbound messages. The broker's mail client's
+  // References chain already contains Vienna's prior outbound IDs (it
+  // built them when broker replied), so anchoring our next outbound on
+  // Vienna's prior outbound chains correctly. Inbound external_message_id
+  // persistence is a forward-looking improvement deliberately scoped out
+  // of LLLL per standing rule (tight scope, one fix per commit).
+  //
+  // Pure plumbing — no prompt change, no live Claude call needed.
+  console.log('\n========== GROUP LLLL — broker-facing thread anchor on executeDraft ==========');
+
+  // ─── isAdminFacingSubject predicate truth table ────────────────────────
+  console.log('\n---------- Group LLLL / Truth Table: isAdminFacingSubject ----------');
+  const { isAdminFacingSubject: llllPredicate } = require('./src/lib/adminReply');
+
+  const llllSubjectCases = [
+    // Broker-conversation subjects → FALSE (must NOT be filtered out of broker chain)
+    { subject: 'Derek Olsen — Potential Deal', expect: false, label: 'broker fresh submission' },
+    { subject: 'Re: Derek Olsen — Potential Deal', expect: false, label: 'broker reply / Vienna welcome' },
+    { subject: 'Re: Re: Derek Olsen — Potential Deal', expect: false, label: 'broker follow-up' },
+    { subject: 'Re: Derek Olsen', expect: false, label: 'Claude-composed draft subject (pre-LLLL bug shape — still broker-facing)' },
+    { subject: 'Second Mortgage — Sandra Fletcher', expect: false, label: 'another broker fresh subject pattern' },
+    { subject: '', expect: false, label: 'empty subject — defensive' },
+
+    // Admin-facing subjects (both directions, all Re: depths) → TRUE
+    { subject: 'ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', expect: true, label: 'Vienna outbound prelim original' },
+    { subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', expect: true, label: 'admin reply to prelim' },
+    { subject: 'Re: Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', expect: true, label: 'Vienna draft preview to admin' },
+    { subject: 'Re: Re: Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', expect: true, label: 'admin SEND reply' },
+    { subject: '[UPDATED] ACTION REQUIRED: PRELIMINARY Review — Derek Olsen', expect: true, label: 'Vienna outbound updated prelim' },
+    { subject: 'Re: [UPDATED] ACTION REQUIRED: PRELIMINARY Review', expect: true, label: 'admin reply to updated prelim' },
+    { subject: 'FINAL REVIEW: Derek Olsen', expect: true, label: 'Vienna outbound final review' },
+    { subject: 'Re: FINAL REVIEW: Derek Olsen', expect: true, label: 'admin reply to final review' },
+    { subject: '[Conditions Fulfilled] Derek Olsen', expect: true, label: 'Vienna conditions fulfilled notice' },
+    { subject: '[File Complete] Derek Olsen', expect: true, label: 'Vienna file complete notice' },
+    { subject: '[Broker Update] Derek Olsen', expect: true, label: 'Vienna broker update (retired path)' },
+    { subject: 'Daily Summary — Saturday, May 16, 2026', expect: true, label: 'cron daily summary outbound' },
+  ];
+
+  let llllPredicatePassed = 0;
+  for (const tc of llllSubjectCases) {
+    const got = llllPredicate(tc.subject);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group LLLL predicate ${tc.label}]: subject=${JSON.stringify(tc.subject)}, expected=${tc.expect}, got=${got}`);
+    }
+    console.log(`  PASS [${tc.label}]: ${JSON.stringify(tc.subject).slice(0, 70)} → ${got}`);
+    llllPredicatePassed++;
+  }
+  console.log(`Group LLLL / Predicate truth table: ${llllPredicatePassed}/${llllSubjectCases.length} passed`);
+
+  // ─── buildBrokerThreadInputs truth table ────────────────────────────
+  console.log('\n---------- Group LLLL / Truth Table: buildBrokerThreadInputs ----------');
+  const { buildBrokerThreadInputs } = require('./src/routes/webhook').__test__;
+
+  const llllChainCases = [
+    {
+      name: 'empty message list',
+      messages: [],
+      expectEarliestSubject: null,
+      expectOutboundIds: [],
+      expectLatestId: null,
+    },
+    {
+      name: 'single broker inbound (no Vienna response yet)',
+      messages: [
+        { direction: 'inbound', subject: 'Derek Olsen — Potential Deal', external_message_id: null },
+      ],
+      expectEarliestSubject: 'Derek Olsen — Potential Deal',
+      expectOutboundIds: [],
+      expectLatestId: null,
+    },
+    {
+      name: 'broker inbound + Vienna welcome',
+      messages: [
+        { direction: 'inbound', subject: 'Derek Olsen — Potential Deal', external_message_id: null },
+        { direction: 'outbound', subject: 'Re: Derek Olsen — Potential Deal', external_message_id: 'vienna-welcome-1' },
+      ],
+      expectEarliestSubject: 'Derek Olsen — Potential Deal',
+      expectOutboundIds: ['vienna-welcome-1'],
+      expectLatestId: 'vienna-welcome-1',
+    },
+    {
+      name: 'Derek production shape — interleaved admin cycle filtered out',
+      messages: [
+        // Broker submission
+        { direction: 'inbound', subject: 'Derek Olsen — Potential Deal', external_message_id: null },
+        // Vienna welcome to broker
+        { direction: 'outbound', subject: 'Re: Derek Olsen — Potential Deal', external_message_id: 'vienna-welcome' },
+        // Broker reply with docs
+        { direction: 'inbound', subject: 'Re: Derek Olsen — Potential Deal', external_message_id: null },
+        // Vienna prelim review to admin
+        { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', external_message_id: 'vienna-prelim' },
+        // Admin APPROVED reply
+        { direction: 'inbound', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', external_message_id: null },
+        // Vienna draft preview to admin
+        { direction: 'outbound', subject: 'Re: Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', external_message_id: 'vienna-preview-1' },
+        // Admin SEND reply
+        { direction: 'inbound', subject: 'Re: Re: Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', external_message_id: null },
+        // Vienna second draft preview to admin
+        { direction: 'outbound', subject: 'Re: Re: Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', external_message_id: 'vienna-preview-2' },
+        // Admin second SEND reply
+        { direction: 'inbound', subject: 'Re: Re: Re: Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', external_message_id: null },
+        // Vienna's broker-facing doc-request (POST-LLLL would carry the broker subject;
+        // pre-LLLL was "Re: Derek Olsen" — still broker-facing, included in chain)
+        { direction: 'outbound', subject: 'Re: Derek Olsen — Potential Deal', external_message_id: 'vienna-broker-docs' },
+      ],
+      expectEarliestSubject: 'Derek Olsen — Potential Deal',
+      expectOutboundIds: ['vienna-welcome', 'vienna-broker-docs'],
+      expectLatestId: 'vienna-broker-docs',
+    },
+    {
+      name: 'outbound with no external_message_id is excluded from chain',
+      messages: [
+        { direction: 'inbound', subject: 'Derek Olsen — Potential Deal', external_message_id: null },
+        { direction: 'outbound', subject: 'Re: Derek Olsen — Potential Deal', external_message_id: null }, // failed send, no ID
+        { direction: 'outbound', subject: 'Re: Derek Olsen — Potential Deal', external_message_id: 'vienna-retry' },
+      ],
+      expectEarliestSubject: 'Derek Olsen — Potential Deal',
+      expectOutboundIds: ['vienna-retry'],
+      expectLatestId: 'vienna-retry',
+    },
+    {
+      name: 'admin-only conversation (no broker messages at all)',
+      messages: [
+        { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Foo', external_message_id: 'admin-only' },
+        { direction: 'inbound', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Foo', external_message_id: null },
+      ],
+      expectEarliestSubject: null, // no broker inbound — falls back to draftSubject at call site
+      expectOutboundIds: [],
+      expectLatestId: null,
+    },
+    {
+      name: 'Claude-composed "Re: Derek Olsen" subject (pre-LLLL bug shape) is still broker-facing',
+      messages: [
+        { direction: 'inbound', subject: 'Derek Olsen — Potential Deal', external_message_id: null },
+        { direction: 'outbound', subject: 'Re: Derek Olsen — Potential Deal', external_message_id: 'welcome' },
+        { direction: 'outbound', subject: 'Re: Derek Olsen', external_message_id: 'pre-llll-docs' }, // truncated subject from pre-LLLL bug
+      ],
+      // Earliest is the FIRST broker inbound's subject — the "Re: Derek Olsen" pre-LLLL outbound
+      // is not used for the anchor subject (only inbounds set earliestBrokerSubject).
+      expectEarliestSubject: 'Derek Olsen — Potential Deal',
+      // But the pre-LLLL outbound IS included in the chain (it's still broker-facing per our
+      // filter — Claude composed it, broker received it, broker's References include it).
+      expectOutboundIds: ['welcome', 'pre-llll-docs'],
+      expectLatestId: 'pre-llll-docs',
+    },
+  ];
+
+  let llllChainPassed = 0;
+  for (const tc of llllChainCases) {
+    const got = buildBrokerThreadInputs(tc.messages);
+    const fails = [];
+    if (got.earliestBrokerSubject !== tc.expectEarliestSubject) {
+      fails.push(`earliestBrokerSubject: expected ${JSON.stringify(tc.expectEarliestSubject)}, got ${JSON.stringify(got.earliestBrokerSubject)}`);
+    }
+    if (JSON.stringify(got.outboundIds) !== JSON.stringify(tc.expectOutboundIds)) {
+      fails.push(`outboundIds: expected ${JSON.stringify(tc.expectOutboundIds)}, got ${JSON.stringify(got.outboundIds)}`);
+    }
+    if (got.latestMessageId !== tc.expectLatestId) {
+      fails.push(`latestMessageId: expected ${JSON.stringify(tc.expectLatestId)}, got ${JSON.stringify(got.latestMessageId)}`);
+    }
+    if (!Array.isArray(got.inboundReferences) || got.inboundReferences.length !== 0) {
+      fails.push(`inboundReferences: expected [], got ${JSON.stringify(got.inboundReferences)}`);
+    }
+    if (fails.length > 0) {
+      throw new Error(`FAIL [Group LLLL chain ${tc.name}]:\n  - ${fails.join('\n  - ')}`);
+    }
+    console.log(`  PASS [${tc.name}]: earliest=${JSON.stringify(got.earliestBrokerSubject)}, outbounds=${got.outboundIds.length}, latest=${JSON.stringify(got.latestMessageId)}`);
+    llllChainPassed++;
+  }
+  console.log(`Group LLLL / Chain truth table: ${llllChainPassed}/${llllChainCases.length} passed`);
+
+  // ─── Source-string regression on adminReply.js ──────────────────────
+  console.log('\n---------- Group LLLL / Source-string regression on adminReply.js ----------');
+  // adminReplySrc already loaded earlier (Group DDDD shared util check)
+
+  if (!/const ADMIN_FACING_SUBJECT_RE = /.test(adminReplySrc)) {
+    throw new Error(`FAIL [Group LLLL ADMIN_FACING_SUBJECT_RE]: adminReply.js must define ADMIN_FACING_SUBJECT_RE`);
+  }
+  console.log('  PASS [Group LLLL ADMIN_FACING_SUBJECT_RE]: regex constant defined');
+
+  // Must use (?:Re:\s+)* (zero-or-more) — distinguishing it from ADMIN_REPLY_SUBJECT_RE
+  // which uses (?:Re:\s+)+ (one-or-more). The * is what lets it catch Vienna's
+  // outbound originals lacking Re:.
+  if (!/ADMIN_FACING_SUBJECT_RE = \/\^\(\?:Re:\\s\+\)\*/.test(adminReplySrc)) {
+    throw new Error(`FAIL [Group LLLL Re: quantifier]: ADMIN_FACING_SUBJECT_RE must use (?:Re:\\s+)* (zero-or-more), not + (one-or-more). The * is what catches Vienna's outbound originals.`);
+  }
+  console.log('  PASS [Group LLLL Re: quantifier]: ADMIN_FACING_SUBJECT_RE uses zero-or-more Re: quantifier');
+
+  // ADMIN_REPLY_SUBJECT_RE (existing) must still use + (preserves its reply-only semantic
+  // for the existing callers in cron + DDDD). Group LLLL must NOT modify the existing predicate.
+  if (!/ADMIN_REPLY_SUBJECT_RE = \/\^\(\?:Re:\\s\+\)\+/.test(adminReplySrc)) {
+    throw new Error(`FAIL [Group LLLL preserves ADMIN_REPLY_SUBJECT_RE]: existing ADMIN_REPLY_SUBJECT_RE must still use (?:Re:\\s+)+ — DO NOT change its semantics, that would break the cron 'Emails Received' filter and DDDD admin-label heuristic`);
+  }
+  console.log('  PASS [Group LLLL preserves ADMIN_REPLY_SUBJECT_RE]: existing reply-only predicate unchanged');
+
+  if (!/isAdminFacingSubject/.test(adminReplySrc) || !/module\.exports = \{[^}]*isAdminFacingSubject[^}]*\}/.test(adminReplySrc)) {
+    throw new Error(`FAIL [Group LLLL isAdminFacingSubject export]: adminReply.js must define and export isAdminFacingSubject`);
+  }
+  console.log('  PASS [Group LLLL isAdminFacingSubject export]: helper defined and exported');
+
+  // "Daily Summary" added to admin-facing pattern (outbound-only, no Re: variant)
+  if (!/Daily Summary/.test(adminReplySrc.match(/ADMIN_FACING_SUBJECT_RE = \/.*\//)[0])) {
+    throw new Error(`FAIL [Group LLLL Daily Summary]: ADMIN_FACING_SUBJECT_RE must include 'Daily Summary' pattern (cron outbound that ADMIN_REPLY_SUBJECT_RE doesn't catch because it has no Re: variant)`);
+  }
+  console.log("  PASS [Group LLLL Daily Summary]: 'Daily Summary' pattern included");
+
+  // ─── Source-string regression on webhook.js wiring ──────────────────
+  console.log('\n---------- Group LLLL / Source-string regression on webhook.js wiring ----------');
+  // webhookSrc already loaded earlier
+
+  if (!/const buildBrokerThreadInputs = \(allMessages = \[\]\) =>/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group LLLL buildBrokerThreadInputs definition]: webhook.js must define buildBrokerThreadInputs(allMessages)`);
+  }
+  console.log('  PASS [Group LLLL buildBrokerThreadInputs definition]: helper defined');
+
+  if (!/module\.exports\.__test__ = \{[\s\S]*buildBrokerThreadInputs,?[\s\S]*\};/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group LLLL buildBrokerThreadInputs export]: helper must be in webhook.js __test__ exports`);
+  }
+  console.log('  PASS [Group LLLL buildBrokerThreadInputs export]: helper exported');
+
+  // adminReply import includes isAdminFacingSubject
+  if (!/const \{[^}]*isAdminFacingSubject[^}]*\} = require\('\.\.\/lib\/adminReply'\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group LLLL import]: webhook.js must import isAdminFacingSubject from adminReply.js`);
+  }
+  console.log('  PASS [Group LLLL import]: isAdminFacingSubject imported into webhook.js');
+
+  // executeDraft now uses anchorSubject and brokerHeaders, not the pre-LLLL [empty headers + draftSubject]
+  // Anchor on Section: executeDraft's broker send must reference anchorSubject + brokerHeaders.
+  if (!/executeDraft = async \(draftEmail, draftSubject, draftAction\)[\s\S]{0,3000}buildBrokerThreadInputs\(allMessages\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group LLLL executeDraft wiring]: executeDraft must call buildBrokerThreadInputs(allMessages)`);
+  }
+  console.log('  PASS [Group LLLL executeDraft wiring]: executeDraft calls buildBrokerThreadInputs');
+
+  if (!/const anchorSubject = brokerInputs\.earliestBrokerSubject/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group LLLL anchorSubject]: executeDraft must compute anchorSubject from brokerInputs.earliestBrokerSubject`);
+  }
+  console.log('  PASS [Group LLLL anchorSubject]: anchorSubject derived from earliestBrokerSubject');
+
+  // sendEmailDelayed call must use anchorSubject (not raw draftSubject) and brokerHeaders (not [])
+  if (!/emailService\.sendEmailDelayed\(\s*existingDeal\.email,\s*anchorSubject,/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group LLLL sendEmailDelayed subject]: executeDraft's sendEmailDelayed call must pass anchorSubject as the subject argument, not raw draftSubject`);
+  }
+  console.log('  PASS [Group LLLL sendEmailDelayed subject]: sendEmailDelayed receives anchorSubject');
+
+  if (!/draftAttachments,\s*\n\s*brokerHeaders,/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group LLLL sendEmailDelayed headers]: executeDraft's sendEmailDelayed call must pass brokerHeaders as the 6th arg, not [] (the pre-LLLL bug shape — empty headers meant Gmail/Outlook couldn't thread)`);
+  }
+  console.log('  PASS [Group LLLL sendEmailDelayed headers]: sendEmailDelayed receives brokerHeaders');
+
+  // Pre-LLLL bug shape must be GONE — executeDraft must NOT pass raw draftSubject + [] to sendEmailDelayed.
+  // Look for the specific pre-LLLL pattern: `draftSubject,\n` followed by empty-text + email + attachments + `[]`.
+  // The strict check: there must NOT be a sendEmailDelayed call with `draftSubject` as the 2nd arg inside executeDraft.
+  // (Match the executeDraft function body, then check for the wrong shape inside.)
+  const executeDraftMatch = webhookSrc.match(/const executeDraft = async[\s\S]*?^\s+\};/m);
+  if (!executeDraftMatch) {
+    throw new Error(`FAIL [Group LLLL executeDraft body extract]: could not isolate executeDraft function body for bug-shape regression check`);
+  }
+  const executeDraftBody = executeDraftMatch[0];
+  if (/sendEmailDelayed\(\s*existingDeal\.email,\s*draftSubject,/.test(executeDraftBody)) {
+    throw new Error(`FAIL [Group LLLL pre-LLLL bug shape]: executeDraft still has sendEmailDelayed(existingDeal.email, draftSubject, ...) — the pre-LLLL bug shape. Must be anchorSubject.`);
+  }
+  console.log('  PASS [Group LLLL no pre-LLLL bug shape]: executeDraft no longer passes raw draftSubject to sendEmailDelayed');
 
   // ════════════════════════════════════════════════════════════════
   // GROUP HHHH — copy-pasteable admin review emails (Franco lender hand-off)

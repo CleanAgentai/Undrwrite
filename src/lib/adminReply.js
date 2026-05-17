@@ -32,4 +32,20 @@ const ADMIN_REPLY_SUBJECT_RE = /^(?:Re:\s+)+(?:\[UPDATED\]\s+)?(?:ACTION REQUIRE
 
 const isAdminReplySubject = (subject) => ADMIN_REPLY_SUBJECT_RE.test(subject || '');
 
-module.exports = { ADMIN_REPLY_SUBJECT_RE, isAdminReplySubject };
+// Group LLLL (S15.3+): broader predicate that matches admin-direction messages
+// regardless of Re: depth — catches Vienna's outbound originals ("ACTION
+// REQUIRED: ..."), Vienna's draft-preview re-sends ("Re: Re: ACTION REQUIRED:
+// ..."), AND admin's inbound replies ("Re: ACTION REQUIRED: ..."). Includes
+// "Daily Summary" (outbound-only, no Re: variant). Used by executeDraft's
+// broker-thread construction to invert into a broker-conversation filter so
+// admin-cycle messages don't leak into the broker-thread header chain.
+//
+// Kept distinct from isAdminReplySubject because the existing callers (cron's
+// "Emails Received" filter, DDDD admin-label heuristic in generateLeadSummary)
+// depend on the reply-only semantic — they specifically want admin REPLIES,
+// not Vienna's outbound-to-admin originals.
+const ADMIN_FACING_SUBJECT_RE = /^(?:Re:\s+)*(?:\[UPDATED\]\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\[Conditions Fulfilled\]|\[File Complete\]|\[Broker Update\]|Daily Summary)/i;
+
+const isAdminFacingSubject = (subject) => ADMIN_FACING_SUBJECT_RE.test(subject || '');
+
+module.exports = { ADMIN_REPLY_SUBJECT_RE, isAdminReplySubject, ADMIN_FACING_SUBJECT_RE, isAdminFacingSubject };

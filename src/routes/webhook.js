@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { isAdminReplySubject } = require('../lib/adminReply');
+const { isAdminReplySubject, isAdminFacingSubject } = require('../lib/adminReply');
 const config = require('../config');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
@@ -228,6 +228,45 @@ const buildPreviewThreadChain = ({ outboundIds = [], inboundReferences = [], lat
     seen.add(key);
     return true;
   });
+};
+
+// Group LLLL (S15.3+): extract the broker-conversation slice of the message log
+// for thread-header construction on broker-facing sends (executeDraft).
+// Counterpart to YYY's admin-thread construction at the draft-preview path:
+// YYY pulls Vienna's full outbound chain anchored on admin's current reply
+// (admin-direction); LLLL pulls the broker-conversation subset filtered AWAY
+// from admin-facing subjects (broker-direction).
+//
+// Production case driving the fix: Derek Olsen 2026-05-16 (deal b1ba76b0).
+// Karen's submission subject was "Derek Olsen — Potential Deal". After admin
+// approved the prelim and SEND'd the doc-request draft, executeDraft sent it
+// to broker with Claude-composed draft_subject "Re: Derek Olsen" (no descriptor)
+// and empty headers — new thread in Karen's inbox. LLLL anchors the subject on
+// the earliest broker-direction inbound + populates In-Reply-To/References
+// from Vienna's broker-direction outbound chain.
+//
+// Filter: !isAdminFacingSubject(m.subject). Catches both directions of
+// admin-side traffic (Vienna's outbound prelim/final/handoff originals +
+// admin's inbound replies + draft-preview cycles) regardless of Re: depth.
+//
+// In-Reply-To anchored on Vienna's last broker-direction outbound (not
+// broker's last inbound) because saveMessage doesn't currently persist
+// external_message_id for inbound messages. The broker's mail client's
+// References chain already contains Vienna's prior outbound IDs (it built
+// them when broker replied), so anchoring our next outbound on Vienna's
+// prior outbound chains correctly for both Gmail (References-based) and
+// Outlook (In-Reply-To-based) threading.
+const buildBrokerThreadInputs = (allMessages = []) => {
+  const brokerMessages = allMessages.filter(m => !isAdminFacingSubject(m.subject));
+  const brokerOutbounds = brokerMessages.filter(m => m.direction === 'outbound' && m.external_message_id);
+  const earliestBrokerInbound = brokerMessages.find(m => m.direction === 'inbound');
+  const latestBrokerOutbound = brokerOutbounds.length > 0 ? brokerOutbounds[brokerOutbounds.length - 1] : null;
+  return {
+    outboundIds: brokerOutbounds.map(m => m.external_message_id),
+    inboundReferences: [],
+    latestMessageId: latestBrokerOutbound ? latestBrokerOutbound.external_message_id : null,
+    earliestBrokerSubject: earliestBrokerInbound ? earliestBrokerInbound.subject : null,
+  };
 };
 
 // Group SSS Site 4 + Group CCCC (S6.1 + S7.2): JS-authoritative completion-path
@@ -689,16 +728,46 @@ ${draftEmail}
         const executeDraft = async (draftEmail, draftSubject, draftAction) => {
           const draftAttachments = [];
 
+          // Group LLLL (S15.3+): broker-thread anchor. Subject + In-Reply-To +
+          // References derive from the broker-direction message slice so the
+          // doc-request / decline / closing draft lands in the broker's
+          // existing conversation instead of starting a new thread (Derek
+          // Olsen 2026-05-16 case: Claude's "Re: Derek Olsen" draft_subject
+          // dropped the original "— Potential Deal" descriptor; empty headers
+          // meant Gmail/Outlook couldn't thread by Message-ID either).
+          const allMessages = await dealsService.getMessages(existingDeal.id);
+          const brokerInputs = buildBrokerThreadInputs(allMessages);
+          const chain = buildPreviewThreadChain(brokerInputs);
+
+          const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+          const brokerHeaders = [];
+          if (brokerInputs.latestMessageId) {
+            brokerHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(brokerInputs.latestMessageId) });
+          }
+          if (chain.length > 0) {
+            brokerHeaders.push({ Name: 'References', Value: chain.map(formatThreadId).join(' ') });
+          }
+
+          // Anchor subject on the earliest broker-direction inbound (broker's
+          // submission). The Claude-composed draftSubject is forensic-only
+          // post-LLLL — preserved in deal.draft_subject for debugging but not
+          // used on the actual send.
+          const anchorSubject = brokerInputs.earliestBrokerSubject
+            ? (brokerInputs.earliestBrokerSubject.startsWith('Re:')
+                ? brokerInputs.earliestBrokerSubject
+                : `Re: ${brokerInputs.earliestBrokerSubject}`)
+            : draftSubject;
+
           emailService.sendEmailDelayed(
             existingDeal.email,
-            draftSubject,
+            anchorSubject,
             draftEmail.replace(/<[^>]*>/g, ''),
             draftEmail,
             draftAttachments,
-            [],
+            brokerHeaders,
             async (result) => {
-              await dealsService.saveMessage(existingDeal.id, 'outbound', draftSubject, draftEmail, result.MessageID);
-              console.log('Draft sent to broker');
+              await dealsService.saveMessage(existingDeal.id, 'outbound', anchorSubject, draftEmail, result.MessageID);
+              console.log(`Draft sent to broker (LLLL: threaded into broker conversation, subject="${anchorSubject}", headers=${brokerHeaders.length})`);
             }
           );
 
@@ -1718,4 +1787,6 @@ module.exports.__test__ = {
   computeIntakeAskedItems,
   // Group JJJJ: misattached doc filter for prelim-review gate
   eligibleDocsForGate,
+  // Group LLLL: broker-thread input extraction for executeDraft header construction
+  buildBrokerThreadInputs,
 };
