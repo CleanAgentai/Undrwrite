@@ -1,7 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const { isAdminReplySubject, isAdminFacingSubject } = require('../lib/adminReply');
-const { isPurchaseFromSummary } = require('../lib/dealType');
+// Group KKKK: SSS-era doc-requirement helpers hoisted to dealType.js so
+// ai.js can also consume them (circular-dep avoidance — webhook.js requires
+// ai.js, so ai.js can't require webhook.js back). Single canonical source.
+const {
+  isPurchaseFromSummary,
+  DOC_SYNONYMS,
+  isDocRequirementSatisfied,
+  BASE_REQUIRED_INTAKE_REFINANCE,
+  BASE_REQUIRED_INTAKE_PURCHASE,
+  COMPLIANCE_REQUIRED_POSTAPPROVAL,
+  intakeRequiredFor,
+  allRequiredForCompletion,
+  allIntakeReceived,
+} = require('../lib/dealType');
 const config = require('../config');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
@@ -46,53 +59,14 @@ const firstNameMatchesAdmin = (name) => {
   return first.length > 0 && first === ADMIN_FIRST_NAME;
 };
 
-// Document classification synonyms — for the missingDocs filter, certain doc types
-// satisfy other required items. Bradley's commit e4f6b89 dropped 'noa' from baseRequired
-// with the comment "NOA satisfies income_proof", but the filter logic was never updated
-// to actually wire in the equivalence. Bug 2 from S3 retest: deal with NOA classification
-// showed "Proof of Income" in [MISSING] list of preliminary review email despite the NOA
-// being on file. Map structure makes future equivalences trivial to add (T4, paystubs are
-// already covered because the classifier maps them to 'income_proof' directly).
-const DOC_SYNONYMS = {
-  income_proof: ['income_proof', 'noa'],
-};
-
-const isDocRequirementSatisfied = (req, classifications) => {
-  const accepted = DOC_SYNONYMS[req] || [req];
-  return accepted.some(c => classifications.includes(c));
-};
-
-// Group SSS (S3.2): two-tier required-doc model. JJJ moved AML/PEP from intake
-// (prelim review) to post-approval (generateDocumentRequestEmail). But four code
-// paths gated "file complete" using intake-only constants — when intake docs
-// were in, the closing handoff fired before AML/PEP were ever requested
-// (Derek Olsen S3 retest production case). SSS extends the completion-tier
-// gates to require compliance docs too. Prelim review stays intake-only — JJJ
-// preserved (AML/PEP must not appear in the prelim [MISSING] list).
-const BASE_REQUIRED_INTAKE_REFINANCE = [
-  'government_id', 'appraisal', 'property_tax', 'mortgage_statement',
-  'income_proof', 'credit_report',
-];
-const BASE_REQUIRED_INTAKE_PURCHASE = [
-  'government_id', 'appraisal', 'property_tax',
-  'income_proof', 'credit_report', 'purchase_contract',
-];
-const COMPLIANCE_REQUIRED_POSTAPPROVAL = ['aml', 'pep'];
-
-const intakeRequiredFor = (isPurchase) =>
-  isPurchase ? BASE_REQUIRED_INTAKE_PURCHASE : BASE_REQUIRED_INTAKE_REFINANCE;
-
-const allRequiredForCompletion = (isPurchase) => [
-  ...intakeRequiredFor(isPurchase),
-  ...COMPLIANCE_REQUIRED_POSTAPPROVAL,
-];
-
-// Group MMMM (S3.1/S3.2): isPurchaseFromSummary moved to src/lib/dealType.js
-// as canonical single-source-of-truth. Imported at top of file. Old local
-// definition was duplicated across webhook.js, ai.js (×2), and cron — the
-// drift risk surfaced when Derek Olsen's "equipment purchase" purpose
-// matched the loose /purchas/ regex and triggered the purchase doc list
-// on a refinance. Re-exported via __test__ below for harness backward-compat.
+// Group KKKK (S1.1/S2.1/S5.1): SSS-era doc-requirement constants + helpers
+// (DOC_SYNONYMS, isDocRequirementSatisfied, BASE_REQUIRED_INTAKE_*,
+// COMPLIANCE_REQUIRED_POSTAPPROVAL, intakeRequiredFor, allRequiredForCompletion)
+// hoisted to src/lib/dealType.js. They're imported at the top of this file
+// and re-exported via __test__ for backward compat with existing SSS/NNN/
+// CCCC/EEEE/JJJJ test-trigger references. The hoist was required so ai.js
+// can also consume them — circular-dep avoidance (webhook.js requires
+// ai.js, so ai.js can't require webhook.js back).
 
 // Group VVV (S4.1): skip blank intake forms (Loan Application + PNW Statement)
 // on the welcome email when the deal will route to a "deferred-intake" state.
@@ -1589,6 +1563,21 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         const labeledActiveHistory = labelMessagesForLeadSummary(conversationHistory, activeBrokerName);
         // Items 3+4: pass deal status (active here, since this is the active branch).
         // Status drives the FILE STATE block in the prompt — gates state-aware forwarding rules.
+        // Group KKKK escalation (D3 5/5 leaked pre-block): compute JS-side
+        // postApprovalAmlPepAsk signal and pass to generateBrokerResponse. Fires
+        // when deal is post-approval (prelim_approved_at set), all intake docs
+        // are on file, and AML or PEP missing. Triggers the explicit prompt
+        // block instructing Vienna to request AML/PEP in this conversational
+        // reply. Pre-KKKK the conversational handler omitted AML/PEP because
+        // the prompt's STANDARD DOCUMENT CHECKLIST doesn't include them.
+        const activeDocsClassifications = documentsOnFile.map(d => d.classification).filter(Boolean);
+        const activeIsPurchase = isPurchaseFromSummary(summaryIn);
+        const activeIntakeComplete = allIntakeReceived(activeDocsClassifications, activeIsPurchase);
+        const activeAmlOnFile = activeDocsClassifications.includes('aml');
+        const activePepOnFile = activeDocsClassifications.includes('pep');
+        const postApprovalAmlPepAsk = !!existingDeal.prelim_approved_at
+          && activeIntakeComplete
+          && (!activeAmlOnFile || !activePepOnFile);
         const result = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -1596,7 +1585,8 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           summaryIn,
           labeledActiveHistory,
           documentsOnFile,
-          existingDeal.status
+          existingDeal.status,
+          { postApprovalAmlPepAsk }
         );
         // Normalize the freshly-updated summary on the way back, before persisting.
         result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);

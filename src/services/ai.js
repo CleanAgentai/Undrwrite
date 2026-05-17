@@ -1,7 +1,7 @@
 const claude = require('../lib/claude');
 const { buildContentBlocks } = require('../lib/pdf');
 const config = require('../config');
-const { isPurchaseFromSummary } = require('../lib/dealType');
+const { isPurchaseFromSummary, intakeRequiredFor, isDocRequirementSatisfied, allIntakeReceived } = require('../lib/dealType');
 
 // Retry wrapper for Claude API calls (handles rate limits)
 const callClaude = async (params, maxRetries = 3) => {
@@ -356,9 +356,28 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   },
 
   // Conversational broker response — reads full context and responds naturally
-  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active') => {
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false } = {}) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
+
+      // Group KKKK escalation (S1.1/S2.1/S5.1): when JS detects post-approval +
+      // intake-complete + AML/PEP missing, inject an explicit block instructing
+      // Vienna to request AML/PEP in this conversational reply. Pre-escalation
+      // D3 verification: 0/5 passed, 5/5 leaked — Claude omitted AML/PEP from
+      // conversational replies because the STANDARD DOCUMENT CHECKLIST in this
+      // prompt doesn't include them (JJJ moved them out of intake; nothing put
+      // them back into the conversational checklist for the post-approval-
+      // intake-complete state). Per Q3-KKKK pre-authorization, the prompt
+      // block fires when the JS-side flag is set.
+      const postApprovalAmlPepBlock = postApprovalAmlPepAsk
+        ? `
+
+POST-APPROVAL AML/PEP ASK (Group KKKK — load-bearing for the conversational follow-up flow): the deal has passed prelim approval, all intake documents are on file, and the only remaining items before funding are the broker compliance forms. Your reply MUST explicitly request:
+- AML form (Anti-Money Laundering — broker compliance, required)
+- PEP form (Politically Exposed Person — broker compliance, required)
+
+Acknowledge what's already received (intake is complete) and request AML + PEP as the final items needed. Do NOT skip this — the pre-KKKK conversational flow omitted AML/PEP because the STANDARD DOCUMENT CHECKLIST below doesn't include them. This block is the explicit instruction for the post-approval-intake-complete state and OVERRIDES any prior rule about "AML/PEP not asked at intake" (this is not intake — this is the post-approval compliance ask).`
+        : '';
 
       const attachmentNames = attachments.length > 0
         ? attachments.map(a => a.Name).join(', ')
@@ -456,7 +475,7 @@ You have TWO tasks. Return both using the exact format at the bottom.
 
 === TASK 1: RESPOND TO THE SENDER ===
 
-Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.
+Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.${postApprovalAmlPepBlock}
 
 PRIORITY ORDER — handle these in order:
 1. ANSWER any questions the sender asked — this is your #1 job. Never ignore a question.
@@ -482,7 +501,7 @@ ${existingSummary?.identity_clash ? `IDENTITY CLASH PENDING (Group HHH) — the 
 ` : ''}HIGH LTV (over 80%) — when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:
 - Acknowledge directly that the LTV is outside our usual 80% threshold. Be honest about it.
 ${existingSummary?.collateral_offered
-  ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, etc., per the STANDARD DOCUMENT CHECKLIST below). Note: AML/PEP are NOT asked at intake — Group JJJ moved them to post-approval (generateDocumentRequestEmail).`
+  ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, etc., per the STANDARD DOCUMENT CHECKLIST below). Note on AML/PEP: do NOT ask for AML/PEP at intake — JJJ moved them out of the initial-contact email. POST-APPROVAL, when intake docs are complete and AML/PEP are the only remaining items (per KKKK gating), ask for them in your normal conversational doc-list — they ARE legitimate broker compliance asks once intake is in. The full doc-request email also requests them once intake completes (KKKK).`
   : `- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
 - CRITICAL — DO NOT REQUEST DOCUMENTS IN THIS EMAIL: when LTV > 80% and additional collateral has NOT yet been confirmed by the broker, the ONLY ask in this email is the collateral question. Do NOT include a document request list — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. Document requests will follow LATER, after Franco decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 - If the broker's most recent reply was unclear about collateral (questions back, "let me check", off-topic), re-ask the collateral question in different words — give concrete examples of what would qualify (a second piece of real estate, an investment property, a vacation home with equity). Stay firm: the doc package is NOT requested until collateral is resolved.`}
@@ -865,7 +884,22 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
       // AML/PEP only apply when the SUBMITTER is a broker (broker compliance documents).
       // For borrower-direct submissions, skip — lender or broker can pull these later.
       const reqSenderIsBroker = dealSummary?.sender_type === 'broker';
-      const complianceDocs = reqSenderIsBroker
+      // Group KKKK (S1.1/S2.1/S5.1): AML/PEP request gated behind "all intake
+      // docs satisfied". Pre-KKKK this block was unconditionally appended
+      // whenever sender_type='broker', bundling AML/PEP with whatever intake
+      // items were still missing. Franco's rule: intake items first, AML/PEP
+      // as a separate request once intake completes. JJJ moved AML/PEP OUT
+      // of intake email; SSS made completion gate two-tier; neither gated
+      // the bundling itself. KKKK closes that loop.
+      //
+      // When intake-incomplete + broker: complianceDocs is '' → request asks
+      // for intake only. When intake-complete + broker: complianceDocs has
+      // the AML/PEP lines → request asks for AML/PEP as the remaining items.
+      // The follow-up flow (broker fills intake over multiple turns, intake
+      // completes, AML/PEP still missing) is handled by generateBrokerResponse's
+      // conversational reply on the active-branch post-approval turn.
+      const intakeComplete = allIntakeReceived(receivedClassifications, reqIsPurchase);
+      const complianceDocs = (reqSenderIsBroker && intakeComplete)
         ? `\n- AML form (Anti-Money Laundering — broker compliance, required)\n- PEP form (Politically Exposed Person — broker compliance, required)`
         : '';
 

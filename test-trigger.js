@@ -5330,6 +5330,421 @@ Crown Mortgage Group Lic. #MB556291`;
   // created, so the clause would be a no-op. Source-string-on-absence
   // regression below catches anyone wiring computeWillReview into the
   // initial branch.
+  // ════════════════════════════════════════════════════════════════
+  // GROUP KKKK — AML/PEP sequencing gate in generateDocumentRequestEmail (S1.1/S2.1/S5.1)
+  // ════════════════════════════════════════════════════════════════
+  // This bug has been counted "fixed" three times. KKKK closes it for good
+  // by gating the BUNDLING itself (not just downstream consequences).
+  //
+  // What JJJ + SSS each did vs didn't:
+  //   - JJJ (S12.2): moved AML/PEP OUT of the intake welcome email. Pre-JJJ
+  //     Vienna asked for AML/PEP at first contact; post-JJJ they moved to
+  //     post-approval via generateDocumentRequestEmail. JJJ did NOT gate
+  //     the complianceDocs block inside generateDocumentRequestEmail.
+  //   - SSS (S3.2): made the COMPLETION gate two-tier (allRequiredForCompletion
+  //     = intake + compliance), so completion-handoff waits for AML+PEP. SSS
+  //     did NOT gate the complianceDocs block; SSS fixed WHEN completion
+  //     fires, not WHEN AML/PEP get requested.
+  //
+  // Why "addressed three times" hasn't held: each round verified "AML/PEP
+  // eventually requested" (which they were — bundled with intake), missing
+  // Franco's actual rule: intake items first, AML/PEP as a separate request
+  // once intake completes. The test pattern asserted appearance, not shape.
+  //
+  // KKKK adds the missing layer:
+  //   1. Hoist SSS doc-requirement helpers (intakeRequiredFor,
+  //      isDocRequirementSatisfied, BASE_REQUIRED_INTAKE_*, etc.) from
+  //      webhook.js to src/lib/dealType.js — single canonical module that
+  //      both webhook.js and ai.js consume.
+  //   2. New gate predicate allIntakeReceived(classifications, isPurchase)
+  //      in dealType.js — truth-tablable.
+  //   3. generateDocumentRequestEmail's complianceDocs block now gated on
+  //      `reqSenderIsBroker && allIntakeReceived(receivedClassifications,
+  //      reqIsPurchase)`. Intake-incomplete → '' (request asks for intake
+  //      only). Intake-complete → AML+PEP lines (request asks for them as
+  //      remaining items).
+  //   4. The follow-up flow (broker fills intake over multiple turns →
+  //      intake completes → AML/PEP still missing) is handled by
+  //      generateBrokerResponse's conversational reply at the active-branch
+  //      post-approval turn. Per Q5-KKKK, trust the existing missingDocs
+  //      flow; D3 5x verifies. Line-485 comment in generateBrokerResponse
+  //      corrected to be factually accurate post-KKKK (pre-KKKK the
+  //      comment said "AML/PEP are handled by generateDocumentRequestEmail"
+  //      which actively primed Claude away from the post-approval-intake-
+  //      complete follow-up that now lives in the conversational path).
+  //
+  // Test pattern shift: D1 + D2 assert SHAPE of the doc-request email, not
+  // just "AML/PEP eventually appear":
+  //   - D1: intake-incomplete fixture → output must NOT contain AML or PEP.
+  //   - D2: intake-complete fixture → output MUST contain AML AND PEP.
+  // This shape-assertion is what catches the regression the previous fixes
+  // missed.
+  //
+  // Close criterion: Franco's retest passing — not the harness going green.
+  console.log('\n========== GROUP KKKK — AML/PEP sequencing gate in generateDocumentRequestEmail ==========');
+
+  // ─── Truth table on allIntakeReceived (the gate predicate) ──────────
+  console.log('\n---------- Group KKKK / Truth Table: allIntakeReceived ----------');
+  const { allIntakeReceived: kkkkIntakeFn } = require('./src/lib/dealType');
+
+  const kkkkCases = [
+    // Refinance — 6 intake required (gov_id + appraisal + property_tax + mortgage_statement + income_proof + credit_report)
+    { name: 'refinance: all 6 intake → true', classifications: ['government_id','appraisal','property_tax','mortgage_statement','income_proof','credit_report'], isPurchase: false, expect: true },
+    { name: 'refinance: missing mortgage_statement → false', classifications: ['government_id','appraisal','property_tax','income_proof','credit_report'], isPurchase: false, expect: false },
+    { name: 'refinance: missing gov_id → false', classifications: ['appraisal','property_tax','mortgage_statement','income_proof','credit_report'], isPurchase: false, expect: false },
+    { name: 'refinance: missing credit_report → false', classifications: ['government_id','appraisal','property_tax','mortgage_statement','income_proof'], isPurchase: false, expect: false },
+    { name: 'refinance: noa satisfies income_proof (synonym) → true', classifications: ['government_id','appraisal','property_tax','mortgage_statement','noa','credit_report'], isPurchase: false, expect: true },
+    { name: 'refinance: all 6 intake + AML/PEP already on file → true (compliance not gated by this predicate)', classifications: ['government_id','appraisal','property_tax','mortgage_statement','income_proof','credit_report','aml','pep'], isPurchase: false, expect: true },
+
+    // Purchase — 6 intake required (gov_id + appraisal + property_tax + income_proof + credit_report + purchase_contract; no mortgage_statement)
+    { name: 'purchase: all 6 intake → true', classifications: ['government_id','appraisal','property_tax','income_proof','credit_report','purchase_contract'], isPurchase: true, expect: true },
+    { name: 'purchase: missing purchase_contract → false', classifications: ['government_id','appraisal','property_tax','income_proof','credit_report'], isPurchase: true, expect: false },
+    { name: 'purchase: refinance docs on file (mortgage_statement instead of purchase_contract) → false', classifications: ['government_id','appraisal','property_tax','mortgage_statement','income_proof','credit_report'], isPurchase: true, expect: false },
+    { name: 'purchase: noa synonym + all intake → true', classifications: ['government_id','appraisal','property_tax','noa','credit_report','purchase_contract'], isPurchase: true, expect: true },
+
+    // Cross-type — refinance fixture classified as purchase, or vice versa
+    { name: 'refinance fixture (no purchase_contract) classified as purchase → false (missing purchase_contract)', classifications: ['government_id','appraisal','property_tax','mortgage_statement','income_proof','credit_report'], isPurchase: true, expect: false },
+
+    // Defensive
+    { name: 'empty classifications → false', classifications: [], isPurchase: false, expect: false },
+    { name: 'null classifications → false (defensive)', classifications: null, isPurchase: false, expect: false },
+    { name: 'classifications has only one intake item → false', classifications: ['appraisal'], isPurchase: false, expect: false },
+  ];
+
+  let kkkkPassed = 0;
+  for (const tc of kkkkCases) {
+    const got = kkkkIntakeFn(tc.classifications, tc.isPurchase);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group KKKK ${tc.name}]:\n  classifications=${JSON.stringify(tc.classifications)}\n  isPurchase=${tc.isPurchase}\n  expected=${tc.expect}\n  got=${got}`);
+    }
+    console.log(`  PASS [${tc.name}]: → ${got}`);
+    kkkkPassed++;
+  }
+  console.log(`Group KKKK / Truth Table: ${kkkkPassed}/${kkkkCases.length} passed`);
+
+  // ─── Source-string regression: dealType.js holds the SSS helpers ────
+  console.log('\n---------- Group KKKK / Source-string regression on dealType.js ----------');
+  const kkkkDealTypeSrc = fs_qqq.readFileSync(path_qqq.join(__dirname, 'src/lib/dealType.js'), 'utf8');
+
+  const kkkkRequiredExports = [
+    'DOC_SYNONYMS',
+    'isDocRequirementSatisfied',
+    'BASE_REQUIRED_INTAKE_REFINANCE',
+    'BASE_REQUIRED_INTAKE_PURCHASE',
+    'COMPLIANCE_REQUIRED_POSTAPPROVAL',
+    'intakeRequiredFor',
+    'allRequiredForCompletion',
+    'allIntakeReceived',
+  ];
+  for (const name of kkkkRequiredExports) {
+    if (!new RegExp(`\\b${name}\\b`).test(kkkkDealTypeSrc)) {
+      throw new Error(`FAIL [Group KKKK dealType.js exports]: ${name} must be defined in dealType.js`);
+    }
+  }
+  console.log(`  PASS [Group KKKK dealType.js exports]: all 8 SSS+KKKK helpers defined in dealType.js`);
+
+  // module.exports must list all of them
+  const kkkkExportsBlock = kkkkDealTypeSrc.match(/module\.exports = \{[\s\S]*?\};/);
+  if (!kkkkExportsBlock) {
+    throw new Error(`FAIL [Group KKKK dealType.js module.exports]: could not locate module.exports block`);
+  }
+  for (const name of kkkkRequiredExports) {
+    if (!new RegExp(`\\b${name}\\b`).test(kkkkExportsBlock[0])) {
+      throw new Error(`FAIL [Group KKKK dealType.js export ${name}]: ${name} must be in module.exports block`);
+    }
+  }
+  console.log(`  PASS [Group KKKK dealType.js exports]: all 8 SSS+KKKK helpers exported`);
+
+  // ─── Source-string regression: webhook.js no longer locally defines SSS helpers ─
+  console.log('\n---------- Group KKKK / Source-string regression: webhook.js doesn\'t duplicate ----------');
+  // webhookSrc already loaded earlier
+
+  // The local definitions must be GONE (otherwise drift risk that KKKK is meant to eliminate).
+  // Check via "const X = " patterns NOT preceded by an import/destructure context.
+  const localDefPatterns = [
+    /^const DOC_SYNONYMS = \{/m,
+    /^const isDocRequirementSatisfied = /m,
+    /^const BASE_REQUIRED_INTAKE_REFINANCE = \[/m,
+    /^const BASE_REQUIRED_INTAKE_PURCHASE = \[/m,
+    /^const COMPLIANCE_REQUIRED_POSTAPPROVAL = /m,
+    /^const intakeRequiredFor = \(isPurchase\) =>/m,
+    /^const allRequiredForCompletion = /m,
+  ];
+  for (const pat of localDefPatterns) {
+    if (pat.test(webhookSrc)) {
+      throw new Error(`FAIL [Group KKKK webhook.js de-duplication]: webhook.js still has a top-level local definition matching ${pat} — KKKK requires these to be imported from dealType.js, not defined locally. Local re-definition recreates the exact drift risk MMMM/KKKK are meant to eliminate.`);
+    }
+  }
+  console.log(`  PASS [Group KKKK webhook.js de-duplication]: no local definitions of SSS helpers in webhook.js`);
+
+  // webhook.js imports them from dealType
+  if (!/const \{[\s\S]*intakeRequiredFor[\s\S]*\} = require\(['"]\.\.\/lib\/dealType['"]\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group KKKK webhook.js import]: webhook.js must import intakeRequiredFor (+ other SSS helpers) from dealType.js`);
+  }
+  console.log(`  PASS [Group KKKK webhook.js import]: imports SSS helpers from dealType.js`);
+
+  // webhook.js still re-exports via __test__ (backward compat with SSS/NNN/CCCC/EEEE/JJJJ test references)
+  const webhookTestExport = webhookSrc.match(/module\.exports\.__test__ = \{[\s\S]*?\};/);
+  if (!webhookTestExport) {
+    throw new Error(`FAIL [Group KKKK webhook.js __test__ block]: __test__ export block missing`);
+  }
+  const reexportNames = ['intakeRequiredFor', 'allRequiredForCompletion', 'isDocRequirementSatisfied', 'DOC_SYNONYMS', 'BASE_REQUIRED_INTAKE_REFINANCE', 'BASE_REQUIRED_INTAKE_PURCHASE', 'COMPLIANCE_REQUIRED_POSTAPPROVAL'];
+  for (const name of reexportNames) {
+    if (!new RegExp(`\\b${name}\\b`).test(webhookTestExport[0])) {
+      throw new Error(`FAIL [Group KKKK webhook.js __test__ re-export ${name}]: ${name} must be in webhook.js __test__ block (backward compat for SSS/NNN/CCCC/EEEE/JJJJ test references)`);
+    }
+  }
+  console.log(`  PASS [Group KKKK webhook.js __test__ re-exports]: all 7 SSS helpers re-exported for backward compat`);
+
+  // ─── Source-string regression: ai.js generateDocumentRequestEmail gate ─
+  console.log('\n---------- Group KKKK / Source-string regression: generateDocumentRequestEmail gate ----------');
+
+  // ai.js imports the needed helpers
+  if (!/require\(['"]\.\.\/lib\/dealType['"]\)[\s\S]{0,400}allIntakeReceived/.test(aiSource) && !/allIntakeReceived[\s\S]{0,400}require\(['"]\.\.\/lib\/dealType['"]\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK ai.js import]: ai.js must import allIntakeReceived from dealType.js`);
+  }
+  console.log(`  PASS [Group KKKK ai.js import]: allIntakeReceived imported into ai.js`);
+
+  // generateDocumentRequestEmail computes intakeComplete via allIntakeReceived
+  if (!/const intakeComplete = allIntakeReceived\(receivedClassifications, reqIsPurchase\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK gate computation]: generateDocumentRequestEmail must compute intakeComplete = allIntakeReceived(receivedClassifications, reqIsPurchase)`);
+  }
+  console.log(`  PASS [Group KKKK gate computation]: intakeComplete = allIntakeReceived(receivedClassifications, reqIsPurchase)`);
+
+  // complianceDocs is gated on BOTH reqSenderIsBroker AND intakeComplete (the load-bearing AND)
+  if (!/const complianceDocs = \(reqSenderIsBroker && intakeComplete\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK complianceDocs gate]: complianceDocs must be gated on '(reqSenderIsBroker && intakeComplete)' — this is the load-bearing fix that closes the AML/PEP bundling bug. Pre-KKKK gated only on reqSenderIsBroker (unconditional for broker deals); KKKK adds the intakeComplete conjunction.`);
+  }
+  console.log(`  PASS [Group KKKK complianceDocs gate]: gated on (reqSenderIsBroker && intakeComplete)`);
+
+  // Pre-KKKK bug shape — unconditional complianceDocs on broker — must be GONE
+  if (/const complianceDocs = reqSenderIsBroker\s*\n\s*\?\s*`/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK pre-KKKK bug shape]: pre-KKKK unconditional 'complianceDocs = reqSenderIsBroker ? AML+PEP : '\\''' shape still present. Must be replaced with the (reqSenderIsBroker && intakeComplete) gate.`);
+  }
+  console.log(`  PASS [Group KKKK no pre-KKKK bug shape]: unconditional reqSenderIsBroker-only gate removed`);
+
+  // generateBrokerResponse's line-485 comment (the COLLATERAL ALREADY OFFERED block)
+  // must be factually accurate post-KKKK — it must NOT say AML/PEP are handled by
+  // generateDocumentRequestEmail without acknowledging the conversational follow-up
+  // path post-KKKK. Specifically: the corrected comment must mention POST-APPROVAL
+  // conversational asks for AML/PEP being legitimate.
+  if (/Group JJJ moved them to post-approval \(generateDocumentRequestEmail\)\.`/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK line-485 comment accuracy]: pre-KKKK comment 'Group JJJ moved them to post-approval (generateDocumentRequestEmail).' is factually inaccurate post-KKKK — generateDocumentRequestEmail no longer always owns AML/PEP (only when intake complete); the conversational path owns the post-approval-intake-complete case. Comment must be corrected to reference both paths.`);
+  }
+  if (!/POST-APPROVAL[\s\S]{0,500}AML\/PEP[\s\S]{0,200}KKKK/i.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK line-485 comment correction]: corrected comment must reference POST-APPROVAL AML/PEP asks + KKKK gating`);
+  }
+  console.log(`  PASS [Group KKKK line-485 comment accuracy]: comment corrected to reflect post-KKKK reality (conversational path handles post-approval-intake-complete AML/PEP ask)`);
+
+  // ─── Source-string regression: D3 escalation — POST-APPROVAL AML/PEP prompt block ─
+  // The pre-block D3 run yielded 5/5 leaks because Claude omitted AML/PEP from
+  // conversational replies (STANDARD DOCUMENT CHECKLIST doesn't include them).
+  // Per Q3-KKKK pre-authorization, the prompt block is the load-bearing fix
+  // for the conversational follow-up. These assertions guard against future
+  // removal of the block — without it, D3 regresses to 5/5 leaks.
+  console.log('\n---------- Group KKKK / D3 escalation: explicit POST-APPROVAL AML/PEP block ----------');
+
+  // generateBrokerResponse signature accepts the postApprovalAmlPepAsk flag
+  if (!/generateBrokerResponse: async \([\s\S]{0,300}\{ postApprovalAmlPepAsk = false \} = \{\}\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK D3-block signature]: generateBrokerResponse must accept { postApprovalAmlPepAsk = false } options object as the trailing arg`);
+  }
+  console.log('  PASS [Group KKKK D3-block signature]: generateBrokerResponse accepts postApprovalAmlPepAsk flag');
+
+  // postApprovalAmlPepBlock conditional string exists and gates on the flag
+  if (!/const postApprovalAmlPepBlock = postApprovalAmlPepAsk\s*\?\s*`/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK D3-block conditional]: postApprovalAmlPepBlock must be conditionally injected based on the postApprovalAmlPepAsk flag`);
+  }
+  console.log('  PASS [Group KKKK D3-block conditional]: block is conditionally injected when flag is set');
+
+  // Block contains the load-bearing instructions: AML + PEP + "MUST" framing
+  // + acknowledgement of the override of "AML/PEP not at intake" rule
+  if (!/POST-APPROVAL AML\/PEP ASK[\s\S]{0,600}AML form \(Anti-Money Laundering[\s\S]{0,200}PEP form \(Politically Exposed Person/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK D3-block content]: prompt block must include 'POST-APPROVAL AML/PEP ASK' + AML form + PEP form explicit asks`);
+  }
+  console.log('  PASS [Group KKKK D3-block content]: block contains AML + PEP explicit asks');
+
+  if (!/MUST explicitly request[\s\S]{0,1200}OVERRIDES any prior rule about "AML\/PEP not asked at intake"/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK D3-block override]: block must include 'MUST explicitly request' + OVERRIDES framing of the prior 'AML/PEP not at intake' rule (the load-bearing override that beats the STANDARD DOCUMENT CHECKLIST's exclusion)`);
+  }
+  console.log('  PASS [Group KKKK D3-block override]: block uses MUST framing and overrides the not-at-intake rule');
+
+  // Block injected into the prompt body (anchored on TASK 1 RESPOND TO THE SENDER section)
+  if (!/=== TASK 1: RESPOND TO THE SENDER ===[\s\S]{0,500}\$\{postApprovalAmlPepBlock\}/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK D3-block injection]: \${postApprovalAmlPepBlock} must be interpolated into the TASK 1 section of the prompt`);
+  }
+  console.log('  PASS [Group KKKK D3-block injection]: block interpolated into TASK 1 prompt section');
+
+  // Call site at webhook.js computes the flag and passes it through
+  if (!/const postApprovalAmlPepAsk = !!existingDeal\.prelim_approved_at[\s\S]{0,200}activeIntakeComplete[\s\S]{0,200}!activeAmlOnFile \|\| !activePepOnFile/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group KKKK D3-block flag computation]: webhook.js active branch must compute postApprovalAmlPepAsk = !!existingDeal.prelim_approved_at && activeIntakeComplete && (!activeAmlOnFile || !activePepOnFile)`);
+  }
+  console.log('  PASS [Group KKKK D3-block flag computation]: webhook.js computes postApprovalAmlPepAsk from JS-side signals');
+
+  if (!/\{ postApprovalAmlPepAsk \}/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group KKKK D3-block flag pass-through]: webhook.js must pass { postApprovalAmlPepAsk } as the 8th arg to generateBrokerResponse`);
+  }
+  console.log('  PASS [Group KKKK D3-block flag pass-through]: flag passed to generateBrokerResponse');
+
+  // ─── Live verification — 5x3 scenarios under RUN_KKKK_D=1 ──────────
+  if (process.env.RUN_KKKK_D === '1') {
+    // Reuse the same real-PDF stub pattern as JJJJ/MMMM
+    const kkkkStubPdf = fs_qqq.readFileSync(path_qqq.join(__dirname, 'forms/Loan Application Form (1).pdf')).toString('base64');
+
+    // ── D1 (5x): generateDocumentRequestEmail with intake-incomplete → NO AML/PEP ──
+    console.log('\n---------- Group KKKK / D1: generateDocumentRequestEmail intake-incomplete → NO AML/PEP (5x) ----------');
+
+    const d1Summary = {
+      sender_type: 'broker',
+      sender_name: 'Amanda Foster',
+      broker_name: 'Amanda Foster',
+      broker_company: 'Crown Mortgage Group',
+      borrower_name: 'Derek Olsen',
+      loan_type: 'second mortgage',
+      is_purchase: false,
+      property_address: '5519 Henwood Road SW, Calgary, AB T3E 7C2',
+      property_value: 730000,
+      loan_amount_requested: 110000,
+      existing_mortgage_balance: 341000,
+      ltv_percent: 61.8,
+      purpose: 'Business working capital and equipment purchase',
+      exit_strategy: 'Refinance with RBC at first mortgage renewal in May 2027',
+    };
+    // Intake-INCOMPLETE: 2 of 6 received (gov_id + appraisal). Missing: property_tax, mortgage_statement, income_proof, credit_report.
+    const d1ExistingDocs = [
+      { file_name: 'GovID_Olsen.pdf', classification: 'government_id' },
+      { file_name: 'Appraisal_Olsen.pdf', classification: 'appraisal' },
+    ];
+
+    let d1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const docRequestEmail = await aiService.generateDocumentRequestEmail(
+          d1Summary, 'personal', false, false, d1ExistingDocs, []
+        );
+        // Leak detection: response mentions AML or PEP. We're strict — any
+        // mention is a leak (intake is incomplete, AML/PEP shouldn't appear).
+        const lower = (docRequestEmail || '').toLowerCase();
+        const mentionsAml = /\baml\b|anti-money laundering/.test(lower);
+        const mentionsPep = /\bpep\b|politically exposed/.test(lower);
+        if (mentionsAml || mentionsPep) {
+          d1Leaks++;
+          const snippet = (docRequestEmail || '').match(/.{0,80}(aml|pep|anti-money|politically).{0,80}/i)?.[0] || 'snippet not found';
+          console.log(`  Run ${run}: LEAK — output mentions AML/PEP despite intake incomplete\n    snippet: ${snippet}`);
+        } else {
+          console.log(`  Run ${run}: PASS — no AML/PEP mentioned (intake-incomplete request asks for intake items only)`);
+        }
+      } catch (e) {
+        d1Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group KKKK / D1 (intake-incomplete 5x): ${5 - d1Leaks}/5 passed, ${d1Leaks}/5 leaked (threshold: ≤1)`);
+
+    // ── D2 (5x): generateDocumentRequestEmail with intake-complete → AML+PEP requested ──
+    console.log('\n---------- Group KKKK / D2: generateDocumentRequestEmail intake-complete → AML+PEP (5x) ----------');
+
+    const d2ExistingDocs = [
+      { file_name: 'GovID_Olsen.pdf', classification: 'government_id' },
+      { file_name: 'Appraisal_Olsen.pdf', classification: 'appraisal' },
+      { file_name: 'PropertyTax_Olsen.pdf', classification: 'property_tax' },
+      { file_name: 'Payout_RBC_Olsen.pdf', classification: 'mortgage_statement' },
+      { file_name: 'NOA_Olsen_2024.pdf', classification: 'income_proof' },
+      { file_name: 'CB_Olsen.pdf', classification: 'credit_report' },
+    ];
+
+    let d2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const docRequestEmail = await aiService.generateDocumentRequestEmail(
+          d1Summary, 'personal', false, false, d2ExistingDocs, []
+        );
+        const lower = (docRequestEmail || '').toLowerCase();
+        const mentionsAml = /\baml\b|anti-money laundering/.test(lower);
+        const mentionsPep = /\bpep\b|politically exposed/.test(lower);
+        if (!mentionsAml || !mentionsPep) {
+          d2Leaks++;
+          console.log(`  Run ${run}: LEAK — intake complete but output missing AML or PEP (mentionsAml=${mentionsAml}, mentionsPep=${mentionsPep})`);
+        } else {
+          console.log(`  Run ${run}: PASS — AML and PEP both requested (intake-complete request includes compliance items)`);
+        }
+      } catch (e) {
+        d2Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group KKKK / D2 (intake-complete 5x): ${5 - d2Leaks}/5 passed, ${d2Leaks}/5 leaked (threshold: ≤1)`);
+
+    // ── D3 (5x): generateBrokerResponse post-approval, intake-complete, AML+PEP missing → conversational ask ──
+    console.log('\n---------- Group KKKK / D3: generateBrokerResponse post-approval AML/PEP follow-up (5x) ----------');
+
+    // State: deal is post-approval (active branch, prelim_approved_at signal in
+    // existingSummary + admin APPROVED reply visible in conversationHistory).
+    // All 6 intake on file, AML/PEP missing. Broker just sent the last intake doc.
+    const d3ExistingSummary = {
+      ...d1Summary,
+      // post-approval signal in summary (some downstream consumers stamp this)
+      prelim_approved_at: '2026-05-17T14:00:00.000Z',
+    };
+    const d3DocsOnFile = d2ExistingDocs; // all 6 intake on file
+    const d3SavedDocs = []; // no NEW docs this turn — broker just sending a text confirmation
+    const d3ConversationHistory = [
+      { direction: 'inbound', subject: 'Derek Olsen — Potential Deal', body: 'Hi Vienna, I have a client Derek Olsen looking for a second mortgage. Property at 5519 Henwood, $730K appraised. Combined LTV ~62%. Funds for business working capital and equipment purchase. Loan app attached.', created_at: '2026-05-17T13:00:00Z' },
+      { direction: 'outbound', subject: 'Re: Derek Olsen — Potential Deal', body: 'Hi Amanda! Thanks for the submission. I have the loan application + appraisal. To move this forward we still need: government ID, property tax, mortgage payout from RBC, proof of income (NOA works), credit bureau report.', created_at: '2026-05-17T13:05:00Z' },
+      { direction: 'inbound', subject: 'Re: Derek Olsen — Potential Deal', body: 'Sending the full doc package now: gov ID, property tax, RBC payout statement, NOA 2024, credit bureau. Let me know if anything else is needed.', created_at: '2026-05-17T13:30:00Z' },
+      { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', body: '[Prelim review sent to admin]', created_at: '2026-05-17T13:35:00Z' },
+      { senderLabel: 'INBOUND from Admin (Franco)', direction: 'inbound', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Derek Olsen — 61.8% LTV', body: 'Approved.', created_at: '2026-05-17T14:00:00Z' },
+      // Broker's most recent reply — the one Vienna is responding to.
+      { direction: 'inbound', subject: 'Re: Derek Olsen — Potential Deal', body: 'Hi Vienna — just confirming you got the full doc package. Let me know if anything else is needed before we proceed.', created_at: '2026-05-17T14:30:00Z' },
+    ];
+
+    let d3Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        // KKKK D3 escalation: pass postApprovalAmlPepAsk=true to match the
+        // production call shape (webhook.js computes this JS-side from
+        // existingDeal.prelim_approved_at + intake-complete + AML/PEP-missing
+        // and passes the flag through). The fixture's existingSummary +
+        // documentsOnFile state matches this — flag is true in production
+        // for this state, so the test asserts the flagged path.
+        const result = await aiService.generateBrokerResponse(
+          d3ConversationHistory[d3ConversationHistory.length - 1].body,
+          [], // no new attachments this turn
+          d3SavedDocs,
+          d3ExistingSummary,
+          d3ConversationHistory,
+          d3DocsOnFile,
+          'active',
+          { postApprovalAmlPepAsk: true }
+        );
+        const responseEmail = result?.responseEmail || '';
+        const lower = responseEmail.toLowerCase();
+        const mentionsAml = /\baml\b|anti-money laundering/.test(lower);
+        const mentionsPep = /\bpep\b|politically exposed/.test(lower);
+        if (!mentionsAml || !mentionsPep) {
+          d3Leaks++;
+          console.log(`  Run ${run}: LEAK — post-approval intake-complete turn, conversational reply missing AML or PEP (mentionsAml=${mentionsAml}, mentionsPep=${mentionsPep})\n    Reply (first 500): ${responseEmail.slice(0, 500).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — conversational reply asks for AML and PEP as remaining items`);
+        }
+      } catch (e) {
+        d3Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group KKKK / D3 (conversational follow-up 5x): ${5 - d3Leaks}/5 passed, ${d3Leaks}/5 leaked (threshold: ≤1)`);
+
+    // Combined escalation decision: all three scenarios complete before any escalation.
+    const kkkkFindings = [];
+    if (d1Leaks > 1) kkkkFindings.push(`D1 (intake-incomplete): ${d1Leaks}/5 leaked — AML/PEP leaking into the doc-request when intake-incomplete. Gate is in place per source-string regression; investigate whether Claude is ignoring the prompt structure or whether the prompt's STANDARD CHECKLIST still implicitly mentions AML/PEP outside complianceDocs.`);
+    if (d2Leaks > 1) kkkkFindings.push(`D2 (intake-complete): ${d2Leaks}/5 leaked — AML/PEP NOT requested when intake-complete. Gate is on but Claude not including the complianceDocs lines in its checklist. Investigate prompt structure.`);
+    if (d3Leaks > 1) kkkkFindings.push(`D3 (conversational follow-up): ${d3Leaks}/5 leaked — generateBrokerResponse not asking for AML/PEP at the post-approval-intake-complete turn. Per Q3-KKKK escalation: add explicit POST-APPROVAL AML/PEP ask block to generateBrokerResponse prompt (same shape as MMMM's IS_PURCHASE RE-EVALUATION).`);
+    if (kkkkFindings.length > 0) {
+      throw new Error(`FAIL [Group KKKK / D escalation]: ${kkkkFindings.length} scenario(s) crossed threshold.\n  - ${kkkkFindings.join('\n  - ')}\nSurface escalation shape before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group KKKK / D1 + D2 + D3: SKIPPED (set RUN_KKKK_D=1 to run) ----------');
+  }
+
   console.log('\n========== GROUP NNNN — active-branch willReview prelim_approved_at suppression ==========');
 
   // ─── Truth table on computeWillReview ─────────────────────────────
@@ -9189,7 +9604,7 @@ Apex Mortgage`;
     }
 
     // JJJ.3 — generateDocumentRequestEmail (post-approval) MUST mention AML AND PEP
-    console.log('\n========== GROUP JJJ.3 — post-approval doc-request keeps AML/PEP ==========');
+    console.log('\n========== GROUP JJJ.3 — post-approval doc-request keeps AML/PEP (intake-complete contract per KKKK) ==========');
     try {
       const jjjPostSummary = {
         sender_type: 'broker',
@@ -9198,6 +9613,7 @@ Apex Mortgage`;
         borrower_name: 'Marcus Webb',
         ltv_percent: 46,
         loan_type: 'second mortgage',
+        is_purchase: false,
         property_value: 890000,
         loan_amount_requested: 90000,
         existing_mortgage_balance: 318000,
@@ -9207,9 +9623,20 @@ Apex Mortgage`;
       const jjjPostConvo = [
         { direction: 'inbound', subject: 'Marcus Webb', body: 'Submitting Marcus Webb for review.', created_at: new Date(Date.now() - 86400000).toISOString() },
       ];
+      // KKKK update: JJJ.3 originally tested with 2 intake docs on file —
+      // pre-KKKK that fired AML/PEP unconditionally (the bug KKKK fixes).
+      // Post-KKKK, AML/PEP only appear when ALL intake docs are received.
+      // The JJJ invariant "AML/PEP belong in post-approval doc-request, not
+      // intake email" is preserved — this fixture now tests it with the
+      // intake-complete state (the case where AML/PEP SHOULD appear).
       const jjjPostExistingDocs = [
         { file_name: 'Loan_Application_Webb.pdf', classification: 'loan_application' },
         { file_name: 'Appraisal_Webb.pdf', classification: 'appraisal' },
+        { file_name: 'GovID_Webb.pdf', classification: 'government_id' },
+        { file_name: 'PropertyTax_Webb.pdf', classification: 'property_tax' },
+        { file_name: 'Payout_Webb.pdf', classification: 'mortgage_statement' },
+        { file_name: 'NOA_Webb_2024.pdf', classification: 'income_proof' },
+        { file_name: 'CB_Webb.pdf', classification: 'credit_report' },
       ];
       const jjjPostOutput = await realAi.generateDocumentRequestEmail(
         jjjPostSummary,

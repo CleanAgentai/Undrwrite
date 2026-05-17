@@ -59,4 +59,94 @@ const isPurchaseFromSummary = (summary) => {
   return false;
 };
 
-module.exports = { isPurchaseFromSummary, PROPERTY_NOUN_RE };
+// ════════════════════════════════════════════════════════════════
+// Group KKKK (S1.1/S2.1/S5.1): SSS-era doc-requirement helpers hoisted from
+// webhook.js into this canonical module. Pre-KKKK these lived in webhook.js;
+// the AML/PEP-bundling bug in generateDocumentRequestEmail (which has been
+// counted "fixed" three times across rounds) needs access to the same
+// intakeRequiredFor + isDocRequirementSatisfied predicates from ai.js. ai.js
+// can't require webhook.js (circular — webhook.js already requires ai.js),
+// so the helpers move here. webhook.js imports + re-exports via __test__
+// for backward compat with existing SSS/NNN/CCCC/EEEE/JJJJ test references.
+//
+// Why "addressed three times" hasn't held:
+//   - JJJ (S12.2) moved AML/PEP OUT of the intake welcome email. Pre-JJJ
+//     Vienna asked for AML/PEP at first contact. Post-JJJ they moved to
+//     post-approval via generateDocumentRequestEmail. JJJ did NOT gate the
+//     complianceDocs block inside generateDocumentRequestEmail.
+//   - SSS (S3.2) made the COMPLETION gate two-tier — allRequiredForCompletion
+//     = intake + compliance — so completion-handoff waits for AML+PEP. SSS
+//     did NOT gate the complianceDocs block; SSS fixed WHEN completion fires,
+//     not WHEN AML/PEP get requested.
+//   - Each round verified "AML/PEP eventually requested" (which they were,
+//     bundled with intake), missing Franco's actual rule: intake items first,
+//     AML/PEP as a separate request once intake completes.
+//   - KKKK adds the missing layer — an explicit allIntakeReceived predicate
+//     that gates the complianceDocs block. Shape-asserting tests (D1 intake-
+//     incomplete → output has NO AML/PEP; D2 intake-complete → output has
+//     AML+PEP) replace the "AML/PEP eventually appear" pattern that hid the
+//     bug. Close criterion is Franco's retest passing.
+//
+// Document-type synonyms — for the requirement-satisfaction filter, certain
+// doc types satisfy other required items (e.g. 'noa' satisfies 'income_proof').
+// Map structure makes future equivalences trivial to add.
+const DOC_SYNONYMS = {
+  income_proof: ['income_proof', 'noa'],
+};
+
+const isDocRequirementSatisfied = (req, classifications) => {
+  const accepted = DOC_SYNONYMS[req] || [req];
+  return accepted.some(c => (classifications || []).includes(c));
+};
+
+// Two-tier required-doc model (SSS). Intake (Tier 1) is what gets asked
+// pre-approval (welcome email + prelim review missing-docs list). Compliance
+// (Tier 2) is post-approval — broker compliance forms required for funding.
+const BASE_REQUIRED_INTAKE_REFINANCE = [
+  'government_id', 'appraisal', 'property_tax', 'mortgage_statement',
+  'income_proof', 'credit_report',
+];
+const BASE_REQUIRED_INTAKE_PURCHASE = [
+  'government_id', 'appraisal', 'property_tax',
+  'income_proof', 'credit_report', 'purchase_contract',
+];
+const COMPLIANCE_REQUIRED_POSTAPPROVAL = ['aml', 'pep'];
+
+const intakeRequiredFor = (isPurchase) =>
+  isPurchase ? BASE_REQUIRED_INTAKE_PURCHASE : BASE_REQUIRED_INTAKE_REFINANCE;
+
+const allRequiredForCompletion = (isPurchase) => [
+  ...intakeRequiredFor(isPurchase),
+  ...COMPLIANCE_REQUIRED_POSTAPPROVAL,
+];
+
+// Group KKKK gate predicate: "all intake docs (Tier 1) satisfied?"
+// Used by generateDocumentRequestEmail to decide whether to bundle AML/PEP
+// (Tier 2) with the doc-request to broker. Pre-KKKK the complianceDocs
+// block was unconditionally appended for broker deals; post-KKKK it's
+// gated behind this predicate. When intake-incomplete → request asks for
+// intake only; when intake-complete → request asks for AML+PEP as the
+// remaining items.
+//
+// Synonym-aware via isDocRequirementSatisfied (e.g. 'noa' satisfies
+// 'income_proof'). Purchase/refinance-aware via intakeRequiredFor.
+const allIntakeReceived = (classifications, isPurchase) =>
+  intakeRequiredFor(isPurchase).every(req =>
+    isDocRequirementSatisfied(req, classifications || [])
+  );
+
+module.exports = {
+  // MMMM
+  isPurchaseFromSummary,
+  PROPERTY_NOUN_RE,
+  // SSS-era (hoisted by KKKK)
+  DOC_SYNONYMS,
+  isDocRequirementSatisfied,
+  BASE_REQUIRED_INTAKE_REFINANCE,
+  BASE_REQUIRED_INTAKE_PURCHASE,
+  COMPLIANCE_REQUIRED_POSTAPPROVAL,
+  intakeRequiredFor,
+  allRequiredForCompletion,
+  // KKKK
+  allIntakeReceived,
+};
