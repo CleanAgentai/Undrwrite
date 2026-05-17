@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { isAdminReplySubject, isAdminFacingSubject } = require('../lib/adminReply');
+const { isPurchaseFromSummary } = require('../lib/dealType');
 const config = require('../config');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
@@ -86,11 +87,12 @@ const allRequiredForCompletion = (isPurchase) => [
   ...COMPLIANCE_REQUIRED_POSTAPPROVAL,
 ];
 
-const isPurchaseFromSummary = (summary) => {
-  const loanType = (summary?.loan_type || '').toLowerCase();
-  const purpose = (summary?.purpose || '').toLowerCase();
-  return /purchas/.test(loanType) || /purchas/.test(purpose);
-};
+// Group MMMM (S3.1/S3.2): isPurchaseFromSummary moved to src/lib/dealType.js
+// as canonical single-source-of-truth. Imported at top of file. Old local
+// definition was duplicated across webhook.js, ai.js (×2), and cron — the
+// drift risk surfaced when Derek Olsen's "equipment purchase" purpose
+// matched the loose /purchas/ regex and triggered the purchase doc list
+// on a refinance. Re-exported via __test__ below for harness backward-compat.
 
 // Group VVV (S4.1): skip blank intake forms (Loan Application + PNW Statement)
 // on the welcome email when the deal will route to a "deferred-intake" state.

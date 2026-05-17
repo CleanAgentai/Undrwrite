@@ -1,6 +1,7 @@
 const claude = require('../lib/claude');
 const { buildContentBlocks } = require('../lib/pdf');
 const config = require('../config');
+const { isPurchaseFromSummary } = require('../lib/dealType');
 
 // Retry wrapper for Claude API calls (handles rate limits)
 const callClaude = async (params, maxRetries = 3) => {
@@ -204,6 +205,7 @@ Use this exact JSON structure (use null for unknown fields, do not guess):
   "total_debt": number or null,
   "ltv_percent": number or null,
   "loan_type": "first mortgage | second mortgage | refinance | construction | other",
+  "is_purchase": "boolean — true ONLY if this loan funds the ACQUISITION of real property (borrower will own a new property as a result of this loan; typically a first mortgage on a property they don't yet own; usually accompanied by a Purchase Contract and Down Payment Proof). false for refinances, second mortgages on already-owned property, debt consolidation, equity take-outs, construction-on-already-owned-land, business working capital — including cases where the loan FUNDS some non-property 'purchase' (equipment, materials, supplies, vehicles). See IS_PURCHASE DETECTION RULE below for worked examples.",
   "purpose": "string describing why they need the loan",
   "exit_strategy": "string or null",
   "income_details": "string or null",
@@ -220,6 +222,26 @@ The accurate LTV will be confirmed once we review the appraisal, NOT from the ap
 Be specific about documents received vs still needed.
 EXIT STRATEGY RULE: Only set exit_strategy to a value if the broker EXPLICITLY stated the exit strategy in their email (e.g. "exit strategy: refinance with B lender at maturity" or "the borrower plans to sell the property after 12 months"). Do NOT infer, guess, or reconstruct an exit strategy from loan purpose, loan type, or any other context. If the exit strategy is not explicitly stated, set exit_strategy to null — and the missing exit strategy should appear in documents_still_needed.
 IDENTITY CLASH DETECTION RULE (Group HHH): set identity_clash=true ONLY when the borrower name in the email body is CLEARLY DIFFERENT from the borrower name in the attached loan application (or any other doc that names a borrower) — i.e. they refer to two different people. Compare full names, not just first names. A typo, missing middle name, or initial-vs-full-name difference is NOT a clash (e.g. "Anna Bergstrom" vs "Anna M. Bergstrom" is the same person; "Anna Bergstrom" vs "Grace Paulson" IS a clash). Set identity_clash=false for any of: no attached doc with a borrower name, names match, names are minor variants of the same person, only one name source available. When identity_clash=true, also add a note to key_risks_or_notes with both names (e.g. "Email body says 'Anna Bergstrom' but loan application is for 'Grace Paulson' — needs clarification before doc requests").
+IS_PURCHASE DETECTION RULE (Group MMMM): set is_purchase=true ONLY when the loan funds the ACQUISITION of real property — the borrower will own a property they don't currently own as a result of this loan. Set is_purchase=false for every other case, including loans whose PROCEEDS are used to buy something other than real property.
+
+CRITICAL DISTINCTION — the word "purchase" can appear in the purpose for two unrelated reasons:
+  (a) The loan IS for a property purchase (acquiring real property) → is_purchase=TRUE
+  (b) The loan is for some other reason (refinance, debt consolidation, working capital, business expansion) and the proceeds happen to fund some other "purchase" (equipment, supplies, materials, vehicles, etc.) → is_purchase=FALSE
+
+The word "purchase" in the purpose field is NOT itself the signal — what matters is what the LOAN is for.
+
+Worked examples:
+  - loan_type "first mortgage", purpose "Purchase of new home in Edmonton, $850K" → is_purchase=TRUE (loan IS the home acquisition).
+  - loan_type "first mortgage", purpose "Purchase of investment property" → is_purchase=TRUE.
+  - loan_type "second mortgage", purpose "Business working capital and equipment purchase" → is_purchase=FALSE (this is the Derek Olsen 2026-05-16 production bug shape — second mortgage on already-owned property; 'purchase' here refers to use of funds, not property acquisition).
+  - loan_type "second mortgage", purpose "Home renovation and debt consolidation" → is_purchase=FALSE (refinance against already-owned home; no real-property acquisition).
+  - loan_type "second mortgage", purpose "Funds to purchase materials and pay contractors for kitchen renovation" → is_purchase=FALSE ('purchase' refers to materials, not property).
+  - loan_type "refinance", purpose anything → is_purchase=FALSE (refinances are not purchases by definition).
+  - loan_type "construction", purpose "Build new home on already-owned lot" → is_purchase=FALSE (borrower already owns the land — construction-on-owned-land is not a purchase).
+  - loan_type "construction", purpose "Purchase land and build new home" → is_purchase=TRUE (loan acquires the land + funds construction).
+  - Bridge loan to buy new property before selling current → is_purchase=TRUE.
+
+This field gates downstream document-requirement logic — purchase deals need Purchase Contract + Proof of Down Payment Source; refinance/second-mortgage deals do NOT. A false positive (refinance flagged as purchase) makes Vienna ask the broker for docs that don't exist for the deal and stalls the file (Derek production bug). A false negative (purchase flagged as refinance) misses required collateral docs. Both matter; bias toward FALSE when ambiguous — false is the safer default since most deals are refinances and most "purchase" tokens in purpose strings are about use-of-funds rather than property acquisition.
 MISATTACHED DOC DETECTION RULE (Group JJJJ): for each attached document, determine whether the document's CONTENT belongs to this deal's canonical file. A doc is misattached if EITHER (a) the applicant/borrower named on the doc differs from the canonical borrower_name above, OR (b) the property address described on the doc differs from the canonical property_address above. Either axis alone is sufficient — the semantic is "this doc doesn't belong to this transaction", not "this doc is for a different person."
 
 Worked examples (canonical borrower "Anna Bergstrom", canonical property "1801 Varsity Estates Dr NW"):
@@ -362,9 +384,10 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
       // - PURCHASE: borrower doesn't own the property yet, so no mortgage payout. Need purchase contract + down payment.
       // - REFINANCE / 2nd MORTGAGE: existing mortgage on subject property — need payout statement.
       // (NOA and Proof of Income are combined into one item; interchangeable for initial review)
-      const dealLoanType = (existingSummary?.loan_type || '').toLowerCase();
-      const dealPurpose = (existingSummary?.purpose || '').toLowerCase();
-      const isPurchaseDeal = /purchas/.test(dealLoanType) || /purchas/.test(dealPurpose);
+      // Group MMMM: structured signal from dealSummary.is_purchase (canonical
+      // single-source-of-truth via dealType.js). Falls back to context-anchored
+      // regex for pre-MMMM deals.
+      const isPurchaseDeal = isPurchaseFromSummary(existingSummary);
       // Group JJJ (S12.2): AML/PEP no longer asked at intake. Both compliance forms
       // move to post-approval — they're handled by generateDocumentRequestEmail's
       // existing complianceDocs ask (line ~744). Variable kept (always []) so the
@@ -557,6 +580,20 @@ CRITICAL — DO NOT CORRUPT BROKER_NAME OR SENDER_NAME:
 - 'Franco' is the LENDER we work for. Franco is NEVER the broker. Even if the latest email starts with 'Hi Franco' or 'Hello Franco' (because the broker is writing TO Franco), do NOT change broker_name to 'Franco'. The broker is the SENDER of these emails, not the recipient.
 - If existing broker_name is already populated, keep it as-is unless you have strong evidence from the conversation context that the existing value is wrong.
 
+IS_PURCHASE RE-EVALUATION (Group MMMM): updated_summary MUST include an is_purchase field (boolean). Re-evaluate from current evidence — loan_type, purpose, conversation context, any newly-arrived Purchase Contract / Down Payment Proof / Agreement of Purchase and Sale. Do NOT just copy the existing summary's value: if the broker's latest correspondence reveals new information that changes the classification (broker clarified an ambiguous purpose, attached a Purchase Contract, or corrected a misclassification), update is_purchase accordingly.
+
+CRITICAL DISTINCTION — the word "purchase" can appear in the purpose for two unrelated reasons:
+  (a) The loan IS for a property purchase (acquiring real property) → is_purchase=TRUE
+  (b) The loan is for some other reason (refinance, debt consolidation, working capital, business expansion) and the proceeds happen to fund some other "purchase" (equipment, supplies, materials, vehicles, etc.) → is_purchase=FALSE
+
+Worked examples (same rule as IS_PURCHASE DETECTION RULE in processInitialEmail):
+  - loan_type "first mortgage" + purpose "Purchase of new home" → TRUE.
+  - loan_type "second mortgage" + purpose "Business working capital and equipment purchase" → FALSE (Derek Olsen 2026-05-16 production bug shape; second mortgage on already-owned property, 'purchase' refers to use of funds).
+  - loan_type "refinance" + any purpose → FALSE.
+  - loan_type "construction" + "Build new home on already-owned lot" → FALSE.
+  - loan_type "construction" + "Purchase land and build new home" → TRUE.
+
+Bias toward FALSE when ambiguous; over-classifying as purchase asks the broker for docs that don't exist (Purchase Contract, Down Payment Proof) and stalls the file.
 MISATTACHED DOC RE-EVALUATION (Group JJJJ): updated_summary MUST include a misattached_documents field — an array of EXACT filenames (matching DOCUMENTS ALREADY ON FILE below + any new attachments) whose CONTENT does not belong to this deal's canonical file. A doc is misattached if EITHER (a) the applicant named on the doc differs from the canonical borrower_name, OR (b) the property address on the doc differs from the canonical property_address. Either axis alone is sufficient — the semantic is "this doc doesn't belong to this transaction."
 
 Worked examples (canonical borrower "Anna Bergstrom", canonical property "1801 Varsity Estates Dr NW"):
@@ -818,9 +855,9 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
   generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = []) => {
     try {
       const receivedClassifications = existingDocs.map(d => d.classification).filter(Boolean);
-      const reqLoanType = (dealSummary?.loan_type || '').toLowerCase();
-      const reqPurpose = (dealSummary?.purpose || '').toLowerCase();
-      const reqIsPurchase = /purchas/.test(reqLoanType) || /purchas/.test(reqPurpose);
+      // Group MMMM: canonical purchase/refinance signal via dealType.js
+      // (single-source-of-truth — no more duplicated /purchas/ regex).
+      const reqIsPurchase = isPurchaseFromSummary(dealSummary);
       const propertySpecificDoc = reqIsPurchase
         ? `- Purchase Contract / Agreement of Purchase and Sale (required for purchase transactions)
 - Proof of Down Payment Source`

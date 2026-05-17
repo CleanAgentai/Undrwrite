@@ -2452,12 +2452,16 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       aiService.generateDocumentRequestEmail = async () => { cCalls.docRequest++; return '<p>Doc request (mocked)</p>'; };
       aiService.generateCompletionEmail = async () => { cCalls.completion++; return '<p>Completion (mocked)</p>'; };
 
-      const runApprovedDispatch = async (docsOnFile, loanType) => {
+      const runApprovedDispatch = async (docsOnFile, loanType, isPurchase = false) => {
         cCalls = { docRequest: 0, completion: 0 };
         resetBbb();
+        // Group MMMM: extracted_data now carries the structured is_purchase
+        // signal (post-MMMM isPurchaseFromSummary is structured-signal-first;
+        // pre-MMMM fixture's loan_type='purchase' string matched the old
+        // /purchas/ regex but isn't one of the canonical loan_type enums).
         setBbbDeal({
           status: 'under_review',
-          extracted_data: { ...bbbDeal?.extracted_data, loan_type: loanType, broker_name: 'Tyler Bennett', borrower_name: 'James Okafor', sender_type: 'broker' },
+          extracted_data: { ...bbbDeal?.extracted_data, loan_type: loanType, is_purchase: isPurchase, broker_name: 'Tyler Bennett', borrower_name: 'James Okafor', sender_type: 'broker' },
         });
         // Override docs stub for this case
         dealsService.getDocumentsByDeal = async () => docsOnFile;
@@ -2532,7 +2536,7 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
         { classification: 'aml', file_name: 'AML.pdf' },
         { classification: 'pep', file_name: 'PEP.pdf' },
       ];
-      const c4 = await runApprovedDispatch(purchaseComplete, 'purchase');
+      const c4 = await runApprovedDispatch(purchaseComplete, 'first mortgage', true); // is_purchase=true per MMMM structured signal
       if (c4.calls.docRequest !== 0 || c4.calls.completion !== 1 || c4.draftAction !== 'approval_completed') {
         throw new Error(`FAIL [Group SSS / C4]: purchase intake+compliance complete should fire generateCompletionEmail, got ${JSON.stringify(c4)}`);
       }
@@ -3071,7 +3075,10 @@ WEBSITE.  unionfinancialcorp.com`;
     {
       name: '2. under_review + all docs in (purchase) + purchase_contract + exit_strategy → completion-handoff',
       deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
-      summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'refi at maturity' },
+      // Group MMMM: structured is_purchase=true signal (post-MMMM canonical
+      // classification — replaces the old /purchas/ regex which matched on
+      // either loan_type='purchase' or purpose containing 'purchase').
+      summary: { loan_type: 'first mortgage', is_purchase: true, purpose: 'purchase of new home', exit_strategy: 'refi at maturity' },
       classifications: purchaseAllDocs,
       expectAction: 'completion-handoff',
       expectConditionsFulfilled: false,
@@ -3220,10 +3227,19 @@ WEBSITE.  unionfinancialcorp.com`;
   }
   console.log('  PASS [clean tier separation: compliance ∩ intake = ∅]');
   sssAPassed++;
-  // isPurchaseFromSummary helper
-  assertSss('isPurchaseFromSummary loan_type=purchase → true', sssIsPurchaseFromSummary({ loan_type: 'purchase' }), true);
+  // isPurchaseFromSummary helper — post-MMMM contract:
+  //   1. Structured is_purchase boolean is authoritative when present.
+  //   2. Fallback regex (for pre-MMMM deals) requires explicit real-property
+  //      context — "purchase property" / "home purchase" / "purchase of <noun>".
+  //      The pre-MMMM loose /purchas/ regex matched on loan_type='purchase'
+  //      (which isn't a canonical enum value) and on any purpose containing
+  //      "purchas" — that was the Derek Olsen failure shape. SSS-era assertions
+  //      that depended on the looser behavior are updated to the new contract.
+  assertSss('isPurchaseFromSummary structured is_purchase=true → true', sssIsPurchaseFromSummary({ is_purchase: true }), true);
+  assertSss('isPurchaseFromSummary structured is_purchase=false → false (overrides regex)', sssIsPurchaseFromSummary({ is_purchase: false, purpose: 'home purchase' }), false);
   assertSss('isPurchaseFromSummary loan_type=refinance → false', sssIsPurchaseFromSummary({ loan_type: 'refinance' }), false);
-  assertSss('isPurchaseFromSummary purpose contains purchas → true', sssIsPurchaseFromSummary({ purpose: 'purchase investment property' }), true);
+  assertSss('isPurchaseFromSummary purpose="purchase of investment property" → true (Pattern B)', sssIsPurchaseFromSummary({ purpose: 'purchase of investment property' }), true);
+  assertSss('isPurchaseFromSummary purpose="property purchase" → true (Pattern A)', sssIsPurchaseFromSummary({ purpose: 'property purchase' }), true);
   assertSss('isPurchaseFromSummary null summary → false', sssIsPurchaseFromSummary(null), false);
   console.log(`Group SSS / A tier constants: ${sssAPassed} assertions passed`);
 
@@ -3315,7 +3331,7 @@ WEBSITE.  unionfinancialcorp.com`;
       name: "D8: purchase deal + intake + compliance + exit_strategy (no prelim_approved_at) → 'final-review'",
       input: {
         deal: { status: 'active' },
-        summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale of subject' },
+        summary: { loan_type: 'first mortgage', is_purchase: true, purpose: 'purchase property', exit_strategy: 'sale of subject' },
         classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract', 'aml', 'pep'],
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
@@ -3325,7 +3341,7 @@ WEBSITE.  unionfinancialcorp.com`;
       name: 'D9: purchase deal missing purchase_contract → null',
       input: {
         deal: { status: 'active' },
-        summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale' },
+        summary: { loan_type: 'first mortgage', is_purchase: true, purpose: 'purchase property', exit_strategy: 'sale' },
         // missing purchase_contract
         classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'aml', 'pep'],
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
@@ -3367,7 +3383,7 @@ WEBSITE.  unionfinancialcorp.com`;
       name: "D13: purchase + full completion gate + prelim_approved_at SET → 'completion-handoff' (purchase tier)",
       input: {
         deal: { status: 'active', prelim_approved_at: '2026-05-11T05:00:00.000Z' },
-        summary: { loan_type: 'purchase', purpose: 'purchase property', exit_strategy: 'sale of subject' },
+        summary: { loan_type: 'first mortgage', is_purchase: true, purpose: 'purchase property', exit_strategy: 'sale of subject' },
         classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract', 'aml', 'pep'],
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
@@ -4340,7 +4356,7 @@ renovations.`,
     },
     {
       name: 'E3: broker, purchase, full intake on-file + exit_strategy set → empty array (everything asked already there)',
-      summary: { sender_type: 'broker', loan_type: 'purchase', exit_strategy: 'sale of subject' },
+      summary: { sender_type: 'broker', loan_type: 'first mortgage', is_purchase: true, exit_strategy: 'sale of subject' },
       classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract'],
       expect: [],
     },
@@ -4376,7 +4392,7 @@ renovations.`,
     },
     {
       name: 'E9: broker, purchase + identity_clash → null (identity_clash takes priority)',
-      summary: { sender_type: 'broker', loan_type: 'purchase', identity_clash: true },
+      summary: { sender_type: 'broker', loan_type: 'first mortgage', is_purchase: true, identity_clash: true },
       classifications: [],
       expect: null,
     },
@@ -4978,6 +4994,306 @@ renovations.`,
     throw new Error(`FAIL [Group JJJJ both-axes semantic]: detection/re-evaluation rules must explicitly state that EITHER borrower-name OR property-address mismatch is sufficient to flag — not borrower-name alone`);
   }
   console.log('  PASS [Group JJJJ both-axes semantic]: both-axes (name OR property) language present in rules');
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP MMMM — purchase/refinance classification via structured signal (S3.1/S3.2)
+  // ════════════════════════════════════════════════════════════════
+  // Production case 2026-05-16 (deal b1ba76b0, Derek Olsen): Karen's submission
+  // had loan_type="second mortgage" + purpose="Business working capital and
+  // equipment purchase". The pre-MMMM /purchas/ regex over loan_type + purpose
+  // matched on "equipment purchase" — Vienna treated Derek as a purchase deal,
+  // intakeRequiredFor(true) added Purchase Contract + Down Payment Proof to
+  // the required list, those never arrived for the refinance, allDocsInNow
+  // stayed false, completionDispatch returned null, willReview re-fired post-
+  // approval → second prelim review (S3.3/S3.4 collapse into MMMM).
+  //
+  // MMMM extracts isPurchaseFromSummary to src/lib/dealType.js as canonical
+  // single-source-of-truth, replacing the 4-site duplicated regex
+  // (webhook.js, ai.js ×2, cron). Structured signal (dealSummary.is_purchase
+  // boolean) is primary, emitted by processInitialEmail + re-evaluated by
+  // generateBrokerResponse each turn. Fallback regex covers backwards-compat
+  // for pre-MMMM deals with context-anchored patterns that reject Derek's
+  // failure shape ("equipment purchase" must NOT match).
+  console.log('\n========== GROUP MMMM — purchase/refinance classification ==========');
+
+  // ─── Truth table on isPurchaseFromSummary ────────────────────────────
+  console.log('\n---------- Group MMMM / Truth Table: isPurchaseFromSummary ----------');
+  const { isPurchaseFromSummary: mmmmFn } = require('./src/lib/dealType');
+
+  const mmmmCases = [
+    // Structured signal wins regardless of purpose text
+    { name: 'structured is_purchase=true wins', summary: { is_purchase: true }, expect: true },
+    { name: 'structured is_purchase=false overrides regex match',
+      summary: { is_purchase: false, purpose: 'home purchase' }, expect: false },
+    { name: 'structured is_purchase=true with conflicting refinance purpose',
+      summary: { is_purchase: true, purpose: 'Home renovation and debt consolidation' }, expect: true },
+
+    // Derek's exact production case — pre-MMMM bug shape
+    { name: 'Derek Olsen production purpose (the regression repro)',
+      summary: { loan_type: 'second mortgage', purpose: 'Business working capital and equipment purchase' },
+      expect: false },
+
+    // Pattern A — "<property-noun> purchase"
+    { name: 'home purchase', summary: { purpose: 'home purchase' }, expect: true },
+    { name: 'property purchase', summary: { purpose: 'property purchase' }, expect: true },
+    { name: 'house purchase', summary: { purpose: 'house purchase' }, expect: true },
+    { name: 'condo purchase', summary: { purpose: 'condo purchase' }, expect: true },
+    { name: 'townhouse purchase', summary: { purpose: 'townhouse purchase' }, expect: true },
+
+    // Pattern B — "purchase of [intermediate tokens] <property-noun>"
+    { name: 'purchase of new home in Edmonton', summary: { purpose: 'Purchase of new home in Edmonton' }, expect: true },
+    { name: 'purchase of a home', summary: { purpose: 'purchase of a home' }, expect: true },
+    { name: 'purchase of investment property (1 intermediate token)', summary: { purpose: 'purchase of investment property' }, expect: true },
+    { name: 'purchase of my first home in Edmonton (4 intermediate tokens, edge of tolerance)',
+      summary: { purpose: 'purchase of my first home in Edmonton' }, expect: true },
+    { name: 'purchase of materials for renovation (no property noun)', summary: { purpose: 'purchase of materials for renovation' }, expect: false },
+    { name: 'purchase of equipment and supplies', summary: { purpose: 'purchase of equipment and supplies' }, expect: false },
+    { name: 'purchase of inventory for business', summary: { purpose: 'purchase of inventory for business' }, expect: false },
+
+    // Pattern C — "purchase price"
+    { name: 'purchase price mention', summary: { purpose: 'Refinance with purchase price negotiation context' }, expect: true },
+
+    // Pattern D — "down payment"
+    { name: 'down payment', summary: { purpose: 'Bridge loan for down payment on next home' }, expect: true },
+    { name: 'downpayment (no hyphen)', summary: { purpose: 'Funding the downpayment' }, expect: true },
+    { name: 'down-payment (hyphenated)', summary: { purpose: 'For down-payment assistance' }, expect: true },
+
+    // Defensive / edge cases
+    { name: 'null summary', summary: null, expect: false },
+    { name: 'empty summary object', summary: {}, expect: false },
+    { name: 'null purpose', summary: { purpose: null }, expect: false },
+    { name: 'past-tense purchased verb (no purchase noun adjacency)',
+      summary: { purpose: 'Refinance the home she purchased in 2019' }, expect: false },
+    { name: 'pre-MMMM regex over-fire shape (should now reject)',
+      summary: { loan_type: 'refinance', purpose: 'equipment purchase for trucking business' }, expect: false },
+
+    // Real-world refinance / debt consolidation purposes — must reject
+    { name: 'debt consolidation and renovations',
+      summary: { loan_type: 'second mortgage', purpose: 'Debt consolidation and home renovations' }, expect: false },
+    { name: 'kitchen renovation funding',
+      summary: { loan_type: 'second mortgage', purpose: 'Kitchen renovation' }, expect: false },
+    { name: 'bridge financing (refinance shape)',
+      summary: { loan_type: 'first mortgage', purpose: 'Bridge financing until sale of current home' }, expect: false },
+  ];
+
+  let mmmmPassed = 0;
+  for (const tc of mmmmCases) {
+    const got = mmmmFn(tc.summary);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group MMMM ${tc.name}]: summary=${JSON.stringify(tc.summary)}, expected=${tc.expect}, got=${got}`);
+    }
+    console.log(`  PASS [${tc.name}]: → ${got}`);
+    mmmmPassed++;
+  }
+  console.log(`Group MMMM / Truth Table: ${mmmmPassed}/${mmmmCases.length} passed`);
+
+  // ─── Source-string regression: dealType.js exists + exports ────────
+  console.log('\n---------- Group MMMM / Source-string regression on dealType.js ----------');
+  const dealTypePath = path_qqq.join(__dirname, 'src/lib/dealType.js');
+  if (!fs_qqq.existsSync(dealTypePath)) {
+    throw new Error(`FAIL [Group MMMM dealType.js file]: src/lib/dealType.js must exist`);
+  }
+  const dealTypeSrc = fs_qqq.readFileSync(dealTypePath, 'utf8');
+  console.log('  PASS [Group MMMM dealType.js file]: src/lib/dealType.js exists');
+
+  if (!/module\.exports = \{[^}]*isPurchaseFromSummary[^}]*\}/.test(dealTypeSrc)) {
+    throw new Error(`FAIL [Group MMMM dealType.js export]: must export isPurchaseFromSummary`);
+  }
+  console.log('  PASS [Group MMMM dealType.js export]: isPurchaseFromSummary exported');
+
+  if (!/typeof summary\?\.is_purchase === 'boolean'/.test(dealTypeSrc)) {
+    throw new Error(`FAIL [Group MMMM structured-signal-first]: dealType.js must check structured signal FIRST (typeof summary?.is_purchase === 'boolean')`);
+  }
+  console.log('  PASS [Group MMMM structured-signal-first]: structured is_purchase signal checked first');
+
+  // PROPERTY_NOUN_RE present and excludes "equipment" / "materials"
+  if (!/PROPERTY_NOUN_RE/.test(dealTypeSrc)) {
+    throw new Error(`FAIL [Group MMMM PROPERTY_NOUN_RE]: dealType.js must define PROPERTY_NOUN_RE for fallback regex`);
+  }
+  const propertyNounMatch = dealTypeSrc.match(/PROPERTY_NOUN_RE = \/[^/]*\//);
+  if (!propertyNounMatch || /equipment|materials|supplies|vehicle/i.test(propertyNounMatch[0])) {
+    throw new Error(`FAIL [Group MMMM PROPERTY_NOUN_RE narrowness]: PROPERTY_NOUN_RE must NOT include 'equipment'/'materials'/'supplies'/'vehicle' tokens — those are the Derek-shape false-positive source. Got: ${propertyNounMatch ? propertyNounMatch[0] : 'no match'}`);
+  }
+  console.log('  PASS [Group MMMM PROPERTY_NOUN_RE narrowness]: excludes equipment/materials/supplies/vehicle');
+
+  // ─── Source-string regression: no /purchas/ regex remains in src/ ──
+  console.log('\n---------- Group MMMM / Source-string regression: regex de-duplication ----------');
+  const sites = [
+    { path: 'src/routes/webhook.js', label: 'webhook.js' },
+    { path: 'src/services/ai.js', label: 'ai.js' },
+    { path: 'src/cron/dailySummary.js', label: 'cron/dailySummary.js' },
+  ];
+  for (const site of sites) {
+    const src = fs_qqq.readFileSync(path_qqq.join(__dirname, site.path), 'utf8');
+    // Strip comments to avoid false-positives on historical mentions
+    const stripped = src.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    if (/\/purchas\/\s*\.test/.test(stripped)) {
+      throw new Error(`FAIL [Group MMMM regex de-duplication / ${site.label}]: pre-MMMM /purchas/.test(...) regex still present (outside comments). MMMM extracts this to dealType.js — call sites must import isPurchaseFromSummary and use it.`);
+    }
+    console.log(`  PASS [Group MMMM regex de-duplication / ${site.label}]: no /purchas/.test(...) in active code`);
+  }
+
+  // Verify each site imports from dealType
+  for (const site of sites) {
+    const src = fs_qqq.readFileSync(path_qqq.join(__dirname, site.path), 'utf8');
+    if (!/require\(['"]\.\.\/lib\/dealType['"]\)/.test(src)) {
+      throw new Error(`FAIL [Group MMMM import / ${site.label}]: must require('../lib/dealType') to consume canonical isPurchaseFromSummary`);
+    }
+    console.log(`  PASS [Group MMMM import / ${site.label}]: imports from dealType.js`);
+  }
+
+  // ─── Source-string regression: prompt updates ──────────────────────
+  console.log('\n---------- Group MMMM / Source-string regression on ai.js prompts ----------');
+
+  // is_purchase in processInitialEmail TASK 2 JSON schema
+  if (!/"is_purchase":\s*"boolean/.test(aiSource)) {
+    throw new Error(`FAIL [Group MMMM is_purchase schema]: processInitialEmail TASK 2 JSON schema must include is_purchase field (boolean type)`);
+  }
+  console.log('  PASS [Group MMMM is_purchase schema]: is_purchase field present in TASK 2 schema');
+
+  // IS_PURCHASE DETECTION RULE present in processInitialEmail
+  if (!/IS_PURCHASE DETECTION RULE \(Group MMMM\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group MMMM detection rule]: processInitialEmail prompt must include IS_PURCHASE DETECTION RULE (Group MMMM)`);
+  }
+  console.log('  PASS [Group MMMM detection rule]: IS_PURCHASE DETECTION RULE present');
+
+  // IS_PURCHASE RE-EVALUATION present in generateBrokerResponse
+  if (!/IS_PURCHASE RE-EVALUATION \(Group MMMM\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group MMMM re-evaluation rule]: generateBrokerResponse prompt must include IS_PURCHASE RE-EVALUATION (Group MMMM)`);
+  }
+  console.log('  PASS [Group MMMM re-evaluation rule]: IS_PURCHASE RE-EVALUATION present');
+
+  // Worked-examples block must name Derek explicitly (the load-bearing pattern
+  // from JJJJ — concrete examples beat abstract phrasing for Claude reliability)
+  const derekCallouts = (aiSource.match(/Derek Olsen 2026-05-16/g) || []).length;
+  if (derekCallouts < 2) {
+    throw new Error(`FAIL [Group MMMM Derek callout]: worked examples must explicitly name 'Derek Olsen 2026-05-16' in BOTH the detection rule (processInitialEmail) AND the re-evaluation rule (generateBrokerResponse). Got ${derekCallouts} occurrence(s).`);
+  }
+  console.log(`  PASS [Group MMMM Derek callout]: Derek Olsen 2026-05-16 named in ${derekCallouts} prompts`);
+
+  // Worked-examples block must include the equipment-purchase false case (the
+  // exact failure mode — pre-MMMM regex matched "equipment purchase" on Derek)
+  const equipmentPurchaseExamples = (aiSource.match(/equipment purchase/gi) || []).length;
+  if (equipmentPurchaseExamples < 2) {
+    throw new Error(`FAIL [Group MMMM equipment-purchase example]: worked examples must include 'equipment purchase' as a FALSE case in both prompts (this is Derek's exact regression repro string). Got ${equipmentPurchaseExamples}.`);
+  }
+  console.log(`  PASS [Group MMMM equipment-purchase example]: 'equipment purchase' false-case present in ${equipmentPurchaseExamples} prompts`);
+
+  // Both-axes semantic: prompt must distinguish (a) loan-IS-the-purchase vs
+  // (b) loan-funds-some-other-purchase. CRITICAL DISTINCTION phrase used in
+  // both rules.
+  const criticalDistinctionCount = (aiSource.match(/CRITICAL DISTINCTION/g) || []).length;
+  if (criticalDistinctionCount < 2) {
+    throw new Error(`FAIL [Group MMMM CRITICAL DISTINCTION]: prompts must include 'CRITICAL DISTINCTION' framing of the (a) vs (b) bug (loan IS purchase vs loan FUNDS purchase) in both rules. Got ${criticalDistinctionCount} occurrence(s).`);
+  }
+  console.log(`  PASS [Group MMMM CRITICAL DISTINCTION]: framing present in ${criticalDistinctionCount} prompts`);
+
+  // ─── Live verification — 5x×2 scenarios under RUN_MMMM_D=1 ──────────
+  if (process.env.RUN_MMMM_D === '1') {
+    console.log('\n---------- Group MMMM / D1: processInitialEmail emits is_purchase=false on Derek-shape refinance (5x) ----------');
+
+    // Real PDF stub bytes — same pattern as JJJJ; loan-app filename triggers
+    // dual-path in buildContentBlocks, Anthropic API validates PDF structure.
+    const mmmmStubPdf = fs_qqq.readFileSync(path_qqq.join(__dirname, 'forms/Loan Application Form (1).pdf')).toString('base64');
+
+    // D1: Derek-shape refinance — "Business working capital and equipment purchase"
+    const d1Attachments = [
+      { Name: 'LoanApplication_Derek_Olsen.pdf', ContentType: 'application/pdf', Content: mmmmStubPdf, ContentLength: mmmmStubPdf.length },
+      { Name: 'Appraisal_5519_Henwood_Rd_SW_Calgary.pdf', ContentType: 'application/pdf', Content: mmmmStubPdf, ContentLength: mmmmStubPdf.length },
+    ];
+    const d1SavedDocs = [
+      { file_name: 'LoanApplication_Derek_Olsen.pdf', classification: 'loan_application',
+        extracted_data: { text: 'CONFIDENTIAL LOAN APPLICATION FORM\n\nApplicant: Derek Olsen\nProperty Address: 5519 Henwood Road SW, Calgary, AB T3E 7C2\nLoan Type: Second Mortgage\nLoan Amount Requested: $110,000\nProperty Value: $730,000\nExisting First Mortgage: $341,000 (RBC Royal Bank)\nLoan Purpose: Business working capital and equipment purchase for Olsen Construction Inc.\nEmployment: Self-employed General Contractor, Olsen Construction Inc., 14 years\nAnnual Income (2024): $138,200\nDate: May 16, 2026' } },
+      { file_name: 'Appraisal_5519_Henwood_Rd_SW_Calgary.pdf', classification: 'appraisal',
+        extracted_data: { text: 'APPRAISAL REPORT\nProperty Address: 5519 Henwood Road SW, Calgary, AB T3E 7C2\nBorrower of Record: Derek Olsen\nAppraised Value: $730,000\nDate of Appraisal: May 12, 2026\nProperty Type: Single-family detached residential\nAppraiser: Margaret A. Okonkwo AACI P.App' } },
+    ];
+    const d1Body = `Hi Vienna,
+
+Hope you're well. I have a client, Derek Olsen, who's looking for a second mortgage on his property in Calgary. The property at 5519 Henwood Road SW recently appraised at $730,000. Derek has an existing RBC first mortgage with a balance of approximately $341,000 that matures in May 2027. He's looking for $110,000 as a second mortgage — combined LTV around 62%, well within parameters.
+
+Derek is self-employed as a general contractor through Olsen Construction Inc. (14 years), with 2024 income of $138,200. The funds are for business working capital and equipment purchase to support the construction business. Exit strategy is refinance with RBC at first mortgage renewal in May 2027.
+
+Loan application and appraisal attached.
+
+Thanks,
+Amanda Foster
+Crown Mortgage Group Lic. #MB556291`;
+
+    let d1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const { dealSummary } = await aiService.processInitialEmail(
+          'Amanda Foster', d1Body, d1Attachments, d1SavedDocs, false, false, false
+        );
+        const isPurchaseVal = dealSummary?.is_purchase;
+        if (isPurchaseVal !== false) {
+          d1Leaks++;
+          console.log(`  Run ${run}: LEAK — is_purchase=${JSON.stringify(isPurchaseVal)}; expected false (refinance/second-mortgage shape)`);
+        } else {
+          console.log(`  Run ${run}: PASS — is_purchase=false (refinance correctly classified)`);
+        }
+      } catch (e) {
+        d1Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group MMMM / D1 (Derek-shape refinance 5x): ${5 - d1Leaks}/5 passed, ${d1Leaks}/5 leaked (threshold: ≤1)`);
+
+    console.log('\n---------- Group MMMM / D2: processInitialEmail emits is_purchase=true on real purchase (5x) ----------');
+
+    // D2: Real first-mortgage property purchase
+    const d2Attachments = [
+      { Name: 'LoanApplication_Sarah_Chen.pdf', ContentType: 'application/pdf', Content: mmmmStubPdf, ContentLength: mmmmStubPdf.length },
+      { Name: 'PurchaseContract_1247_River_Heights.pdf', ContentType: 'application/pdf', Content: mmmmStubPdf, ContentLength: mmmmStubPdf.length },
+    ];
+    const d2SavedDocs = [
+      { file_name: 'LoanApplication_Sarah_Chen.pdf', classification: 'loan_application',
+        extracted_data: { text: 'CONFIDENTIAL LOAN APPLICATION FORM\n\nApplicant: Sarah Chen\nProperty Address: 1247 River Heights Crescent SE, Calgary, AB T2C 4E8\nLoan Type: First Mortgage (Purchase)\nLoan Amount Requested: $548,000\nProperty Purchase Price: $685,000\nDown Payment: $137,000 (20%)\nDown Payment Source: TFSA savings + gift from parents (gift letter on file)\nEmployment: Software Engineer, Shopify Inc., 5 years\nAnnual Income: $112,000\nDate: May 16, 2026' } },
+      { file_name: 'PurchaseContract_1247_River_Heights.pdf', classification: 'purchase_contract',
+        extracted_data: { text: 'AGREEMENT OF PURCHASE AND SALE\nProperty: 1247 River Heights Crescent SE, Calgary, AB T2C 4E8\nPurchaser: Sarah Chen\nVendor: Marcus and Elaine Trottier\nPurchase Price: $685,000\nClosing Date: July 15, 2026\nDeposit: $34,250 (5%) paid on signing\nConditions: subject to financing approval by June 20, 2026' } },
+    ];
+    const d2Body = `Hi Vienna,
+
+Submitting a first mortgage application for Sarah Chen. She's purchasing a new home at 1247 River Heights Crescent SE, Calgary for $685,000. Down payment of $137,000 (20%) confirmed via TFSA savings and a gift from her parents (gift letter on file). Loan amount requested is $548,000.
+
+Sarah is a Software Engineer at Shopify with 5 years tenure earning $112K annually. Closing date is July 15, 2026 — financing condition deadline June 20.
+
+Attached: purchase contract and loan application. Credit bureau and down payment proof to follow.
+
+Thanks,
+Amanda Foster
+Crown Mortgage Group Lic. #MB556291`;
+
+    let d2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const { dealSummary } = await aiService.processInitialEmail(
+          'Amanda Foster', d2Body, d2Attachments, d2SavedDocs, false, false, false
+        );
+        const isPurchaseVal = dealSummary?.is_purchase;
+        if (isPurchaseVal !== true) {
+          d2Leaks++;
+          console.log(`  Run ${run}: LEAK — is_purchase=${JSON.stringify(isPurchaseVal)}; expected true (real first-mortgage purchase shape)`);
+        } else {
+          console.log(`  Run ${run}: PASS — is_purchase=true (purchase correctly classified)`);
+        }
+      } catch (e) {
+        d2Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group MMMM / D2 (real purchase 5x): ${5 - d2Leaks}/5 passed, ${d2Leaks}/5 leaked (threshold: ≤1)`);
+
+    // Combined escalation decision (UUU/JJJJ pattern): both scenarios complete first
+    const mmmmFindings = [];
+    if (d1Leaks > 1) mmmmFindings.push(`D1 (Derek-shape refinance): ${d1Leaks}/5 leaked — Claude not reliably emitting is_purchase=false on refinance with 'equipment purchase' in purpose. Worked-examples block may need strengthening or further DEREK callout.`);
+    if (d2Leaks > 1) mmmmFindings.push(`D2 (real purchase): ${d2Leaks}/5 leaked — Claude not reliably emitting is_purchase=true on first-mortgage property purchase with attached Purchase Contract.`);
+    if (mmmmFindings.length > 0) {
+      throw new Error(`FAIL [Group MMMM / D escalation]: ${mmmmFindings.length} scenario(s) crossed threshold.\n  - ${mmmmFindings.join('\n  - ')}\nSurface escalation shape before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group MMMM / D1 + D2: SKIPPED (set RUN_MMMM_D=1 to run) ----------');
+  }
 
   // ════════════════════════════════════════════════════════════════
   // GROUP LLLL — broker-facing thread anchor on executeDraft (S15.3+)

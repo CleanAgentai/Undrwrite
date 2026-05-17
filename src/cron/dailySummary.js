@@ -3,6 +3,7 @@ const config = require('../config');
 const dealsService = require('../services/deals');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
+const { isPurchaseFromSummary } = require('../lib/dealType');
 
 // Group GGGG: REMINDER_TESTING_MODE env var. When set, accelerates the full
 // reminder cadence so Franco can validate all 3 reminders end-to-end within
@@ -104,8 +105,10 @@ const runFollowUpReminders = async () => {
       // DOC_SYNONYMS rather than cross-module import — see TODO below.
       const dealDocs = await dealsService.getDocumentsByDeal(deal.id);
       const classifications = dealDocs.map(d => d.classification).filter(Boolean);
-      const reminderLoanType = (deal.extracted_data?.loan_type || '').toLowerCase();
-      const reminderIsPurchase = /purchas/.test(reminderLoanType) || /purchas/.test(deal.extracted_data?.purpose || '');
+      // Group MMMM: canonical purchase/refinance signal via dealType.js.
+      // Pre-MMMM the inline /purchas/ regex over loan_type + purpose drift-
+      // risked the Derek-shape false positive ("equipment purchase").
+      const reminderIsPurchase = isPurchaseFromSummary(deal.extracted_data);
       // TODO: extract DOC_SYNONYMS to a shared util if a third consumer surfaces.
       // Currently inlined here and in src/routes/webhook.js (single entry — NOA satisfies income_proof).
       const DOC_SYNONYMS_LOCAL = { income_proof: ['income_proof', 'noa'] };
