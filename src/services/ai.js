@@ -212,6 +212,7 @@ Use this exact JSON structure (use null for unknown fields, do not guess):
   "documents_received": ["list of document names received"],
   "documents_still_needed": ["list of documents still missing"],
   "misattached_documents": ["EXACT filenames (as listed in the attachment list) of any attached documents that do not belong to this deal's canonical file — meaning the doc's CONTENT names a different applicant (wrong borrower), describes a different property (wrong property address), or otherwise doesn't apply to this transaction. Either axis is sufficient: a doc with the correct borrower name but a different property address belongs in this array; a doc with the correct property but a different applicant also belongs. Empty array when all attached docs match BOTH the canonical borrower AND the canonical property. See MISATTACHED DOC DETECTION RULE below for worked examples."],
+  "unresolved_discrepancy": "boolean — true when any discrepancy you would flag in key_risks_or_notes per UUU/SSS rules is currently waiting for clarification (broker has not yet confirmed which value is correct AND no new docs have resolved it). Scope is IDENTICAL to UUU's flagging scope: numeric mismatches without hedge tolerance, categorical mismatches (purpose/lender/employer/address/ownership/occupancy), sub-identity-clash borrower-name variants flagged for clarification. False when no discrepancies were detected, OR all detected discrepancies have been resolved. See UNRESOLVED_DISCREPANCY DETECTION RULE below for worked examples.",
   "key_risks_or_notes": "string - any red flags, urgency, or notable details",
   "identity_clash": true | false,
   "summary": "9-10 sentence plain English summary of the deal so far"
@@ -252,6 +253,29 @@ Worked examples (canonical borrower "Anna Bergstrom", canonical property "1801 V
   - Doc has no clear applicant info but the property address matches canonical → DO NOT FLAG (no evidence of mismatch).
 
 Add the EXACT filename (from the attachment list) to misattached_documents. RULES: (1) match on document CONTENT, not filename — a file called "appraisal.pdf" whose content shows a different property IS misattached; a file called "Grace_Paulson.pdf" whose content actually matches Anna + canonical property is NOT misattached. (2) Be conservative — when unsure on BOTH axes, do NOT flag. False positives suppress the prelim gate and the broker hangs. False negatives let prelim fire on docs that don't apply (the Anna Bergstrom production bug). (3) Set to an empty array when all attached docs match canonical on both axes. (4) Use the exact filename string from the attachment list. (5) This field is independent of identity_clash — identity_clash is about the email body vs the docs, while misattached_documents is about doc content vs the canonical deal. When identity_clash=true the docs causing the clash typically also go into misattached_documents.
+
+UNRESOLVED_DISCREPANCY DETECTION RULE (Group QQQQ): set unresolved_discrepancy=true when ANY discrepancy you would flag in key_risks_or_notes per UUU/SSS rules is currently waiting for clarification. Set false when no discrepancies have been detected OR all detected discrepancies have been resolved.
+
+Detection scope (IDENTICAL to UUU's flagging scope — the gate and the flagging must stay in lockstep, or the gate becomes a separate truth from what Vienna communicates):
+  - Numeric mismatches between email-body figures and document figures (loan amount, property value, existing mortgage balance, credit scores) with NO hedge tolerance — i.e., NOT within UUU's ~10% hedged-estimate exception (estimate markers like "~", "approximately", "around", "roughly", "about").
+  - Categorical mismatches (loan purpose, lender name, employer name, property address, ownership type, occupancy status) where values differ materially between sources.
+  - Borrower name mismatches that don't trigger full identity_clash (minor variants flagged for clarification without escalating to identity_clash=true).
+
+Resolution semantic (when to flip true → false on follow-up turns — this rule fires on first contact via processInitialEmail; generateBrokerResponse handles re-evaluation):
+  - Broker text confirmation: explicit statement of which value is correct ("the correct loan amount is $68K" / "yes, $73K was a typo, please use $68K from the docs") → resolves the corresponding discrepancy.
+  - Updated docs matching canonical: broker sends new docs whose content aligns with the deal's current canonical figures → resolves.
+  - Mixed: broker confirms SOME but not OTHERS — flag stays true if ANY discrepancy remains unresolved.
+
+Worked examples (canonical borrower Sandra Lynn Fletcher, canonical property "412 Windermere Close SW, Edmonton"):
+  - INITIAL TURN: email body says "Loan Request: $73,000" + "Existing First Mortgage (RBC): ~$290,000" but loan-app shows $68,000 + payout shows $295,000, no broker text resolving the difference → unresolved_discrepancy=TRUE (the Sandra Fletcher 2026-05-17 production bug shape — prelim MUST hold until resolved).
+  - FOLLOW-UP TURN after broker confirms: prior turn flagged $73K vs $68K mismatch; broker now writes "Apologies — the loan request is $68,000 and the RBC balance is $295,000, please use those going forward" → unresolved_discrepancy=FALSE (broker explicitly confirmed both figures).
+  - NO DISCREPANCY: email figures match document figures, no categorical mismatches → unresolved_discrepancy=FALSE (clean file; never flagged anything).
+  - HEDGED-ESTIMATE EXCEPTION (UUU rule): email says "~$112,000" + loan-app shows $110,000 → 1.8% delta with explicit hedge marker → NOT flagged in key_risks_or_notes per UUU → unresolved_discrepancy=FALSE (no discrepancy by UUU's scope).
+  - PARTIAL RESOLUTION: prior turn flagged TWO discrepancies ($73K vs $68K AND lender stated as "TD" vs payout showing "RBC"); broker confirms loan amount only, doesn't address lender → unresolved_discrepancy=TRUE (lender mismatch still unresolved).
+  - VAGUE ACKNOWLEDGEMENT: broker says "looks good, please proceed" without addressing the specific discrepancy → does NOT resolve (silence on the discrepancy isn't confirmation).
+
+This field gates the preliminary-review trigger downstream. False positive (Vienna sees no discrepancy but emits true) suppresses prelim that should fire → broker hangs. False negative (Vienna sees discrepancy but emits false) lets prelim fire prematurely with unresolved figures (the Sandra Fletcher production bug). Be conservative — flag TRUE when ambiguous (bias toward holding the prelim).
+
 If any number stated in the email (credit scores, property value, loan amount, balances) differs from what an attached document shows, add a note to key_risks_or_notes flagging the discrepancy — e.g. "Email stated credit scores 531/519 but credit bureau shows 583/608 — needs clarification."
 The summary field should read like a brief to a lender — include all key facts.
 
@@ -670,6 +694,22 @@ Re-evaluate this field every turn from scratch — do not just copy the previous
 - If broker conversationally claims an earlier-flagged doc was actually correct, only remove from the array if the doc's content actually matches canonical on both axes. Do not remove based on conversational claim alone — the doc content is authoritative.
 - Empty array when no docs on file are misattached.
 - This field gates the preliminary-review trigger downstream. False positives suppress the gate (broker hangs); false negatives let prelim fire on docs that don't apply (the Anna Bergstrom production bug). Be conservative — flag only when content clearly mismatches canonical.
+
+UNRESOLVED_DISCREPANCY RE-EVALUATION (Group QQQQ): updated_summary MUST include an unresolved_discrepancy field (boolean). Re-evaluate every turn from current evidence — the latest broker message, any newly arrived docs, prior discrepancies flagged in this conversation. Do NOT just copy the existing summary's value: if the broker's latest correspondence resolves a previously-flagged discrepancy (text confirmation OR corrected docs that match canonical), flip true→false. If new evidence introduces a new discrepancy, flip false→true.
+
+CRITICAL DISTINCTION — resolution requires actual evidence:
+- Broker text explicitly confirming the correct value → resolves.
+- New doc whose content aligns with canonical → resolves.
+- Broker says "looks good, please proceed" without addressing the specific discrepancy → does NOT resolve (vague acknowledgement isn't confirmation).
+- Broker silence on the discrepancy across multiple turns → does NOT resolve (must explicitly confirm or send corrected docs).
+
+Worked examples (same rule as UNRESOLVED_DISCREPANCY DETECTION RULE in processInitialEmail):
+- Sandra Fletcher production bug shape, current turn: prior turn flagged $73K vs $68K mismatch, broker now writes "Apologies — the loan request is $68,000, please use that going forward" → unresolved_discrepancy=FALSE this turn.
+- Same shape, broker hasn't responded yet (still pending): unresolved_discrepancy=TRUE.
+- No discrepancies ever detected, broker sending new docs: unresolved_discrepancy=FALSE.
+- Partial resolution: two discrepancies flagged previously, broker confirms one but not the other → unresolved_discrepancy=TRUE (the unresolved one keeps the flag).
+
+Bias toward TRUE when ambiguous — false negative lets prelim fire prematurely with unresolved discrepancies (the Sandra production bug). Resolution must be evidenced; silence is not resolution.
 
 EXISTING DEAL SUMMARY:
 ${JSON.stringify(existingSummary, null, 2)}

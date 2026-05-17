@@ -5649,6 +5649,266 @@ Crown Mortgage Group Lic. #MB556291`;
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP QQQQ — unresolved_discrepancy structured signal gates prelim trigger (S8.1+S8.2)
+  // ════════════════════════════════════════════════════════════════
+  // Production case 2026-05-17 (deal ffb4fa0c, Sandra Fletcher): broker
+  // submission stated "$73,000 loan request" + "~$290,000 RBC balance" but
+  // loan-app shows $68,000 + payout shows $295,000. Vienna correctly flagged
+  // both discrepancies in msg 2 (welcome reply). 39 seconds LATER she also
+  // fired ACTION REQUIRED: PRELIMINARY Review to admin — SIMULTANEOUSLY with
+  // asking the broker to confirm (S8.1: premature prelim). After broker
+  // confirmed $68K / $295K in msg 4, Vienna fired a SECOND [UPDATED]
+  // PRELIMINARY Review (S8.2: double prelim).
+  //
+  // Both bugs collapse to ONE root cause: computeWillReview had no clause
+  // gating on "is any discrepancy waiting for clarification?"
+  //
+  // STRUCTURAL FRAMING — this is the THIRD per-trigger gate clause:
+  //   - BBBB (R2 S7.1/S9.1): && hasExitStrategy — gate held until broker
+  //     provided exit strategy.
+  //   - NNNN (R3 S3.3/S3.4 residual): && !deal.prelim_approved_at — gate
+  //     suppressed post-approval re-fires.
+  //   - QQQQ (R4 S8.1/S8.2, this one): && !summary?.unresolved_discrepancy
+  //     — gate held until broker resolves the discrepancy.
+  //
+  // Same diff shape as BBBB/NNNN. Same JJJJ structured-signal-gates-the-
+  // trigger pattern as JJJJ misattached_documents + MMMM is_purchase. The
+  // mechanism is canonical for soft-knowledge-to-JS-gate translation: Vienna
+  // already reasons about discrepancies in key_risks_or_notes; we
+  // structured-output her reasoning into a boolean the gate can read.
+  //
+  // What this does NOT do: it does NOT structurally preempt future trigger
+  // discoveries. A 4th distinct trigger would mean a 4th clause. What it
+  // DOES do is establish the fix-shape as canonical — future triggers slot
+  // in mechanically (structured signal + worked examples + gate clause +
+  // truth table extension + 5x verification) without architectural debate.
+  //
+  // KNOWN ARCHITECTURAL EVOLUTION PATH (logged, NOT actioned, awaiting a 4th
+  // trigger to justify the refactor blast radius): replace the 6-clause AND
+  // chain in computeWillReview with a single computePendingClarifications
+  // (deal, summary, classifications) helper returning the list of unresolved
+  // blockers; each trigger becomes an entry that gates BOTH the prelim
+  // trigger AND OOOO's enumeration. That WOULD structurally close the class.
+  // YAGNI on N=3 — wait for N=4.
+  console.log('\n========== GROUP QQQQ — unresolved_discrepancy gates prelim trigger ==========');
+
+  // ─── Source-string regression: schema + DETECTION RULE in processInitialEmail ──
+  console.log('\n---------- Group QQQQ / Source-string regression on processInitialEmail ----------');
+  // aiSource already loaded earlier
+
+  if (!/"unresolved_discrepancy": "boolean/.test(aiSource)) {
+    throw new Error(`FAIL [Group QQQQ schema]: processInitialEmail TASK 2 JSON schema must include unresolved_discrepancy field (boolean type)`);
+  }
+  console.log('  PASS [Group QQQQ schema]: unresolved_discrepancy field present in TASK 2 schema');
+
+  if (!/UNRESOLVED_DISCREPANCY DETECTION RULE \(Group QQQQ\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group QQQQ detection rule]: processInitialEmail prompt must include UNRESOLVED_DISCREPANCY DETECTION RULE (Group QQQQ)`);
+  }
+  console.log('  PASS [Group QQQQ detection rule]: detection rule present in processInitialEmail');
+
+  if (!/UNRESOLVED_DISCREPANCY RE-EVALUATION \(Group QQQQ\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group QQQQ re-evaluation rule]: generateBrokerResponse prompt must include UNRESOLVED_DISCREPANCY RE-EVALUATION (Group QQQQ)`);
+  }
+  console.log('  PASS [Group QQQQ re-evaluation rule]: re-evaluation rule present in generateBrokerResponse');
+
+  // UUU coupling explicit in both prompts — the "IDENTICAL to UUU's flagging scope" claim
+  // is what keeps the gate and the flagging in lockstep. If anyone weakens this language,
+  // the gate could drift from UUU's textual flagging.
+  const uuuCouplingCount = (aiSource.match(/IDENTICAL to UUU's flagging scope/g) || []).length;
+  if (uuuCouplingCount < 1) {
+    throw new Error(`FAIL [Group QQQQ UUU coupling]: prompts must include "IDENTICAL to UUU's flagging scope" framing — load-bearing for gate/flag consistency`);
+  }
+  console.log(`  PASS [Group QQQQ UUU coupling]: "IDENTICAL to UUU's flagging scope" framing present (${uuuCouplingCount} occurrence)`);
+
+  // Worked examples must name Sandra Fletcher 2026-05-17 explicitly (load-bearing-naming
+  // pattern from JJJJ/MMMM — concrete examples beat abstract phrasing)
+  const sandraCallouts = (aiSource.match(/Sandra Fletcher 2026-05-17/g) || []).length;
+  if (sandraCallouts < 1) {
+    throw new Error(`FAIL [Group QQQQ Sandra callout]: worked examples must explicitly name 'Sandra Fletcher 2026-05-17' as the production bug shape (load-bearing concrete naming pattern from JJJJ/MMMM)`);
+  }
+  console.log(`  PASS [Group QQQQ Sandra callout]: Sandra Fletcher 2026-05-17 named in ${sandraCallouts} prompt(s)`);
+
+  // The CRITICAL DISTINCTION framing on resolution semantics (text confirmation vs
+  // vague acknowledgement vs silence) — load-bearing for re-evaluation reliability
+  if (!/Broker silence on the discrepancy across multiple turns/.test(aiSource)) {
+    throw new Error(`FAIL [Group QQQQ silence rule]: re-evaluation rule must explicitly state that broker silence does NOT resolve the discrepancy (must explicitly confirm or send corrected docs)`);
+  }
+  console.log('  PASS [Group QQQQ silence rule]: explicit "silence ≠ resolution" framing present');
+
+  // ─── Source-string regression: computeWillReview clause ────────────
+  console.log('\n---------- Group QQQQ / Source-string regression on computeWillReview ----------');
+
+  // The new clause must be present in computeWillReview's body
+  const qqqqHelperBody = webhookSrc.match(/const computeWillReview = [\s\S]*?\n\};/);
+  if (!qqqqHelperBody) {
+    throw new Error(`FAIL [Group QQQQ helper extract]: could not extract computeWillReview body`);
+  }
+  if (!/!\s*summary\??\.unresolved_discrepancy/.test(qqqqHelperBody[0])) {
+    throw new Error(`FAIL [Group QQQQ clause]: computeWillReview must include '!summary?.unresolved_discrepancy' suppression clause — this is the load-bearing fix that closes S8.1+S8.2 double-prelim`);
+  }
+  console.log('  PASS [Group QQQQ clause]: !summary?.unresolved_discrepancy present in computeWillReview');
+
+  // The clause is marked with a Group QQQQ comment (load-bearing for future
+  // readers — the 3rd per-trigger clause should be discoverable as such)
+  if (!/QQQQ/.test(qqqqHelperBody[0])) {
+    throw new Error(`FAIL [Group QQQQ comment marker]: computeWillReview clause must carry a 'QQQQ' comment marker for discoverability (the 3rd per-trigger gate clause — BBBB, NNNN, QQQQ)`);
+  }
+  console.log('  PASS [Group QQQQ comment marker]: clause marked with QQQQ comment');
+
+  // ─── Live verification — 5x×2 scenarios under RUN_QQQQ_D=1 ─────────
+  if (process.env.RUN_QQQQ_D === '1') {
+    // Real PDF stub bytes — same pattern as JJJJ/MMMM/KKKK
+    const qqqqStubPdf = fs_qqq.readFileSync(path_qqq.join(__dirname, 'forms/Loan Application Form (1).pdf')).toString('base64');
+
+    // ── D1 (5x): processInitialEmail emits unresolved_discrepancy=true on Sandra-shape submission ──
+    console.log('\n---------- Group QQQQ / D1: processInitialEmail emits unresolved_discrepancy=true on Sandra-shape (5x) ----------');
+
+    // Sandra's exact production msg 1 body — deliberately mismatched email figures
+    const d1Body = `Hi,
+
+Please find the following file for your review.
+
+*Borrower:* Sandra Lynn Fletcher
+*Property:* 412 Windermere Close SW, Edmonton, AB T6W 0R1
+*Appraised Value:* $580,000
+*Loan Request:* $73,000 (second mortgage)
+*Existing First Mortgage (RBC):* ~$290,000
+*Combined LTV:* ~62.6%
+*Purpose:* Debt consolidation
+
+Documents attached:
+    - Loan application
+    - Personal Net Worth statement
+    - Appraisal
+    - Credit bureau
+    - T4 (2025)
+    - RBC payout statement
+    - AML form
+    - PEP form
+
+Thanks,
+Nathan Collier
+Apex Mortgage Solutions Lic. #MB774263`;
+
+    const d1Attachments = [
+      { Name: 'LoanApplication_Sandra_Fletcher.pdf', ContentType: 'application/pdf', Content: qqqqStubPdf, ContentLength: qqqqStubPdf.length },
+      { Name: 'RBC_Payout_Statement_Sandra_Fletcher.pdf', ContentType: 'application/pdf', Content: qqqqStubPdf, ContentLength: qqqqStubPdf.length },
+    ];
+    const d1SavedDocs = [
+      { file_name: 'LoanApplication_Sandra_Fletcher.pdf', classification: 'loan_application',
+        extracted_data: { text: 'CONFIDENTIAL LOAN APPLICATION FORM\n\nApplicant: Sandra Lynn Fletcher\nProperty Address: 412 Windermere Close SW, Edmonton, AB T6W 0R1\nLoan Type: Second Mortgage\nLoan Amount Requested: $68,000\nProperty Value: $580,000\nExisting First Mortgage: $295,000 (RBC Royal Bank)\nEmployment: Nurse Manager, Alberta Health Services, 20 years\nAnnual Income: $104,200\nDate: May 17, 2026' } },
+      { file_name: 'RBC_Payout_Statement_Sandra_Fletcher.pdf', classification: 'mortgage_statement',
+        extracted_data: { text: 'RBC PAYOUT STATEMENT\nBorrower: Sandra Lynn Fletcher\nProperty: 412 Windermere Close SW, Edmonton, AB\nCurrent Balance: $295,000\nPayoff Amount: $295,127.34\nValidity Period: 30 days from May 17, 2026\nPrepayment Penalty: $1,847.20\nLender: Royal Bank of Canada' } },
+    ];
+
+    let d1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const { dealSummary } = await aiService.processInitialEmail(
+          'Nathan Collier', d1Body, d1Attachments, d1SavedDocs, false, false, false
+        );
+        const unresolved = dealSummary?.unresolved_discrepancy;
+        if (unresolved !== true) {
+          d1Leaks++;
+          console.log(`  Run ${run}: LEAK — unresolved_discrepancy=${JSON.stringify(unresolved)}; expected true (Sandra production shape: $73K vs $68K loan + $290K vs $295K balance, no broker confirmation)`);
+        } else {
+          console.log(`  Run ${run}: PASS — unresolved_discrepancy=true (correctly flagged on initial submission)`);
+        }
+      } catch (e) {
+        d1Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group QQQQ / D1 (Sandra-shape initial 5x): ${5 - d1Leaks}/5 passed, ${d1Leaks}/5 leaked (threshold: ≤1)`);
+
+    // ── D2 (5x): generateBrokerResponse re-evaluates to false after broker confirms ──
+    console.log('\n---------- Group QQQQ / D2: generateBrokerResponse flips unresolved_discrepancy true→false after broker confirms (5x) ----------');
+
+    const d2ExistingSummary = {
+      sender_type: 'broker',
+      sender_name: 'Nathan Collier',
+      broker_name: 'Nathan Collier',
+      broker_company: 'Apex Mortgage Solutions',
+      borrower_name: 'Sandra Lynn Fletcher',
+      loan_type: 'second mortgage',
+      is_purchase: false,
+      property_address: '412 Windermere Close SW, Edmonton, AB T6W 0R1',
+      property_value: 580000,
+      loan_amount_requested: 73000,  // ← email-stated, mismatched with docs
+      existing_mortgage_balance: 290000,  // ← email-stated, mismatched with docs
+      ltv_percent: 62.6,
+      purpose: 'Debt consolidation',
+      exit_strategy: 'Refinance with RBC at mortgage renewal (March 2028)',
+      identity_clash: false,
+      misattached_documents: [],
+      unresolved_discrepancy: true,  // ← THE LOAD-BEARING PRE-CONDITION (Vienna flagged on prior turn)
+      key_risks_or_notes: 'Discrepancies needing clarification: (1) loan amount — email states $73,000 but loan application shows $68,000; (2) existing mortgage balance — email states ~$290,000 but RBC payout statement shows $295,000.',
+    };
+    const d2DocsOnFile = [
+      { file_name: 'LoanApplication_Sandra_Fletcher.pdf', classification: 'loan_application' },
+      { file_name: 'PNW_Sandra_Fletcher.pdf', classification: 'pnw_statement' },
+      { file_name: 'Appraisal_412_Windermere.pdf', classification: 'appraisal' },
+      { file_name: 'CB_Sandra_Fletcher.pdf', classification: 'credit_report' },
+      { file_name: 'T4_Sandra_Fletcher_2025.pdf', classification: 'income_proof' },
+      { file_name: 'RBC_Payout_Sandra_Fletcher.pdf', classification: 'mortgage_statement' },
+      { file_name: 'AML_Sandra_Fletcher.pdf', classification: 'aml' },
+      { file_name: 'PEP_Sandra_Fletcher.pdf', classification: 'pep' },
+    ];
+    const d2ConvHistory = [
+      { direction: 'inbound', subject: 'New Mortgage Submission — Sandra Fletcher', body: 'Hi, Please find the following file for your review. Loan Request: $73,000. Existing First Mortgage (RBC): ~$290,000. (Discrepancies vs attached docs.)', created_at: '2026-05-17T19:11:58Z' },
+      { direction: 'outbound', subject: 'Re: New Mortgage Submission — Sandra Fletcher', body: 'Hi Nathan! I noticed a couple of figures that don\'t match between your email and the documents: (1) loan request — email says $73,000 but the loan application shows $68,000; (2) existing RBC mortgage balance — email says ~$290,000 but the RBC payout statement shows $295,000. Could you confirm which figures are accurate?', created_at: '2026-05-17T19:12:21Z' },
+    ];
+    // Sandra's actual msg 4 — explicit broker confirmation of both correct figures
+    const d2Body = `Hi Vienna,
+
+Apologies for the errors in my email. The documents are correct:
+    - Loan request: *$68,000*
+    - Existing RBC mortgage balance: *$295,000*
+
+Please use those figures going forward.
+
+Nathan Collier
+
+Apex Mortgage Solutions Lic. #MB774263`;
+
+    let d2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const result = await aiService.generateBrokerResponse(
+          d2Body,
+          [],
+          [],
+          d2ExistingSummary,
+          d2ConvHistory,
+          d2DocsOnFile,
+          'active'
+        );
+        const updatedUnresolved = result?.updatedSummary?.unresolved_discrepancy;
+        if (updatedUnresolved !== false) {
+          d2Leaks++;
+          console.log(`  Run ${run}: LEAK — updated_summary.unresolved_discrepancy=${JSON.stringify(updatedUnresolved)}; expected false (broker explicitly confirmed BOTH figures in this turn)`);
+        } else {
+          console.log(`  Run ${run}: PASS — unresolved_discrepancy=false (correctly flipped after broker confirmation)`);
+        }
+      } catch (e) {
+        d2Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group QQQQ / D2 (broker confirmation 5x): ${5 - d2Leaks}/5 passed, ${d2Leaks}/5 leaked (threshold: ≤1)`);
+
+    // Combined escalation decision (JJJJ/MMMM/KKKK pattern): both scenarios complete first
+    const qqqqFindings = [];
+    if (d1Leaks > 1) qqqqFindings.push(`D1 (Sandra initial): ${d1Leaks}/5 leaked — Claude not reliably emitting unresolved_discrepancy=true on initial submission with email-vs-doc mismatches. Worked-examples block may need strengthening or further Sandra callout.`);
+    if (d2Leaks > 1) qqqqFindings.push(`D2 (broker confirmation): ${d2Leaks}/5 leaked — Claude not reliably flipping true→false after broker explicitly confirmed both figures. RE-EVALUATION block may need explicit "resolution must be evidenced" expansion or escalation to a structured JS-side resolution check.`);
+    if (qqqqFindings.length > 0) {
+      throw new Error(`FAIL [Group QQQQ / D escalation]: ${qqqqFindings.length} scenario(s) crossed threshold.\n  - ${qqqqFindings.join('\n  - ')}\nSurface escalation shape before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group QQQQ / D1 + D2: SKIPPED (set RUN_QQQQ_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP KKKK — AML/PEP sequencing gate in generateDocumentRequestEmail (S1.1/S2.1/S5.1)
   // ════════════════════════════════════════════════════════════════
   // This bug has been counted "fixed" three times. KKKK closes it for good
@@ -6220,6 +6480,48 @@ Crown Mortgage Group Lic. #MB556291`;
         deal: { status: 'active', prelim_approved_at: null },
         summary: { ltv_percent: 65, exit_strategy: 'refi' },
         classifications: [],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+
+    // ─── QQQQ extension cases (3rd per-trigger gate clause: unresolved_discrepancy) ───
+    {
+      name: 'QQQQ NEW: unresolved_discrepancy=true + all other gates pass → false (suppresses prelim until broker confirms)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi at maturity', unresolved_discrepancy: true },
+        classifications: ['appraisal', 'loan_application'],
+        identityClashUnresolved: false,
+      },
+      expect: false,
+    },
+    {
+      name: 'QQQQ NEW: unresolved_discrepancy=false + all gates pass → true (discrepancy resolved, prelim fires)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi at maturity', unresolved_discrepancy: false },
+        classifications: ['appraisal', 'loan_application'],
+        identityClashUnresolved: false,
+      },
+      expect: true,
+    },
+    {
+      name: 'QQQQ BACKCOMPAT: unresolved_discrepancy=undefined (legacy/pre-QQQQ deal) → true (undefined falsy → !falsy → clause passes; no regression on pre-QQQQ extracted_data)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: null },
+        summary: { ltv_percent: 65, exit_strategy: 'refi at maturity' },  // unresolved_discrepancy absent
+        classifications: ['appraisal'],
+        identityClashUnresolved: false,
+      },
+      expect: true,
+    },
+    {
+      name: 'QQQQ + NNNN compose: unresolved_discrepancy=true AND prelim_approved_at set → false (both clauses suppress; either alone is sufficient)',
+      input: {
+        deal: { status: 'active', prelim_approved_at: '2026-05-17T00:00:00.000Z' },
+        summary: { ltv_percent: 65, exit_strategy: 'refi', unresolved_discrepancy: true },
+        classifications: ['appraisal'],
         identityClashUnresolved: false,
       },
       expect: false,

@@ -306,6 +306,7 @@ const computeWillReview = ({ deal, summary, classifications, identityClashUnreso
     && hasExitStrategy
     && !identityClashUnresolved
     && !deal?.prelim_approved_at
+    && !summary?.unresolved_discrepancy   // ← QQQQ (S8.1+S8.2): 3rd per-trigger gate clause
   );
 };
 
