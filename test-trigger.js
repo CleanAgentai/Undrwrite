@@ -10514,6 +10514,49 @@ Brian`;
     // Three smokes — JJJ.1/JJJ.2 are negative (no AML/PEP), JJJ.3 is positive
     // (AML/PEP must appear post-approval — regression guard for "we moved them,
     // didn't delete them").
+    //
+    // JJJ-hardening 2026-05-18: pre-hardening the JJJ protection was IMPLICIT —
+    // INITIAL_EMAIL_PROMPT's "WHAT TO ASK FOR" list simply didn't include AML/PEP,
+    // and the prompt relied on Claude not adding them. Measured baseline leak
+    // rate ~20% (1/5 isolated runs); amplified to ~70% (3-4 of 5) when adjacent
+    // prompt content shifted (PPPP's first attempt at adding FORBIDDEN INTERNAL
+    // ROUTING above the broker section). Implicit omission is fragile to prompt
+    // perturbation. JJJ-hardening converts this to an EXPLICIT rule in
+    // INITIAL_EMAIL_PROMPT — "CRITICAL — DO NOT ASK FOR AML / PEP AT INTAKE" — so
+    // the protection holds regardless of adjacent content changes. The deterministic
+    // source-string regression below + the JJJ.1 5x live smoke confirm both
+    // the rule's presence and its behavioral effect.
+
+    // JJJ-hardening source-string regression: explicit anti-AML/PEP rule
+    // must be present in INITIAL_EMAIL_PROMPT. Deterministic (reads ai.js
+    // source). Runs before the JJJ.1 live smoke so a missing rule fails
+    // fast without spending API credits.
+    console.log('\n========== GROUP JJJ-hardening — explicit anti-AML/PEP rule present in INITIAL_EMAIL_PROMPT ==========');
+    const fs_jjjh = require('fs');
+    const path_jjjh = require('path');
+    const aiSourceJJJH = fs_jjjh.readFileSync(path_jjjh.join(__dirname, 'src/services/ai.js'), 'utf8');
+    const jjjHardeningMarkers = [
+      'CRITICAL — DO NOT ASK FOR AML / PEP AT INTAKE (Group JJJ, S12.2):',
+      'AML (anti-money laundering) and PEP (politically exposed person) forms are POST-APPROVAL compliance items.',
+      'Do NOT include AML or PEP in your welcome email',
+      'Do NOT mention "AML and PEP forms" as upcoming items',
+      'Do NOT reference them at all in the welcome email',
+      'will be requested AFTER intake is complete',
+    ];
+    // Find the rule's location to confirm it sits inside INITIAL_EMAIL_PROMPT
+    // (between the const declaration at the top and the module.exports object).
+    const initialPromptStart = aiSourceJJJH.indexOf('const INITIAL_EMAIL_PROMPT = `');
+    const initialPromptEnd = aiSourceJJJH.indexOf('---END_SUMMARY---`;', initialPromptStart);
+    if (initialPromptStart === -1 || initialPromptEnd === -1) {
+      throw new Error(`FAIL [Group JJJ-hardening]: could not locate INITIAL_EMAIL_PROMPT bounds in ai.js source. Cannot verify rule placement.`);
+    }
+    const initialPromptBody = aiSourceJJJH.slice(initialPromptStart, initialPromptEnd);
+    for (const marker of jjjHardeningMarkers) {
+      if (!initialPromptBody.includes(marker)) {
+        throw new Error(`FAIL [Group JJJ-hardening]: explicit anti-AML/PEP rule fragment missing from INITIAL_EMAIL_PROMPT. Missing marker: ${JSON.stringify(marker)}. The rule must be inside INITIAL_EMAIL_PROMPT (not just somewhere in ai.js) — its job is to harden processInitialEmail specifically against the implicit-omission failure mode.`);
+      }
+    }
+    console.log(`  PASS [Group JJJ-hardening]: all ${jjjHardeningMarkers.length} explicit rule fragments present inside INITIAL_EMAIL_PROMPT bounds`);
 
     // JJJ.1 — INITIAL email must NOT mention AML/PEP
     console.log('\n========== GROUP JJJ.1 — INITIAL email no AML/PEP at intake ==========');
