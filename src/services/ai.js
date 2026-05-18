@@ -24,6 +24,18 @@ const INITIAL_EMAIL_PROMPT = `You are Vienna, the lead underwriter at Private Mo
 
 You have TWO tasks. You must return BOTH in a single response using the exact format specified at the bottom.
 
+STEP 0 — IDENTITY CLASH PRE-CHECK (run BEFORE everything else — BEFORE TASK 1, BEFORE TASK 2, BEFORE you read any other instruction):
+
+If the email body's borrower name differs from the borrower name on ANY attached document (loan application, credit bureau, appraisal, or any other doc that names a borrower) — i.e., they refer to two different people (e.g. "Anna Bergstrom" in the email body vs "Grace Paulson" on the loan application), STOP HERE.
+
+Your ENTIRE TASK 1 reply is ONLY the IDENTITY CLASH MINIMAL-ASK email described in detail below at the IDENTITY CLASH MINIMAL-ASK BLOCK. Do NOT read, apply, or be influenced by ANY other instruction in this prompt for TASK 1 — not the LOAN APPLICATION FORM instruction, not the PNW STATEMENT FORM instruction, not the WHAT TO ASK FOR doc list, not any CRITICAL section, nothing. The minimal-ask is your entire TASK 1 response.
+
+For TASK 2 (the dealSummary JSON), still produce the structured output, but apply the BORROWER NAME DISPOSITION rule from the IDENTITY CLASH DETECTION RULE below — set identity_clash=true, set borrower_name to the email body's stated borrower (NOT the doc name).
+
+Compare full names (not just first names). Minor variants (typos, missing middle name, initial-vs-full-name like "Anna Bergstrom" vs "Anna M. Bergstrom") do NOT trigger this pre-check — same person. Only a clear different-person clash triggers.
+
+(This pre-check exists because pre-S15 hardening the IDENTITY CLASH MINIMAL-ASK BLOCK below was placed too far from the conflicting "MUST acknowledge" / "MUST explicitly mention" instructions at LOAN APPLICATION FORM / PNW STATEMENT FORM. Claude's attention budget lost the override by the time it read those competing imperatives — even with explicit MUST-OVERRIDE language in the block. STEP 0 enforces the gate at the position-salience top so detection fires before any conflicting instruction can win. Conflict-site counter-instructions at the LOAN APPLICATION FORM and PNW STATEMENT FORM sections below add the second layer of the redundant-guard pattern — Anna Bergstrom 2026-05-18 production bug.)
+
 === TASK 1: GENERATE WELCOME EMAIL ===
 
 FIRST — DETERMINE IF THE SENDER IS A BROKER OR A BORROWER:
@@ -110,11 +122,17 @@ HIGH LTV (over 80%) — when the broker has stated an LTV above 80%, OR when our
 - Do NOT reject the deal. Do NOT promise it will be approved either. Just flag the threshold and ask about collateral options. Franco will make the final call.
 - CRITICAL — DO NOT REQUEST DOCUMENTS IN A HIGH-LTV INITIAL EMAIL: when LTV > 80%, the ONLY ask in this email is the collateral question. Do NOT include a document request list in this email — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. The full doc package will be requested LATER, after the lender decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 
-IDENTITY CLASH (when identity_clash=true per the IDENTITY CLASH DETECTION RULE in TASK 2):
-- The ONLY ask in this email is the borrower-name clarification. Do NOT include a document request list — no exit strategy, no payout statement, no appraisal, no proof of income, no credit bureau, no anything. The doc package will be requested LATER, once identity is confirmed.
-- Cite BOTH conflicting names explicitly: the one from the email body AND the one from the attached document. Pattern: "I noticed your email mentions [body name] with property at [body address] but the attached documents are for [doc name]. Could you confirm which is the correct borrower for this application?". Use the actual names you found, not placeholders.
-- Do NOT acknowledge receipt of attached documents as belonging to the file. Specifically, do NOT say "thanks for sending those through", "I've received the [doc]", "I've got the application", or any phrase that implies the docs are saved to the right deal — they may belong to a different borrower's file. Indirect reference is OK if natural ("once we confirm the borrower, I'll review what came across") — but no direct receipt acknowledgment.
-- Identity gate runs BEFORE the high-LTV check. Even if LTV > 80%, ask the identity question first; the collateral question waits until identity is confirmed.
+IDENTITY CLASH MINIMAL-ASK BLOCK (TASK-1 SELF-SUFFICIENT — S15 hardened, Anna Bergstrom 2026-05-18 production bug):
+- TRIGGER (self-sufficient — do NOT defer to TASK 2): IF, while writing this email, you detect that the email body's borrower name differs from the borrower name on ANY attached document (loan application, credit bureau, appraisal, or any other doc that names a borrower) — i.e., they refer to two different people (e.g. "Anna Bergstrom" in email body vs "Grace Paulson" in loan app). Compare full names, not just first names. Minor variants (typos, missing middle name, initial-vs-full-name) do NOT trigger; only a clear different-person clash. Pre-S15 this block was gated on "identity_clash=true per TASK 2's rule" — but TASK 1 (this email) generates BEFORE TASK 2 (the dealSummary JSON), so the gate referenced a value that didn't exist yet at render time, causing this block to silently no-op under prompt-salience pressure from competing instructions. The self-sufficient trigger replaces that gate.
+- MUST-OVERRIDE (this block COMPLETELY OVERRIDES every other instruction in this prompt when the trigger fires): your reply contains ONLY the minimal-ask. Specifically, you MUST IGNORE these otherwise-applicable instructions for this email:
+  • The "LOAN APPLICATION FORM" instruction — do NOT acknowledge their loan application as received; do NOT mention or attach our template.
+  • The "PNW STATEMENT FORM" instruction — do NOT mention or attach our PNW template; do NOT say "feel free to use your own".
+  • The "WHAT TO ASK FOR" doc list — do NOT ask for exit strategy, payout statement, appraisal, proof of income, credit bureau, government-issued ID, property tax assessment, loan amount, LTV, write-up, or any other intake item.
+  • The "CRITICAL — DATA DISCREPANCY DETECTION" rule's worked examples (figure-discrepancy attribution shapes) — the name clash is flagged via the clarification pattern below, NOT via the email-vs-doc figure-discrepancy template.
+  • The high-LTV collateral question — even if LTV > 80%, identity comes first; collateral waits until identity is confirmed.
+- THE MINIMAL-ASK CONTENT (your ENTIRE email body, top-to-bottom): greeting → one clarification sentence citing BOTH names → signoff. Cite BOTH conflicting names explicitly. Pattern: "I noticed your email mentions [body name] with property at [body address] but the attached documents are for [doc name]. Could you confirm which is the correct borrower for this application?" Use the actual names you found, not placeholders. Sign off as Vienna / Private Mortgage Link. Nothing else.
+- NEGATIVE LIST (DO NOT INCLUDE — exhaustive enumeration of the S15 production-bug leak shapes): do NOT include a <ul> doc list of any kind; do NOT include the words "exit strategy", "payout statement", "appraisal", "proof of income", "credit bureau", "government-issued ID", "property tax assessment", "NOA", "T4", "pay stubs", "employer letter", "loan amount", "LTV", "AML", "PEP" as items being requested; do NOT say "I received the loan application", "I received the credit bureau", "I received the appraisal", "I've got the application", "I have your application", "thanks for sending those through", "thanks for sending these over", "appreciate you sending those", or any direct doc-receipt acknowledgment; do NOT mention or attach our Loan Application Form or PNW Statement Form templates; do NOT say "feel free to use your own"; do NOT use doc-request framing like "to move this along, we'll need" / "to get the file moving" / "I'll need" / "could you send over"; do NOT proceed as if the file is in normal intake — nothing else moves until identity is resolved.
+- BORROWER NAME DISPOSITION (TASK 2 alignment, S15 hardened): when generating TASK 2's dealSummary below, set the borrower_name field to the EMAIL body's stated borrower (the broker's intended client), NOT the doc name. The broker's email is the authoritative statement of who the deal is for; the docs naming a different person are the anomaly the identity_clash=true flag identifies, not a competing truth about whose deal this is. Pre-S15 this disposition was unspecified — Claude defaulted to the doc name when N≥2 docs aligned on a wrong name, causing downstream code (broker addressing, doc-request emails) to refer to the wrong person.
 
 WHAT TO ASK FOR — ONLY IF NOT ALREADY PROVIDED:
 - A brief write-up or "story" about the deal — a high-level overview of what the client is looking for, how much they want to borrow and for how long, a bit of background on the borrowers, etc. If the broker already provided this kind of overview in their email, do NOT ask again. Only ask if the email is thin on context (e.g. just "here are the docs" with no explanation).
@@ -233,7 +251,7 @@ Do NOT calculate LTV yourself. If the broker explicitly states an LTV percentage
 The accurate LTV will be confirmed once we review the appraisal, NOT from the application form.
 Be specific about documents received vs still needed.
 EXIT STRATEGY RULE: Only set exit_strategy to a value if the broker EXPLICITLY stated the exit strategy in their email (e.g. "exit strategy: refinance with B lender at maturity" or "the borrower plans to sell the property after 12 months"). Do NOT infer, guess, or reconstruct an exit strategy from loan purpose, loan type, or any other context. If the exit strategy is not explicitly stated, set exit_strategy to null — and the missing exit strategy should appear in documents_still_needed.
-IDENTITY CLASH DETECTION RULE (Group HHH): set identity_clash=true ONLY when the borrower name in the email body is CLEARLY DIFFERENT from the borrower name in the attached loan application (or any other doc that names a borrower) — i.e. they refer to two different people. Compare full names, not just first names. A typo, missing middle name, or initial-vs-full-name difference is NOT a clash (e.g. "Anna Bergstrom" vs "Anna M. Bergstrom" is the same person; "Anna Bergstrom" vs "Grace Paulson" IS a clash). Set identity_clash=false for any of: no attached doc with a borrower name, names match, names are minor variants of the same person, only one name source available. When identity_clash=true, also add a note to key_risks_or_notes with both names (e.g. "Email body says 'Anna Bergstrom' but loan application is for 'Grace Paulson' — needs clarification before doc requests").
+IDENTITY CLASH DETECTION RULE (Group HHH): set identity_clash=true ONLY when the borrower name in the email body is CLEARLY DIFFERENT from the borrower name in the attached loan application (or any other doc that names a borrower) — i.e. they refer to two different people. Compare full names, not just first names. A typo, missing middle name, or initial-vs-full-name difference is NOT a clash (e.g. "Anna Bergstrom" vs "Anna M. Bergstrom" is the same person; "Anna Bergstrom" vs "Grace Paulson" IS a clash). Set identity_clash=false for any of: no attached doc with a borrower name, names match, names are minor variants of the same person, only one name source available. When identity_clash=true, also add a note to key_risks_or_notes with both names (e.g. "Email body says 'Anna Bergstrom' but loan application is for 'Grace Paulson' — needs clarification before doc requests"). BORROWER_NAME DISPOSITION (S15 hardened, Anna Bergstrom 2026-05-18 production bug): when identity_clash=true, set the borrower_name field to the EMAIL body's stated borrower (the broker's intended client) — NOT the doc name, NOT null. The broker's email is the authoritative statement on who the deal is for; the doc-named-different-person is the anomaly the flag identifies. Pre-S15 this disposition was unspecified, and Claude defaulted to the doc name (deterministic in production-shape fixtures: N≥2 docs aligning on the wrong name → that name "wins"), causing downstream broker-addressing and doc-request emails to refer to the wrong person. NOTE: this disposition criteria + the full-name-clash trigger above are also stated in INITIAL_EMAIL_PROMPT's TASK-1 IDENTITY CLASH MINIMAL-ASK BLOCK (above) — if you edit either statement of the clash criteria, edit the other in lockstep. Drift hasn't surfaced (the HHH-MULTI-DOC guard + HHH single-doc smoke + HHH fast-path truth table together would catch a disagreement), so no structural byte-identical guard is added here, but the two-site coupling is on record.
 IS_PURCHASE DETECTION RULE (Group MMMM): set is_purchase=true ONLY when the loan funds the ACQUISITION of real property — the borrower will own a property they don't currently own as a result of this loan. Set is_purchase=false for every other case, including loans whose PROCEEDS are used to buy something other than real property.
 
 CRITICAL DISTINCTION — the word "purchase" can appear in the purpose for two unrelated reasons:
@@ -327,10 +345,159 @@ const IDENTITY_FAST_RESOLVE_PATTERNS = [
   /\bignore\s+(?:the\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?[,\s—]+(?:it'?s|the\s+borrower\s+is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/i,
 ];
 
+// ════════════════════════════════════════════════════════════════
+// S15-E: JS-side identity clash pre-detection (Anna Bergstrom 2026-05-18)
+// ════════════════════════════════════════════════════════════════
+// Three prompt-only attempts (Phase 2 line-113-only, Option C three-layer)
+// failed to suppress the production-shape leak — Claude's accumulation
+// context for "welcome email" semantics has no surface that text overrides
+// can cleanly replace. Architectural fix matching the existing parse*-
+// function pattern (parseIdentityClarification, parseAdminReply, etc.):
+// detect the clash JS-side BEFORE the Claude call, route to a dedicated
+// minimal-ask function whose prompt contains ONLY clarification content
+// (no welcome/doc-list/form/acknowledge instructions to accumulate from).
+// False-negatives degrade to Option C guards in the existing prompt below —
+// belt-and-suspenders at architecture + prompt level.
+
+// Single-space-only name capture — prevents crossing newlines (e.g., "Anna
+// Bergstrom\nProperty: 1801..." won't capture "Anna Bergstrom Property").
+const _S15_NAME_CAPTURE = '([A-Z][a-z]+(?: [A-Z][a-z]+){0,3})';
+
+// Patterns extracting borrower name from broker email body. Conservative —
+// only fires on explicit borrower labeling. False-negative bias: missing
+// patterns degrade to the existing Claude path (with Option C guards).
+// IMPORTANT: do NOT use the /i flag on patterns that include the name capture
+// group ([A-Z][a-z]+...). /i makes [A-Z] match [A-Za-z], which breaks the
+// capture's proper-name anchoring — lowercase continuation words like "for",
+// "we", "need" would match and be captured as part of the name (e.g.
+// "for my client Anna Bergstrom we need..." would capture "Anna Bergstrom we
+// need"). Same root cause as the HHH-followup /i-flag false-positive risk.
+// Pattern: character-class the LITERAL words ([Bb]orrower, [Cc]lient, etc.)
+// to handle case variance without /i; keep the capture group strict.
+const BORROWER_BODY_PATTERNS = [
+  // "Borrower:" / "*Borrower:*" / "**Borrower:**" / "*Borrower*:" — line-anchored,
+  // handles asterisks before/between/after Borrower:
+  new RegExp(`(?:^|\\n)\\s*\\*{0,2}Borrower\\*{0,2}:\\*{0,2}\\s*${_S15_NAME_CAPTURE}`, 'm'),
+  // "Borrower Name:" label — line-anchored, char-classed
+  new RegExp(`(?:^|\\n)\\s*\\*{0,2}[Bb]orrower [Nn]ame\\*{0,2}:\\*{0,2}\\s*${_S15_NAME_CAPTURE}`, 'm'),
+  // "borrower is <Name>" mid-sentence — char-classed, no /i
+  new RegExp(`\\b[Bb]orrower is ${_S15_NAME_CAPTURE}\\b`),
+  // "on behalf of (my )?client <Name>"
+  new RegExp(`\\b[Oo]n [Bb]ehalf [Oo]f (?:[Mm]y )?[Cc]lient ${_S15_NAME_CAPTURE}\\b`),
+  // "for (my )?client <Name>"
+  new RegExp(`\\b[Ff]or (?:[Mm]y )?[Cc]lient ${_S15_NAME_CAPTURE}\\b`),
+];
+
+// Patterns extracting borrower name from a document's extracted text.
+// Matches structured labels common across loan apps, credit bureaus,
+// and appraisal reports. Same /i-flag avoidance as the body patterns above.
+const BORROWER_DOC_PATTERNS = [
+  // "Full Legal Name: <Name>" — most common in loan applications
+  new RegExp(`(?:^|\\n)\\s*[Ff]ull [Ll]egal [Nn]ame:\\s*${_S15_NAME_CAPTURE}`, 'm'),
+  // "Applicant: <Name>" — common in credit bureau / appraisal reports
+  new RegExp(`(?:^|\\n)\\s*[Aa]pplicant:\\s*${_S15_NAME_CAPTURE}`, 'm'),
+  // "Borrower: <Name>" — alternate explicit label
+  new RegExp(`(?:^|\\n)\\s*[Bb]orrower:\\s*${_S15_NAME_CAPTURE}`, 'm'),
+  // "Primary Borrower" then "Full Legal Name:" on a subsequent line (common loan-app shape)
+  new RegExp(`[Pp]rimary [Bb]orrower\\s*\\n\\s*[Ff]ull [Ll]egal [Nn]ame:\\s*${_S15_NAME_CAPTURE}`),
+];
+
+const extractBorrowerFromEmailBody = (emailBody) => {
+  if (!emailBody || typeof emailBody !== 'string') return null;
+  for (const re of BORROWER_BODY_PATTERNS) {
+    const m = emailBody.match(re);
+    if (m && m[1]) return m[1].trim();
+  }
+  return null;
+};
+
+const extractBorrowerFromDocText = (docText) => {
+  if (!docText || typeof docText !== 'string') return null;
+  for (const re of BORROWER_DOC_PATTERNS) {
+    const m = docText.match(re);
+    if (m && m[1]) return m[1].trim();
+  }
+  return null;
+};
+
+// Tokenize a name for comparison — lowercase, drop initials/periods, drop
+// single-letter tokens. "Anna M. Bergstrom" → ["anna", "bergstrom"].
+const tokenizeNameForCompare = (name) => (name || '').trim().split(/\s+/)
+  .map(t => t.toLowerCase().replace(/[.,]+$/, ''))
+  .filter(t => t.length > 1);
+
+// Returns true if names plausibly refer to the same person. Mirrors the
+// line 236 IDENTITY CLASH DETECTION RULE exclusion criteria — typo /
+// missing middle name / initial-vs-full-name = same person. Conservative
+// on single-token comparisons (treats as same if first names match) to
+// avoid false-positive clashes on partial-name inputs.
+const sameName = (a, b) => {
+  if (!a || !b) return true; // can't compare → no clash signal
+  const ta = tokenizeNameForCompare(a);
+  const tb = tokenizeNameForCompare(b);
+  if (ta.length === 0 || tb.length === 0) return true;
+  if (ta.length === 1 || tb.length === 1) return ta[0] === tb[0];
+  return ta[0] === tb[0] && ta[ta.length - 1] === tb[tb.length - 1];
+};
+
+// Returns true ONLY when both names are present AND they refer to different
+// people per the sameName check. Bias toward FALSE — false-negative degrades
+// to the existing Claude path (Option C guards), false-positive forces an
+// unnecessary clarification email which is a worse UX.
+const isIdentityClash = (emailName, docName) =>
+  Boolean(emailName) && Boolean(docName) && !sameName(emailName, docName);
+
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
   processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false) => {
     try {
+      // ─── S15-E: JS-side identity clash pre-detection (Anna Bergstrom 2026-05-18) ───
+      // Detect deterministically BEFORE the Claude call. If detected, route to
+      // generateIdentityClashMinimalAsk (zero-accumulation prompt). Build the
+      // dealSummary JS-side (line 236 BORROWER_NAME DISPOSITION applied here as
+      // a hard JS assignment, not a probabilistic Claude emission). If JS-side
+      // misses the clash (extraction regex didn't fire), execution falls
+      // through to the existing Claude path which still carries the Option C
+      // guards (STEP 0 + line 113 block + conflict-site counter-instructions
+      // + line 236 disposition rule) as the safety-net layer.
+      // 95% non-clash case: unchanged from prior behavior — JS detection
+      // returns no match, fall-through, identical Claude invocation.
+      const _s15BodyName = extractBorrowerFromEmailBody(emailBody);
+      if (_s15BodyName) {
+        for (const sd of (savedDocs || [])) {
+          const _s15DocName = extractBorrowerFromDocText(sd?.extracted_data?.text || '');
+          if (_s15DocName && isIdentityClash(_s15BodyName, _s15DocName)) {
+            console.log(`S15-E: identity clash detected JS-side — emailBody="${_s15BodyName}", doc="${_s15DocName}" (file: ${sd.file_name}). Routing to generateIdentityClashMinimalAsk; bypassing the main INITIAL_EMAIL_PROMPT path.`);
+            const welcomeEmail = await module.exports.generateIdentityClashMinimalAsk(emailBody, _s15BodyName, _s15DocName, senderName);
+            // Build minimal dealSummary JS-side. borrower_name = email body's
+            // name (line 236 disposition rule, applied deterministically).
+            // misattached_documents enumerates every saved doc whose extracted
+            // borrower name clashes with the email body's name (mirrors JJJJ).
+            // Other fields intentionally undefined — they get populated on
+            // subsequent turns via generateBrokerResponse after the clash
+            // resolves, same as the existing identity_clash flow.
+            const _s15Misattached = (savedDocs || [])
+              .filter(d => {
+                const dn = extractBorrowerFromDocText(d?.extracted_data?.text || '');
+                return dn && isIdentityClash(_s15BodyName, dn);
+              })
+              .map(d => d.file_name);
+            const dealSummary = {
+              sender_type: 'broker',
+              sender_name: senderName,
+              broker_name: senderName,
+              borrower_name: _s15BodyName,
+              identity_clash: true,
+              misattached_documents: _s15Misattached,
+              key_risks_or_notes: `Email body says "${_s15BodyName}" but attached documents are for "${_s15DocName}" — needs clarification before doc requests.`,
+              summary: `Identity clash detected: broker (${senderName}) submitted documents for ${_s15DocName} but stated the borrower as ${_s15BodyName}. File held pending clarification.`,
+            };
+            return { welcomeEmail, dealSummary };
+          }
+        }
+      }
+      // No JS-side clash → existing Claude flow unchanged (byte-identical to prior behavior).
+
       const content = await buildContentBlocks(attachments, savedDocs);
 
       const attachmentNames = attachments.map(a => a.Name).join(', ');
@@ -339,8 +506,8 @@ module.exports = {
         : '\n\nNo attachments were included with this email.';
 
       const appFormInstructions = hasOwnApplication
-        ? 'LOAN APPLICATION FORM:\n- The broker has ALREADY submitted their own loan application form. Do NOT ask them to fill out ours. Do NOT mention or reference our blank Loan Application Form in the email — it was NOT attached. Acknowledge that you received their application.'
-        : 'LOAN APPLICATION FORM:\n- The Loan Application Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our Loan Application Form for the borrower to fill out"). Ask the broker to have the borrower complete and return it. If they already have their own application form filled out, that is acceptable too — they can send theirs instead of using ours.';
+        ? 'LOAN APPLICATION FORM:\n- The broker has ALREADY submitted their own loan application form. Do NOT ask them to fill out ours. Do NOT mention or reference our blank Loan Application Form in the email — it was NOT attached. Acknowledge that you received their application. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on the attached loan application (a different person, e.g. "Anna Bergstrom" in the email vs "Grace Paulson" on the application), do NOT acknowledge their application as received — the docs may belong to a different borrower\'s file. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only, NOT a normal welcome with acknowledgment.'
+        : 'LOAN APPLICATION FORM:\n- The Loan Application Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our Loan Application Form for the borrower to fill out"). Ask the broker to have the borrower complete and return it. If they already have their own application form filled out, that is acceptable too — they can send theirs instead of using ours. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on any attached doc (a different person), do NOT mention or attach the Loan Application Form template, do NOT ask the borrower to fill it out — the file isn\'t in normal intake. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only.';
 
       // Group S+W: parallel PNW handling. Pre-fix, the PNW form was always
       // attached (no hasOwnPnw check) AND the prompt didn't require Vienna to
@@ -348,8 +515,8 @@ module.exports = {
       // Post-fix: detect own-PNW via webhook, conditional attachment, conditional
       // prompt instruction with mandatory mention + own-PNW acceptance.
       const pnwFormInstructions = hasOwnPnw
-        ? 'PNW STATEMENT FORM:\n- The broker has ALREADY submitted their own PNW (Personal Net Worth) statement. Do NOT ask them to fill out ours. Do NOT mention or reference our blank PNW Statement Form in the email — it was NOT attached. Acknowledge that you received their PNW.'
-        : 'PNW STATEMENT FORM:\n- The PNW (Personal Net Worth) Statement Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our PNW Statement Form for the borrower to complete"). Ask the broker to have the borrower fill it out and return it. If they already have their own PNW or net worth statement filled out, that is acceptable too — they can send theirs instead of using ours.';
+        ? 'PNW STATEMENT FORM:\n- The broker has ALREADY submitted their own PNW (Personal Net Worth) statement. Do NOT ask them to fill out ours. Do NOT mention or reference our blank PNW Statement Form in the email — it was NOT attached. Acknowledge that you received their PNW. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on any attached doc (a different person), do NOT acknowledge their PNW as received — the docs may belong to a different borrower\'s file. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only, NOT a normal welcome with acknowledgment.'
+        : 'PNW STATEMENT FORM:\n- The PNW (Personal Net Worth) Statement Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our PNW Statement Form for the borrower to complete"). Ask the broker to have the borrower fill it out and return it. If they already have their own PNW or net worth statement filled out, that is acceptable too — they can send theirs instead of using ours. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on any attached doc (a different person), do NOT mention or attach the PNW Statement Form template, do NOT ask the borrower to fill it out — the file isn\'t in normal intake. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only.';
 
       // F2 — Both-Franco collision branch. When the sender's first name from the
       // From-header matches the admin's first name (Franco), the From-header alone
@@ -1795,6 +1962,61 @@ BROKER'S REPLY:
   // Fast-path regex catches unambiguous "X is correct" patterns; everything else
   // flows to Claude. confirmedBorrowerName falls back to null if extraction is
   // unreliable per Q2 — webhook keeps the originally-detected name in that case.
+  // ════════════════════════════════════════════════════════════════
+  // S15-E: generateIdentityClashMinimalAsk — dedicated minimal-ask function
+  // ════════════════════════════════════════════════════════════════
+  // Routed-to by processInitialEmail when JS-side detection (extractBorrower*
+  // + isIdentityClash) fires. Prompt is INTENTIONALLY minimal — ZERO welcome
+  // email, doc list, form acknowledgment, or "TWO tasks" accumulation surface.
+  // Empirical reason: three prompt-only attempts (Phase 2 line-113-only,
+  // Option C three-layer) all leaked 5/5 against the same production-shape
+  // fixture because Claude's accumulation context for "welcome email"
+  // semantics can't be cleanly suppressed by text overrides in the same
+  // prompt. Architectural fix matching the existing parse*-function pattern
+  // — separate function = separate accumulation context = no leak surface.
+  generateIdentityClashMinimalAsk: async (emailBody, bodyName, docName, brokerSenderName) => {
+    try {
+      const firstName = (brokerSenderName || '').split(/\s+/)[0] || brokerSenderName;
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 256,
+        messages: [{
+          role: 'user',
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link. Write a single short clarification email to a mortgage broker.
+
+CONTEXT — an identity clash has been detected in the broker's submission:
+- The broker's email body names the borrower as: ${bodyName}
+- BUT the attached documents are for a different person: ${docName}
+- The broker who sent this email is ${brokerSenderName}. Greet them by first name.
+
+YOUR ENTIRE TASK — write ONLY the clarification email, nothing else:
+- Greet ${firstName} by first name.
+- Cite BOTH conflicting names. Use this exact pattern (substitute the names): "I noticed your email mentions ${bodyName} but the attached documents are for ${docName}. Could you confirm which is the correct borrower for this application?"
+- Sign off as Vienna / Private Mortgage Link.
+
+That is the ENTIRE email. Three short paragraphs at most: greeting, clarification, signoff.
+
+DO NOT include any of the following:
+- A document list of any kind (no <ul>, no bulleted asks)
+- The words "exit strategy", "payout statement", "appraisal", "proof of income", "credit bureau", "government-issued ID", "property tax assessment", "NOA", "T4", "AML", "PEP" as items being requested
+- Any "I received the [doc]", "I've got the application", "thanks for sending those through", or document receipt acknowledgment
+- Any mention of the Loan Application Form or PNW Statement Form templates
+- Any "to get the file moving", "we'll need", "could you send over", or doc-request framing
+- Filler closers like "looking forward to hearing from you" beyond the signoff
+
+Return only the HTML email body. Use <p> tags around each paragraph. No subject line, no <html>/<body> wrappers.
+
+BROKER'S ORIGINAL EMAIL BODY (context only — do not reference its contents beyond the two names):
+${emailBody}`,
+        }],
+      });
+      return response.content[0].text.trim();
+    } catch (error) {
+      console.error('Claude identity clash minimal-ask error:', error.message);
+      throw error;
+    }
+  },
+
   parseIdentityClarification: async (replyText, dealSummary = {}) => {
     const stripped = module.exports.stripQuotedText(replyText);
     const text = (stripped || replyText || '').trim();
@@ -2328,4 +2550,15 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // for parseIdentityClarification. See the const declaration above
   // module.exports for the rationale on why this is hoisted to module scope.
   IDENTITY_FAST_RESOLVE_PATTERNS,
+
+  // Exposed for S15-E test verification: the JS-side identity clash detection
+  // helpers (extraction + comparison). Deterministic truth tables in
+  // test-trigger.js (GROUP S15-E-HELPERS) lock these behaviorally — they are
+  // net-new code on the 95% common path whose failure mode (spurious clash
+  // on a clean deal) is worse than the bug they fix, so they need
+  // deterministic regression coverage.
+  extractBorrowerFromEmailBody,
+  extractBorrowerFromDocText,
+  sameName,
+  isIdentityClash,
 };

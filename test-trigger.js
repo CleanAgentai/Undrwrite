@@ -1328,6 +1328,179 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`Group HHH fast-path negatives: ${identityNegPassed}/${identityFastNegatives.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP HHH-RESOLUTION-PATH — touch-region → re-verify-region for the S15
+  // borrower_name disposition addition at line 236 of ai.js. The fix changes
+  // dealSummary.borrower_name to the EMAIL body's name (Anna) when
+  // identity_clash=true. That value flows into parseIdentityClarification's
+  // Claude fallback prompt at ai.js:1838 ("Body name: ${dealSummary?.borrower_name}"),
+  // which is used for resolution semantics. This block proves the resolution
+  // path still works correctly with the new disposition value flowing
+  // through. Same discipline as Commit-1 D1/D2 baselines and S14 Site B.
+  //
+  // Three deterministic fast-path cases (no Claude — no probabilistic flake):
+  //   - Anna confirm: broker confirms the email-body name. Fast-path pattern 1
+  //     matches "borrower is Anna Bergstrom" → resolved, captures "Anna Bergstrom".
+  //   - Grace flip: broker corrects to the doc name. Fast-path pattern 1
+  //     matches "borrower is Grace Paulson" → resolved, captures "Grace Paulson".
+  //     This is the load-bearing case for the disposition change: even though
+  //     borrower_name flowed in as "Anna" (S15 disposition), broker's confirm
+  //     of "Grace" must still resolve cleanly with confirmedBorrowerName=Grace
+  //     so webhook can update borrower_name to the broker-confirmed value.
+  //   - Anna-name-is variant: broker uses "Borrower name is Anna Bergstrom"
+  //     (HHH-followup sentence-initial coverage) → resolved, captures Anna.
+  console.log('\n========== GROUP HHH-RESOLUTION-PATH — broker-confirms with S15 disposition flowing through ==========');
+  const hhhResExistingSummary = {
+    borrower_name: 'Anna Bergstrom',
+    identity_clash: true,
+    broker_name: 'Oliver Reed',
+  };
+  const hhhResCases = [
+    {
+      label: 'Anna confirm (email-body name)',
+      reply: "borrower is Anna Bergstrom — apologies, Grace's docs were attached by mistake. I'll resend Anna's docs.",
+      expectedDisposition: 'resolved',
+      expectedName: 'Anna Bergstrom',
+    },
+    {
+      label: 'Grace flip (broker corrects to doc name — load-bearing for disposition change)',
+      reply: 'actually the borrower is Grace Paulson, my intro email referenced the wrong file.',
+      expectedDisposition: 'resolved',
+      expectedName: 'Grace Paulson',
+    },
+    {
+      label: 'Anna-name-is variant (HHH-followup sentence-initial coverage)',
+      reply: 'Borrower name is Anna Bergstrom.',
+      expectedDisposition: 'resolved',
+      expectedName: 'Anna Bergstrom',
+    },
+  ];
+  let hhhResPassed = 0;
+  for (const tc of hhhResCases) {
+    const r = await aiService.parseIdentityClarification(tc.reply, hhhResExistingSummary);
+    if (r.disposition === tc.expectedDisposition && r.confirmedBorrowerName === tc.expectedName) {
+      console.log(`  PASS: ${tc.label} → disposition='${r.disposition}', confirmedBorrowerName='${r.confirmedBorrowerName}'`);
+      hhhResPassed++;
+    } else {
+      throw new Error(`FAIL [Group HHH-RESOLUTION-PATH ${tc.label}]: expected disposition='${tc.expectedDisposition}' name='${tc.expectedName}', got disposition='${r.disposition}' name='${JSON.stringify(r.confirmedBorrowerName)}'. The S15 borrower_name=Anna disposition flowing into parseIdentityClarification's existingSummary must not perturb resolution semantics — broker's confirmation determines the final borrower_name (via webhook.js:1493-1496 update path), and parseIdentityClarification must correctly extract the confirmed name regardless of what borrower_name was set to at identity_clash time.`);
+    }
+  }
+  console.log(`Group HHH-RESOLUTION-PATH: ${hhhResPassed}/${hhhResCases.length} passed (touch-region → re-verify guarantee)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP S15-E-HELPERS — deterministic truth tables for JS-side clash detection
+  // ════════════════════════════════════════════════════════════════
+  // Three prompt-only attempts to fix the S15 Anna/Grace production bug all
+  // leaked 5/5 against the same fixture — Claude's accumulation context for
+  // "welcome email" semantics can't be cleanly suppressed by text overrides.
+  // Architectural fix (S15-E): detect the clash JS-side BEFORE the Claude
+  // call, route to generateIdentityClashMinimalAsk (minimal prompt, zero
+  // welcome-email accumulation surface). This block locks the three JS
+  // helpers deterministically — they're net-new code on the 95% common
+  // path whose failure mode (spurious clash on a clean deal) is worse than
+  // the bug being fixed, so they need explicit regression coverage.
+  // sameName / isIdentityClash mirror the line 236 IDENTITY CLASH DETECTION
+  // RULE exclusion criteria (typo / missing middle name / initial-vs-full
+  // = same person). Same forward-note as the prior three-site count: clash
+  // criteria are now stated in FOUR places — STEP 0, line 113 trigger,
+  // line 236 detection rule, and these JS helpers. Distinct roles, can't
+  // be byte-identical. Behaviorally covered by this truth table + the
+  // HHH-MULTI-DOC live + HHH single-doc + HHH fast-path regex tests.
+  console.log('\n========== GROUP S15-E-HELPERS — deterministic truth tables for JS clash detection ==========');
+
+  // sameName / isIdentityClash truth table
+  const sameNameCases = [
+    // Same person (no clash)
+    ['Anna Bergstrom', 'Anna Bergstrom', true],
+    ['Anna Bergstrom', 'Anna M. Bergstrom', true],   // missing middle name
+    ['Anna Bergstrom', 'Anna M Bergstrom', true],    // missing middle name, no period
+    ['Anna Bergstrom', 'anna bergstrom', true],      // case-insensitive
+    ['anna bergstrom', 'Anna Bergstrom', true],      // case-insensitive symmetric
+    ['Anna', 'Anna Bergstrom', true],                // single-token compare (first-name match)
+    ['Anna Bergstrom', 'Anna', true],                // single-token compare reverse
+    ['Sandra Lynn Fletcher', 'Sandra Lynn Fletcher', true],  // 3-token exact
+    ['Sandra Fletcher', 'Sandra Lynn Fletcher', true],       // 2-vs-3 tokens, first+last match
+    ['Anna B.', 'Anna Bergstrom', true],             // initial filtered → single-token compare
+    // Different people (clash)
+    ['Anna Bergstrom', 'Grace Paulson', false],
+    ['Sandra Lynn Fletcher', 'Sandra Williams', false],      // same first, different last
+    ['Anna Bergstrom', 'Grace Bergstrom', false],            // same last, different first
+    // No source (treat as same — no clash signal)
+    [null, 'Grace Paulson', true],
+    ['Anna Bergstrom', null, true],
+    ['', 'Grace Paulson', true],
+    ['Anna Bergstrom', '', true],
+  ];
+  let sameNamePassed = 0;
+  for (const [a, b, expectedSame] of sameNameCases) {
+    const gotSame = aiService.sameName(a, b);
+    const expectedClash = !expectedSame && Boolean(a) && Boolean(b);  // isIdentityClash also requires both present
+    const gotClash = aiService.isIdentityClash(a, b);
+    if (gotSame === expectedSame && gotClash === expectedClash) {
+      sameNamePassed++;
+    } else {
+      throw new Error(`FAIL [S15-E sameName/isIdentityClash]: sameName(${JSON.stringify(a)}, ${JSON.stringify(b)}) expected ${expectedSame}, got ${gotSame}; isIdentityClash expected ${expectedClash}, got ${gotClash}`);
+    }
+  }
+  console.log(`  PASS [S15-E sameName/isIdentityClash]: ${sameNamePassed}/${sameNameCases.length} cases`);
+
+  // extractBorrowerFromEmailBody truth table (POSITIVE + false-positive-bait NEGATIVE)
+  const bodyExtractCases = [
+    // POSITIVE — explicit borrower labeling
+    ['Borrower: Anna Bergstrom\nProperty: 1801', 'Anna Bergstrom'],
+    ['*Borrower:* Sandra Lynn Fletcher\n*Property:* 412 Windermere', 'Sandra Lynn Fletcher'],
+    ['**Borrower:** Anna Bergstrom\nProperty: 1801', 'Anna Bergstrom'],
+    ['Borrower Name: Anna Bergstrom\n', 'Anna Bergstrom'],
+    ['The borrower is Anna Bergstrom, looking at $90,000', 'Anna Bergstrom'],
+    ['Submitting on behalf of my client Anna Bergstrom for a $90,000', 'Anna Bergstrom'],
+    ['for my client Anna Bergstrom we need', 'Anna Bergstrom'],
+    // NEGATIVE — name-noise that must NOT extract (false-positive bait)
+    ['Hi Franco, please review.\n\nThanks,\nJason Mercer\nCapital Bridge Mortgage Group', null],
+    ['Existing mortgage with TD Bank, balance ~$341,000', null],
+    ['Property: 1801 Varsity Estates Dr NW, Calgary, AB', null],
+    ['Hi Franco,\n\nNew submission. Property at $620K, LTV ~70%.\n\nThanks,\nOliver Reed', null],
+    ['Hi Franco,\nNew first mortgage submission with Royal Bank of Canada as exit lender.', null],
+    ['Exit strategy: refinance with RBC at maturity. Property worth $620K.', null],
+    ['Hello,\nI work with Capital Bridge Mortgage. Please find attached.\nThanks,\nJason Mercer', null],
+  ];
+  let bodyExtractPassed = 0;
+  for (const [input, expected] of bodyExtractCases) {
+    const got = aiService.extractBorrowerFromEmailBody(input);
+    if (got === expected) {
+      bodyExtractPassed++;
+    } else {
+      throw new Error(`FAIL [S15-E extractBorrowerFromEmailBody]: input ${JSON.stringify(input).slice(0, 120)} expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`  PASS [S15-E extractBorrowerFromEmailBody]: ${bodyExtractPassed}/${bodyExtractCases.length} cases (POSITIVE + false-positive-bait)`);
+
+  // extractBorrowerFromDocText truth table (POSITIVE + false-positive-bait NEGATIVE)
+  const docExtractCases = [
+    // POSITIVE — common doc-label shapes
+    ['LOAN APPLICATION FORM\n\nPRIMARY BORROWER\nFull Legal Name: Grace Paulson\nDate of Birth: 1981-03-14', 'Grace Paulson'],
+    ['CREDIT BUREAU REPORT\n\nApplicant: Grace Paulson\nDate of Birth: 1981', 'Grace Paulson'],
+    ['PROPERTY APPRAISAL REPORT\n\nApplicant: Grace Paulson\nProperty: 1801', 'Grace Paulson'],
+    ['Borrower: Anna Bergstrom\nDate: May 17', 'Anna Bergstrom'],
+    ['Full Legal Name: Sandra Lynn Fletcher\nDate of Birth: 1980', 'Sandra Lynn Fletcher'],
+    // NEGATIVE — must NOT extract (false-positive bait)
+    ['Property Address: 1801 Varsity Estates Dr NW', null],
+    ['Signed: Grace Paulson', null],
+    ['Appraiser: Maria Chen, AACI', null],
+    ['Lender: Royal Bank of Canada', null],
+    ['CREDIT BUREAU REPORT\n\nReport Date: May 17, 2026\nReport Number: EQ-2026-051718', null],
+    ['Trade lines:\n- TD Visa opened 2014\n- RBC mortgage 2019', null],
+  ];
+  let docExtractPassed = 0;
+  for (const [input, expected] of docExtractCases) {
+    const got = aiService.extractBorrowerFromDocText(input);
+    if (got === expected) {
+      docExtractPassed++;
+    } else {
+      throw new Error(`FAIL [S15-E extractBorrowerFromDocText]: input ${JSON.stringify(input).slice(0, 120)} expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`  PASS [S15-E extractBorrowerFromDocText]: ${docExtractPassed}/${docExtractCases.length} cases (POSITIVE + false-positive-bait)`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
   // ════════════════════════════════════════════════════════════════
   // Production observed 9 reminder emails fired to one broker at the same 9 PM
@@ -11425,6 +11598,273 @@ Signed: Grace Paulson`;
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group HHH smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP HHH-MULTI-DOC — production-shape regression guard (S15 / Anna Bergstrom 2026-05-18)
+    // ════════════════════════════════════════════════════════════════
+    // The existing GROUP HHH live smoke above uses a TOO-EASY fixture
+    // (1 Grace doc + DIFFERENT property + hasOwnApplication=false). That
+    // shape doesn't trigger the competing-instructions failure mode the
+    // S15 production bug surfaced, so the harness was green while
+    // production broke. This block exercises the production shape:
+    //   - 3 docs (loan app, credit bureau, appraisal), all for Grace Paulson
+    //   - SAME property address as the email (only borrower name diverges)
+    //   - hasOwnApplication=true (broker submitted their own loan app form,
+    //     NOT Vienna's template)
+    // Pre-fix: TASK 1 (welcomeEmail) silently skips the IDENTITY CLASH
+    // minimal-ask block — the block's gate was on "identity_clash=true per
+    // TASK 2's rule" (a value that doesn't exist yet at TASK 1 render time)
+    // AND hasOwnApplication's "Acknowledge that you received their application"
+    // competing instruction wins under prompt-salience pressure. Result:
+    // welcome email asks for the full doc list, acknowledges receipt of
+    // wrong-borrower docs, requests docs "for Anna" — exactly the production
+    // failure mode Franco reported. Pre-fix observed leak rate: 5/5.
+    //
+    // Post-fix:
+    //   - IDENTITY CLASH block becomes TASK-1 self-sufficient (detects the
+    //     name clash during email generation, doesn't defer to TASK 2)
+    //   - MUST-OVERRIDE language explicitly overrides hasOwnApplication,
+    //     PNW form, WHAT TO ASK FOR, DATA DISCREPANCY worked examples,
+    //     high-LTV — the minimal-ask is the ENTIRE email
+    //   - NEGATIVE LIST enumerates the production-bug leak shapes exhaustively
+    //   - borrower_name disposition rule at line 236: when identity_clash=true,
+    //     set borrower_name to the email body's name (Anna), NOT the doc name
+    //
+    // Threshold: ≤1 leak ships, ≥2 escalates. 5x because rendering is
+    // probabilistic. Gated under RUN_HHH_MULTIDOC_D=1 (API spend control,
+    // same pattern as PPPP/RRRR/QQQQ/S14 5x).
+    if (process.env.RUN_HHH_MULTIDOC_D === '1') {
+      console.log('\n========== GROUP HHH-MULTI-DOC — production-shape (3 docs, hasOwnApplication=true) 5x ==========');
+      const hhhMultiBody = `Hi Franco,
+
+New second mortgage submission for your review. The borrower is Anna Bergstrom, looking at $90,000 against her property in Calgary.
+
+Details:
+- Property: 1801 Varsity Estates Dr NW, Calgary, AB
+- Property Value: ~$620,000
+- Existing first mortgage (TD): ~$341,000
+- Loan request: $90,000
+- LTV: ~70%
+
+Attaching her loan app, credit bureau pull, and the recent appraisal. Let me know what else you need!
+
+Thanks,
+Oliver Reed
+Capital Bridge Mortgage Group`;
+      const hhhMultiStubPdf = fs_qqq.readFileSync(path_qqq.join(__dirname, 'forms/Loan Application Form (1).pdf')).toString('base64');
+      const hhhMultiAttachments = [
+        { Name: 'LoanApp.pdf', ContentType: 'application/pdf', Content: hhhMultiStubPdf, ContentLength: hhhMultiStubPdf.length },
+        { Name: 'CreditBureau.pdf', ContentType: 'application/pdf', Content: hhhMultiStubPdf, ContentLength: hhhMultiStubPdf.length },
+        { Name: 'Appraisal.pdf', ContentType: 'application/pdf', Content: hhhMultiStubPdf, ContentLength: hhhMultiStubPdf.length },
+      ];
+      const hhhMultiSavedDocs = [
+        { file_name: 'LoanApp.pdf', classification: 'loan_application',
+          extracted_data: { text: 'LOAN APPLICATION FORM\n\nPRIMARY BORROWER\nFull Legal Name: Grace Paulson\nDate of Birth: 1981-03-14\nProperty Address: 1801 Varsity Estates Dr NW, Calgary, AB\n\nPROPERTY DETAILS\nProperty Address: 1801 Varsity Estates Dr NW, Calgary, AB\nCurrent Property Value: $620,000\nExisting Mortgage: $341,000 (TD Bank)\n\nLOAN DETAILS\nLoan Amount Requested: $90,000\n\nSigned: Grace Paulson' } },
+        { file_name: 'CreditBureau.pdf', classification: 'credit_report',
+          extracted_data: { text: 'CREDIT BUREAU REPORT — CONSUMER DISCLOSURE\n\nApplicant: Grace Paulson\nDate of Birth: 1981-03-14\nSIN: ***-***-789\nReport Date: May 17, 2026\n\nCREDIT SCORES:\n  Equifax: 712\n  TransUnion: 705\nClean credit history with no derogatory items.\n\nTRADE LINES (3 ACTIVE):\n- TD Visa: opened 2015, limit $10,000, current balance $2,134, payment history 120/120 on time\n- TD mortgage: opened 2019, original $355,000, current balance $341,000, payment history 84/84 on time\n- Capital One Mastercard: opened 2017, limit $8,000, current balance $987\n\nINQUIRIES: 1 — soft pull by TD on 2025-09-12\nPUBLIC RECORDS: None\nCOLLECTIONS: None' } },
+        { file_name: 'Appraisal.pdf', classification: 'appraisal',
+          extracted_data: { text: 'PROPERTY APPRAISAL REPORT\n\nApplicant: Grace Paulson\nProperty Address: 1801 Varsity Estates Dr NW, Calgary, AB\nAppraiser: Maria Chen, AACI\nAppraisal Date: May 14, 2026\n\nAPPRAISED VALUE: $620,000\n\nApproach Used: Direct Comparison (3 comparable sales within 1km). Subject property condition: above average.\n\nLand value: $280,000\nImprovement value: $340,000\n\nReport prepared per CUSPAP standards.' } },
+      ];
+
+      let hhhMultiLeaks = 0;
+      for (let run = 1; run <= 5; run++) {
+        try {
+          const r = await realAi.processInitialEmail(
+            'Oliver Reed', hhhMultiBody, hhhMultiAttachments, hhhMultiSavedDocs,
+            true, false, false  // hasOwnApplication=true, hasOwnPnw=false, nameCollidesWithAdmin=false
+          );
+          const welcome = r.welcomeEmail || '';
+          const summary = r.dealSummary || {};
+
+          // Same assertions as the existing HHH single-doc smoke, plus the
+          // S15 borrower_name disposition check.
+          let runLeak = null;
+          if (summary.identity_clash !== true) {
+            runLeak = `identity_clash=${JSON.stringify(summary.identity_clash)}, expected true`;
+          } else if (/<ul>/i.test(welcome)) {
+            runLeak = '<ul> doc list leaked into welcome';
+          } else if (/\b(?:exit\s+strategy|payout\s+statement|proof\s+of\s+income|credit\s+bureau|property\s+tax\s+assessment|government[\s-]?issued\s+ID)\b/i.test(welcome)) {
+            const m = welcome.match(/\b(?:exit\s+strategy|payout\s+statement|proof\s+of\s+income|credit\s+bureau|property\s+tax\s+assessment|government[\s-]?issued\s+ID)\b/i);
+            runLeak = `doc-list keyword leaked: ${JSON.stringify(m && m[0])}`;
+          } else if (/(?:I'?ve|I\s+have)\s+received\s+(?:the\s+)?(?:loan\s+app|application|credit\s+bureau|appraisal|docs?)|thanks\s+for\s+sending\s+(?:those\s+)?(?:through|over)/i.test(welcome)) {
+            runLeak = 'receipt acknowledgment leaked';
+          } else if (!/(?:could\s+you|can\s+you)\s+(?:please\s+)?confirm/i.test(welcome) && !/\bwhich\s+(?:is\s+)?(?:the\s+)?correct/i.test(welcome)) {
+            runLeak = "clarification ask missing ('could you confirm' / 'which is the correct')";
+          } else if (!/\bAnna\s+Bergstrom\b/.test(welcome)) {
+            runLeak = 'email-body name "Anna Bergstrom" not cited in welcome';
+          } else if (!/\bGrace\s+Paulson\b/.test(welcome)) {
+            runLeak = 'doc name "Grace Paulson" not cited in welcome';
+          } else if (!/\bAnna\s+Bergstrom\b/i.test(summary.borrower_name || '')) {
+            runLeak = `borrower_name disposition wrong — got ${JSON.stringify(summary.borrower_name)}, expected "Anna Bergstrom" (email body name per S15 disposition at ai.js:236)`;
+          }
+
+          if (runLeak) {
+            hhhMultiLeaks++;
+            console.log(`  Run ${run}: LEAK — ${runLeak}\n    Welcome first 500: ${welcome.slice(0, 500).replace(/\n/g, ' ')}\n    borrower_name=${JSON.stringify(summary.borrower_name)}, identity_clash=${JSON.stringify(summary.identity_clash)}`);
+          } else {
+            console.log(`  Run ${run}: PASS — minimal-ask, no doc-list, no receipt-ack, both names cited, borrower_name=Anna`);
+          }
+        } catch (e) {
+          hhhMultiLeaks++;
+          console.log(`  Run ${run}: ERROR — ${e.message}`);
+        }
+      }
+      console.log(`Group HHH-MULTI-DOC: ${5 - hhhMultiLeaks}/5 passed, ${hhhMultiLeaks}/5 leaked (threshold: ≤1)`);
+      if (hhhMultiLeaks > 1) {
+        throw new Error(`FAIL [Group HHH-MULTI-DOC escalation]: ${hhhMultiLeaks}/5 leaked. The S15-E JS-side detection + minimal-ask routing isn't holding under production-shape (3 docs + hasOwnApplication=true). Either JS-side detection isn't firing (extraction helper false-negative) OR generateIdentityClashMinimalAsk's prompt still produces a non-minimal welcome. Surface diff before commit.`);
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // GROUP S15-E-RESOLUTION — E-path resolution end-to-end (MANDATORY ADD 1)
+      // ════════════════════════════════════════════════════════════════
+      // Verifies that the MINIMAL dealSummary E produces (only sender/broker/
+      // borrower/identity_clash/misattached/key_risks/summary set — no
+      // property_value, loan_amount_requested, ltv_percent, loan_type, etc.)
+      // flows through the resolution path correctly:
+      //   1. parseIdentityClarification on broker's confirmation → resolves
+      //   2. generateBrokerResponse on resolved-state minimal summary doesn't
+      //      crash or misbehave on undefined fields
+      // The HHH-RESOLUTION-PATH test above uses a richer summary; this test
+      // specifically exercises E's minimal field set.
+      console.log('\n========== GROUP S15-E-RESOLUTION — resolution from E-built minimal dealSummary ==========');
+
+      // The EXACT shape processInitialEmail returns when JS-side clash fires
+      // (mirrors ai.js processInitialEmail entry branch). NO property_value,
+      // loan_amount, ltv_percent, loan_type, etc. — these are unset.
+      const ePathMinimalSummary = {
+        sender_type: 'broker',
+        sender_name: 'Oliver Reed',
+        broker_name: 'Oliver Reed',
+        borrower_name: 'Anna Bergstrom',
+        identity_clash: true,
+        misattached_documents: ['LoanApp.pdf', 'CreditBureau.pdf', 'Appraisal.pdf'],
+        key_risks_or_notes: 'Email body says "Anna Bergstrom" but attached documents are for "Grace Paulson" — needs clarification before doc requests.',
+        summary: 'Identity clash detected: broker (Oliver Reed) submitted documents for Grace Paulson but stated the borrower as Anna Bergstrom. File held pending clarification.',
+      };
+
+      // Part 1: parseIdentityClarification with the E minimal summary as
+      // existingSummary — deterministic fast-path cases, no Claude variance.
+      const ePathResCases = [
+        { label: 'Anna confirm (broker confirms email-body name)', reply: "borrower is Anna Bergstrom — apologies, Grace's docs were attached by mistake", expectDisp: 'resolved', expectName: 'Anna Bergstrom' },
+        { label: 'Grace flip (broker corrects to doc name)', reply: 'actually the borrower is Grace Paulson, my intro email referenced the wrong file', expectDisp: 'resolved', expectName: 'Grace Paulson' },
+      ];
+      for (const tc of ePathResCases) {
+        const r = await realAi.parseIdentityClarification(tc.reply, ePathMinimalSummary);
+        if (r.disposition !== tc.expectDisp || r.confirmedBorrowerName !== tc.expectName) {
+          throw new Error(`FAIL [Group S15-E-RESOLUTION parse ${tc.label}]: expected disposition='${tc.expectDisp}' name='${tc.expectName}', got disposition='${r.disposition}' name='${JSON.stringify(r.confirmedBorrowerName)}'. The E minimal dealSummary's borrower_name=Anna flowing into existingSummary must not perturb parseIdentityClarification resolution semantics.`);
+        }
+      }
+      console.log(`  PASS [Group S15-E-RESOLUTION parse]: ${ePathResCases.length}/${ePathResCases.length} resolution cases pass with E minimal summary`);
+
+      // Part 2 (load-bearing): generateBrokerResponse on the E minimal summary
+      // post-resolution. This is the consumer-doesn't-crash-on-missing-fields
+      // check. Construct the resolved-state summary (identity_clash=false,
+      // borrower_name confirmed) and conversation history with the resolution
+      // turn, then call generateBrokerResponse. Assert no throw and a non-empty
+      // response. Field-coverage: property_value/loan_amount/ltv/loan_type
+      // all undefined — generateBrokerResponse should handle gracefully.
+      try {
+        const ePathResolvedSummary = {
+          ...ePathMinimalSummary,
+          identity_clash: false,
+          misattached_documents: [],
+        };
+        const ePathResolvedConvo = [
+          { direction: 'inbound', subject: 'New Mortgage Submission — Anna Bergstrom', body: '[broker original submission with Anna body + Grace docs]', created_at: '2026-05-18T14:00:00Z' },
+          { direction: 'outbound', subject: 'Re: New Mortgage Submission — Anna Bergstrom', body: '<p>Hi Oliver! I noticed your email mentions Anna Bergstrom but the attached documents are for Grace Paulson. Could you confirm which is the correct borrower for this application?</p><p>Vienna<br>Private Mortgage Link</p>', created_at: '2026-05-18T14:15:00Z' },
+          { direction: 'inbound', subject: 'Re: New Mortgage Submission — Anna Bergstrom', body: 'borrower is Anna Bergstrom — apologies, sending her actual docs now', created_at: '2026-05-18T14:30:00Z' },
+        ];
+        const ePathResolvedResult = await realAi.generateBrokerResponse(
+          'borrower is Anna Bergstrom — apologies, sending her actual docs now',
+          [], [], ePathResolvedSummary, ePathResolvedConvo, [], 'active'
+        );
+        const ePathResolvedEmail = ePathResolvedResult?.responseEmail || '';
+        if (!ePathResolvedEmail || ePathResolvedEmail.length < 30) {
+          throw new Error(`FAIL [Group S15-E-RESOLUTION generateBrokerResponse]: empty/short responseEmail (length=${ePathResolvedEmail.length}). generateBrokerResponse failed to produce a reasonable reply on E's minimal summary (missing property_value/loan_amount/ltv_percent/loan_type/etc.).`);
+        }
+        console.log(`  PASS [Group S15-E-RESOLUTION generateBrokerResponse]: produced ${ePathResolvedEmail.length}-char reply on E minimal summary post-resolution (no crash on undefined fields)`);
+      } catch (e) {
+        if (e.message.startsWith('FAIL')) throw e;
+        console.warn(`  Group S15-E-RESOLUTION generateBrokerResponse skipped due to API error: ${e.message}`);
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // GROUP S15-E-NO-CLASH — strengthened no-clash regression (MANDATORY ADD 2 tail)
+      // ════════════════════════════════════════════════════════════════
+      // Confirms the JS-side detection does NOT route to minimal-ask on clean
+      // deals that contain name-noise tokens (broker signatures with full
+      // names, lender names like TD Bank / Royal Bank of Canada, property
+      // address tokens like Varsity Estates / Smith Street). Same fixture
+      // pattern as HHH-MULTI-DOC but with email body's borrower name MATCHING
+      // the doc borrower name — no clash. Tests 3x because the no-clash path
+      // is the 95% common case and a regression there is high blast radius.
+      console.log('\n========== GROUP S15-E-NO-CLASH — clean deals with name-noise must NOT route to minimal-ask 3x ==========');
+      const noClashBody = `Hi Franco,
+
+New second mortgage submission for your review. The borrower is Anna Bergstrom, looking at $90,000 against her property in Calgary.
+
+Details:
+- Property: 1801 Varsity Estates Dr NW, Calgary, AB
+- Property Value: ~$620,000
+- Existing first mortgage with TD Bank: ~$341,000
+- Loan request: $90,000
+- LTV: ~70%
+- Exit: refinance with Royal Bank of Canada at maturity
+
+Attaching her loan app, credit bureau pull, and the recent appraisal. Let me know what else you need!
+
+Thanks,
+Jason Mercer
+Capital Bridge Mortgage Group`;
+      // All Anna Bergstrom docs (no clash); name-noise tokens (TD Bank, RBC, Royal Bank, Varsity Estates, Jason Mercer signature) must not trigger anything.
+      const noClashSavedDocs = [
+        { file_name: 'LoanApp_Anna.pdf', classification: 'loan_application',
+          extracted_data: { text: 'LOAN APPLICATION FORM\n\nPRIMARY BORROWER\nFull Legal Name: Anna Bergstrom\nDate of Birth: 1980-07-22\nProperty Address: 1801 Varsity Estates Dr NW, Calgary, AB\n\nLOAN DETAILS\nLoan Amount Requested: $90,000\n\nSigned: Anna Bergstrom' } },
+        { file_name: 'CreditBureau_Anna.pdf', classification: 'credit_report',
+          extracted_data: { text: 'CREDIT BUREAU REPORT — CONSUMER DISCLOSURE\n\nApplicant: Anna Bergstrom\nDate of Birth: 1980-07-22\n\nCREDIT SCORES:\n  Equifax: 745\n  TransUnion: 738\n\nTRADE LINES: TD Visa $2,134/$10,000; TD mortgage $341,000/$355,000; Capital One $987/$8,000' } },
+        { file_name: 'Appraisal_Anna.pdf', classification: 'appraisal',
+          extracted_data: { text: 'PROPERTY APPRAISAL REPORT\n\nApplicant: Anna Bergstrom\nProperty Address: 1801 Varsity Estates Dr NW, Calgary, AB\nAppraiser: Maria Chen, AACI\n\nAPPRAISED VALUE: $620,000' } },
+      ];
+      const noClashAttachments = noClashSavedDocs.map(d => ({ Name: d.file_name, ContentType: 'application/pdf', Content: hhhMultiStubPdf, ContentLength: hhhMultiStubPdf.length }));
+
+      let noClashLeaks = 0;
+      for (let run = 1; run <= 3; run++) {
+        try {
+          const r = await realAi.processInitialEmail(
+            'Jason Mercer', noClashBody, noClashAttachments, noClashSavedDocs,
+            true, false, false  // hasOwnApplication=true
+          );
+          const welcome = r.welcomeEmail || '';
+          const summary = r.dealSummary || {};
+
+          // Expected: normal welcome path (NOT the minimal-ask). identity_clash=false,
+          // welcome has a doc-related ask or acknowledgment (normal flow). The
+          // E-route signature would be: identity_clash=true + welcome is a minimal
+          // clarification — both must be FALSE here.
+          let runLeak = null;
+          if (summary.identity_clash === true) {
+            runLeak = `S15-E false-positive: identity_clash=true on a clean Anna-only deal. JS-side extraction misfired. summary.borrower_name=${JSON.stringify(summary.borrower_name)}, misattached=${JSON.stringify(summary.misattached_documents)}`;
+          } else if (/I noticed your email mentions [A-Z]/.test(welcome) && /attached documents are for [A-Z]/.test(welcome)) {
+            runLeak = `welcome reads as a minimal-ask clarification on a no-clash deal — E routing fired falsely`;
+          }
+          if (runLeak) {
+            noClashLeaks++;
+            console.log(`  Run ${run}: LEAK — ${runLeak}\n    Welcome first 400: ${welcome.slice(0, 400).replace(/\n/g, ' ')}`);
+          } else {
+            console.log(`  Run ${run}: PASS — clean Anna deal handled by normal Claude path (identity_clash=${summary.identity_clash}, borrower_name=${JSON.stringify(summary.borrower_name)})`);
+          }
+        } catch (e) {
+          noClashLeaks++;
+          console.log(`  Run ${run}: ERROR — ${e.message}`);
+        }
+      }
+      console.log(`Group S15-E-NO-CLASH: ${3 - noClashLeaks}/3 passed, ${noClashLeaks}/3 leaked`);
+      if (noClashLeaks > 0) {
+        throw new Error(`FAIL [Group S15-E-NO-CLASH]: ${noClashLeaks}/3 leaked. S15-E JS-side detection is firing on a CLEAN deal (no actual clash). Either extractBorrowerFromEmailBody or extractBorrowerFromDocText is false-positive-ing on name-noise tokens (broker signature, lender names, address tokens), or sameName/isIdentityClash is incorrectly returning clash on matching names. Surface diff — this is the load-bearing 95%-common-path regression check.`);
+      }
+    } else {
+      console.log('\n---------- Group HHH-MULTI-DOC + S15-E-RESOLUTION + S15-E-NO-CLASH: SKIPPED (set RUN_HHH_MULTIDOC_D=1 to run) ----------');
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
