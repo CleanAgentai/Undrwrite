@@ -6314,16 +6314,15 @@ License #M15003421`,
   console.log('  PASS [Group QQQQ-hardening Site B worked example]: doc-vs-doc resolution-pending case present');
 
   // Concrete-naming structural guard: Lena Park 2026-05-18 must appear in
-  // exactly 4 distinct prompt locations (Site A line-269 preamble, Site A
-  // worked example, Site A TASK 2 schema flavor, Site B worked example).
-  // Same pattern as the Sandra Fletcher 2026-05-17 callout count (3) above —
-  // concrete production-case naming prevents the rule from drifting into
-  // generic abstractions over future edits.
-  const lenaCallouts = (aiSource.match(/Lena Park 2026-05-18/g) || []).length;
-  if (lenaCallouts !== 4) {
-    throw new Error(`FAIL [Group QQQQ-hardening Lena callout]: expected exactly 4 "Lena Park 2026-05-18" callouts (Site A line-269 preamble, Site A worked example, Site A TASK 2 flavor, Site B worked example), got ${lenaCallouts}. Concrete production-case naming is load-bearing for preventing rule drift.`);
-  }
-  console.log(`  PASS [Group QQQQ-hardening Lena callout]: Lena Park 2026-05-18 named in ${lenaCallouts} prompt locations (matches expected 4)`);
+  // distinct prompt locations across the rule family. The cross-commit
+  // invariant is enforced by GROUP S14 / Assertion 5 (line ~6635) which
+  // asserts a total === 8 across BOTH this commit's 4 callouts (Site A
+  // line-269 preamble, Site A worked example, Site A TASK 2 schema flavor,
+  // Site B worked example) AND the S14 commit's 4 callouts (Site A
+  // ATTRIBUTION RULE label + doc-vs-doc example label, Site B same pair).
+  // Keeping the count assertion in one place (S14's block, which knows
+  // about both contributions) avoids the cross-commit coupling that an
+  // independent === 4 assertion here would create.
 
   // ─── Source-string regression: computeWillReview clause ────────────
   console.log('\n---------- Group QQQQ / Source-string regression on computeWillReview ----------');
@@ -6578,6 +6577,317 @@ Apex Mortgage Solutions Lic. #MB774263`;
     }
   } else {
     console.log('\n---------- Group QQQQ / D1 + D2 + D3: SKIPPED (set RUN_QQQQ_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP S14 — broker-facing discrepancy attribution fix (Lena Park S14)
+  // ════════════════════════════════════════════════════════════════
+  // Production case (Lena Park 2026-05-18): broker submitted loan-app with
+  // credit scores 631/619 and credit bureau showing 748/752; broker's email
+  // mentioned NO credit scores. Vienna correctly DETECTED the discrepancy
+  // (QQQQ gate fired) but described it to the broker as "your email mentions
+  // credit scores of 631 and 619, but the credit bureau reports show 748 and
+  // 752" — misattributing 631/619 to an email that never mentioned them.
+  // Root cause: the discrepancy-DESCRIPTION rule at INITIAL_EMAIL_PROMPT line
+  // 185 + generateBrokerResponse line 645 framed the comparison as
+  // "email body vs attached document" with all 3 worked examples using
+  // "your email mentions" attribution. Claude generalized DETECTION beyond
+  // the literal rule (which is why QQQQ fired correctly), but followed the
+  // worked-example template for OUTPUT phrasing — same recurring failure
+  // mode as RRRR/JJJ-hardening: implicit-by-template attribution that holds
+  // until the case shape differs from the templates.
+  //
+  // Commit 1 (QQQQ-hardening 84927ca) shipped first to make the gate's
+  // own rule-text explicitly enumerate doc-vs-doc, eliminating the
+  // implicit-by-generalization fragility on the gate side. THIS commit
+  // (S14 broker-facing fix) addresses the description-side bug:
+  //   1. Axis broaden the discrepancy detection rule (Site A + Site B) to
+  //      explicitly enumerate "email-vs-doc, doc-vs-doc, prior-message-vs-doc"
+  //      (parity with QQQQ-hardening's axes).
+  //   2. Add an explicit ATTRIBUTION RULE bullet (canonical, byte-identical
+  //      at both sites): name the ACTUAL source, NEVER default to "your
+  //      email mentions X" when the figure came from a document.
+  //   3. Add a doc-vs-doc worked example (canonical, byte-identical at both
+  //      sites) — Lena Park shape — ADDED alongside the 3 existing
+  //      email-vs-doc examples. Additive, not replacing: the leak was the
+  //      ABSENCE of a doc-vs-doc template, not the presence of email-vs-doc
+  //      ones (which are still valid when email genuinely IS one side).
+  //   4. Site B restructured monolith → 9 bullets so the byte-identical
+  //      canonical block can sit cleanly inside the rule region. All
+  //      existing Site B rule text preserved verbatim (multi-discrepancy
+  //      enforcement, 3 worked examples, final imperative) — restructure
+  //      is bullet-split only, not content shift.
+  //
+  // Implementation note: CANONICAL_DISCREPANCY_BLOCK is 2 bullets
+  // (ATTRIBUTION RULE + doc-vs-doc example), contiguous at both sites.
+  // The rule-statement broadening (canonical bullet 1 in the plan) is a
+  // separate 1-line edit at each site because its position differs
+  // structurally between Site A (replaces line 185 inline) and Site B
+  // (second bullet in the restructured block). Verifying it via a
+  // dedicated source-string assertion ("between ANY two sources" × 2)
+  // rather than packing it into the byte-identical fragment keeps Site A's
+  // pedagogical flow (rule → multi-discrep enforcement → UUU exceptions
+  // → attribution + example → existing examples) — packing 3 bullets
+  // contiguously would have forced multi-discrep + UUU AFTER the worked
+  // examples, breaking that flow.
+  console.log('\n========== GROUP S14 — broker-facing discrepancy attribution fix ==========');
+  const fs_s14 = require('fs');
+  const path_s14 = require('path');
+  const aiSourceS14 = fs_s14.readFileSync(path_s14.join(__dirname, 'src/services/ai.js'), 'utf8');
+
+  // ─── Source-string regressions (5 assertions) ──────────────────────
+
+  // Assertion 1: CANONICAL_DISCREPANCY_BLOCK (2-bullet) byte-identical × 2
+  const CANONICAL_DISCREPANCY_BLOCK = `- ATTRIBUTION RULE (S14 / Lena Park 2026-05-18 production bug): when describing a discrepancy in your reply, attribute each side of the mismatch to its ACTUAL source — name the specific document (e.g. "the loan application", "the credit bureau report", "the appraisal", "the mortgage payout statement", "the employer letter") or "your email" / "your prior message", whichever the figure GENUINELY came from. NEVER default to "your email mentions X" when the figure actually came from a document; that misattributes the source and confuses the broker about where the conflicting figure originated. The attribution must name where the figure actually lives.
+- Example (DOC-VS-DOC, email silent on the figure — S14 / Lena Park 2026-05-18 production shape): "I noticed a discrepancy in the submitted documents — the loan application shows credit scores of 631 and 619, while the credit bureau report shows 748 and 752. Could you confirm which set is correct?"`;
+  const s14CanonicalCount = aiSourceS14.split(CANONICAL_DISCREPANCY_BLOCK).length - 1;
+  if (s14CanonicalCount !== 2) {
+    throw new Error(`FAIL [Group S14 byte-identical]: CANONICAL_DISCREPANCY_BLOCK (ATTRIBUTION RULE + doc-vs-doc worked example) must appear exactly 2 times byte-identical across broker-facing discrepancy-description prompts (Site A: INITIAL_EMAIL_PROMPT, Site B: generateBrokerResponse), got ${s14CanonicalCount}. Structural guard against N-1-of-N drift on the recurring discrepancy-description rule family.`);
+  }
+  console.log(`  PASS [Group S14 byte-identical]: CANONICAL_DISCREPANCY_BLOCK appears exactly 2 times`);
+
+  // Assertion 2: ATTRIBUTION RULE marker present × 2 (pinpoints the load-bearing principle independently)
+  const s14AttributionMarkers = aiSourceS14.match(/ATTRIBUTION RULE \(S14 \/ Lena Park 2026-05-18 production bug\)/g) || [];
+  if (s14AttributionMarkers.length !== 2) {
+    throw new Error(`FAIL [Group S14 attribution marker]: expected exactly 2 "ATTRIBUTION RULE (S14 / Lena Park 2026-05-18 production bug)" markers across Site A + Site B, got ${s14AttributionMarkers.length}. The marker label itself is load-bearing for traceability.`);
+  }
+  console.log(`  PASS [Group S14 attribution marker]: ATTRIBUTION RULE label present in 2 sites`);
+
+  // Assertion 3: doc-vs-doc worked example marker present × 2 (pinpoints the new template independently)
+  const s14DocVsDocExamples = aiSourceS14.match(/Example \(DOC-VS-DOC, email silent on the figure — S14 \/ Lena Park 2026-05-18 production shape\)/g) || [];
+  if (s14DocVsDocExamples.length !== 2) {
+    throw new Error(`FAIL [Group S14 doc-vs-doc example]: expected exactly 2 "Example (DOC-VS-DOC, email silent on the figure — S14 / Lena Park 2026-05-18 production shape)" markers across Site A + Site B, got ${s14DocVsDocExamples.length}.`);
+  }
+  console.log(`  PASS [Group S14 doc-vs-doc example]: doc-vs-doc worked-example label present in 2 sites`);
+
+  // Assertion 4: three-axis rule wording × 2 (axis broadening verified separately
+  // since the rule-statement bullet's position differs structurally between sites
+  // and isn't part of the byte-identical canonical fragment)
+  const s14ThreeAxisCount = (aiSourceS14.match(/between ANY two sources — the email body, prior thread messages, OR any attached document/g) || []).length;
+  if (s14ThreeAxisCount !== 2) {
+    throw new Error(`FAIL [Group S14 three-axis rule]: expected exactly 2 "between ANY two sources — the email body, prior thread messages, OR any attached document" phrases across Site A (line 185 replacement) + Site B (rule-statement bullet in restructure), got ${s14ThreeAxisCount}. The axis broadening must land at both sites or N-1-of-N gap recurs on the re-eval turn.`);
+  }
+  console.log(`  PASS [Group S14 three-axis rule]: axis-broadened rule statement present in 2 sites`);
+
+  // Assertion 5: cross-commit Lena Park callout invariant === 8
+  //   Commit 1 (QQQQ-hardening 84927ca) contributed 4 callouts:
+  //     - Site A line-269 preamble
+  //     - Site A worked example
+  //     - Site A TASK 2 schema flavor
+  //     - Site B (generateBrokerResponse re-eval) worked example
+  //   Commit 2 (this S14 commit) contributes 4 more:
+  //     - Site A ATTRIBUTION RULE bullet label
+  //     - Site A doc-vs-doc example label
+  //     - Site B ATTRIBUTION RULE bullet label
+  //     - Site B doc-vs-doc example label
+  //   Cross-commit total: 8. This invariant guards against either commit
+  //   drifting its callout count independently.
+  const s14LenaCallouts = (aiSourceS14.match(/Lena Park 2026-05-18/g) || []).length;
+  if (s14LenaCallouts !== 8) {
+    throw new Error(`FAIL [Group S14 cross-commit Lena invariant]: expected exactly 8 "Lena Park 2026-05-18" callouts across the QQQQ-hardening (Commit 1) + S14 (Commit 2) surfaces, got ${s14LenaCallouts}. Concrete-naming structural guard prevents either commit's rule text from drifting independently into generic abstractions.`);
+  }
+  console.log(`  PASS [Group S14 cross-commit Lena invariant]: 8 "Lena Park 2026-05-18" callouts (4 from QQQQ-hardening + 4 from S14)`);
+
+  // ─── Live 5x verification — 3 fixtures, gated under RUN_S14_D=1 ────
+  if (process.env.RUN_S14_D === '1') {
+    // Shared LEAK + POSITIVE regex for credit-score attribution
+    const s14LeakRe = /your\s+email\s+(mentions|mentioned|says|states|lists|notes|shows|indicates)[^.]{0,80}(631|619|credit\s+scores)/i;
+    const s14PositiveRe = /(loan\s+application|application\s+form|the\s+application)[^.]{0,40}(631|619)/i;
+    const s14Leak = (reply) => s14LeakRe.test(reply) || !s14PositiveRe.test(reply);
+
+    // Shared fixture data (richer extracted_data so isFormLikeText routes via
+    // dual-path text + base64, surfaced during Commit 1 verification)
+    const s14StubPdf = fs_s14.readFileSync(path_s14.join(__dirname, 'forms/Loan Application Form (1).pdf')).toString('base64');
+    const s14LenaBody = `Hi,
+
+New second mortgage submission for your review.
+
+*Borrower:* Lena Park
+*Property:* 224 Birchwood Lane NE, Calgary, AB T3K 2H4
+*Property Value:* $640,000
+*Loan Request:* $85,000 (second mortgage)
+*Existing First Mortgage:* $310,000 (TD Bank)
+*Combined LTV:* ~62%
+*Purpose:* Home renovations and debt consolidation
+
+Documents attached: loan application, credit bureau, appraisal, T4, TD payout statement.
+
+Thanks,
+Jordan Park
+Apex Mortgage Solutions Lic. #MB774263`;
+
+    const s14LoanAppText = 'CONFIDENTIAL LOAN APPLICATION FORM\n\nApplicant: Lena Park\nProperty Address: 224 Birchwood Lane NE, Calgary, AB T3K 2H4\nLoan Type: Second Mortgage\nLoan Amount Requested: $85,000\nProperty Value: $640,000\nExisting First Mortgage: $310,000 (TD Bank)\nEmployment: Operations Manager, Suncor Energy, 12 years\nAnnual Income: $118,400\nMonthly Gross Income: $9,866\nMonthly Expenses (excluding shelter): $3,200\n\nCREDIT INFORMATION:\n  Equifax: 631\n  TransUnion: 619\n\nApplicant declares all information above to be accurate to the best of their knowledge.\n\nDate Signed: May 18, 2026\nApplicant Signature: Lena Park';
+
+    const s14CreditBureauText = 'CREDIT BUREAU REPORT — CONSUMER DISCLOSURE\nApplicant: Lena Park\nDate of Birth: March 14, 1981\nSIN: ***-***-456\nReport Date: May 17, 2026\nReport Number: EQ-2026-051718-LP-001\n\nCREDIT SCORES:\n  Equifax: 748 (range 300-900)\n  TransUnion: 752 (range 300-900)\nBoth scores reflect approximately 10 years of credit history with no derogatory marks on file across either bureau.\n\nTRADE LINES (5 ACTIVE):\n- TD Visa: opened 2014, limit $15,000, current balance $2,847, payment history 120/120 on time\n- TD mortgage: opened 2020, original $355,000, current balance $310,000, payment history 64/64 on time\n- Suncor employee credit union LOC: opened 2018, limit $25,000, current balance $0\n- Capital One Mastercard: opened 2016, limit $8,500, current balance $1,123\n- Costco Mastercard: opened 2019, limit $12,000, current balance $645\n\nINQUIRIES (LAST 24 MONTHS): 2 — soft pull by TD on 2025-08-14, hard pull by Suncor on 2024-11-03\nPUBLIC RECORDS: None\nCOLLECTIONS: None';
+
+    // ── Fixture 1: Site A 5x — initial path (Lena's first submission) ──
+    console.log('\n---------- Group S14 / Fixture 1: Site A initial path (processInitialEmail welcome must attribute correctly) 5x ----------');
+    const s14Fixture1Attachments = [
+      { Name: 'LoanApplication_Lena_Park.pdf', ContentType: 'application/pdf', Content: s14StubPdf, ContentLength: s14StubPdf.length },
+      { Name: 'CreditBureau_Lena_Park.pdf', ContentType: 'application/pdf', Content: s14StubPdf, ContentLength: s14StubPdf.length },
+    ];
+    const s14Fixture1SavedDocs = [
+      { file_name: 'LoanApplication_Lena_Park.pdf', classification: 'loan_application', extracted_data: { text: s14LoanAppText } },
+      { file_name: 'CreditBureau_Lena_Park.pdf', classification: 'credit_report', extracted_data: { text: s14CreditBureauText } },
+    ];
+
+    let s14F1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const { welcomeEmail } = await aiService.processInitialEmail(
+          'Jordan Park', s14LenaBody, s14Fixture1Attachments, s14Fixture1SavedDocs, false, false, false
+        );
+        const reply = welcomeEmail || '';
+        if (s14Leak(reply)) {
+          s14F1Leaks++;
+          const reason = s14LeakRe.test(reply) ? 'credit scores misattributed to "your email"' : 'credit scores not attributed to loan application';
+          console.log(`  Run ${run}: LEAK — ${reason}\n    Reply excerpt: ${reply.slice(0, 600).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — credit scores correctly attributed to loan application, not email`);
+        }
+      } catch (e) {
+        s14F1Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group S14 / Fixture 1 (Site A initial 5x): ${5 - s14F1Leaks}/5 passed, ${s14F1Leaks}/5 leaked (threshold: ≤1)`);
+
+    // ── Fixture 2: Site B 5x — re-eval doc-vs-doc only ──
+    console.log('\n---------- Group S14 / Fixture 2: Site B re-eval doc-vs-doc only (generateBrokerResponse re-flag must attribute correctly) 5x ----------');
+    const s14Fixture2ExistingSummary = {
+      sender_type: 'broker', sender_name: 'Jordan Park',
+      broker_name: 'Jordan Park', broker_company: 'Apex Mortgage Solutions',
+      borrower_name: 'Lena Park',
+      property_address: '224 Birchwood Lane NE, Calgary, AB T3K 2H4',
+      property_value: 640000, loan_amount_requested: 85000,
+      existing_mortgage_balance: 310000, ltv_percent: 62,
+      loan_type: 'second mortgage', is_purchase: false,
+      purpose: 'Home renovations and debt consolidation',
+      exit_strategy: 'Refinance with TD at maturity (2028)',
+      unresolved_discrepancy: true,
+      key_risks_or_notes: 'Credit score discrepancy: loan application shows 631/619 but credit bureau shows 748/752 — needs clarification.',
+      identity_clash: false,
+    };
+    const s14Fixture2Convo = [
+      { direction: 'inbound',  subject: 'New Mortgage Submission — Lena Park', body: s14LenaBody, created_at: '2026-05-18T14:00:00Z' },
+      { direction: 'outbound', subject: 'Re: New Mortgage Submission — Lena Park', body: 'Hi Jordan! Thanks for sending this through. Before we go further: I noticed a discrepancy in the submitted documents — the loan application shows credit scores of 631 and 619, while the credit bureau report shows 748 and 752. Could you confirm which set is correct so we have the right figures on file?', created_at: '2026-05-18T14:15:00Z' },
+    ];
+    const s14Fixture2EmailBody = `Hi Vienna,
+
+You flagged a credit score discrepancy earlier — can you remind me of the specifics so I can address it with the borrower today? I want to make sure I'm referencing the right figures.
+
+Thanks,
+Jordan`;
+    const s14Fixture2DocsOnFile = [
+      { file_name: 'LoanApplication_Lena_Park.pdf', classification: 'loan_application', extracted_data: { text: s14LoanAppText } },
+      { file_name: 'CreditBureau_Lena_Park.pdf', classification: 'credit_report', extracted_data: { text: s14CreditBureauText } },
+    ];
+
+    let s14F2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const result = await aiService.generateBrokerResponse(
+          s14Fixture2EmailBody, [], s14Fixture2DocsOnFile, s14Fixture2ExistingSummary,
+          s14Fixture2Convo, s14Fixture2DocsOnFile.map(d => d.file_name), 'active'
+        );
+        const reply = result?.responseEmail || '';
+        if (s14Leak(reply)) {
+          s14F2Leaks++;
+          const reason = s14LeakRe.test(reply) ? 'credit scores misattributed to "your email"' : 'credit scores not attributed to loan application';
+          console.log(`  Run ${run}: LEAK — ${reason}\n    Reply excerpt: ${reply.slice(0, 600).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — credit scores correctly attributed to loan application on re-eval reply`);
+        }
+      } catch (e) {
+        s14F2Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group S14 / Fixture 2 (Site B re-eval doc-vs-doc 5x): ${5 - s14F2Leaks}/5 passed, ${s14F2Leaks}/5 leaked (threshold: ≤1)`);
+
+    // ── Fixture 3: Site B 5x — multi-discrepancy regression (load-bearing) ──
+    // Two simultaneous discrepancies: doc-vs-doc credit scores (loan-app 631/619
+    // vs bureau 748/752) AND email-vs-doc property value (email $640K vs appraisal
+    // $720K). Vienna's reply must surface BOTH AND attribute each correctly.
+    // Guards against the monolith → 9-bullet restructure silently weakening the
+    // "flag EACH ONE SEPARATELY" enforcement that lived in the prior single bullet.
+    console.log('\n---------- Group S14 / Fixture 3: Site B multi-discrepancy regression (both surface + both attributed correctly) 5x ----------');
+    const s14Fixture3ExistingSummary = {
+      ...s14Fixture2ExistingSummary,
+      key_risks_or_notes: 'Two discrepancies flagged for clarification: (1) credit score mismatch — loan application shows 631/619 but credit bureau shows 748/752; (2) property value mismatch — broker stated $640,000 in submission email but appraisal shows $720,000.',
+    };
+    const s14Fixture3Convo = [
+      { direction: 'inbound', subject: 'New Mortgage Submission — Lena Park', body: s14LenaBody, created_at: '2026-05-18T14:00:00Z' },
+      { direction: 'outbound', subject: 'Re: New Mortgage Submission — Lena Park', body: 'Hi Jordan! Thanks for sending this through. Before we go further: I noticed two discrepancies in the submitted file that need clarification: (1) credit scores — the loan application shows 631/619 but the credit bureau report shows 748/752; (2) property value — your email lists $640,000 but the appraisal shows $720,000. Could you confirm which figures we should use going forward?', created_at: '2026-05-18T14:15:00Z' },
+    ];
+    const s14Fixture3EmailBody = `Hi Vienna,
+
+Can you remind me of all the discrepancies you flagged? I want to address each one with the borrower today so we can move forward.
+
+Thanks,
+Jordan`;
+    const s14AppraisalText = 'PROPERTY APPRAISAL REPORT\n\nProperty Address: 224 Birchwood Lane NE, Calgary, AB T3K 2H4\nAppraiser: Maria Chen, AACI\nAppraisal Date: May 12, 2026\nReport Date: May 14, 2026\n\nAPPRAISED VALUE: $720,000\n\nApproach Used: Direct Comparison (3 recent comparable sales within 1km, all sold within last 90 days at $695,000 to $735,000). Subject property condition: above average — recent kitchen renovation 2024.\n\nLand value contribution: $325,000\nImprovement value contribution: $395,000\n\nThis appraisal report has been prepared in accordance with CUSPAP standards.';
+    const s14Fixture3DocsOnFile = [
+      { file_name: 'LoanApplication_Lena_Park.pdf', classification: 'loan_application', extracted_data: { text: s14LoanAppText } },
+      { file_name: 'CreditBureau_Lena_Park.pdf', classification: 'credit_report', extracted_data: { text: s14CreditBureauText } },
+      { file_name: 'Appraisal_Lena_Park.pdf', classification: 'appraisal', extracted_data: { text: s14AppraisalText } },
+    ];
+
+    // Multi-discrepancy leak detector:
+    //   (a) standard credit-score attribution leak (LeakRe matches OR PositiveRe fails)
+    //   (b) multi-discrepancy enforcement: BOTH discrepancies must surface (credit-score numbers AND property-value numbers in reply)
+    //   (c) second-discrepancy attribution sanity: appraisal as the doc side, email as the broker side
+    const s14MultiLeak = (reply) => {
+      // (a) credit-score attribution
+      if (s14LeakRe.test(reply)) return { leak: true, reason: '(a) credit scores misattributed to "your email"' };
+      if (!s14PositiveRe.test(reply)) return { leak: true, reason: '(a) credit scores not attributed to loan application' };
+      // (b) multi-discrepancy: both discrepancies must surface
+      const hasCreditScore = /\b(631|619|748|752)\b/.test(reply);
+      const hasPropertyValue = /\$?\s?(640|720)[,\s]?000\b/.test(reply);
+      if (!hasCreditScore) return { leak: true, reason: '(b) multi-discrepancy weakened — credit-score discrepancy not surfaced in reply' };
+      if (!hasPropertyValue) return { leak: true, reason: '(b) multi-discrepancy weakened — property-value discrepancy not surfaced in reply' };
+      // (c) property-value attribution sanity
+      if (/(your\s+email|you\s+stated|you\s+mentioned)[^.]{0,40}\$?\s?720[,\s]?000\b/i.test(reply)) {
+        return { leak: true, reason: '(c) property value $720K misattributed to email (it came from the appraisal)' };
+      }
+      if (/(appraisal|loan\s+application)[^.]{0,40}\$?\s?640[,\s]?000\b/i.test(reply)) {
+        return { leak: true, reason: '(c) property value $640K misattributed to a document (it came from the email)' };
+      }
+      return { leak: false };
+    };
+
+    let s14F3Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const result = await aiService.generateBrokerResponse(
+          s14Fixture3EmailBody, [], s14Fixture3DocsOnFile, s14Fixture3ExistingSummary,
+          s14Fixture3Convo, s14Fixture3DocsOnFile.map(d => d.file_name), 'active'
+        );
+        const reply = result?.responseEmail || '';
+        const { leak, reason } = s14MultiLeak(reply);
+        if (leak) {
+          s14F3Leaks++;
+          console.log(`  Run ${run}: LEAK — ${reason}\n    Reply excerpt: ${reply.slice(0, 700).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — both discrepancies surfaced AND attributed correctly (credit scores→loan-app, property value→email-vs-appraisal)`);
+        }
+      } catch (e) {
+        s14F3Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group S14 / Fixture 3 (Site B multi-discrepancy 5x): ${5 - s14F3Leaks}/5 passed, ${s14F3Leaks}/5 leaked (threshold: ≤1)`);
+
+    // Combined escalation decision
+    const s14Findings = [];
+    if (s14F1Leaks > 1) s14Findings.push(`Site A (Lena initial 5x): ${s14F1Leaks}/5 leaked — ATTRIBUTION RULE not strong enough in welcome-email context. Either strengthen the rule's MUST framing or expand worked examples. Surface diff.`);
+    if (s14F2Leaks > 1) s14Findings.push(`Site B doc-vs-doc 5x: ${s14F2Leaks}/5 leaked — N-of-N gap; re-eval reply doesn't carry the same attribution as Site A. Site B canonical-block insertion may need strengthening or restructure may have weakened context. Surface diff.`);
+    if (s14F3Leaks > 1) s14Findings.push(`Site B multi-discrepancy 5x: ${s14F3Leaks}/5 leaked — monolith→9-bullet restructure may have weakened multi-discrepancy enforcement OR the second discrepancy's attribution broke. Inspect each LEAK reason. Surface diff.`);
+    if (s14Findings.length > 0) {
+      throw new Error(`FAIL [Group S14 / escalation]: ${s14Findings.length} fixture(s) crossed threshold.\n  - ${s14Findings.join('\n  - ')}\nSurface escalation shape before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group S14 / Fixtures 1+2+3: SKIPPED (set RUN_S14_D=1 to run) ----------');
   }
 
   // ════════════════════════════════════════════════════════════════
