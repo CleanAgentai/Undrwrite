@@ -6032,6 +6032,155 @@ Crown Mortgage Group Lic. #MB556291`;
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP PPPP — forbidden-routing 6-site byte-identical structural guard (S6.2)
+  // ════════════════════════════════════════════════════════════════
+  // S6.2 root cause was framed as "INITIAL_EMAIL_PROMPT missing the FORBIDDEN
+  // INTERNAL ROUTING REFERENCES block" — Kevin-class case where Vienna's
+  // welcome leaked "I'll get this over to Franco" because the broker-path of
+  // processInitialEmail had no instruction not to. Inventory revealed the
+  // real bug was structural: the rule was hand-copied into FIVE existing
+  // broker-facing prompts as THREE drifting variants (line 649 broker, 874
+  // rejection, 1137 doc-request, 1887 revise, 1955 admin-response), with
+  // INITIAL_EMAIL_PROMPT as the missing 6th. Exact KKKK-saga shape — "fix
+  // applied to N-1 of N sites" — except already in flight before PPPP
+  // touched it.
+  //
+  // PPPP normalizes all 6 to byte-identical canonical text (line 649's
+  // variant with the "has been received and is being reviewed" tail).
+  // Rejection (874) and admin-response (1955) get ADDITIVE sub-bullets
+  // beneath the canonical preserving their context-specific banned phrases
+  // (rejection: 8 extras + the "we won't be proceeding — not the internal
+  // mechanics" tail) and attribution sentence (admin: "Even though admin
+  // notes drove this reply, do NOT attribute it to a person by name").
+  // The additive design preserves all rule surface from the prior variants;
+  // nothing context-specific is lost.
+  //
+  // PPPP's first verification attempt surfaced a JJJ.1 regression — adding
+  // the FORBIDDEN block to INITIAL_EMAIL_PROMPT amplified Vienna's implicit
+  // ~20% AML/PEP-at-intake leak rate to ~70%. The regression was fixed by
+  // the prior JJJ-hardening commit (explicit anti-AML/PEP rule converted
+  // JJJ's implicit-omission protection to explicit-rule protection). PPPP
+  // (this commit) lands ON TOP of JJJ-hardening so the INITIAL insertion
+  // is no longer amplifying the leak — the explicit rule holds.
+  //
+  // The 6-site byte-identical assertion is the structural guard against
+  // future N-1-of-N drift. The additive-marker assertion is the structural
+  // guard against the NORMALIZATION ITSELF silently dropping context-
+  // specific protection. Both required.
+  console.log('\n========== GROUP PPPP — forbidden-routing 6-site byte-identical structural guard ==========');
+  const fs_pppp = require('fs');
+  const path_pppp = require('path');
+  const aiSourcePPPP = fs_pppp.readFileSync(path_pppp.join(__dirname, 'src/services/ai.js'), 'utf8');
+
+  // Assertion 1: CANONICAL_BLOCK_LITERAL appears exactly 6 times.
+  // The literal is verbatim from line 649 (generateBrokerResponse) — the
+  // chosen canonical variant. Any divergence at any site fails this.
+  const CANONICAL_BLOCK_LITERAL = `- FORBIDDEN INTERNAL ROUTING REFERENCES (in your email to the broker): never name "Franco", never reference "the lender rep", "our team", "the underwriters", "internal review", any "review process" phrasing ("the review process", "our review process", "patience with the review", "patience with our review process", "the underwriting process"), any "passing along" phrasing ("passing it along", "passing this along", "passing everything along", "passing the file along", "passing along to..."), "forwarding to", "I'll get this over to", or any specific internal department or person. The broker should know only that the file has been received and is being reviewed.`;
+  const pppCanonicalCount = aiSourcePPPP.split(CANONICAL_BLOCK_LITERAL).length - 1;
+  if (pppCanonicalCount !== 6) {
+    throw new Error(`FAIL [Group PPPP byte-identical]: expected exactly 6 byte-identical occurrences of CANONICAL_BLOCK_LITERAL across broker-facing prompts (INITIAL_EMAIL_PROMPT, generateBrokerResponse, generateRejectionEmail, generateDocumentRequestEmail, reviseEmailWithEdits, generateAdminResponseEmail), got ${pppCanonicalCount}. The structural guard prevents the N-1-of-N drift failure mode that recurs in the KKKK saga — any site diverging means a broker-facing path lost the rule.`);
+  }
+  console.log(`  PASS [Group PPPP byte-identical]: CANONICAL_BLOCK_LITERAL appears exactly 6 times across broker-facing prompts`);
+
+  // Assertion 2: additive sub-bullets must be present — rejection-specific
+  // banned phrases (8 markers + tail) AND admin-response attribution
+  // sentence. If the normalization silently dropped these, assertion 1
+  // could still pass (6 byte-identical copies) while rejection/admin
+  // protection silently weakened. This assertion catches that exact
+  // failure mode.
+  const pppRejectionAdditiveMarkers = [
+    'ADDITIONAL FORBIDDEN ROUTING PHRASES (rejection context',
+    '"the underwriting team"',
+    '"after review by our team"',
+    '"the lender declined"',
+    '"Franco passed"',
+    '"Franco decided"',
+    '"the file was rejected by"',
+    '"I\'ll let Franco know"',
+    '"I\'ve passed this along to"',
+    'we won\'t be proceeding — not the internal mechanics',
+  ];
+  for (const marker of pppRejectionAdditiveMarkers) {
+    if (!aiSourcePPPP.includes(marker)) {
+      throw new Error(`FAIL [Group PPPP rejection-additive]: rejection-specific protection lost during normalization. Missing marker: ${JSON.stringify(marker)}. Site 874's additive sub-bullet must preserve all 8 rejection-specific banned phrases AND the rejection-specific tail "we won't be proceeding — not the internal mechanics of how that conclusion was reached" — these are NOT covered by the canonical bullet's broader rule.`);
+    }
+  }
+  console.log(`  PASS [Group PPPP rejection-additive]: all ${pppRejectionAdditiveMarkers.length} rejection-specific markers present (8 banned phrases + section header + tail)`);
+
+  const pppAdminAdditiveMarker = 'ADDITIONAL FORBIDDEN ROUTING (admin-response context): Even though admin notes drove this reply, do NOT attribute it to a person by name.';
+  if (!aiSourcePPPP.includes(pppAdminAdditiveMarker)) {
+    throw new Error(`FAIL [Group PPPP admin-additive]: admin-response attribution protection lost during normalization. Site 1955's additive sub-bullet must preserve: ${JSON.stringify(pppAdminAdditiveMarker)}`);
+  }
+  console.log(`  PASS [Group PPPP admin-additive]: admin-response attribution sentence preserved`);
+
+  // ────────────────────────────────────────────────────────────────
+  // PPPP S6.2 live 5x — Kevin-class broker INITIAL submission. The
+  // representative fixture targets the failure mode (welcome email
+  // leaks internal routing) and is content-agnostic per triage —
+  // PPPP's verification is "does the welcome leak internal routing"
+  // not a deal-shape-specific behavior. Banned-pattern list covers
+  // the specific shapes that leaked pre-PPPP plus the canonical
+  // rule surface (Franco-named-as-actor, "I'll get this over to
+  // Franco", "passing along to Franco", "the underwriting process",
+  // etc.). Threshold: ≤1 leak ships, ≥2 escalates.
+  // ────────────────────────────────────────────────────────────────
+  if (process.env.RUN_PPPP_D === '1') {
+    console.log('\n---------- Group PPPP / S6.2: INITIAL broker submission must not name reviewer (5x) ----------');
+    const pppFixture = {
+      senderName: 'Kevin Walsh',
+      emailBody: `Hello Franco,
+
+Submitting a new file for your review — Mortgage House Brokerage License #M15003421. Borrower is Sandra Lynn Fletcher, looking for a $68,000 second mortgage on her property at 412 Windermere Close SW, Edmonton, AB T6W 0R1 (property value $580,000, existing first mortgage $295,000 with RBC). LTV ~62.6%. Purpose: debt consolidation and home repairs. Exit strategy: refinance with RBC at first-mortgage renewal in March 2028.
+
+Borrower has strong credit (729 Equifax / 735 TransUnion), 20-year tenure at Alberta Health Services.
+
+Please review and let me know next steps.
+
+Kevin Walsh
+Mortgage House Brokerage
+License #M15003421`,
+      attachments: [],
+    };
+    const pppBannedPatterns = [
+      /\bI'?ll\s+get\s+this\s+over\s+to\s+Franco\b/i,
+      /\bI'?ll\s+pass\s+this\s+(?:along\s+)?to\s+Franco\b/i,
+      /\bI'?ll\s+forward\s+this\s+to\s+Franco\b/i,
+      /\bI'?ve\s+passed\s+this\s+along\s+to\b/i,
+      /\bFranco\s+will\s+review\b/i,
+      /\bforwarding\s+(?:this\s+)?to\s+Franco\b/i,
+      /\bpassing\s+(?:this|it|everything|the\s+file)\s+along\b/i,
+      /\bthe\s+(?:underwriting|review)\s+process\b/i,
+      /\bthe\s+lender\s+rep\b/i,
+      /\bour\s+(?:underwriting\s+)?team\b/i,
+      /\bthe\s+underwriters?\b/i,
+      /\binternal\s+review\b/i,
+    ];
+    let pppLeaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const result = await aiService.processInitialEmail(pppFixture.senderName, pppFixture.emailBody, pppFixture.attachments);
+        const welcomeEmail = result?.welcomeEmail || '';
+        const hit = pppBannedPatterns.find(p => p.test(welcomeEmail));
+        if (hit) {
+          pppLeaks++;
+          console.log(`  Run ${run}: LEAK — ${hit}\n    Body excerpt: ${welcomeEmail.slice(0, 600).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — no internal-routing leak`);
+        }
+      } catch (e) {
+        pppLeaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group PPPP / S6.2: ${5 - pppLeaks}/5 passed, ${pppLeaks}/5 leaked (threshold: ≤1)`);
+    if (pppLeaks > 1) {
+      throw new Error(`FAIL [Group PPPP / S6.2 escalation]: ${pppLeaks}/5 leaked. Either the canonical block's MUST framing isn't strong enough in welcome context (consider section-header strengthening), OR a banned-phrase variant slipped through that the ban list doesn't cover (expand list with specific paraphrases Claude produced). Surface escalation shape before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group PPPP / S6.2: SKIPPED (set RUN_PPPP_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP QQQQ — unresolved_discrepancy structured signal gates prelim trigger (S8.1+S8.2)
   // ════════════════════════════════════════════════════════════════
   // Production case 2026-05-17 (deal ffb4fa0c, Sandra Fletcher): broker
