@@ -5649,6 +5649,327 @@ Crown Mortgage Group Lic. #MB556291`;
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP RRRR — decline reason propagation + tone (S8.3)
+  // ════════════════════════════════════════════════════════════════
+  // Production case 2026-05-17 (deal ffb4fa0c, Sandra Fletcher): admin
+  // replied "DECLINE — The borrower's credit scores (729/735) do not meet
+  // our minimum threshold for this loan size." Vienna's broker-facing
+  // rejection draft omitted the reason entirely ("After reviewing the
+  // file, we're unable to proceed with this deal at this time."), and
+  // padded the message with presumptuous templated empathy ("I know this
+  // isn't the news you were hoping for, but please don't let this
+  // discourage you from sending future opportunities our way. We'd love
+  // to work together on the next one!").
+  //
+  // Two distinct structural failures:
+  //   1. Call site doesn't propagate: generateRejectionEmail only received
+  //      dealSummary — parseAdminReply's message (carrying the full admin
+  //      text + stated reason) was discarded. Even a perfect prompt
+  //      couldn't include the reason.
+  //   2. Prompt actively forbids citing reasons + actively instructs the
+  //      leaked templates: "do NOT cite specific risk factors from the
+  //      deal summary" + verbatim 'Genuinely encourage future deals —
+  //      "We\\'d love to work together on the next one!"'. Either fix
+  //      alone is insufficient. Both must land together.
+  //
+  // RRRR ships both pieces:
+  //   - extractDeclineReason JS helper in webhook.js (mandatory full-text
+  //     fallback — never let a regex miss cause a silent reason omission)
+  //   - Both call sites (under_review-with-draft + under_review-without-
+  //     draft) propagate the extracted reason
+  //   - generateRejectionEmail signature extended to (dealSummary,
+  //     adminDeclineReason = null)
+  //   - Conditional declineReasonBlock injects EXPLICIT EXCEPTION when
+  //     reason is present, overriding the existing "don't cite risk
+  //     factors" rule
+  //   - Targeted tone edits (per Q2-RRRR-impl, not a full rewrite):
+  //     replace "warm and empathetic" with "professional, concise,
+  //     factual"; remove "We'd love to work together" instruction;
+  //     add 7-pattern BANNED PHRASES list (KKKK BANNED OPENERS precedent)
+  console.log('\n========== GROUP RRRR — decline reason propagation + tone ==========');
+
+  // ─── Truth table on extractDeclineReason ──────────────────────────
+  console.log('\n---------- Group RRRR / Truth Table: extractDeclineReason ----------');
+  const { extractDeclineReason } = require('./src/routes/webhook').__test__;
+
+  const rrrrCases = [
+    // Strict separator pattern (em-dash, colon, hyphen)
+    {
+      name: 'Sandra exact production shape (em-dash separator)',
+      input: "DECLINE — The borrower's credit scores (729/735) do not meet our minimum threshold for this loan size.",
+      expect: "The borrower's credit scores (729/735) do not meet our minimum threshold for this loan size.",
+    },
+    { name: 'DECLINE + colon separator', input: 'DECLINE: scores too low', expect: 'scores too low' },
+    { name: 'DECLINE + hyphen separator', input: 'DECLINE - too risky', expect: 'too risky' },
+    { name: 'REJECT variant + em-dash', input: 'REJECT — not enough equity', expect: 'not enough equity' },
+    { name: 'Declined (ED suffix) + colon, case-insensitive', input: 'Declined: too high LTV', expect: 'too high LTV' },
+
+    // Looser pattern (period/comma/space, no formal separator)
+    { name: 'Looser: period separator', input: 'Decline. scores too low', expect: 'scores too low' },
+    { name: 'Looser: comma separator', input: 'Decline, scores too low', expect: 'scores too low' },
+    { name: 'Looser: space only', input: 'Decline scores too low', expect: 'scores too low' },
+
+    // Decline-only → null (no reason → generic decline path)
+    { name: 'Decline-only word', input: 'DECLINE', expect: null },
+    { name: 'Decline-only with period', input: 'Decline.', expect: null },
+    { name: 'Rejected-only with exclamation', input: 'Rejected!', expect: null },
+
+    // Empty/null guards
+    { name: 'Whitespace only → null', input: '   ', expect: null },
+    { name: 'Empty string → null', input: '', expect: null },
+    { name: 'null input → null', input: null, expect: null },
+    { name: 'undefined input → null', input: undefined, expect: null },
+
+    // MANDATORY FALLBACK CASES — load-bearing for "never silently omit"
+    {
+      name: 'FALLBACK: non-decline-prefix format → full text returned (never silently omit)',
+      input: "Send a rejection — they didn't meet our threshold",
+      expect: "Send a rejection — they didn't meet our threshold",
+    },
+    {
+      name: 'FALLBACK: reason-first format → full text returned',
+      input: 'scores too low. decline.',
+      expect: 'scores too low. decline.',
+    },
+
+    // Multi-line — uses [\s\S]+ not .+ to capture newlines
+    {
+      name: 'Multi-line reason captured (em-dash separator)',
+      input: 'DECLINE — first issue\nsecond issue\nthird issue',
+      expect: 'first issue\nsecond issue\nthird issue',
+    },
+  ];
+
+  let rrrrPassed = 0;
+  for (const tc of rrrrCases) {
+    const got = extractDeclineReason(tc.input);
+    if (got !== tc.expect) {
+      throw new Error(`FAIL [Group RRRR ${tc.name}]:\n  input=${JSON.stringify(tc.input)}\n  expected=${JSON.stringify(tc.expect)}\n  got=${JSON.stringify(got)}`);
+    }
+    console.log(`  PASS [${tc.name}]`);
+    rrrrPassed++;
+  }
+  console.log(`Group RRRR / Truth Table: ${rrrrPassed}/${rrrrCases.length} passed`);
+
+  // ─── Source-string regressions on webhook.js wiring ──────────────
+  console.log('\n---------- Group RRRR / Source-string regression on webhook.js ----------');
+
+  // Helper defined
+  if (!/const extractDeclineReason = \(adminMessage\) =>/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group RRRR helper definition]: extractDeclineReason must be defined with (adminMessage) signature`);
+  }
+  console.log('  PASS [Group RRRR helper definition]: signature present');
+
+  // Mandatory fallback comment present (load-bearing — future readers must understand why the last branch returns text)
+  if (!/MANDATORY FALLBACK GUARANTEE/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group RRRR fallback documentation]: helper must have 'MANDATORY FALLBACK GUARANTEE' comment explaining the never-silently-omit invariant`);
+  }
+  console.log('  PASS [Group RRRR fallback documentation]: MANDATORY FALLBACK GUARANTEE documented');
+
+  // Helper exported via __test__
+  if (!/module\.exports\.__test__ = \{[\s\S]*extractDeclineReason,?[\s\S]*\};/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group RRRR helper export]: extractDeclineReason must be in webhook.js __test__ exports`);
+  }
+  console.log('  PASS [Group RRRR helper export]: exported via __test__');
+
+  // BOTH call sites must extract + pass adminDeclineReason. Asserting 2+ occurrences
+  // of the pattern "const adminDeclineReason = extractDeclineReason(message);" and
+  // "generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason)".
+  const extractCalls = (webhookSrc.match(/const adminDeclineReason = extractDeclineReason\(message\);/g) || []).length;
+  if (extractCalls < 2) {
+    throw new Error(`FAIL [Group RRRR both call sites extract]: extractDeclineReason(message) must be called at BOTH rejection call sites (under_review-with-draft + under_review-without-draft). Got ${extractCalls} occurrence(s).`);
+  }
+  console.log(`  PASS [Group RRRR both call sites extract]: extractDeclineReason called at ${extractCalls} sites`);
+
+  const rejectionCallsWithReason = (webhookSrc.match(/generateRejectionEmail\(existingDeal\.extracted_data, adminDeclineReason\)/g) || []).length;
+  if (rejectionCallsWithReason < 2) {
+    throw new Error(`FAIL [Group RRRR both call sites pass]: generateRejectionEmail(extracted_data, adminDeclineReason) must be called at BOTH rejection call sites. Got ${rejectionCallsWithReason} occurrence(s).`);
+  }
+  console.log(`  PASS [Group RRRR both call sites pass]: adminDeclineReason passed at ${rejectionCallsWithReason} sites`);
+
+  // Pre-RRRR bug shape (calling generateRejectionEmail with only extracted_data) must be GONE
+  if (/generateRejectionEmail\(existingDeal\.extracted_data\)(?!\s*,)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group RRRR pre-RRRR bug shape]: webhook.js still has a generateRejectionEmail(extracted_data) call without the second arg — the pre-RRRR signature that silently dropped the admin's reason`);
+  }
+  console.log('  PASS [Group RRRR no pre-RRRR bug shape]: no single-arg generateRejectionEmail calls remain');
+
+  // ─── Source-string regressions on ai.js prompt ────────────────────
+  console.log('\n---------- Group RRRR / Source-string regression on ai.js prompt ----------');
+
+  // Signature accepts adminDeclineReason
+  if (!/generateRejectionEmail: async \(dealSummary, adminDeclineReason = null\) =>/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR signature]: generateRejectionEmail signature must be (dealSummary, adminDeclineReason = null)`);
+  }
+  console.log('  PASS [Group RRRR signature]: generateRejectionEmail accepts adminDeclineReason');
+
+  // Conditional declineReasonBlock present
+  if (!/const declineReasonBlock = adminDeclineReason\s*\?\s*`/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR block conditional]: declineReasonBlock must be conditionally injected when adminDeclineReason is truthy`);
+  }
+  console.log('  PASS [Group RRRR block conditional]: block fires when reason present');
+
+  // "MUST include this reason" framing
+  if (!/MUST include this reason in the broker-facing email/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR MUST framing]: block must use 'MUST include this reason' framing (load-bearing)`);
+  }
+  console.log('  PASS [Group RRRR MUST framing]: explicit MUST instruction present');
+
+  // EXPLICIT EXCEPTION framing — overrides the "don't cite risk factors" rule
+  if (!/EXPLICIT EXCEPTION/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR EXPLICIT EXCEPTION]: block must include 'EXPLICIT EXCEPTION' framing to mark the override of the don't-cite-risk-factors rule`);
+  }
+  console.log('  PASS [Group RRRR EXPLICIT EXCEPTION]: override framing present');
+
+  // 7 BANNED PHRASES verbatim in the prompt
+  const rrrrBannedPhrases = [
+    '"I know this isn\'t the news you were hoping for"',
+    '"please don\'t let this discourage you"',
+    '"We\'d love to work together on the next one"',
+    '"we\'d love to work with you"',
+    '"looking forward to the next one"',
+    '"don\'t let this discourage you from sending future opportunities"',
+  ];
+  for (const phrase of rrrrBannedPhrases) {
+    if (!aiSource.includes(phrase)) {
+      throw new Error(`FAIL [Group RRRR ban list]: BANNED PHRASES list must include verbatim ${phrase}`);
+    }
+  }
+  console.log(`  PASS [Group RRRR ban list]: all ${rrrrBannedPhrases.length} verbatim BANNED PHRASES present`);
+
+  // Pre-RRRR "We'd love to work together on the next one!" verbatim INSTRUCTION must be GONE
+  // (different from the ban list — the INSTRUCTION line that told Vienna to use this template).
+  // The ban list contains the phrase without exclamation; the instruction had exclamation.
+  if (/Genuinely encourage future deals — "We'd love to work together on the next one!"/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR removed leaked instruction]: pre-RRRR instruction 'Genuinely encourage future deals — "We\\'d love to work together on the next one!"' must be REMOVED — this was the prompt-side source of the leak (telling Vienna to use the template). Removing it + adding the ban list is the two-pronged fix.`);
+  }
+  console.log('  PASS [Group RRRR removed leaked instruction]: pre-RRRR "Genuinely encourage future deals" instruction gone');
+
+  // Pre-RRRR "Be warm and empathetic" tone framing replaced with "professional, concise, factual"
+  if (/Be warm and empathetic — disappointing news should still feel personal and kind/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR tone replacement]: pre-RRRR 'Be warm and empathetic — disappointing news should still feel personal and kind' framing must be REPLACED with 'professional, concise, factual'`);
+  }
+  if (!/professional, concise, factual/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR new tone]: replacement tone framing 'professional, concise, factual' missing`);
+  }
+  console.log('  PASS [Group RRRR tone replacement]: "warm and empathetic" → "professional, concise, factual"');
+
+  // ─── Live verification — 5x×2 scenarios under RUN_RRRR_D=1 ────────
+  if (process.env.RUN_RRRR_D === '1') {
+    // Sandra Fletcher dealSummary shape — used in BOTH D1 and D2.
+    // Reason: D2 specifically tests "no fabrication of SPECIFIC dealSummary values
+    // when adminDeclineReason is null" per Q3-RRRR-impl. The summary must contain
+    // specific values (729/735 credit scores, 62.6% LTV, $68,000 loan) so we can
+    // assert their absence in D2's generic-decline output.
+    const rrrrSummary = {
+      sender_type: 'broker',
+      sender_name: 'Nathan Collier',
+      broker_name: 'Nathan Collier',
+      broker_company: 'Apex Mortgage Solutions',
+      borrower_name: 'Sandra Lynn Fletcher',
+      loan_type: 'second mortgage',
+      property_address: '412 Windermere Close SW, Edmonton, AB T6W 0R1',
+      property_value: 580000,
+      loan_amount_requested: 68000,
+      existing_mortgage_balance: 295000,
+      ltv_percent: 62.6,
+      purpose: 'Debt consolidation and home repairs',
+      exit_strategy: 'Refinance with RBC at mortgage renewal (March 2028)',
+      key_risks_or_notes: 'Strong borrower profile. Credit scores: 729 Equifax / 735 TransUnion. 20-year tenure at Alberta Health Services.',
+    };
+
+    // Banned-phrase patterns — exhaustive verbatim + paraphrase matches for the 7 forbidden phrases.
+    // Used in BOTH D1 and D2 leak detection.
+    const rrrrBannedPatterns = [
+      /\bI know this isn'?t the news you were hoping for\b/i,
+      /\bplease don'?t let this discourage you\b/i,
+      /\bwe'?d love to work together on the next one\b/i,
+      /\bwe'?d love to work with you\b/i,
+      /\blooking forward to the next one\b/i,
+      /\bdon'?t let this discourage you from sending future opportunities\b/i,
+    ];
+
+    // ── D1 (5x): admin DECLINE with reason → broker email contains the reason ──
+    console.log('\n---------- Group RRRR / D1: admin DECLINE with reason → broker email cites it (5x) ----------');
+
+    // Sandra's actual production admin reply, post-extraction (the strict pattern strips
+    // "DECLINE — " prefix and returns the reason text).
+    const d1Reason = "The borrower's credit scores (729/735) do not meet our minimum threshold for this loan size.";
+
+    let d1Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const rejectionEmail = await aiService.generateRejectionEmail(rrrrSummary, d1Reason);
+        const reply = rejectionEmail || '';
+
+        // Leak conditions for D1:
+        //   (a) reason content missing (no "729" AND no "735" AND no "credit scores" AND no "threshold")
+        //   (b) any banned phrase present
+        const mentionsReason = /729|735|credit scores?|threshold/i.test(reply);
+        const bannedHit = rrrrBannedPatterns.find(p => p.test(reply));
+
+        if (!mentionsReason) {
+          d1Leaks++;
+          console.log(`  Run ${run}: LEAK — reason content missing (no '729', '735', 'credit scores', or 'threshold' anywhere)\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+        } else if (bannedHit) {
+          d1Leaks++;
+          console.log(`  Run ${run}: LEAK — banned phrase matched: ${bannedHit}\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — reason cited (mentionsReason=true), no banned phrases`);
+        }
+      } catch (e) {
+        d1Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group RRRR / D1 (reason-present 5x): ${5 - d1Leaks}/5 passed, ${d1Leaks}/5 leaked (threshold: ≤1)`);
+
+    // ── D2 (5x): admin DECLINE without reason → generic decline, no fabrication ──
+    console.log('\n---------- Group RRRR / D2: admin DECLINE without reason → generic, no fabrication of SPECIFIC values (5x) ----------');
+
+    let d2Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const rejectionEmail = await aiService.generateRejectionEmail(rrrrSummary, null);
+        const reply = rejectionEmail || '';
+
+        // Leak conditions for D2 (per Q3-RRRR-impl refinement — assert absence of SPECIFIC
+        // dealSummary values, not generic terms; specific-value fabrication is precisely
+        // the failure mode, generic-term detection is brittle):
+        //   (a) any banned phrase present (same as D1)
+        //   (b) fabrication of SPECIFIC dealSummary values (729, 735, 62.6%, $68,000, etc.)
+        //       — these MUST NOT appear when adminDeclineReason is null
+        const bannedHit = rrrrBannedPatterns.find(p => p.test(reply));
+        const fabricatedSpecificValue = /\b(729|735|62\.6|68,?000|295,?000|580,?000)\b/.test(reply);
+
+        if (bannedHit) {
+          d2Leaks++;
+          console.log(`  Run ${run}: LEAK — banned phrase matched: ${bannedHit}\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+        } else if (fabricatedSpecificValue) {
+          d2Leaks++;
+          const fabMatch = reply.match(/\b(729|735|62\.6|68,?000|295,?000|580,?000)\b/);
+          console.log(`  Run ${run}: LEAK — fabricated specific dealSummary value: ${fabMatch[0]} (adminDeclineReason was null; Vienna must NOT cite specific risk factors from the summary)\n    Reply (first 500): ${reply.slice(0, 500).replace(/\n/g, ' ')}`);
+        } else {
+          console.log(`  Run ${run}: PASS — generic decline, no fabricated specific values, no banned phrases`);
+        }
+      } catch (e) {
+        d2Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group RRRR / D2 (reason-absent 5x): ${5 - d2Leaks}/5 passed, ${d2Leaks}/5 leaked (threshold: ≤1)`);
+
+    // Combined escalation decision (JJJJ/MMMM/KKKK/OOOO/QQQQ pattern): both scenarios complete first
+    const rrrrFindings = [];
+    if (d1Leaks > 1) rrrrFindings.push(`D1 (reason-present): ${d1Leaks}/5 leaked. Either reason content omitted (block injection not strong enough — strengthen MUST framing or add more worked examples) OR banned phrases leaking despite the ban list (expand ban list with specific paraphrases Claude produced).`);
+    if (d2Leaks > 1) rrrrFindings.push(`D2 (reason-absent): ${d2Leaks}/5 leaked. Either fabrication of specific dealSummary values (the 'don't cite risk factors' rule weakening — tighten with explicit no-fabrication framing) OR banned phrases (tone-replacement insufficient — strengthen).`);
+    if (rrrrFindings.length > 0) {
+      throw new Error(`FAIL [Group RRRR / D escalation]: ${rrrrFindings.length} scenario(s) crossed threshold.\n  - ${rrrrFindings.join('\n  - ')}\nSurface escalation shape before commit.`);
+    }
+  } else {
+    console.log('\n---------- Group RRRR / D1 + D2: SKIPPED (set RUN_RRRR_D=1 to run) ----------');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP QQQQ — unresolved_discrepancy structured signal gates prelim trigger (S8.1+S8.2)
   // ════════════════════════════════════════════════════════════════
   // Production case 2026-05-17 (deal ffb4fa0c, Sandra Fletcher): broker

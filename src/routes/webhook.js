@@ -366,6 +366,64 @@ const computeStillMissingForReview = ({ deal, summary, classifications, identity
   return items;
 };
 
+// Group RRRR (S8.3): extract the admin's stated decline reason from the
+// parsed admin reply text. parseAdminReply returns { intent, message } where
+// message carries the full admin text; pre-RRRR generateRejectionEmail only
+// received dealSummary, so the admin's reason (e.g. "DECLINE — borrower's
+// credit scores (729/735) do not meet our minimum threshold for this loan
+// size.") was discarded and Vienna's broker-facing rejection omitted the
+// reason entirely (Sandra Fletcher 2026-05-17 production case).
+//
+// MANDATORY FALLBACK GUARANTEE: when the strip pattern doesn't match an
+// unexpected admin format (e.g. "scores too low. decline." or any non-
+// standard ordering), return the FULL admin message text rather than null.
+// The failure mode we must never hit is "reason omitted" — that IS the bug.
+// Including slightly too much (an unstripped prefix) is acceptable; dropping
+// the reason because the format was unexpected is not.
+//
+// Returns:
+//   - null when adminMessage is empty / whitespace / a decline-only word
+//     (no reason text present at all) → prompt falls back to generic decline.
+//   - The stripped reason text when the message matches a known
+//     "DECLINE/REJECT[ED] [— : -] <reason>" or looser "Decline. <reason>"
+//     / "Decline <reason>" pattern.
+//   - The FULL message text (untrimmed of any decline-prefix) when no
+//     pattern matches but the message is non-empty — mandatory fallback.
+const extractDeclineReason = (adminMessage) => {
+  if (!adminMessage) return null;
+  const text = String(adminMessage).trim();
+  if (text.length === 0) return null;
+
+  // Strict pattern: "DECLINE — <reason>" / "DECLINE: <reason>" / "DECLINE - <reason>"
+  // (Sandra's exact production shape uses the em-dash variant.) Uses [\s\S]+
+  // not .+ to match multi-line reasons across newlines.
+  const strict = text.match(/^(?:DECLINE|REJECT)(?:ED|D)?\s*[—:\-]\s*([\s\S]+)$/i);
+  if (strict && strict[1].trim().length > 0) {
+    return strict[1].trim();
+  }
+
+  // Looser pattern: "Decline. <reason>" / "Decline, <reason>" / "Decline <reason>"
+  // — starts with a decline word but no formal separator.
+  const looser = text.match(/^(?:DECLINE|REJECT)(?:ED|D)?\b[.,\s]+([\s\S]+)$/i);
+  if (looser && looser[1].trim().length > 0) {
+    return looser[1].trim();
+  }
+
+  // Decline-only with no follow text (e.g. "DECLINE", "Decline.", "Rejected!")
+  // → no reason present; return null → prompt's generic decline path fires.
+  if (/^(?:DECLINE|REJECT)(?:ED|D)?[.!\s]*$/i.test(text)) {
+    return null;
+  }
+
+  // Mandatory fallback: doesn't start with a decline word at all (admin used
+  // a non-standard format that parseAdminReply still classified as 'rejected',
+  // e.g. "Send a rejection — they didn't meet our threshold" or "scores too
+  // low. decline."). Pass the FULL text — better to include slightly too much
+  // than to silently omit the reason. Vienna's prompt receives the full
+  // string as adminDeclineReason and incorporates it naturally.
+  return text;
+};
+
 const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
   if (deal?.status !== 'active') return null;
   if (willGoToCollateralCheck || willReview || identityClashUnresolved) return null;
@@ -940,7 +998,12 @@ ${draftEmail}
           await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
         } else if (intent === 'rejected') {
           console.log('Deal rejected by admin — generating draft rejection');
-          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data);
+          // Group RRRR (S8.3): propagate admin's stated decline reason to the
+          // broker-facing draft. Mandatory full-text fallback in extractor
+          // — if the strip regex misses, full message passes through.
+          // Never let a regex miss cause a silent reason omission.
+          const adminDeclineReason = extractDeclineReason(message);
+          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason);
           await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes — generating draft response');
@@ -1001,7 +1064,10 @@ ${draftEmail}
           }
         } else if (intent === 'rejected') {
           console.log('Deal rejected by admin — generating draft rejection');
-          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data);
+          // Group RRRR (S8.3): propagate admin's stated decline reason
+          // (under_review path, symmetric with the upper draft_email path).
+          const adminDeclineReason = extractDeclineReason(message);
+          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason);
           await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes for under_review deal — generating draft');
@@ -1914,4 +1980,6 @@ module.exports.__test__ = {
   computeWillReview,
   // Group OOOO: pre-approval enumeration of items blocking the willReview gate
   computeStillMissingForReview,
+  // Group RRRR: admin decline-reason extraction with mandatory full-text fallback
+  extractDeclineReason,
 };
