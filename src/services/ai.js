@@ -266,7 +266,7 @@ Add the EXACT filename (from the attachment list) to misattached_documents. RULE
 UNRESOLVED_DISCREPANCY DETECTION RULE (Group QQQQ): set unresolved_discrepancy=true when ANY discrepancy you would flag in key_risks_or_notes per UUU/SSS rules is currently waiting for clarification. Set false when no discrepancies have been detected OR all detected discrepancies have been resolved.
 
 Detection scope (IDENTICAL to UUU's flagging scope — the gate and the flagging must stay in lockstep, or the gate becomes a separate truth from what Vienna communicates):
-  - Numeric mismatches between email-body figures and document figures (loan amount, property value, existing mortgage balance, credit scores) with NO hedge tolerance — i.e., NOT within UUU's ~10% hedged-estimate exception (estimate markers like "~", "approximately", "around", "roughly", "about").
+  - Numeric mismatches between ANY two sources — email body, prior thread messages, OR attached documents (including DOCUMENT-VS-DOCUMENT pairs like loan application vs credit bureau, appraisal vs payout statement, employer letter vs T4) — for loan amount, property value, existing mortgage balance, credit scores, ages/tenures, with NO hedge tolerance (i.e., NOT within UUU's ~10% hedged-estimate exception: "~", "approximately", "around", "roughly", "about"). Pre-S14-hardening this line scoped only "email-body figures and document figures" AND a 4-item field list narrower than UUU's flagging scope (which already includes ages/tenures per UUU S3.3+S3.4 worked examples); broadened on both axes via Lena Park 2026-05-18 doc-vs-doc case (email silent on credit scores, loan-app 631/619 vs bureau 748/752 — the gate fired correctly by Claude generalization, but the rule's literal text didn't authorize it; hardening makes the working-by-luck behavior structurally explicit) and via consistency with UUU's flagging scope per the gate rule's own "IDENTICAL to UUU's flagging scope" framing at line 268.
   - Categorical mismatches (loan purpose, lender name, employer name, property address, ownership type, occupancy status) where values differ materially between sources.
   - Borrower name mismatches that don't trigger full identity_clash (minor variants flagged for clarification without escalating to identity_clash=true).
 
@@ -279,13 +279,14 @@ Worked examples (canonical borrower Sandra Lynn Fletcher, canonical property "41
   - INITIAL TURN: email body says "Loan Request: $73,000" + "Existing First Mortgage (RBC): ~$290,000" but loan-app shows $68,000 + payout shows $295,000, no broker text resolving the difference → unresolved_discrepancy=TRUE (the Sandra Fletcher 2026-05-17 production bug shape — prelim MUST hold until resolved).
   - FOLLOW-UP TURN after broker confirms: prior turn flagged $73K vs $68K mismatch; broker now writes "Apologies — the loan request is $68,000 and the RBC balance is $295,000, please use those going forward" → unresolved_discrepancy=FALSE (broker explicitly confirmed both figures).
   - NO DISCREPANCY: email figures match document figures, no categorical mismatches → unresolved_discrepancy=FALSE (clean file; never flagged anything).
+  - DOC-VS-DOC, EMAIL SILENT (S14 / Lena Park 2026-05-18 production shape): broker's email body mentioned no credit scores at all; loan application shows 631 / 619 while credit bureau shows 748 / 752 → unresolved_discrepancy=TRUE (numeric mismatch between two documents, email irrelevant to the figure — gate still fires; resolution requires broker text confirmation of which set to use OR a corrected doc).
   - HEDGED-ESTIMATE EXCEPTION (UUU rule): email says "~$112,000" + loan-app shows $110,000 → 1.8% delta with explicit hedge marker → NOT flagged in key_risks_or_notes per UUU → unresolved_discrepancy=FALSE (no discrepancy by UUU's scope).
   - PARTIAL RESOLUTION: prior turn flagged TWO discrepancies ($73K vs $68K AND lender stated as "TD" vs payout showing "RBC"); broker confirms loan amount only, doesn't address lender → unresolved_discrepancy=TRUE (lender mismatch still unresolved).
   - VAGUE ACKNOWLEDGEMENT: broker says "looks good, please proceed" without addressing the specific discrepancy → does NOT resolve (silence on the discrepancy isn't confirmation).
 
 This field gates the preliminary-review trigger downstream. False positive (Vienna sees no discrepancy but emits true) suppresses prelim that should fire → broker hangs. False negative (Vienna sees discrepancy but emits false) lets prelim fire prematurely with unresolved figures (the Sandra Fletcher production bug). Be conservative — flag TRUE when ambiguous (bias toward holding the prelim).
 
-If any number stated in the email (credit scores, property value, loan amount, balances) differs from what an attached document shows, add a note to key_risks_or_notes flagging the discrepancy — e.g. "Email stated credit scores 531/519 but credit bureau shows 583/608 — needs clarification."
+If any number from ANY source (the email body, a prior thread message, or any attached document) differs from what another source shows, add a note to key_risks_or_notes flagging the discrepancy. Examples: email-vs-doc shape — "Email stated credit scores 531/519 but credit bureau shows 583/608 — needs clarification."; doc-vs-doc shape (S14 / Lena Park 2026-05-18) — "Loan application shows credit scores 631/619 but credit bureau shows 748/752 — needs clarification."
 The summary field should read like a brief to a lender — include all key facts.
 
 === RESPONSE FORMAT ===
@@ -742,6 +743,7 @@ Worked examples (same rule as UNRESOLVED_DISCREPANCY DETECTION RULE in processIn
 - Same shape, broker hasn't responded yet (still pending): unresolved_discrepancy=TRUE.
 - No discrepancies ever detected, broker sending new docs: unresolved_discrepancy=FALSE.
 - Partial resolution: two discrepancies flagged previously, broker confirms one but not the other → unresolved_discrepancy=TRUE (the unresolved one keeps the flag).
+- DOC-VS-DOC shape (S14 / Lena Park 2026-05-18), still pending: prior turn flagged loan-app credit scores 631/619 vs credit bureau 748/752 (no broker email mention of scores), broker's current reply doesn't confirm which set to use → unresolved_discrepancy=TRUE this turn. Resolution requires broker text confirmation ("use the bureau scores") OR a corrected doc that aligns the figures.
 
 Bias toward TRUE when ambiguous — false negative lets prelim fire prematurely with unresolved discrepancies (the Sandra production bug). Resolution must be evidenced; silence is not resolution.
 

@@ -6267,6 +6267,64 @@ License #M15003421`,
   }
   console.log('  PASS [Group QQQQ silence rule]: explicit "silence ≠ resolution" framing present');
 
+  // ─── QQQQ-hardening (S14 prep) — doc-vs-doc enumeration assertions ──
+  // Lena Park 2026-05-18 production case: broker email mentioned no credit
+  // scores, but loan-app showed 631/619 and credit bureau showed 748/752.
+  // The QQQQ gate fired correctly (via Claude generalization) but the rule's
+  // literal text at line 269 scoped only "email-body figures and document
+  // figures" — same implicit-by-luck fragility as JJJ.1 pre-hardening.
+  // S14 prep hardens the rule text to explicitly enumerate doc-vs-doc
+  // (and brings the field list to parity with UUU's already-broader scope
+  // per the gate rule's own "IDENTICAL to UUU's flagging scope" framing).
+  // These assertions guard against the rule-text reverting to the narrow
+  // version under future edits — the structural drift class PPPP-shape
+  // assertions prevent.
+
+  // Assertion 1: Site A detection-scope broadened to "ANY two sources"
+  if (!aiSource.includes('Numeric mismatches between ANY two sources')) {
+    throw new Error(`FAIL [Group QQQQ-hardening axis]: Site A detection-scope must read "Numeric mismatches between ANY two sources" — the axis broadening that authorizes doc-vs-doc cases (Lena Park 2026-05-18 shape).`);
+  }
+  console.log('  PASS [Group QQQQ-hardening axis]: Site A line 269 enumerates "ANY two sources"');
+
+  // Assertion 2: Site A doc-vs-doc enumeration with concrete pair examples
+  if (!aiSource.includes('DOCUMENT-VS-DOCUMENT pairs like loan application vs credit bureau')) {
+    throw new Error(`FAIL [Group QQQQ-hardening doc-vs-doc enum]: Site A must explicitly enumerate doc-vs-doc pairs ("loan application vs credit bureau, appraisal vs payout statement, employer letter vs T4") to make the axis structurally explicit, not just implied by "ANY two sources".`);
+  }
+  console.log('  PASS [Group QQQQ-hardening doc-vs-doc enum]: Site A enumerates concrete doc-vs-doc pairs');
+
+  // Assertion 3: Site A worked example for doc-vs-doc-email-silent shape
+  if (!aiSource.includes('DOC-VS-DOC, EMAIL SILENT (S14 / Lena Park 2026-05-18 production shape)')) {
+    throw new Error(`FAIL [Group QQQQ-hardening Site A worked example]: Site A worked-examples block must include the DOC-VS-DOC EMAIL SILENT case (Lena Park shape) so Claude has a concrete template for the email-irrelevant doc-vs-doc axis.`);
+  }
+  console.log('  PASS [Group QQQQ-hardening Site A worked example]: doc-vs-doc-email-silent case present');
+
+  // Assertion 4: Site A TASK 2 schema flavor expanded with doc-vs-doc example
+  if (!aiSource.includes('Loan application shows credit scores 631/619 but credit bureau shows 748/752')) {
+    throw new Error(`FAIL [Group QQQQ-hardening Site A TASK 2 flavor]: Site A's TASK 2 schema flavor text must include the doc-vs-doc shape example ("Loan application shows credit scores 631/619 but credit bureau shows 748/752") alongside the email-vs-doc example — both shapes must be present in the schema-side guidance.`);
+  }
+  if (!aiSource.includes('doc-vs-doc shape (S14 / Lena Park 2026-05-18)')) {
+    throw new Error(`FAIL [Group QQQQ-hardening Site A TASK 2 label]: Site A's TASK 2 schema flavor text must label the doc-vs-doc shape with the "(S14 / Lena Park 2026-05-18)" callout.`);
+  }
+  console.log('  PASS [Group QQQQ-hardening Site A TASK 2 flavor]: doc-vs-doc shape example + S14 label present in schema flavor');
+
+  // Assertion 5: Site B re-evaluation worked example for doc-vs-doc resolution-pending shape
+  if (!aiSource.includes('DOC-VS-DOC shape (S14 / Lena Park 2026-05-18), still pending')) {
+    throw new Error(`FAIL [Group QQQQ-hardening Site B worked example]: Site B (generateBrokerResponse re-evaluation block) must include a doc-vs-doc resolution-pending worked example so Site B's worked examples are symmetric with Site A's enumeration. The re-evaluation gate operates on the same axes — when Site A flags doc-vs-doc on turn 1, Site B must understand the same shape on turn N.`);
+  }
+  console.log('  PASS [Group QQQQ-hardening Site B worked example]: doc-vs-doc resolution-pending case present');
+
+  // Concrete-naming structural guard: Lena Park 2026-05-18 must appear in
+  // exactly 4 distinct prompt locations (Site A line-269 preamble, Site A
+  // worked example, Site A TASK 2 schema flavor, Site B worked example).
+  // Same pattern as the Sandra Fletcher 2026-05-17 callout count (3) above —
+  // concrete production-case naming prevents the rule from drifting into
+  // generic abstractions over future edits.
+  const lenaCallouts = (aiSource.match(/Lena Park 2026-05-18/g) || []).length;
+  if (lenaCallouts !== 4) {
+    throw new Error(`FAIL [Group QQQQ-hardening Lena callout]: expected exactly 4 "Lena Park 2026-05-18" callouts (Site A line-269 preamble, Site A worked example, Site A TASK 2 flavor, Site B worked example), got ${lenaCallouts}. Concrete production-case naming is load-bearing for preventing rule drift.`);
+  }
+  console.log(`  PASS [Group QQQQ-hardening Lena callout]: Lena Park 2026-05-18 named in ${lenaCallouts} prompt locations (matches expected 4)`);
+
   // ─── Source-string regression: computeWillReview clause ────────────
   console.log('\n---------- Group QQQQ / Source-string regression on computeWillReview ----------');
 
@@ -6429,15 +6487,97 @@ Apex Mortgage Solutions Lic. #MB774263`;
     }
     console.log(`Group QQQQ / D2 (broker confirmation 5x): ${5 - d2Leaks}/5 passed, ${d2Leaks}/5 leaked (threshold: ≤1)`);
 
-    // Combined escalation decision (JJJJ/MMMM/KKKK pattern): both scenarios complete first
+    // ── D3 (5x, QQQQ-hardening / S14 prep): doc-vs-doc, email silent on the figure ──
+    // Lena Park 2026-05-18 production shape: broker's email body says nothing
+    // about credit scores; loan-app shows 631/619 while credit bureau shows
+    // 748/752. Pre-hardening the gate fired correctly by Claude generalization
+    // (rule's literal text scoped only "email-body figures and document figures"
+    // at line 269, but Claude inferred doc-vs-doc was in-scope). Post-hardening
+    // the rule explicitly enumerates doc-vs-doc — this scenario proves the
+    // explicit enumeration is BEHAVIORAL (gate still fires), not just textual.
+    //
+    // Hard gate vs D1/D2: D1 + D2 must remain 5/5 (same fixtures as the QQQQ
+    // shipped baseline — proves the rule-text edit didn't perturb existing
+    // behavior). D1 specifically exercises loan_amount ($73K email vs $68K
+    // loan-app) AND existing_mortgage_balance (~$290K email vs $295K payout) —
+    // both in the originally-listed-fields pre-hardening list at line 269.
+    // D1 5/5 post-hardening therefore proves the field-list expansion (adding
+    // ages/tenures to UUU parity) didn't regress the originally-listed-fields
+    // path on at least two of the four originals.
+    console.log('\n---------- Group QQQQ / D3: processInitialEmail emits unresolved_discrepancy=true on Lena-shape doc-vs-doc (5x) ----------');
+
+    const d3Body = `Hi,
+
+New second mortgage submission for your review.
+
+*Borrower:* Lena Park
+*Property:* 224 Birchwood Lane NE, Calgary, AB T3K 2H4
+*Property Value:* $640,000
+*Loan Request:* $85,000 (second mortgage)
+*Existing First Mortgage:* $310,000 (TD Bank)
+*Combined LTV:* ~62%
+*Purpose:* Home renovations and debt consolidation
+
+Documents attached: loan application, credit bureau, appraisal, T4, TD payout statement.
+
+Thanks,
+Jordan Park
+Apex Mortgage Solutions Lic. #MB774263`;
+
+    const d3Attachments = [
+      { Name: 'LoanApplication_Lena_Park.pdf', ContentType: 'application/pdf', Content: qqqqStubPdf, ContentLength: qqqqStubPdf.length },
+      { Name: 'CreditBureau_Lena_Park.pdf', ContentType: 'application/pdf', Content: qqqqStubPdf, ContentLength: qqqqStubPdf.length },
+    ];
+    // Note on extracted_data realism: pdf.js isFormLikeText guards against
+    // sparse synthetic text (shortRatio>0.7 + no $ + no >120-char paragraphs
+    // → treats it as a blank form template and sends base64-only). A first
+    // version of this fixture had a 200-char credit bureau text that tripped
+    // that guard — Claude only received the empty form PDF and never saw
+    // the 748/752 figures, so the discrepancy was undetectable regardless
+    // of the rule. Real credit bureau / loan-app extracted text has dollar
+    // amounts, trade lines, and long descriptive lines — fixture matches
+    // that shape so the dual-path text+base64 route activates as intended.
+    const d3SavedDocs = [
+      { file_name: 'LoanApplication_Lena_Park.pdf', classification: 'loan_application',
+        extracted_data: { text: 'CONFIDENTIAL LOAN APPLICATION FORM\n\nApplicant: Lena Park\nProperty Address: 224 Birchwood Lane NE, Calgary, AB T3K 2H4\nLoan Type: Second Mortgage\nLoan Amount Requested: $85,000\nProperty Value: $640,000\nExisting First Mortgage: $310,000 (TD Bank)\nEmployment: Operations Manager, Suncor Energy, 12 years\nAnnual Income: $118,400\nMonthly Gross Income: $9,866\nMonthly Expenses (excluding shelter): $3,200\n\nCREDIT INFORMATION:\n  Equifax: 631\n  TransUnion: 619\n\nApplicant declares all information above to be accurate to the best of their knowledge.\n\nDate Signed: May 18, 2026\nApplicant Signature: Lena Park' } },
+      { file_name: 'CreditBureau_Lena_Park.pdf', classification: 'credit_report',
+        extracted_data: { text: 'CREDIT BUREAU REPORT — CONSUMER DISCLOSURE\nApplicant: Lena Park\nDate of Birth: March 14, 1981\nSIN: ***-***-456\nReport Date: May 17, 2026\nReport Number: EQ-2026-051718-LP-001\n\nCREDIT SCORES:\n  Equifax: 748 (range 300-900)\n  TransUnion: 752 (range 300-900)\nBoth scores reflect approximately 10 years of credit history with no derogatory marks on file across either bureau.\n\nTRADE LINES (5 ACTIVE):\n- TD Visa: opened 2014, limit $15,000, current balance $2,847, payment history 120/120 on time\n- TD mortgage: opened 2020, original $355,000, current balance $310,000, payment history 64/64 on time\n- Suncor employee credit union LOC: opened 2018, limit $25,000, current balance $0\n- Capital One Mastercard: opened 2016, limit $8,500, current balance $1,123\n- Costco Mastercard: opened 2019, limit $12,000, current balance $645\n\nINQUIRIES (LAST 24 MONTHS): 2 — soft pull by TD on 2025-08-14, hard pull by Suncor on 2024-11-03\nPUBLIC RECORDS: None\nCOLLECTIONS: None' } },
+    ];
+
+    let d3Leaks = 0;
+    for (let run = 1; run <= 5; run++) {
+      try {
+        const { dealSummary } = await aiService.processInitialEmail(
+          'Jordan Park', d3Body, d3Attachments, d3SavedDocs, false, false, false
+        );
+        const unresolved = dealSummary?.unresolved_discrepancy;
+        if (unresolved !== true) {
+          d3Leaks++;
+          console.log(`  Run ${run}: LEAK — unresolved_discrepancy=${JSON.stringify(unresolved)}; expected true (Lena Park doc-vs-doc shape: loan-app 631/619 vs bureau 748/752, email silent on scores)`);
+        } else {
+          console.log(`  Run ${run}: PASS — unresolved_discrepancy=true (correctly flagged doc-vs-doc with email silent on the figure)`);
+        }
+      } catch (e) {
+        d3Leaks++;
+        console.log(`  Run ${run}: ERROR — ${e.message}`);
+      }
+    }
+    console.log(`Group QQQQ / D3 (Lena-shape doc-vs-doc 5x): ${5 - d3Leaks}/5 passed, ${d3Leaks}/5 leaked (threshold: ≤1)`);
+
+    // Combined escalation decision (JJJJ/MMMM/KKKK pattern): all three scenarios complete first.
+    // D1/D2 carry stricter semantics post-hardening: they must remain at the QQQQ shipped
+    // baseline (5/5), since the hardening's "no behavior change" claim requires it. Any
+    // shift from 5/5 means the rule-text edit perturbed existing behavior — surface deltas
+    // and revert/adjust before commit. D3 follows standard ≤1 threshold.
     const qqqqFindings = [];
-    if (d1Leaks > 1) qqqqFindings.push(`D1 (Sandra initial): ${d1Leaks}/5 leaked — Claude not reliably emitting unresolved_discrepancy=true on initial submission with email-vs-doc mismatches. Worked-examples block may need strengthening or further Sandra callout.`);
-    if (d2Leaks > 1) qqqqFindings.push(`D2 (broker confirmation): ${d2Leaks}/5 leaked — Claude not reliably flipping true→false after broker explicitly confirmed both figures. RE-EVALUATION block may need explicit "resolution must be evidenced" expansion or escalation to a structured JS-side resolution check.`);
+    if (d1Leaks > 0) qqqqFindings.push(`D1 (Sandra initial / email-vs-doc): ${d1Leaks}/5 leaked — SHIFT FROM SHIPPED BASELINE (5/5). The QQQQ-hardening rule rewrite perturbed email-vs-doc path behavior. Surface diff + the specific leak shapes before commit. Do NOT commit.`);
+    if (d2Leaks > 0) qqqqFindings.push(`D2 (broker confirmation / re-evaluation): ${d2Leaks}/5 leaked — SHIFT FROM SHIPPED BASELINE (5/5). Site B worked-example addition perturbed re-evaluation behavior. Revert Site B's worked example or adjust before commit.`);
+    if (d3Leaks > 1) qqqqFindings.push(`D3 (Lena doc-vs-doc): ${d3Leaks}/5 leaked — explicit enumeration isn't strong enough to make Claude reliably fire on doc-vs-doc + email-silent. Worked example may need strengthening or further callout.`);
     if (qqqqFindings.length > 0) {
       throw new Error(`FAIL [Group QQQQ / D escalation]: ${qqqqFindings.length} scenario(s) crossed threshold.\n  - ${qqqqFindings.join('\n  - ')}\nSurface escalation shape before commit.`);
     }
   } else {
-    console.log('\n---------- Group QQQQ / D1 + D2: SKIPPED (set RUN_QQQQ_D=1 to run) ----------');
+    console.log('\n---------- Group QQQQ / D1 + D2 + D3: SKIPPED (set RUN_QQQQ_D=1 to run) ----------');
   }
 
   // ════════════════════════════════════════════════════════════════
