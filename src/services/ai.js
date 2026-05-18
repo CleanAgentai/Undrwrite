@@ -290,6 +290,31 @@ You MUST return your response in this EXACT format with these exact delimiters:
 (your JSON deal summary here)
 ---END_SUMMARY---`;
 
+// Group HHH (S15.1) fast-path regexes for parseIdentityClarification. Hoisted
+// to module scope (was inline pre-2026-05-18) so the test harness can hit them
+// directly for negative-case verification — pre-hoist the truth table called
+// parseIdentityClarification end-to-end, which silently fell through to Claude
+// when the fast-path missed, masking real coverage gaps as Claude-flake.
+//
+// Pattern 1 (HHH-followup 2026-05-18): character-class the literal words —
+// "[Cc]orrect" and "[Bb]orrower" — to cover sentence-initial capitalization
+// ("Borrower name is X", "Correct borrower is X") that pre-followup silently
+// fell through to Claude. NOT using /i flag because that would also case-
+// insensitive-ize the [A-Z][a-z]+ capture group and false-positive on
+// "borrower is going to take..." (capturing "going to take" as a name).
+// The capture group stays strict (proper-case-anchored 2-4 word names);
+// only the LITERAL words flex case.
+//
+// Patterns 2 + 3 unchanged from HHH introduction (be193aa). Pattern 2's
+// capture leads, so no sentence-initial-capital issue. Pattern 3's /i flag
+// is scoped to the narrower "ignore X, it's Y" shape — out of HHH-followup's
+// scope.
+const IDENTITY_FAST_RESOLVE_PATTERNS = [
+  /(?:[Cc]orrect\s+[Bb]orrower\s+is|[Bb]orrower\s+(?:is|should\s+be|name\s+is))\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/,
+  /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+is\s+(?:the\s+)?correct\b/,
+  /\bignore\s+(?:the\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?[,\s—]+(?:it'?s|the\s+borrower\s+is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/i,
+];
+
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
   processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false) => {
@@ -1755,12 +1780,10 @@ BROKER'S REPLY:
 
     // Fast-path: explicit "[Name] is correct" / "the correct borrower is [Name]" patterns.
     // Capture the resolved name. Conservative — only fires on tight patterns.
-    const fastResolvePatterns = [
-      /(?:correct\s+borrower\s+is|borrower\s+(?:is|should\s+be|name\s+is))\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/,
-      /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s+is\s+(?:the\s+)?correct\b/,
-      /\bignore\s+(?:the\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?[,\s—]+(?:it'?s|the\s+borrower\s+is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/i,
-    ];
-    for (const re of fastResolvePatterns) {
+    // Patterns are defined at module scope (IDENTITY_FAST_RESOLVE_PATTERNS) so
+    // the test harness can verify them directly for negative cases — see top
+    // of this file for the HHH-followup rationale.
+    for (const re of IDENTITY_FAST_RESOLVE_PATTERNS) {
       const m = text.match(re);
       if (m) return { disposition: 'resolved', message: text, confirmedBorrowerName: m[1] };
     }
@@ -2277,4 +2300,9 @@ ${JSON.stringify(summaryData, null, 2)}`,
       throw error;
     }
   },
+
+  // Exposed for HHH-followup test verification: the fast-path regex array
+  // for parseIdentityClarification. See the const declaration above
+  // module.exports for the rationale on why this is hoisted to module scope.
+  IDENTITY_FAST_RESOLVE_PATTERNS,
 };

@@ -1244,26 +1244,88 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   // classifies broker reply as 'resolved' (with optional confirmedBorrowerName) or
   // 'unresolved'. Fast-path regex catches unambiguous resolutions; everything else
   // flows to Claude. This block tests fast-path patterns deterministically.
+  //
+  // HHH-followup 2026-05-18: the loop body is now a TWO-STEP assertion. Step 1
+  // hits the fast-path regex directly (aiService.IDENTITY_FAST_RESOLVE_PATTERNS)
+  // and FAILS if no pattern matches — i.e. if the case would silently fall
+  // through to Claude. Pre-followup the loop only called parseIdentityClarification
+  // end-to-end, so a regex miss masqueraded as a Claude-flake when the API
+  // degraded (Daniel Rosen 3-strike during the credit-exhaustion phase). The
+  // first step locks in the contract this truth table's label promises:
+  // "fast-path (no Claude)" — a regex miss is a hard FAIL, not a silent
+  // Claude-dependent pass.
+  //
+  // Pattern 1 (HHH-followup): character-classed [Cc]orrect / [Bb]orrower to
+  // cover sentence-initial capitalization. Sibling lock-in rows ("Correct
+  // borrower is X", "Borrower is X", "Borrower should be X") prove the new
+  // coverage and prevent silent regression back to "lowercase only".
   console.log('\n========== GROUP HHH — parseIdentityClarification fast-path truth table ==========');
   const identityClashCases = [
-    // Resolved with extracted name
+    // Existing cases (HHH be193aa)
     ['Anna Bergstrom is the correct borrower.',                                'resolved',  'Anna Bergstrom'],
     ['The correct borrower is Anna Bergstrom — apologies for the confusion.',  'resolved',  'Anna Bergstrom'],
     ['borrower is Lisa Smith, both prior were wrong.',                         'resolved',  'Lisa Smith'],
     ['borrower should be Anna Bergstrom.',                                     'resolved',  'Anna Bergstrom'],
     ['Borrower name is Daniel Rosen.',                                         'resolved',  'Daniel Rosen'],
+    // HHH-followup sibling lock-ins (sentence-initial capitalization).
+    // Pre-followup these silently fell through to Claude — natural broker
+    // reply shapes that the fast-path regex now covers deterministically.
+    ['Correct borrower is Anna Bergstrom.',                                    'resolved',  'Anna Bergstrom'],
+    ['Borrower is Daniel Rosen.',                                              'resolved',  'Daniel Rosen'],
+    ['Borrower should be Anna Bergstrom.',                                     'resolved',  'Anna Bergstrom'],
   ];
   let identityFastPassed = 0;
   for (const [reply, expectedDisp, expectedName] of identityClashCases) {
-    const result = await aiService.parseIdentityClarification(reply);
-    if (result.disposition === expectedDisp && result.confirmedBorrowerName === expectedName) {
-      console.log(`  PASS: ${JSON.stringify(reply.slice(0, 55))} → '${expectedDisp}' (${expectedName})`);
-      identityFastPassed++;
-    } else {
-      throw new Error(`FAIL [Group HHH parseIdentityClarification ${JSON.stringify(reply)}]: expected '${expectedDisp}' (${expectedName}), got '${result.disposition}' (${result.confirmedBorrowerName})`);
+    // Step 1 (HHH-followup): fast-path regex MUST match. A regex miss here
+    // means the case would silently fall through to Claude — exactly the bug
+    // this block guards against. Hard FAIL with a label that names the
+    // failure mode, not the surface symptom.
+    let fastPathCapture = null;
+    for (const re of aiService.IDENTITY_FAST_RESOLVE_PATTERNS) {
+      const m = reply.match(re);
+      if (m) { fastPathCapture = m[1]; break; }
     }
+    if (!fastPathCapture) {
+      throw new Error(`FAIL [Group HHH fast-path ${JSON.stringify(reply)}]: no regex match — case would silently fall through to Claude (the bug this block guards against)`);
+    }
+    if (fastPathCapture !== expectedName) {
+      throw new Error(`FAIL [Group HHH capture ${JSON.stringify(reply)}]: expected '${expectedName}', regex captured '${fastPathCapture}'`);
+    }
+    // Step 2: end-to-end parseIdentityClarification still returns expected
+    // shape. With step 1 passing, this call's fast-path returns immediately
+    // (no Claude call) — fully deterministic.
+    const result = await aiService.parseIdentityClarification(reply);
+    if (result.disposition !== expectedDisp || result.confirmedBorrowerName !== expectedName) {
+      throw new Error(`FAIL [Group HHH end-to-end ${JSON.stringify(reply)}]: expected '${expectedDisp}' (${expectedName}), got '${result.disposition}' (${result.confirmedBorrowerName})`);
+    }
+    console.log(`  PASS: ${JSON.stringify(reply.slice(0, 55))} → fast-path captured '${expectedName}', end-to-end resolved`);
+    identityFastPassed++;
   }
   console.log(`Group HHH parseIdentityClarification fast-path: ${identityFastPassed}/${identityClashCases.length} passed`);
+
+  // HHH-followup negative cases — regex-only (no parseIdentityClarification
+  // call), fully deterministic. Guards against the false-positive risk on
+  // "borrower is <non-name continuation>" shapes. The capture group's
+  // [A-Z][a-z]+ + {1,3}-extra-words structure should reject these because
+  // each continuation starts with a lowercase token. Lock the rejection in.
+  const identityFastNegatives = [
+    'borrower is going to take a different approach',
+    'borrower is still deciding',
+    'borrower is the same person',
+    'borrower is not changing',
+  ];
+  let identityNegPassed = 0;
+  for (const reply of identityFastNegatives) {
+    for (const re of aiService.IDENTITY_FAST_RESOLVE_PATTERNS) {
+      const m = reply.match(re);
+      if (m) {
+        throw new Error(`FAIL [Group HHH negative ${JSON.stringify(reply)}]: regex ${re.source} should NOT match but captured '${m[1]}'`);
+      }
+    }
+    console.log(`  PASS (negative): ${JSON.stringify(reply.slice(0, 60))} → no fast-path match`);
+    identityNegPassed++;
+  }
+  console.log(`Group HHH fast-path negatives: ${identityNegPassed}/${identityFastNegatives.length} passed`);
 
   // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
