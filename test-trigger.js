@@ -11331,6 +11331,60 @@ Brian`;
     console.log(`  PASS [Group JJJ-hardening]: all ${jjjHardeningMarkers.length} explicit rule fragments present inside INITIAL_EMAIL_PROMPT bounds`);
 
     // JJJ.1 — INITIAL email must NOT mention AML/PEP
+    // ════════════════════════════════════════════════════════════════
+    // GROUP JJJ.1-REGEX — deterministic credit-ask regex coverage
+    // ════════════════════════════════════════════════════════════════
+    // The JJJ.1 live smoke below asserts Vienna's welcome still asks for
+    // "credit bureau/report" intake. Pre-fix the assertion regex was
+    // /credit\s+(?:bureau|report|pulled\s+credit)/i — the third alternative
+    // was a dead branch: with `credit\s+` as a required prefix outside the
+    // group, `pulled\s+credit` becomes "credit pulled credit" (impossible
+    // English). The intended catch — "have you pulled credit for X" without
+    // bureau/report — never matched. JJJ.1 then probabilistically failed
+    // whenever Vienna phrased the credit ask as "Have you pulled credit
+    // for the borrower(s)?" (the S15 test run captured this exact failure
+    // against the same fixture).
+    //
+    // Fix: two top-level alternatives separated by `|`. Plus `s?` before
+    // the `\b` after bureau/report (the trailing `\b` rejects plurals
+    // because `t` and `s` are both word chars — caught during planning).
+    //
+    // This deterministic mini-truth-table locks the new regex against the
+    // full coverage matrix (singular + plural for bureau/report, "pulled
+    // credit" standalone, false-positive bait). Vienna's phrasing variance
+    // can't regress JJJ.1 as long as the regex itself stays correct. Same
+    // test-honesty pattern as HHH-followup (fast-path truth table that
+    // makes the test stop lying about what it validates).
+    console.log('\n========== GROUP JJJ.1-REGEX — deterministic credit-ask regex coverage ==========');
+    const JJJ1_CREDIT_REGEX = /\bcredit\s+(?:bureau|report)s?\b|\bpulled\s+credit\b/i;
+    const jjj1RegexCases = [
+      // POSITIVE — every valid Vienna credit-ask phrasing
+      ['credit bureau',                                              true],
+      ['credit bureaus',                                             true],  // plural — would have shipped broken without s?
+      ['credit report',                                              true],
+      ['credit reports',                                             true],  // plural — load-bearing
+      ['credit bureau reports',                                      true],  // observed in prior green run
+      ['Credit Bureau Reports',                                      true],  // title case
+      ['CREDIT BUREAUS',                                             true],  // all caps
+      ['Have you pulled credit for the borrower(s)?',                true],  // production wording that exposed the dead third alt
+      ['Have you already pulled a credit report?',                   true],  // alt 1 matches "credit report"
+      ['Credit bureau reports — have you pulled credit for Marcus?', true],  // observed in prior green run
+      // NEGATIVE — regression-guard intent preserved
+      ['Some other text with no credit ask',                         false],
+      ['discredit reports',                                          false], // leading \b before "credit" blocks inside "discredit"
+      ['creditreports without space',                                false], // \s+ requires whitespace
+    ];
+    let jjj1RegexPassed = 0;
+    for (const [input, expected] of jjj1RegexCases) {
+      const got = JJJ1_CREDIT_REGEX.test(input);
+      if (got === expected) {
+        jjj1RegexPassed++;
+      } else {
+        throw new Error(`FAIL [Group JJJ.1-REGEX]: input ${JSON.stringify(input)} expected ${expected}, got ${got}. The credit-ask regex must accept every valid Vienna phrasing (singular + plural for bureau/report, "pulled credit" standalone) AND reject phrasings without an actual credit ask. Same test-honesty pattern as HHH-followup.`);
+      }
+    }
+    console.log(`  PASS [Group JJJ.1-REGEX]: ${jjj1RegexPassed}/${jjj1RegexCases.length} cases (positive + plural + false-positive bait)`);
+
     console.log('\n========== GROUP JJJ.1 — INITIAL email no AML/PEP at intake ==========');
     try {
       const jjjInitialBody = `Hi Franco,
@@ -11373,7 +11427,7 @@ Apex Mortgage`;
         [/(?:payout\s+statement|mortgage\s+payout)/i, 'mortgage payout statement'],
         [/appraisal/i, 'appraisal'],
         [/(?:proof\s+of\s+income|NOA|notice\s+of\s+assessment)/i, 'proof of income'],
-        [/credit\s+(?:bureau|report|pulled\s+credit)/i, 'credit bureau/report'],
+        [/\bcredit\s+(?:bureau|report)s?\b|\bpulled\s+credit\b/i, 'credit bureau(s) / report(s) / pulled credit'],
       ];
       for (const [re, label] of expectedJJJ1) {
         if (!re.test(jjjInitialEmail)) {
