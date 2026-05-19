@@ -5551,6 +5551,385 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log(`  PASS [C5-CLARIFICATION-ACK P3 / Grace-residual lock]: ${c5GggProbes.length}/${c5GggProbes.length} GGG-concern probes pass enforceNoRoutingLeak unchanged — E coverage gap is the documented evidence for Grace-shape residual (lifting GGG L2142 unsafe at MVP); future pattern-set changes trip this test → conscious review`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP C7-SIGNATURE-PARSER — R4-Bucket-C.7 broker-name parsing (R4-S2 Marcus)
+  // ════════════════════════════════════════════════════════════════
+  // Deterministic JS-side parse of broker first-name from email signature.
+  // Marcus's bug: Franco's admin proxy footer (below `\n-- \n` RFC delim)
+  // shadowed Natalie's actual signature → Vienna emitted "Hi there!" generic.
+  // Fix: RFC-footer-strip BEFORE name extraction, anchor on `Lic. #` marker,
+  // Title-Case first-name validation, explicit negative filters (titles,
+  // license numbers, company tokens, admin name).
+  console.log('\n========== GROUP C7-SIGNATURE-PARSER — broker-name extraction truth table ==========');
+  const c7Cases = [
+    // ─── POSITIVES — must extract correct first name ───
+    {
+      label: 'P1 Marcus 1f1e7ac4 verbatim (R4-S2 Franco-reported)',
+      input: `Hi, I'm submitting a new mortgage application for your review.
+
+*Borrower:* Marcus Webb *Property:* 1142 Tory Road NW
+
+*Natalie Bergman*
+
+Summit Financial Group Lic. #MB338764
+
+--
+Franco Maione
+Founder at VIMA Real Broker
+Mobile (780) 975-3339`,
+      expected: 'Natalie',
+    },
+    {
+      label: 'P2 bare-name variant (Steven Laroche / Crestwood)',
+      input: `Hi, application attached.
+
+Steven Laroche
+Crestwood Mortgage Services Lic. #MB779034
+
+--
+Footer text`,
+      expected: 'Steven',
+    },
+    {
+      label: 'P3 double-asterisk variant (**Alex Thompson**)',
+      input: `Hi, application attached.
+
+**Alex Thompson**
+Clearview Mortgage Inc. Lic. #MB114829
+
+--
+Footer text`,
+      expected: 'Alex',
+    },
+    // ─── NEGATIVES — must return null (over-fire protection; "confidently wrong > generic fallback") ───
+    {
+      label: 'N1 no signature at all',
+      input: `Hi, send me a quote. Thanks.`,
+      expected: null,
+    },
+    {
+      label: 'N2 only admin footer (no broker sig before --)',
+      input: `Hi, application attached.
+
+--
+Franco Maione
+Founder at VIMA Real Broker
+Mobile (780) 975-3339`,
+      expected: null,
+    },
+    {
+      label: 'N3 license-only (company name, no person name)',
+      input: `Hi, application attached.
+
+Summit Financial Group Lic. #MB338764
+
+--
+Footer`,
+      expected: null,
+    },
+    {
+      label: 'N4 title-as-first-token "Mortgage Broker"',
+      input: `Hi.
+
+Mortgage Broker
+Summit Group Lic. #MB123
+
+--
+Footer`,
+      expected: null,
+    },
+    {
+      label: 'N5 admin name in signature (defense-in-depth — never echo "Franco")',
+      input: `Hi.
+
+*Franco Maione*
+VIMA Real Broker Lic. #MB000
+
+--
+Footer`,
+      expected: null,
+    },
+  ];
+  let c7Passed = 0;
+  for (const tc of c7Cases) {
+    const got = aiService.parseBrokerFirstNameFromSignature(tc.input);
+    if (got !== tc.expected) {
+      throw new Error(`FAIL [C7-SIGNATURE-PARSER ${tc.label}]: expected ${JSON.stringify(tc.expected)}, got ${JSON.stringify(got)}.\nInput first 200: ${tc.input.slice(0, 200).replace(/\n/g, '\\n')}`);
+    }
+    console.log(`  PASS [${tc.label}]: ${tc.expected === null ? 'null (over-fire blocked)' : `extracted "${got}"`}`);
+    c7Passed++;
+  }
+  console.log(`Group C7-SIGNATURE-PARSER: ${c7Passed}/${c7Cases.length} passed (P1-P3 corpus-verified positives + N1-N5 over-fire negatives)`);
+
+  // GROUP C7-COLLISION-WIRING — source-grep that JJJ-hardening + parser wiring is in place.
+  console.log('\n========== GROUP C7-COLLISION-WIRING — JJJ prompt hardening + call-site wiring ==========');
+  const c7AiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const c7WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  // (a) JJJ F2 hardening: explicit CRITICAL block forbidding "Hi Franco" with self-check.
+  if (!/F2 anti-pattern, JJJ explicit-CRITICAL hardening/.test(c7AiSrc)) {
+    throw new Error(`FAIL [C7-COLLISION-WIRING / JJJ marker]: ai.js missing "F2 anti-pattern, JJJ explicit-CRITICAL hardening" marker in processInitialEmail collision-instructions block.`);
+  }
+  if (!/NEVER greet as "Hi Franco/.test(c7AiSrc)) {
+    throw new Error(`FAIL [C7-COLLISION-WIRING / JJJ explicit "NEVER Hi Franco"]: collision-instructions must contain explicit "NEVER greet as 'Hi Franco' ..." block (JJJ implicit→explicit-CRITICAL carry-forward).`);
+  }
+  console.log('  PASS [C7-COLLISION-WIRING / JJJ hardening]: F2 anti-pattern is explicit CRITICAL with self-check in processInitialEmail collision-instructions');
+  // (b) parsedBrokerFirstName threaded through processInitialEmail opts.
+  if (!/parsedBrokerFirstName/.test(c7AiSrc)) {
+    throw new Error(`FAIL [C7-COLLISION-WIRING / parsedBrokerFirstName opt]: processInitialEmail must accept parsedBrokerFirstName opt for deterministic greeting.`);
+  }
+  // (c) Webhook initial-submission branch calls the parser and threads the result.
+  if (!/aiService\.parseBrokerFirstNameFromSignature\(/.test(c7WebhookSrc)) {
+    throw new Error(`FAIL [C7-COLLISION-WIRING / call-site]: webhook.js must call aiService.parseBrokerFirstNameFromSignature (initial-submission greeting wiring).`);
+  }
+  if (!/parsedBrokerFirstName:\s*_c7ParsedBrokerName/.test(c7WebhookSrc)) {
+    throw new Error(`FAIL [C7-COLLISION-WIRING / opt threading]: webhook.js must pass parsedBrokerFirstName through processInitialEmail opts.`);
+  }
+  console.log('  PASS [C7-COLLISION-WIRING / call-site wiring]: webhook.js initial-submission calls parseBrokerFirstNameFromSignature and threads through processInitialEmail opts');
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C6-DOC-LIST-RENDER — R4-Bucket-C.6 Documents Included JS render (R4-S1 Grace T4)
+  // ════════════════════════════════════════════════════════════════
+  // Pure-render function over canonical (documents, missingDocs) arrays —
+  // miscount-proof by construction. R1 carries the real-Grace load; R4 is
+  // a synthesized negative (acceptable here per user direction: tests a
+  // pure-map property, not extraction-faithfulness).
+  console.log('\n========== GROUP C6-DOC-LIST-RENDER — JS-render Section 9 truth table ==========');
+  const c6RenderCases = [
+    {
+      label: 'R1 Grace 5f8e4921 REAL fixture — full enumeration incl. T4 + 3 missing',
+      docs: [
+        { file_name: 'Credit_Bureau_Grace_Paulson.pdf', classification: 'credit_report' },
+        { file_name: 'Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf', classification: 'appraisal' },
+        { file_name: 'T4_Grace_Paulson_2025.pdf', classification: 'income_proof' },
+        { file_name: 'LoanApplication_Grace_Paulson.pdf', classification: 'loan_application' },
+        { file_name: 'PNW_Statement_Grace_Paulson.pdf', classification: 'pnw_statement' },
+      ],
+      missing: ['government_id', 'property_tax', 'mortgage_statement'],
+      mustContain: [
+        '[RECEIVED] Credit_Bureau_Grace_Paulson.pdf (credit_report)',
+        '[RECEIVED] Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf (appraisal)',
+        '[RECEIVED] T4_Grace_Paulson_2025.pdf (income_proof)',
+        '[RECEIVED] LoanApplication_Grace_Paulson.pdf (loan_application)',
+        '[RECEIVED] PNW_Statement_Grace_Paulson.pdf (pnw_statement)',
+        '[MISSING] Government-Issued ID',
+        '[MISSING] Property Tax Assessment',
+        '[MISSING] Current Mortgage Payout Statement',
+      ],
+    },
+    {
+      label: 'R2 empty docs + 3 missing → only [MISSING] items',
+      docs: [],
+      missing: ['government_id', 'appraisal', 'credit_report'],
+      mustContain: ['[MISSING] Government-Issued ID', '[MISSING] Property Appraisal', '[MISSING] Credit Report'],
+      mustNotContain: ['[RECEIVED]'],
+    },
+    {
+      label: 'R3 8 docs all present + empty missing → all [RECEIVED], no [MISSING]',
+      docs: [
+        { file_name: 'a.pdf', classification: 'credit_report' },
+        { file_name: 'b.pdf', classification: 'appraisal' },
+        { file_name: 'c.pdf', classification: 'property_tax' },
+        { file_name: 'd.pdf', classification: 'mortgage_statement' },
+        { file_name: 'e.pdf', classification: 'income_proof' },
+        { file_name: 'f.pdf', classification: 'government_id' },
+        { file_name: 'g.pdf', classification: 'aml' },
+        { file_name: 'h.pdf', classification: 'pep' },
+      ],
+      missing: [],
+      mustContain: ['[RECEIVED] a.pdf', '[RECEIVED] h.pdf'],
+      mustNotContain: ['[MISSING]'],
+    },
+    {
+      label: 'R4 OVER-FIRE NEGATIVE (synthesized) — 5 docs WITHOUT T4 → output must NOT contain T4',
+      docs: [
+        { file_name: 'Credit_Bureau_Grace_Paulson.pdf', classification: 'credit_report' },
+        { file_name: 'Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf', classification: 'appraisal' },
+        { file_name: 'LoanApplication_Grace_Paulson.pdf', classification: 'loan_application' },
+        { file_name: 'PNW_Statement_Grace_Paulson.pdf', classification: 'pnw_statement' },
+        { file_name: 'GovID_Grace_Paulson.pdf', classification: 'government_id' },
+      ],
+      missing: [],
+      mustContain: ['[RECEIVED] Credit_Bureau_Grace_Paulson.pdf', '[RECEIVED] GovID_Grace_Paulson.pdf'],
+      mustNotContain: ['T4_Grace_Paulson_2025.pdf', 'T4_Grace'],
+    },
+    {
+      label: 'R5 doc with null classification → "(unclassified)"',
+      docs: [{ file_name: 'mystery.pdf', classification: null }],
+      missing: [],
+      mustContain: ['[RECEIVED] mystery.pdf (unclassified)'],
+    },
+    {
+      label: 'R6 DOC_DISPLAY_NAMES lookup — "mortgage_statement" → "Current Mortgage Payout Statement"',
+      docs: [],
+      missing: ['mortgage_statement'],
+      mustContain: ['[MISSING] Current Mortgage Payout Statement'],
+      mustNotContain: ['[MISSING] mortgage_statement'],
+    },
+  ];
+  let c6Passed = 0;
+  for (const tc of c6RenderCases) {
+    const got = aiService.renderDocumentsIncludedSection(tc.docs, tc.missing);
+    if (!got.startsWith('<h2>Documents Included</h2>')) {
+      throw new Error(`FAIL [C6-DOC-LIST-RENDER ${tc.label}]: output must start with "<h2>Documents Included</h2>". Got:\n${got}`);
+    }
+    for (const needle of (tc.mustContain || [])) {
+      if (!got.includes(needle)) {
+        throw new Error(`FAIL [C6-DOC-LIST-RENDER ${tc.label}]: expected output to contain "${needle}".\nGot:\n${got}`);
+      }
+    }
+    for (const needle of (tc.mustNotContain || [])) {
+      if (got.includes(needle)) {
+        throw new Error(`FAIL [C6-DOC-LIST-RENDER ${tc.label}]: expected output to NOT contain "${needle}".\nGot:\n${got}`);
+      }
+    }
+    console.log(`  PASS [${tc.label}]`);
+    c6Passed++;
+  }
+  console.log(`Group C6-DOC-LIST-RENDER: ${c6Passed}/${c6RenderCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C6-B-SNAPSHOT-INTERACTION — REQUIRED: C.5/B-Snapshot regression-direction pin
+  // ════════════════════════════════════════════════════════════════
+  // The load-bearing risk for C.6: strip+inject operates on the SAME prelim
+  // email where B 2b prepends the Deal Snapshot block that C.5's REQUIRED-1
+  // specifically verified shows Grace's CORRECTED figures (postal T3K 4J9,
+  // value $615K, loan $375,150, LTV 61% combined). If C.6's strip regex
+  // over-matches into B's adjacent Snapshot, Grace's corrected-figures
+  // surface regresses — straight to Franco on the R4-S1 retest at the
+  // milestone. Assemble a realistic prelim with all three coexisting
+  // (B Snapshot + FILE STATUS banner + Claude's buggy Documents Included),
+  // run the full C.6 pipeline, assert B Snapshot is BYTE-INTACT.
+  console.log('\n========== GROUP C6-B-SNAPSHOT-INTERACTION — strip+inject does NOT corrupt B Snapshot (Grace REQUIRED-1 surface) ==========');
+  // B 2b's actual Snapshot HTML for Grace (verbatim from real msg[3] +
+  // renderDealSnapshot output with C.5-verified corrected figures).
+  const c6GraceBSnapshot = `<h2>Deal Snapshot</h2>
+<p><strong>Property Address:</strong> 88 harvest hills blvd ne</p>
+<p><strong>City / Province:</strong> Calgary / AB</p>
+<p><strong>Loan Amount Requested:</strong> $375,150</p>
+<p><strong>Mortgage Position:</strong> 2nd</p>
+<p><strong>Appraised Value:</strong> $615,000</p>
+<p><strong>LTV:</strong> 61% (computed)</p>
+<p><strong>Borrower Type:</strong> Personal</p>
+<p><strong>Ownership Type:</strong> Personal</p>`;
+  const c6BannerLine = `<p><strong>FILE STATUS:</strong> PRELIMINARY REVIEW — AWAITING APPROVAL</p>`;
+  // Vienna's narrative INCLUDING the buggy Documents Included section (4/5
+  // received with T4 dropped — verbatim from Grace's real msg[3] body).
+  const c6ViennaNarrative = `<h2>Borrower Overview</h2>
+<p>Grace Marie Paulson is an elementary school teacher with the Calgary Board of Education with 14 years of experience.</p>
+
+<h2>Loan Purpose</h2>
+<p>Home renovation and debt consolidation.</p>
+
+<h2>Documents Included</h2>
+<ul>
+<li>[RECEIVED] Credit_Bureau_Grace_Paulson.pdf (credit_report)</li>
+<li>[RECEIVED] Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf (appraisal)</li>
+<li>[RECEIVED] LoanApplication_Grace_Paulson.pdf (loan_application)</li>
+<li>[RECEIVED] PNW_Statement_Grace_Paulson.pdf (pnw_statement)</li>
+<li>[MISSING] Current Mortgage Payout Statement</li>
+</ul>
+
+<hr>
+<p><em>The sections below are internal — do not forward to lenders.</em></p>
+
+<h2>Email Conversation (Internal — Do Not Forward)</h2>
+<p><strong>INBOUND from Alex Thompson</strong> - 2026-05-18T22:01:33Z</p>
+<p>Hi, application attached.</p>`;
+
+  // Assemble the realistic prelim: banner + B Snapshot + Vienna narrative
+  // (mirrors what webhook.js produces after enforceReviewBanner +
+  // prependDealSnapshot + Vienna's generateLeadSummary output).
+  const c6AssembledPrelim = `${c6BannerLine}\n${c6GraceBSnapshot}\n\n${c6ViennaNarrative}`;
+
+  // Grace's REAL documents (5, T4 included) + REAL missing (3).
+  const c6GraceDocs = [
+    { file_name: 'Credit_Bureau_Grace_Paulson.pdf', classification: 'credit_report' },
+    { file_name: 'Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf', classification: 'appraisal' },
+    { file_name: 'T4_Grace_Paulson_2025.pdf', classification: 'income_proof' },
+    { file_name: 'LoanApplication_Grace_Paulson.pdf', classification: 'loan_application' },
+    { file_name: 'PNW_Statement_Grace_Paulson.pdf', classification: 'pnw_statement' },
+  ];
+  const c6GraceMissing = ['government_id', 'property_tax', 'mortgage_statement'];
+
+  // Run full C.6 pipeline.
+  const c6PipelineResult = aiService.stripAndInjectDocumentsIncluded(c6AssembledPrelim, c6GraceDocs, c6GraceMissing);
+  const c6Final = c6PipelineResult.result;
+
+  // (1) B's Snapshot block is BYTE-INTACT.
+  if (!c6Final.includes(c6GraceBSnapshot)) {
+    throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (1) / B Snapshot byte-intact]: C.6 strip+inject CORRUPTED B's Snapshot block. Grace's REQUIRED-1-verified corrected figures (postal T3K 4J9, value $615K, loan $375,150, LTV 61%) regressed.\nExpected substring:\n${c6GraceBSnapshot}\n\nFinal output:\n${c6Final}`);
+  }
+  console.log('  PASS [C6-B-SNAPSHOT-INTERACTION (1)]: B Deal Snapshot block byte-intact through C.6 pipeline — Grace REQUIRED-1 corrected figures (postal T3K 4J9, $615K, $375,150, 61% LTV) untouched');
+
+  // (2) FILE STATUS banner intact.
+  if (!c6Final.includes(c6BannerLine)) {
+    throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (2) / banner intact]: C.6 strip+inject corrupted the FILE STATUS banner. Final:\n${c6Final}`);
+  }
+  console.log('  PASS [C6-B-SNAPSHOT-INTERACTION (2)]: FILE STATUS banner byte-intact');
+
+  // (3) Documents Included correctly replaced — T4 + gov_id + property_tax now present.
+  if (!c6Final.includes('[RECEIVED] T4_Grace_Paulson_2025.pdf (income_proof)')) {
+    throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (3) / T4 present]: Documents Included must contain T4 line after C.6 injection. Final:\n${c6Final}`);
+  }
+  if (!c6Final.includes('[MISSING] Government-Issued ID')) {
+    throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (3) / gov_id present]: [MISSING] Government-Issued ID must appear after C.6 injection (full section-wide fix, not just T4). Final:\n${c6Final}`);
+  }
+  if (!c6Final.includes('[MISSING] Property Tax Assessment')) {
+    throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (3) / property_tax present]: [MISSING] Property Tax Assessment must appear after C.6 injection (full section-wide fix). Final:\n${c6Final}`);
+  }
+  // Claude's buggy 4-line list must be GONE (no duplicate Documents Included sections).
+  const c6DocsIncludedCount = (c6Final.match(/<h2>\s*Documents\s+Included\s*<\/h2>/gi) || []).length;
+  if (c6DocsIncludedCount !== 1) {
+    throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (3) / single-section]: expected exactly 1 "Documents Included" heading in final output, got ${c6DocsIncludedCount}. Claude's buggy section was not properly stripped before JS injection.`);
+  }
+  console.log('  PASS [C6-B-SNAPSHOT-INTERACTION (3)]: Documents Included replaced authoritatively — T4 + gov_id + property_tax present; exactly 1 section in final output (no duplicate)');
+
+  // (4) Ordering non-conflicting: banner → B Snapshot → narrative → JS Docs → <hr> → email conv.
+  const idxBanner = c6Final.indexOf(c6BannerLine);
+  const idxSnapshot = c6Final.indexOf(c6GraceBSnapshot);
+  const idxNarrativeStart = c6Final.indexOf('<h2>Borrower Overview</h2>');
+  const idxJsDocs = c6Final.indexOf('<h2>Documents Included</h2>');
+  const idxHr = c6Final.indexOf('<hr>');
+  const idxEmailConv = c6Final.indexOf('<h2>Email Conversation');
+  const positions = [
+    ['FILE STATUS banner', idxBanner],
+    ['B Deal Snapshot', idxSnapshot],
+    ['Borrower Overview (narrative)', idxNarrativeStart],
+    ['JS Documents Included', idxJsDocs],
+    ['<hr> Section-10 separator', idxHr],
+    ['Email Conversation', idxEmailConv],
+  ];
+  for (const [label, idx] of positions) {
+    if (idx < 0) throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (4) / ordering]: ${label} not found in final output.`);
+  }
+  for (let i = 1; i < positions.length; i++) {
+    const [prevLabel, prevIdx] = positions[i - 1];
+    const [curLabel, curIdx] = positions[i];
+    if (prevIdx >= curIdx) {
+      throw new Error(`FAIL [C6-B-SNAPSHOT-INTERACTION (4) / ordering]: expected "${prevLabel}" (offset ${prevIdx}) to appear BEFORE "${curLabel}" (offset ${curIdx}). C.6 inject position violated.`);
+    }
+  }
+  console.log(`  PASS [C6-B-SNAPSHOT-INTERACTION (4)]: ordering FILE STATUS → B Snapshot → narrative → JS Docs → <hr> → Email Conv (offsets ${positions.map(p => p[1]).join('/')}) — C.6 inject at the correct logical Section-9 position`);
+
+  // GROUP C6-CLAUDE-STRIP-WIRING — source-grep webhook.js wiring.
+  console.log('\n========== GROUP C6-CLAUDE-STRIP-WIRING — sendPreliminaryReviewToAdmin pipeline wiring ==========');
+  if (!/aiService\.stripAndInjectDocumentsIncluded\(/.test(c7WebhookSrc)) {
+    throw new Error(`FAIL [C6-CLAUDE-STRIP-WIRING / call missing]: webhook.js must invoke aiService.stripAndInjectDocumentsIncluded inside sendPreliminaryReviewToAdmin.`);
+  }
+  // The strip+inject must come AFTER prependDealSnapshot (so it operates on
+  // the assembled prelim with B's Snapshot already in place) and BEFORE
+  // enforceReviewBanner (consistent positioning).
+  const c6StripIdx = c7WebhookSrc.indexOf('stripAndInjectDocumentsIncluded');
+  const c6PrependIdx = c7WebhookSrc.indexOf('prependDealSnapshot');
+  const c6EnforceBannerIdx = c7WebhookSrc.indexOf('enforceReviewBanner(leadSummary');
+  if (c6PrependIdx < 0 || c6StripIdx < 0 || c6EnforceBannerIdx < 0) {
+    throw new Error(`FAIL [C6-CLAUDE-STRIP-WIRING / pipeline integrity]: missing one or more of {prependDealSnapshot, stripAndInjectDocumentsIncluded, enforceReviewBanner} in webhook.js.`);
+  }
+  if (!(c6PrependIdx < c6StripIdx && c6StripIdx < c6EnforceBannerIdx)) {
+    throw new Error(`FAIL [C6-CLAUDE-STRIP-WIRING / ordering]: expected pipeline order prependDealSnapshot (${c6PrependIdx}) → stripAndInjectDocumentsIncluded (${c6StripIdx}) → enforceReviewBanner (${c6EnforceBannerIdx}). C.6 must run AFTER B's Snapshot prepend (so it operates on assembled prelim) and BEFORE banner enforcement (consistent positioning).`);
+  }
+  console.log(`  PASS [C6-CLAUDE-STRIP-WIRING / ordering]: prependDealSnapshot → stripAndInjectDocumentsIncluded → enforceReviewBanner (offsets ${c6PrependIdx}/${c6StripIdx}/${c6EnforceBannerIdx})`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask

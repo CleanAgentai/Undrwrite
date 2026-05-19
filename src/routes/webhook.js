@@ -706,6 +706,18 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   if (_snapStrip.strippedAny) {
     console.log('B-2b (admin Snapshot): Vienna emitted a Snapshot block despite NO-SNAPSHOT instruction — backstop stripped it before prepending JS canonical.');
   }
+  // R4-Bucket-C.6 (Grace 5f8e4921 T4 fix): strip Claude's Documents Included
+  // section + inject JS-rendered authoritative one. Claude probabilistically
+  // dropped items from Section 9 (Grace lost T4 from [RECEIVED] + gov_id +
+  // property_tax from [MISSING]). Pattern anchored EXACTLY on
+  // `<h2>Documents Included</h2>` — does NOT match B's `<h2>Deal Snapshot</h2>`
+  // block prepended above. Inject location: before first `<hr>` (the
+  // Section-10 separator), preserving Section 9's logical position.
+  // Verified by GROUP C6-B-SNAPSHOT-INTERACTION: B Snapshot byte-intact under
+  // C.6 pipeline (Grace's corrected figures from C.5 REQUIRED-1 stay intact).
+  const _c6DocsResult = aiService.stripAndInjectDocumentsIncluded(leadSummary, dealDocs, missingDocs);
+  leadSummary = _c6DocsResult.result;
+  console.log(`C.6: Documents Included JS-rendered (stripped=${_c6DocsResult.stripped}, injected=${_c6DocsResult.injected})`);
 
   let reviewAttachments = [];
   if (dealDocs.length > 0) {
@@ -1455,6 +1467,18 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         console.log('Processing initial email with Claude...');
         console.log('Passing', email.attachments.length, 'attachments for analysis');
         if (initialFromCollision) console.log('From-header collides with admin first name — instructing generic greeting');
+        // R4-Bucket-C.7 (S4 Marcus 1f1e7ac4): deterministic broker-signature
+        // first-name parse BEFORE Claude. RFC-footer-strip kills the proxy-
+        // shadow root cause (Franco's "-- Franco Maione Founder at VIMA Real
+        // Broker..." footer below the sig delimiter is stripped before the
+        // name extractor sees it). When parser succeeds, processInitialEmail
+        // uses the name deterministically. When parser returns null (signature
+        // shape outside scope), generic "Hi there!" fallback fires — same as
+        // pre-fix behavior, safe failure direction.
+        const _c7ParsedBrokerName = aiService.parseBrokerFirstNameFromSignature(email.textBody);
+        if (_c7ParsedBrokerName) {
+          console.log(`C.7: signature parser extracted broker first name "${_c7ParsedBrokerName}" — passing to processInitialEmail for deterministic greeting`);
+        }
         // eslint-disable-next-line prefer-const
         let { welcomeEmail, dealSummary } = await aiService.processInitialEmail(
           email.fromName,
@@ -1465,7 +1489,7 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           hasOwnPnw,
           initialFromCollision,
           email.subject,  // S15-E-followup: subject used by JS-side absence-based clash detection
-          { discrepancyDetected: _bDiscrepancyDetected, canonicalFieldsPrompt: _bCanonicalPromptCtx }
+          { discrepancyDetected: _bDiscrepancyDetected, canonicalFieldsPrompt: _bCanonicalPromptCtx, parsedBrokerFirstName: _c7ParsedBrokerName }
         );
         // Cluster B Commit 2b — post-Claude strip + inject (pure JS injection completes).
         // strip is defense-in-depth backstop (Cluster E lesson — prompt enforcement is

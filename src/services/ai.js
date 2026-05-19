@@ -691,6 +691,116 @@ const prependDealSnapshot = (html, snapshotHtml) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────────
+// R4-Bucket-C.6 — Documents Included section JS render (R4-S1 Grace)
+// ──────────────────────────────────────────────────────────────────────────
+// Franco-reported defect: Grace's prelim review (deal 5f8e4921 msg[3])
+// rendered 4/5 received docs (T4 dropped) AND 1/3 missing docs (gov_id +
+// property_tax dropped). Root: Claude probabilistically dropped items from
+// generateLeadSummary's Section 9 despite the prompt interpolating the
+// authoritative arrays as a static string. Same prompt-only-fails pattern
+// as E / D / C.3. T4 was the visible symptom Franco reported; the root
+// is the whole Section 9.
+//
+// Fix: JS-render the section authoritatively. Pure consumer of the
+// `documents` and `missingDocs` arrays already computed at the call site
+// (sendPreliminaryReviewToAdmin) — same canonical inputs Claude saw,
+// rendered deterministically. Mirrors B 2b's Snapshot strip+prepend.
+const renderDocumentsIncludedSection = (documents, missingDocs) => {
+  const receivedItems = (documents || []).map(d =>
+    `<li>[RECEIVED] ${d.file_name} (${d.classification || 'unclassified'})</li>`
+  );
+  const missingItems = (missingDocs || []).map(d =>
+    `<li>[MISSING] ${module.exports.DOC_DISPLAY_NAMES[d] || d}</li>`
+  );
+  const items = [...receivedItems, ...missingItems];
+  if (items.length === 0) {
+    return `<h2>Documents Included</h2>\n<p><em>No documents on file.</em></p>`;
+  }
+  return `<h2>Documents Included</h2>\n<ul>\n${items.join('\n')}\n</ul>`;
+};
+
+// Strip pattern for Claude-emitted Documents Included section. Anchored
+// EXACTLY on `<h2>Documents Included</h2>` followed by `<ul>...</ul>` —
+// does NOT match `<h2>Deal Snapshot</h2>` (B 2b's prepended block) or any
+// other section heading. Non-greedy through the FIRST `</ul>` closer.
+const DOCUMENTS_INCLUDED_BLOCK_PATTERN = /<h2>\s*Documents\s+Included\s*<\/h2>\s*<ul>[\s\S]*?<\/ul>/i;
+
+const stripAndInjectDocumentsIncluded = (html, documents, missingDocs) => {
+  if (!html || typeof html !== 'string') {
+    return { result: html, stripped: false, injected: false };
+  }
+  const stripped = DOCUMENTS_INCLUDED_BLOCK_PATTERN.test(html);
+  const withoutClaudeSection = stripped ? html.replace(DOCUMENTS_INCLUDED_BLOCK_PATTERN, '') : html;
+  const jsSection = renderDocumentsIncludedSection(documents, missingDocs);
+  // Insert BEFORE the first <hr> (Section-10 separator) so the JS section
+  // lands at Section 9's logical position. Fallback: append at end.
+  const hrMatch = withoutClaudeSection.match(/<hr\s*\/?>/i);
+  let result;
+  if (hrMatch) {
+    const hrIdx = withoutClaudeSection.indexOf(hrMatch[0]);
+    result = withoutClaudeSection.slice(0, hrIdx) + jsSection + '\n\n' + withoutClaudeSection.slice(hrIdx);
+  } else {
+    result = withoutClaudeSection + '\n\n' + jsSection;
+  }
+  return { result, stripped, injected: true };
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// R4-Bucket-C.7 — broker-signature first-name parser (R4-S2 Marcus)
+// ──────────────────────────────────────────────────────────────────────────
+// Franco-reported defect: Marcus deal (1f1e7ac4) submission had broker
+// signature `*Natalie Bergman*\n\nSummit Financial Group Lic. #MB338764`
+// followed by the standard RFC sig delimiter `\n-- \n` and the admin
+// proxy footer (`Franco Maione\nFounder at VIMA Real Broker...`). Vienna's
+// welcome reply opened with "Hi there!" — the collision-fallback path
+// shadowed Natalie's signature because Franco's proxy footer was present.
+//
+// Fix: deterministic JS-side parse BEFORE Claude. RFC-footer-strip first
+// (kills the proxy-shadow root cause), then anchor on the `Lic. #` marker
+// (the strongest broker-signature signal across the corpus) to find the
+// name line, then Title-Case-first-token validation with explicit
+// negative filters (titles, license numbers, company tokens, admin's name).
+// Returns null on uncertainty — generic "Hi there!" fallback is the
+// safe pre-fix behavior, not a regression.
+//
+// Over-fire protection (the C.7 hard correctness requirement): a
+// confidently-wrong personalized greeting ("Hi Summit Financial Group!" /
+// "Hi MB338764!" / "Hi Mortgage Broker!") is worse than the generic
+// fallback. The negative filters + Title-Case-shape requirement enforce
+// this structurally; deterministic negatives in GROUP C7-SIGNATURE-PARSER.
+//
+// Scope-lock: parser anchors on `Lic. #` — strongest broker-signature
+// marker in the corpus. Signatures without it (rare) → parser returns
+// null → generic fallback. Conservative residual logged in commit body.
+const parseBrokerFirstNameFromSignature = (emailBody) => {
+  if (!emailBody || typeof emailBody !== 'string') return null;
+  // 1) Strip RFC sig delimiter footer ("\n-- \n" and everything after).
+  //    Kills the proxy-shadow root cause: Franco's admin footer below the
+  //    `-- ` separator never reaches the name extractor.
+  const sigDelim = emailBody.search(/\n--\s*\n/);
+  const beforeFooter = sigDelim >= 0 ? emailBody.slice(0, sigDelim) : emailBody;
+  // 2) Anchor on `Lic. #` (strongest broker-signature marker in the corpus).
+  //    Look backwards from the license line to find the name line.
+  //    Captures *Name*, **Name**, or bare-line Name forms.
+  const licMatch = beforeFooter.match(/([^\n]+)\n+[^\n]*Lic\.\s*#/i);
+  if (!licMatch) return null;
+  // 3) Clean asterisks/markdown bold markers from the name line.
+  const nameLine = licMatch[1].replace(/^\s*\*+/, '').replace(/\*+\s*$/, '').trim();
+  // 4) Validate: first token must be a simple Title-Case first-name shape.
+  //    Filters company tokens (multi-word starting with capital), license-
+  //    number patterns, and generic titles.
+  const tokens = nameLine.split(/\s+/);
+  if (tokens.length === 0 || tokens.length > 5) return null;
+  const firstToken = tokens[0];
+  if (!/^[A-Z][a-z]+$/.test(firstToken)) return null;
+  if (/^(Mr|Mrs|Ms|Dr|Sir|Madam|Mortgage|Broker|Senior|Junior|Lender|Underwriter|Manager|Officer)$/i.test(firstToken)) return null;
+  // 5) Never extract admin's own first name (defense-in-depth — collision
+  //    cases should fall back to generic rather than echo admin name).
+  if (firstToken.toLowerCase() === 'franco') return null;
+  return firstToken;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
 // Cluster E — broker-facing routing-leak post-gen sweep
 // ──────────────────────────────────────────────────────────────────────────
 // Franco-reported defect (R3-S7 Bug 1): Vienna's broker-facing reply emitted
@@ -841,7 +951,13 @@ module.exports = {
     //   canonicalFieldsPrompt: optional pre-rendered "CANONICAL FIELD VALUES" block —
     //     authoritative values JS extracted; Vienna should reference these (not raw
     //     extracted_data) for field-level claims.
-    const { discrepancyDetected = false, canonicalFieldsPrompt = '' } = opts;
+    // R4-Bucket-C.7 opt:
+    //   parsedBrokerFirstName: JS-parsed broker first-name from email signature
+    //     (parseBrokerFirstNameFromSignature). When provided AND collision is in
+    //     play, prompt uses this name deterministically as the greeting target —
+    //     resolves the S4 Marcus "Hi there!" generic-fallback bug where Franco's
+    //     proxy footer shadowed Natalie's signature.
+    const { discrepancyDetected = false, canonicalFieldsPrompt = '', parsedBrokerFirstName = null } = opts;
     try {
       // ─── S15-E-followup: absence-based JS-side identity clash pre-detection (Anna Bergstrom 2026-05-18 real-Postmark) ───
       // Detect deterministically BEFORE the Claude call. Inversion of the
@@ -927,13 +1043,28 @@ module.exports = {
       // different first name (e.g. "Jennifer", "Daniel"), greet by that name. Only
       // fall back to a generic greeting when the sig is absent or also Franco-like
       // (preserves the genuine-Franco-broker regression guard, e.g. "Franco Vieanna").
+      // R4-Bucket-C.7 (Marcus 1f1e7ac4): when JS-parsed the broker first-name
+      // from the signature (before the RFC `\n-- \n` admin proxy footer), the
+      // collision-instructions DETERMINISTICALLY tell the prompt to use that
+      // name, overriding the probabilistic signature-inspection step that
+      // failed on Marcus. The JJJ-style CRITICAL block below ALSO carries the
+      // explicit-hardened F2 anti-pattern ("never Hi Franco"). Together: (i)
+      // deterministic parser eliminates the proxy-shadow root cause; (ii)
+      // JJJ implicit→explicit-CRITICAL prompt hardening is defense-in-depth.
+      const parsedNameBlock = parsedBrokerFirstName
+        ? `\n- JS-PARSED BROKER FIRST NAME (DETERMINISTIC, USE THIS): the signature parser extracted "${parsedBrokerFirstName}" from the email body BEFORE the RFC sig delimiter (admin proxy footer was stripped). Greet by this name: "Hi ${parsedBrokerFirstName}!" — this OVERRIDES the inspection step below and is the authoritative greeting for this turn.`
+        : '';
       const nameCollisionInstructions = nameCollidesWithAdmin
         ? `\n\nCRITICAL — NAME COLLISION DETECTED (READ BEFORE GREETING):
 - The sender's first name (from the From-header, "${senderName || 'Unknown'}") matches the admin's first name (Franco). The From-header alone is unreliable for greeting.
-- HARD RULE — UNCONDITIONAL: Do NOT greet the recipient as "Hi Franco!", "Hello Franco!", "Dear Franco", "Hey Franco", or any variation that uses the name "Franco". This rule is absolute. Even if the body signature reads "Franco Vieanna", "Franco Genovese", or "F. Vieanna", you must NOT greet by the name "Franco".
+- HARD RULE — UNCONDITIONAL (F2 anti-pattern, JJJ explicit-CRITICAL hardening):
+  * NEVER greet as "Hi Franco!", "Hello Franco!", "Dear Franco", "Hey Franco", or ANY variation containing the name "Franco" — even when From-header reads "Franco Maione" / "Franco Vieanna" / "F. Vieanna" / "Franco Anything".
+  * SELF-CHECK before returning: re-read the first 5 words of your welcome email. If "Franco" appears in the greeting, REWRITE.
+  * This rule overrides ANY signature inspection — even if a body signature reads "Franco Lastname", do NOT echo it.${parsedNameBlock}
 - DECIDE THE GREETING IN THIS ORDER:
-  1) Look at the email body for a signature (e.g. "Thanks, Jennifer", "Best, Daniel", "— Sarah Tanaka", "Cheers, Mei"). If the signature contains a first name that is CLEARLY DIFFERENT from "Franco" (e.g. "Jennifer", "Daniel", "Sarah", "Mei"), greet by THAT name: "Hi Jennifer!", "Hi Daniel!", "Hi Sarah!".
-  2) Otherwise — if the email body has NO signature, OR the signature's first name is also "Franco" (any "Franco Lastname" or "F. Lastname" pattern) — use a GENERIC greeting: "Hi there!" or "Hello!" with NO first name. Per the HARD RULE above, never substitute "Franco" here.
+  1) JS-PARSED BROKER FIRST NAME (above, if provided) — use deterministically.
+  2) Otherwise, look at the email body for a signature (e.g. "Thanks, Jennifer", "Best, Daniel", "— Sarah Tanaka", "Cheers, Mei"). If the signature contains a first name that is CLEARLY DIFFERENT from "Franco" (e.g. "Jennifer", "Daniel", "Sarah", "Mei"), greet by THAT name: "Hi Jennifer!", "Hi Daniel!", "Hi Sarah!".
+  3) Otherwise — if the email body has NO signature, OR the signature's first name is also "Franco" (any "Franco Lastname" or "F. Lastname" pattern) — use a GENERIC greeting: "Hi there!" or "Hello!" with NO first name. Per the F2 HARD RULE above, never substitute "Franco" here.
 - The deal summary JSON should populate sender_name / broker_name from the fullest name visible (signature preferred, From-header as fallback). The collision rule above governs only the body greeting in this welcome email.`
         : '';
 
@@ -3016,4 +3147,10 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // Cluster E — broker-facing routing-leak post-gen sweep.
   enforceNoRoutingLeak,
   ROUTING_LEAK_PATTERNS,
+  // R4-Bucket-C.6 — Documents Included JS render + strip+inject (Grace T4 fix)
+  renderDocumentsIncludedSection,
+  stripAndInjectDocumentsIncluded,
+  DOCUMENTS_INCLUDED_BLOCK_PATTERN,
+  // R4-Bucket-C.7 — broker-signature first-name parser (Marcus collision fix)
+  parseBrokerFirstNameFromSignature,
 };
