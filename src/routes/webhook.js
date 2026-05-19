@@ -548,6 +548,19 @@ const sendEscalationToAdmin = async (deal, dealSummary, ltv, options = {}) => {
 // options.isUpdate (Fix 2): when true, prefix subject with "[UPDATED] " so Franco can
 // distinguish a fresh review from the original one. Used when broker submits remaining
 // docs to an under_review deal — replaces the passive [Broker Update] dead-end.
+//
+// options.brokerFacingReplyText (Cluster D — Marcus 1f1e7ac4 + Ethan 830f9ad5
+// 2026-05-18 real-Postmark): the verbatim broker-facing text Vienna emitted (or
+// would have emitted, on NNN-suppressed paths) on this turn. Classified by
+// welcomeEmailIsAskingClarification — if the reply asks for clarification, the
+// review banner is forced to PRELIMINARY — BROKER CLARIFICATION PENDING so a
+// COMPLETE review never fires while a question to the broker is outstanding.
+// Pre-fix: the gate at the statusFlag line used only missingDocs.length, which
+// treated docs-on-file as sufficient for COMPLETE — Marcus and Ethan both had
+// every required doc yet had unresolved Vienna→broker discrepancy asks, and
+// COMPLETE fired anyway. JS classification used (not a Claude-set flag) per
+// the S15-E lesson: dealSummary.unresolved_discrepancy was empirically unreliable
+// both directions (Marcus true-ignored, Ethan wrongly-false).
 const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv, options = {}) => {
   // LTV ≤ 80% confirmed — send Franco preliminary review with docs
   console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco${options.isUpdate ? ' (updated)' : ''}`);
@@ -599,19 +612,38 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   }
 
   const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
-  const statusFlag = missingDocs.length > 0 ? 'PRELIMINARY' : 'COMPLETE';
+
+  // Cluster D: classify Vienna's broker-facing reply for this turn. If she's
+  // asking the broker a clarification question, the admin review must NOT
+  // emit COMPLETE — clarification-pending takes precedence over docs-complete.
+  const clarificationPending = aiService.welcomeEmailIsAskingClarification(options.brokerFacingReplyText || '');
+  const statusFlag = clarificationPending ? 'PRELIMINARY-CLARIFICATION'
+                   : missingDocs.length > 0 ? 'PRELIMINARY'
+                   : 'COMPLETE';
+  const bannerText = clarificationPending ? 'PRELIMINARY — BROKER CLARIFICATION PENDING'
+                   : missingDocs.length > 0 ? 'PRELIMINARY REVIEW — AWAITING APPROVAL'
+                   : 'COMPLETE — Ready for Review';
+  // JS-enforce the banner — strip Claude's emitted FILE STATUS line and prepend
+  // the JS-determined banner; also strips the trailing "This file is COMPLETE…"
+  // self-consistency line when the banner contradicts. Same trust profile as
+  // Cluster E's planned post-gen sweep: JS owns the rule, not Claude.
+  const enforcedLeadSummary = aiService.enforceReviewBanner(leadSummary, bannerText);
+
+  const subjectStatus = clarificationPending ? 'PRELIMINARY (clarification pending)'
+                       : missingDocs.length > 0 ? 'PRELIMINARY'
+                       : 'COMPLETE';
   const subjectPrefix = options.isUpdate ? '[UPDATED] ' : '';
-  const subject = `${subjectPrefix}ACTION REQUIRED: ${statusFlag} Review — ${borrowerName} — ${ltv}% LTV`;
+  const subject = `${subjectPrefix}ACTION REQUIRED: ${subjectStatus} Review — ${borrowerName} — ${ltv}% LTV`;
   const reviewResult = await emailService.sendEmail(
     config.adminEmail,
     subject,
-    leadSummary.replace(/<[^>]*>/g, ''),
-    leadSummary,
+    enforcedLeadSummary.replace(/<[^>]*>/g, ''),
+    enforcedLeadSummary,
     reviewAttachments
   );
-  await dealsService.saveMessage(deal.id, 'outbound', subject, leadSummary, reviewResult.MessageID);
+  await dealsService.saveMessage(deal.id, 'outbound', subject, enforcedLeadSummary, reviewResult.MessageID);
   await dealsService.update(deal.id, { status: 'under_review' });
-  console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing)`);
+  console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing, clarificationPending=${clarificationPending}, statusFlag=${statusFlag})`);
 };
 
 // Group BBB (S9.1/S9.2/S9.3) → generalized in Group NNN: completion handoff. Fires
@@ -1399,7 +1431,9 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
           // when null. The remaining (deferred) enhancement is to extract ownership_type directly
           // in INITIAL_EMAIL_PROMPT's TASK 2 JSON so it's populated on day 1.
-          await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv);
+          // Cluster D: pass welcomeEmail so sendPreliminaryReviewToAdmin can detect
+          // a pending broker-facing clarification ask and suppress COMPLETE.
+          await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv, { brokerFacingReplyText: welcomeEmail });
         }
       } catch (err) {
         // Group FFFF Layer 1: any unhandled error in the new-client INITIAL
@@ -1654,7 +1688,10 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
         } else {
           // 'preliminary-update' — under_review + !allDocsInNow
-          await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true });
+          // Cluster D: pass the generated-but-NNN-suppressed reviewResult.responseEmail
+          // so the gate can still detect a pending clarification ask even though the
+          // broker doesn't see Vienna's reply directly on this turn.
+          await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true, brokerFacingReplyText: reviewResult.responseEmail || '' });
         }
 
         // Group NNN: Vienna goes silent across the whole under_review/ltv_escalated
@@ -1873,7 +1910,9 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           await dealsService.update(existingDeal.id, { status: 'awaiting_collateral' });
           console.log('Deal status: awaiting_collateral (Fix 7 — collateral question pending)');
         } else if (willReview) {
-          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv);
+          // Cluster D: pass result.responseEmail so the gate can detect a pending
+          // broker clarification ask even when Vienna's reply is NNN-suppressed.
+          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv, { brokerFacingReplyText: result.responseEmail || '' });
         } else {
           // Deal already under_review or no LTV yet — keep conversation going.
           // (We do NOT auto-flip to 'active' here anymore — awaiting_collateral, completed,

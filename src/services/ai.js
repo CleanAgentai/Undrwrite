@@ -552,6 +552,76 @@ const isIdentityClashByAbsence = (emailSubject, emailBody, savedDocs) => {
   return null;
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// Cluster D — false-COMPLETE gate. Classifies Vienna's broker-facing reply
+// for "is this asking a clarification question". The admin review banner
+// gates on this so a COMPLETE review never fires while a clarification
+// ask is outstanding to the broker.
+//
+// Real-Postmark production shapes this is gated against:
+//   - Marcus 1f1e7ac4 msg [2]: "I noticed a few discrepancies… could you
+//     confirm which amount is correct?"
+//   - Ethan 830f9ad5 msg [2]: "I noticed a discrepancy… Could you confirm
+//     which figure is accurate"
+//   - Vienna's INITIAL_EMAIL_PROMPT examples: "could you clarify which is
+//     accurate", "I noticed your email mentioned X but Y shows Z"
+//
+// Probability surface: classifies Vienna's natural-language output, so
+// phrasing variants could miss. Forward-handoff in commit body: post-
+// Cluster-B's pre-Claude structural discrepancy detection, this classifier
+// demotes to defense-in-depth; the JS pre-check becomes primary.
+// Pre-committed escalation per Cluster D plan: a real-replay miss reorders
+// the batch (B first) rather than pattern-extending here.
+const CLARIFICATION_PATTERNS = [
+  /\bcould you (?:please\s+)?(?:confirm|clarify)\b/i,
+  /\bplease confirm\b/i,
+  /\bi noticed\b[^.?!]*\b(?:discrepanc|don'?t match|doesn'?t match|differ|differs|differing|conflict|mismatch)/i,
+  /\b(?:which|what)\s+(?:one|set|amount|figure|version|value)?\s*\b(?:is|are)\s+(?:the\s+)?(?:correct|accurate|right|actual)\b/i,
+  /\b(?:need|requires?|requesting|awaiting)\s+(?:a\s+)?clarification\b/i,
+  /\bcan you (?:please\s+)?(?:confirm|clarify)\b/i,
+];
+
+const welcomeEmailIsAskingClarification = (welcomeEmailHtml) => {
+  if (!welcomeEmailHtml || typeof welcomeEmailHtml !== 'string') return false;
+  // Strip HTML tags + collapse whitespace for stable pattern matching.
+  const plain = welcomeEmailHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (plain.length === 0) return false;
+  for (const re of CLARIFICATION_PATTERNS) {
+    if (re.test(plain)) return true;
+  }
+  return false;
+};
+
+// JS-enforced banner substitution. Strips Claude's FILE STATUS paragraph
+// and prepends the JS-determined banner. Also strips the trailing
+// "This file is COMPLETE…" self-consistency line when the banner says
+// otherwise (Claude renders that line conditionally when given
+// isComplete=true, but the gate may have flipped the conclusion).
+// Same trust profile as Cluster E's post-gen sweep — JS owns the rule,
+// not Claude.
+const REVIEW_BANNER_PARAGRAPH_RE = /<p>[\s\S]*?FILE STATUS[\s\S]*?<\/p>/i;
+const REVIEW_COMPLETE_TRAILING_RE = /<p>\s*This file is COMPLETE\s*[—–\-]\s*all required documents have been received\.\s*<\/p>\s*/i;
+
+const enforceReviewBanner = (leadSummaryHtml, bannerText) => {
+  if (!leadSummaryHtml || typeof leadSummaryHtml !== 'string') return leadSummaryHtml;
+  const canonicalBanner = `<p><strong>FILE STATUS:</strong> ${bannerText}</p>`;
+  let out = leadSummaryHtml;
+  if (REVIEW_BANNER_PARAGRAPH_RE.test(out)) {
+    out = out.replace(REVIEW_BANNER_PARAGRAPH_RE, canonicalBanner);
+  } else {
+    // Banner missing entirely — prepend.
+    out = canonicalBanner + '\n\n' + out;
+  }
+  // When banner is anything other than COMPLETE, the trailing self-
+  // consistency line ("This file is COMPLETE — all required documents
+  // have been received.") contradicts the banner and must be removed.
+  const bannerIsComplete = /^COMPLETE\b/i.test(bannerText);
+  if (!bannerIsComplete) {
+    out = out.replace(REVIEW_COMPLETE_TRAILING_RE, '');
+  }
+  return out;
+};
+
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
   processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false, emailSubject = '') => {
@@ -2679,4 +2749,7 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // S15-E-followup additions (Anna Bergstrom 2026-05-18 real-Postmark fixture):
   extractBorrowerFromEmailSubject,
   isIdentityClashByAbsence,
+  // Cluster D (Marcus 1f1e7ac4 + Ethan 830f9ad5 2026-05-18 real-Postmark): false-COMPLETE gate.
+  welcomeEmailIsAskingClarification,
+  enforceReviewBanner,
 };

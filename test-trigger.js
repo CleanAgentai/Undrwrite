@@ -1624,6 +1624,180 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`  PASS [S15-E-followup isIdentityClashByAbsence]: ${absencePassed}/${absenceCases.length} cases (real-shape + hyphen handling + edge cases)`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP D-CLARIFICATION-DETECT — deterministic truth table for the
+  // Cluster D false-COMPLETE gate's classifier + banner enforcer.
+  // ════════════════════════════════════════════════════════════════
+  // Positives anchor on real-Postmark production output:
+  //   - Marcus 1f1e7ac4 msg [2] verbatim sentences
+  //   - Ethan 830f9ad5 msg [2] verbatim sentences
+  //   - Vienna's INITIAL_EMAIL_PROMPT example phrasings
+  // Negatives anchor on real Vienna NON-clarification outputs:
+  //   - clean-receipt acknowledgments (Grace welcome msg [2] pre-discrepancy
+  //     shape, hypothetical clean Marcus, Derek-shape)
+  //   - completion-stage emails (Ethan close msg [10])
+  //   - generic "let me know" / "questions" without confirm/clarify intent
+  // Necessary-not-sufficient per the D plan: locks classifier behavior on
+  // CHOSEN strings; the load-bearing recall measure is D-NO-FALSE-COMPLETE
+  // on real-Postmark replays (downstream).
+  console.log('\n========== GROUP D-CLARIFICATION-DETECT — classifier + banner enforcer truth table ==========');
+
+  const clarifyCases = [
+    // ─── POSITIVES — must classify as clarification-asking ───
+    // Marcus msg [2] verbatim (production fixture):
+    [`<p>Hi there!</p>
+<p>I'm Vienna. Thanks for submitting Marcus Webb's application! I've received the loan application, credit bureau, appraisal, T4, PNW statement, government ID, property tax assessment, and RBC payout statement.</p>
+<p>I noticed a few discrepancies in the documents that need clarification:</p>
+<ul>
+<li>Your email mentions an appraised value of $680,000, but the appraisal report shows $680,000 — actually, these match, my mistake</li>
+<li>Your email states the mortgage amount requested is $408,000, but the loan application shows $95,000 — could you confirm which amount is correct?</li>
+<li>The RBC payout statement shows an outstanding balance of $400,000, but your email and other documents reference different figures</li>
+</ul>
+<p>Could you clarify these amounts so we have accurate data on file?</p>`, true, 'Marcus msg[2] verbatim'],
+    // Ethan msg [2] verbatim (production fixture):
+    [`<p>Hi Steven!</p>
+<p>I'm Vienna. Thank you for the comprehensive submission — I've received the loan application, appraisal, credit bureau, T4, PNW statement, CIBC payout statement, government ID, property tax assessment, AML form, and PEP form.</p>
+<p>I noticed a discrepancy in the mortgage balance figures — your email mentions a loan amount of $334,880, but the CIBC payout statement shows a total payout amount of $264,810.42. Could you confirm which figure is accurate for the requested loan amount?</p>
+<p>Once that's clarified, I'll get this moving!</p>`, true, 'Ethan msg[2] verbatim'],
+    // INITIAL_EMAIL_PROMPT examples (Vienna's prompt-canonical clarification phrasings):
+    [`<p>I noticed your email mentioned credit scores of 531/519 but the credit bureau report shows 583/608 — could you clarify which is accurate?</p>`, true, 'prompt example: email-vs-doc credit score'],
+    [`<p>I noticed two figures that don't match: (1) the property value — your email lists $890,000 but the appraisal shows $920,000; (2) the existing mortgage balance — your email states $318,000 but the loan application shows $341,000. Could you confirm which figures are accurate?</p>`, true, 'prompt example: dual discrepancy'],
+    [`<p>I noticed a discrepancy in the submitted documents — the loan application shows credit scores of 631 and 619, while the credit bureau report shows 748 and 752. Could you confirm which set is correct?</p>`, true, 'prompt example: doc-vs-doc'],
+    // Grace R4-S1 msg [2] verbatim (production fixture — also clarification-asking):
+    [`<p>Hi Alex!</p>
+<p>I'm Vienna. Thanks for sending over Grace's application.</p>
+<p>I noticed a couple of discrepancies that need clarification before we can move forward:</p>
+<ul>
+<li>Property address — your email shows T3K 4T2, but the attached documents show T3K 4J9</li>
+<li>Property value — your email lists $480,000 but the appraisal shows $615,000</li>
+<li>LTV calculation — based on your figures this would be ~61%, but with the appraisal value it would be closer to 47%</li>
+</ul>
+<p>Could you confirm which figures are accurate?</p>`, true, 'Grace msg[2] verbatim'],
+    // Plural-figure variant:
+    [`<p>Could you confirm which amounts are correct?</p>`, true, 'plural confirm'],
+    // "Please confirm" variant:
+    [`<p>The property value differs between sources. Please confirm the accurate figure.</p>`, true, 'please confirm + differs'],
+    // "Can you" instead of "Could you":
+    [`<p>Can you clarify which loan amount is correct — $408K or $95K?</p>`, true, 'can you clarify variant'],
+    // "I noticed... don't match":
+    [`<p>Hi Steve! I noticed the figures in your email and the appraisal don't match. Which value is accurate?</p>`, true, '"I noticed don\'t match" + "which is accurate"'],
+
+    // ─── NEGATIVES — must NOT classify as clarification-asking ───
+    // Clean receipt acknowledgment (Derek-shape — common path):
+    [`<p>Hi Sandra!</p>
+<p>I'm Vienna. Thanks for submitting Derek Olsen's application! I've received the loan application, credit bureau, appraisal, T4, PNW statement, and payout statement — thanks for sending those through.</p>
+<p>We're starting on the file. I'll be in touch shortly with an update.</p>
+<p>Vienna<br>Private Mortgage Link</p>`, false, 'clean receipt (Derek-shape)'],
+    // Hypothetical clean Marcus (no discrepancy detected):
+    [`<p>Hi Natalie!</p>
+<p>I'm Vienna. Thanks for submitting Marcus Webb's application! I've received the full package. We're starting on the file.</p>
+<p>Vienna<br>Private Mortgage Link</p>`, false, 'clean Marcus shape'],
+    // Completion close (Ethan msg [10] verbatim):
+    [`<p>Hi Steven,</p>
+<p>The file is now complete and submitted. Thank you for your patience during our review. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>
+<p>Vienna<br>Private Mortgage Link</p>`, false, 'Ethan completion close (msg[10])'],
+    // Generic "let me know" — directive, not clarification ask:
+    [`<p>Please let me know if you have any additional questions about the timeline.</p>`, false, 'generic "any questions"'],
+    // Doc request without clarification phrasing:
+    [`<p>Could you send the government-issued ID and property tax assessment when you get a chance?</p>`, false, 'doc request — could you send'],
+    // Asking about preference, not clarification:
+    [`<p>Could you let me know which delivery method works best for you?</p>`, false, 'asking preference, not clarification'],
+    // Identity-clash minimal-ask SHOULD classify as clarification (S15-E compat):
+    [`<p>Hi Oliver! Your email mentions Anna Bergstrom but the attached documents are for Grace Paulson. Could you confirm which is the correct borrower for this application?</p>`, true, 'S15-E identity-clash minimal-ask (compat check)'],
+    // Empty string:
+    ['', false, 'empty string'],
+    // Whitespace + HTML only:
+    [`<p>  </p>`, false, 'whitespace-only HTML'],
+  ];
+  let clarifyPassed = 0;
+  for (const [input, expected, label] of clarifyCases) {
+    const got = aiService.welcomeEmailIsAskingClarification(input);
+    if (got === expected) {
+      clarifyPassed++;
+    } else {
+      throw new Error(`FAIL [Cluster D welcomeEmailIsAskingClarification]: ${label} — expected ${expected}, got ${got}. Input first 200: ${input.slice(0, 200).replace(/\n/g, ' ')}`);
+    }
+  }
+  console.log(`  PASS [D classifier]: ${clarifyPassed}/${clarifyCases.length} cases (Marcus/Ethan/Grace verbatim + prompt-canonical positives + clean-receipt/completion/generic negatives + S15-E identity-clash compat)`);
+
+  // ─── enforceReviewBanner deterministic substitution ───
+  // Sample inputs match the two banner formats observed in production
+  // (Marcus msg [3] format A: <strong>FILE STATUS:</strong> COMPLETE; Grace
+  // msg [4] format B: <strong>FILE STATUS: PRELIMINARY REVIEW ...</strong>).
+  // Also covers trailing "This file is COMPLETE" self-consistency stripping.
+  const bannerCases = [
+    {
+      label: 'format A → COMPLETE (no-op)',
+      input: `<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>
+<p>Deal Snapshot</p>
+<p>This file is COMPLETE — all required documents have been received.</p>`,
+      banner: 'COMPLETE — Ready for Review',
+      expectContains: ['<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>', 'This file is COMPLETE — all required documents have been received.'],
+      expectNotContains: [],
+    },
+    {
+      label: 'format A → PRELIMINARY-CLARIFICATION (banner flip + trailing strip)',
+      input: `<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>
+<p>Deal Snapshot</p>
+<p>This file is COMPLETE — all required documents have been received.</p>`,
+      banner: 'PRELIMINARY — BROKER CLARIFICATION PENDING',
+      expectContains: ['<p><strong>FILE STATUS:</strong> PRELIMINARY — BROKER CLARIFICATION PENDING</p>'],
+      expectNotContains: ['FILE STATUS:</strong> COMPLETE', 'This file is COMPLETE — all required documents have been received.'],
+    },
+    {
+      label: 'format B → PRELIMINARY-CLARIFICATION (format B → format A canonical)',
+      input: `<p><strong>FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL</strong></p>
+<p>Deal Snapshot</p>`,
+      banner: 'PRELIMINARY — BROKER CLARIFICATION PENDING',
+      expectContains: ['<p><strong>FILE STATUS:</strong> PRELIMINARY — BROKER CLARIFICATION PENDING</p>'],
+      expectNotContains: ['PRELIMINARY REVIEW — AWAITING APPROVAL'],
+    },
+    {
+      label: 'format B → COMPLETE (banner flip, no trailing to strip)',
+      input: `<p><strong>FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL</strong></p>
+<p>Deal Snapshot</p>`,
+      banner: 'COMPLETE — Ready for Review',
+      expectContains: ['<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>'],
+      expectNotContains: ['PRELIMINARY REVIEW — AWAITING APPROVAL'],
+    },
+    {
+      label: 'missing banner → prepended',
+      input: `<p>Deal Snapshot</p>
+<p>Borrower Overview</p>`,
+      banner: 'COMPLETE — Ready for Review',
+      expectContains: ['<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>', '<p>Deal Snapshot</p>'],
+      expectNotContains: [],
+    },
+    {
+      label: 'preserves [UPDATED]-shape body',
+      input: `<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>
+<p>Updated since last review — broker submitted T4.</p>`,
+      banner: 'PRELIMINARY — BROKER CLARIFICATION PENDING',
+      expectContains: ['PRELIMINARY — BROKER CLARIFICATION PENDING', 'Updated since last review'],
+      expectNotContains: ['FILE STATUS:</strong> COMPLETE'],
+    },
+  ];
+  let bannerPassed = 0;
+  for (const tc of bannerCases) {
+    const out = aiService.enforceReviewBanner(tc.input, tc.banner);
+    let ok = true;
+    let why = '';
+    for (const needle of tc.expectContains) {
+      if (!out.includes(needle)) { ok = false; why = `missing expected substring "${needle}"`; break; }
+    }
+    if (ok) {
+      for (const needle of tc.expectNotContains) {
+        if (out.includes(needle)) { ok = false; why = `unexpected substring still present "${needle}"`; break; }
+      }
+    }
+    if (ok) {
+      bannerPassed++;
+    } else {
+      throw new Error(`FAIL [Cluster D enforceReviewBanner]: ${tc.label} — ${why}. Output:\n${out.slice(0, 500)}`);
+    }
+  }
+  console.log(`  PASS [D banner enforcer]: ${bannerPassed}/${bannerCases.length} cases (format A/B + trailing self-consistency strip + missing-banner-prepend)`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
   // ════════════════════════════════════════════════════════════════
   // Production observed 9 reminder emails fired to one broker at the same 9 PM
@@ -12248,6 +12422,375 @@ Capital Bridge Mortgage Group`;
       }
     } else {
       console.log('\n---------- Group HHH-MULTI-DOC + S15-E-RESOLUTION + S15-E-NO-CLASH: SKIPPED (set RUN_HHH_MULTIDOC_D=1 to run) ----------');
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // CLUSTER D BEHAVIORAL — real-Postmark replay (RUN_D_D=1)
+    // ════════════════════════════════════════════════════════════════
+    // Load-bearing recall gate for the false-COMPLETE fix. Per Cluster D
+    // plan (Porter 2026-05-18): 0-miss bar on Marcus 5x + Ethan 5x — a
+    // single recall miss = COMPLETE fires falsely = HITL-skip recurs
+    // probabilistically. Pre-committed escalation: if real-replay miss
+    // OR no-regression FP, do NOT pattern-extend; surface the evading
+    // phrasing and reorder the batch (B first, D gates on B's pre-Claude
+    // structural signal).
+    if (process.env.RUN_D_D === '1') {
+      const fs = require('fs');
+      const path = require('path');
+      const dStubPdf = fs.readFileSync(path.join(__dirname, 'forms/Loan Application Form (1).pdf')).toString('base64');
+      const dAi = require('./src/services/ai');
+
+      // Ground-truth tighter regex — covers any phrasing shape that a human
+      // would call "a clarification ask". Broader than the classifier; used
+      // as the independent oracle for what Vienna actually emitted on each
+      // run. A run where ground-truth=true must have classifier=true.
+      const GROUND_TRUTH_CLARIFICATION_RE = /\b(?:could|can|please|would)\s+you\s+(?:please\s+)?(?:confirm|clarify|let\s+me\s+know\s+which|verify)\b|\b(?:i\s+noticed|noticed)\b[^.?!]*?\b(?:discrepanc|don'?t\s+match|doesn'?t\s+match|differ|mismatch|conflict)|\b(?:which|what)\s+(?:one|set|amount|figure|version|value)?\s*\b(?:is|are)\s+(?:the\s+)?(?:correct|accurate|right|actual)\b|\bneed(?:s|ing)?\s+(?:a\s+)?clarification\b/i;
+
+      const dStripHtml = (s) => (s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      const dDoesAsk = (welcomeHtml) => GROUND_TRUTH_CLARIFICATION_RE.test(dStripHtml(welcomeHtml));
+
+      // ════════════════════════════════════════════════════════════
+      // GROUP D-NO-FALSE-COMPLETE — Marcus 5x + Ethan 5x (0-miss bar)
+      // ════════════════════════════════════════════════════════════
+      // Marcus fixture: real Postmark inbound from deal 1f1e7ac4 verbatim.
+      // Full 8-doc package with hallucination-bait (blank LoanApp template
+      // — production triggered $95K confabulation) + category-confusion
+      // (RBC payout statement, new loan request vs existing balance).
+      // Ethan fixture: real Postmark inbound from deal 830f9ad5 verbatim.
+      // Full 10-doc package with category-confusion bait ($334,880 new
+      // loan request vs $264,810.42 CIBC payout total).
+      // Bar: every run where Vienna emits a clarification ask
+      //      (GROUND_TRUTH_CLARIFICATION_RE matches) MUST have:
+      //   - welcomeEmailIsAskingClarification returns true (classifier recall)
+      //   - enforceReviewBanner produces "PRELIMINARY — BROKER CLARIFICATION PENDING"
+      //   - banner does NOT contain "COMPLETE — Ready for Review"
+      // Any miss → escalate per plan (reorder to B first).
+      console.log('\n========== GROUP D-NO-FALSE-COMPLETE — Marcus + Ethan real-Postmark replay (5x each, 0-miss bar) ==========');
+
+      // ─── Marcus deal 1f1e7ac4 verbatim fixture ───
+      const marcusSubject = 'New Mortgage Submission — Marcus Webb, 1142 Tory Road NW Edmonton';
+      const marcusBody = `Hi,
+
+I'm submitting a new mortgage application for your review.
+
+*Borrower:* Marcus Webb *Property:* 1142 Tory Road NW, Edmonton, AB
+T6R 3K2 *Appraised
+Value:* $680,000*Mortgage Amount Requested:* $408,000 *LTV:* ~60%
+
+Please find the following documents attached:
+
+   - Loan Application (Marcus Webb)
+   - Credit Bureau
+   - Appraisal Report
+   - T4 / Proof of Income
+   - PNW Statement
+   - Government ID
+   - Property Tax Assessment
+   - RBC Payout Statement
+
+Please let me know if anything else is needed.
+
+*Natalie Bergman*
+
+Summit Financial Group Lic. #MB338764`;
+      // Real Supabase extracted_data per doc (deal 1f1e7ac4):
+      const marcusSavedDocs = [
+        { file_name: 'RBC_Payout_Statement_Marcus_Webb.pdf', classification: 'mortgage_statement',
+          extracted_data: { text: 'RBC Royal Bank\nMortgage Payout Statement\nPrepared For: Marcus James Webb\nStatement Date: May 1, 2026 Valid Until: May 31, 2026\nProperty Address: 1142 Tory Road NW, Edmonton, AB T6R 0S4\nMortgage Account No.: •••• •••• •••• 4419 Maturity Date: November 1, 2027\nPayout Breakdown\nOutstanding Principal Balance: $400,000.00\nAccrued Interest (to May 31, 2026): $1,633.33\nMortgage Discharge Fee: $300.00\nTitle Insurance / Legal Fees (est.): $250.00\nTOTAL PAYOUT AMOUNT: $402,183.33\nInterest Rate: 5.09% Fixed Regular Payment: $2,164.18' } },
+        { file_name: 'PropertyTaxAssessment_Marcus_Webb.pdf', classification: 'property_tax',
+          extracted_data: { text: 'City of Edmonton\n2026 Property Assessment Notice\nOwner Name: Marcus James Webb\nProperty Address: 1142 Tory Road NW Edmonton, AB T6R 0S4\nTotal Assessed Value (2026): $664,000\n2026 Tax Estimate: $5,066.40' } },
+        { file_name: 'GovernmentID_Marcus_Webb.pdf', classification: 'government_id',
+          extracted_data: { text: 'ALBERTA DRIVER\'S LICENCE\nLAST NAME: WEBB\nFIRST NAME: MARCUS JAMES\nDATE OF BIRTH: 1985 01 22\nADDRESS: 1142 TORY ROAD NW EDMONTON AB T6R 0S4' } },
+        { file_name: 'LoanApplication_Marcus_Webb.pdf', classification: 'loan_application',
+          // Blank form template — real production extracted_data; the $95K hallucination bait.
+          extracted_data: { text: 'LOAN APPLICATION FORM\nLoan Details\nRequested loan amount: $\nUse of funds:\nDate that loan is required:\nRequested Term (eg. 6, 12 or 18 months):\nExit Strategy (how you plan on repaying the loan):\nDOB: Gender:\nSIN: Marital Status:\nPrimary Borrower\nName:\nEmail:\nAddress:\nPostal Code:\nOccupation:\nAnnual Income:' } },
+        { file_name: 'PNW_Statement_Marcus_Webb.pdf', classification: 'pnw_statement',
+          extracted_data: { text: 'Personal Statement of Affairs\nName: (blank form template)' } },
+        { file_name: 'T4_Marcus_Webb_2025.pdf', classification: 'income_proof',
+          extracted_data: { text: 'STATEMENT OF REMUNERATION PAID\nT4 — Tax Year 2025\nEmployer: Stantec Consulting Ltd.\nEmployee: Marcus James Webb\nBox 14 Employment Income: $118,500.00' } },
+        { file_name: 'Credit_Bureau_Marcus_Webb.pdf', classification: 'credit_report',
+          extracted_data: { text: 'CREDIT BUREAU REPORT\nFull Name: Marcus James Webb\nDate of Birth: February 11, 1979\nCurrent Address: 1142 Tory Road NW Edmonton AB T6R 3K2\nCREDIT SCORES\nEquifax: 718 TransUnion: 724\nScotiabank Mortgage Oct 2017 $520,000/$318,000 $2,210/mo R1' } },
+        { file_name: 'Appraisal_1142_Tory_Road_NW_Edmonton.pdf', classification: 'appraisal',
+          extracted_data: { text: 'PINNACLE PROPERTY APPRAISALS\nSubject Property: 1142 Tory Road NW, Edmonton, AB T6R 3K2\nProperty Type: Single-family detached residential\nYear Built: 2001\nOPINION OF VALUE: $680,000' } },
+      ];
+      const marcusAttachments = marcusSavedDocs.map(d => ({ Name: d.file_name, ContentType: 'application/pdf', Content: dStubPdf, ContentLength: dStubPdf.length }));
+
+      // ─── Ethan deal 830f9ad5 verbatim fixture ───
+      const ethanSubject = 'New Private Mortgage Application — Ethan Broussard — 819 Strathmore Drive SW, Calgary';
+      const ethanBody = `Hi,
+
+My name is Steven Laroche with Crestwood Mortgage Services (Lic.
+#MB779034). I'm submitting a complete private mortgage application on
+behalf of my client, Ethan Broussard.
+
+*Property:* 819 Strathmore Drive SW, Calgary, AB T3H 4M6 *Appraised Value:*
+$560,000 *Mortgage Amount Requested:* $334,880 *LTV:* ~59.8% *Purpose:* Debt
+consolidation / equity takeout *Exit Strategy:* Refinance with conventional
+lender within 12 months upon credit score improvement
+
+Please find the following documents attached:
+
+   - Loan Application — Ethan Broussard
+   - Appraisal — 819 Strathmore Drive SW
+   - Credit Bureau — Ethan Broussard
+   - T4 (2025) — Ethan Broussard
+   - PNW Statement — Ethan Broussard
+   - CIBC Payout Statement — Ethan Broussard
+   - Government-Issued ID — Ethan Broussard
+   - Property Tax Assessment — Ethan Broussard
+   - AML Form — Ethan Broussard
+   - PEP Form — Ethan Broussard
+
+Please let me know how you'd like to proceed.
+
+Steven Laroche
+
+Crestwood Mortgage Services Lic. #MB779034`;
+      const ethanSavedDocs = [
+        { file_name: 'AML_Form_Ethan_Broussard.pdf', classification: 'aml',
+          extracted_data: { text: 'AML FORM\nFull Legal Name: Ethan James Broussard\nDOB: May 30, 1982\nAddress: 819 Strathmore Drive SW, Calgary, AB T3H 4M6\nPurpose of Mortgage: Debt consolidation and emergency home repairs' } },
+        { file_name: 'PropertyTaxAssessment_Ethan_Broussard.pdf', classification: 'property_tax',
+          extracted_data: { text: 'CITY OF CALGARY\n2025 PROPERTY ASSESSMENT NOTICE\nOwner: Ethan James Broussard\nLocation: 819 Strathmore Drive SW Calgary AB T3H 4M6\nTotal Assessed Value: $560,000' } },
+        { file_name: 'GovernmentID_Ethan_Broussard.pdf', classification: 'government_id',
+          extracted_data: { text: 'ALBERTA OPERATOR LICENCE\nBROUSSARD, ETHAN JAMES\n819 Strathmore Drive SW Calgary AB T3H 4M6\nDOB: 1982-05-30' } },
+        { file_name: 'PEP_Form_Ethan_Broussard.pdf', classification: 'pep',
+          extracted_data: { text: 'PEP FORM\nFull Legal Name: Ethan James Broussard\nAre you a PEP? No' } },
+        { file_name: 'CIBC_Payout_Statement_Ethan_Broussard.pdf', classification: 'mortgage_statement',
+          // The B-category-confusion bait: $264,810.42 payout total is NOT a discrepancy with the $334,880 new loan request.
+          extracted_data: { text: 'CIBC MORTGAGE PAYOUT STATEMENT\nStatement Date: May 4, 2026 Valid Until: June 3, 2026\nPrimary Borrower: Ethan Broussard\nProperty Address: 819 Strathmore Drive SW Calgary AB T3H 4M6\nOutstanding Principal Balance: $261,000.00\nAccrued Interest (to May 4, 2026): $347.92\nPrepayment Penalty (3-month interest): $3,112.50\nDischarge Fee: $350.00\nTotal Payout Amount: $264,810.42' } },
+        { file_name: 'T4_Ethan_Broussard_2025.pdf', classification: 'income_proof',
+          extracted_data: { text: 'T4 STATEMENT 2025\nEmployer: Canadian National Railway Company (CN Rail)\nEmployee: Ethan James Broussard\nBox 14 Employment Income: $99,400.00\nYear of Employment: 2010 – Present (16 years)' } },
+        { file_name: 'PNW_Statement_Ethan_Broussard.pdf', classification: 'pnw_statement',
+          extracted_data: { text: 'Personal Statement of Affairs\nName: (blank form template)' } },
+        { file_name: 'LoanApplication_Ethan_Broussard.pdf', classification: 'loan_application',
+          extracted_data: { text: 'LOAN APPLICATION FORM\nRequested loan amount: $ (blank)\nPrimary Borrower\nName: (blank)' } },
+        { file_name: 'Credit_Bureau_Ethan_Broussard.pdf', classification: 'credit_report',
+          extracted_data: { text: 'CANADIAN CREDIT BUREAU\nFull Name: Ethan James Broussard\nDOB: May 30, 1982\nEquifax Canada: 742 (Good)\nTransUnion Canada: 738 (Good)\nCIBC Mortgage Oct 2017 $390,000/$261,000 $1,808/mo R1' } },
+        { file_name: 'Appraisal_819_Strathmore_Drive_SW_Calgary.pdf', classification: 'appraisal',
+          extracted_data: { text: 'REAL PROPERTY APPRAISAL REPORT\nSubject Property: 819 Strathmore Drive SW Calgary AB T3H 4M6\nReconciled Market Value: $560,000' } },
+      ];
+      const ethanAttachments = ethanSavedDocs.map(d => ({ Name: d.file_name, ContentType: 'application/pdf', Content: dStubPdf, ContentLength: dStubPdf.length }));
+
+      // Run the recall gate for one fixture. Returns {asks, classifierCaught, bannerCorrect, miss, leakReason, welcomeFirst400}.
+      const runRecallProbe = async (label, senderName, subject, body, attachments, savedDocs) => {
+        const r = await dAi.processInitialEmail(senderName, body, attachments, savedDocs, true, true, false, subject);
+        const welcome = r.welcomeEmail || '';
+        const dealSummary = r.dealSummary || {};
+        const asks = dDoesAsk(welcome);
+        const classifierCaught = dAi.welcomeEmailIsAskingClarification(welcome);
+
+        // Apply banner: simulate the webhook gate (missingDocs computed assuming all docs in for these full-package fixtures).
+        const missingDocs = []; // both fixtures are full-package
+        const statusFlag = classifierCaught ? 'PRELIMINARY-CLARIFICATION'
+                         : missingDocs.length > 0 ? 'PRELIMINARY'
+                         : 'COMPLETE';
+        const bannerText = classifierCaught ? 'PRELIMINARY — BROKER CLARIFICATION PENDING'
+                         : missingDocs.length > 0 ? 'PRELIMINARY REVIEW — AWAITING APPROVAL'
+                         : 'COMPLETE — Ready for Review';
+        // Synthetic minimal leadSummary to validate banner enforcer on this turn.
+        const synthLeadSummary = `<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>
+<h2>Deal Snapshot</h2>
+<p>Borrower: ${dealSummary.borrower_name || senderName}</p>
+<p>This file is COMPLETE — all required documents have been received.</p>`;
+        const enforced = dAi.enforceReviewBanner(synthLeadSummary, bannerText);
+        const bannerCorrect = enforced.includes(`<p><strong>FILE STATUS:</strong> ${bannerText}</p>`);
+        const bannerLeak = classifierCaught && enforced.includes('FILE STATUS:</strong> COMPLETE');
+
+        let miss = null;
+        if (asks && !classifierCaught) miss = 'asks=true but classifier=false (recall miss — phrasing evaded the classifier)';
+        else if (classifierCaught && !bannerCorrect) miss = 'classifier=true but banner enforcement failed';
+        else if (bannerLeak) miss = 'banner still contains COMPLETE despite PRELIMINARY-CLARIFICATION substitution';
+
+        return { asks, classifierCaught, statusFlag, bannerText, miss, welcomeFirst400: dStripHtml(welcome).slice(0, 400) };
+      };
+
+      let dNoFalseCompleteMisses = 0;
+      const dRecallReport = [];
+      for (let run = 1; run <= 5; run++) {
+        try {
+          const r = await runRecallProbe('Marcus', 'Natalie Bergman', marcusSubject, marcusBody, marcusAttachments, marcusSavedDocs);
+          dRecallReport.push({ fixture: 'Marcus', run, ...r });
+          if (r.miss) {
+            dNoFalseCompleteMisses++;
+            console.log(`  Marcus Run ${run}: MISS — ${r.miss}`);
+            console.log(`    Welcome first 400: ${r.welcomeFirst400}`);
+          } else {
+            console.log(`  Marcus Run ${run}: PASS — asks=${r.asks} classifier=${r.classifierCaught} banner="${r.bannerText}"`);
+          }
+        } catch (e) {
+          dNoFalseCompleteMisses++;
+          console.log(`  Marcus Run ${run}: ERROR — ${e.message}`);
+          dRecallReport.push({ fixture: 'Marcus', run, error: e.message });
+        }
+      }
+      for (let run = 1; run <= 5; run++) {
+        try {
+          const r = await runRecallProbe('Ethan', 'Steven Laroche', ethanSubject, ethanBody, ethanAttachments, ethanSavedDocs);
+          dRecallReport.push({ fixture: 'Ethan', run, ...r });
+          if (r.miss) {
+            dNoFalseCompleteMisses++;
+            console.log(`  Ethan Run ${run}: MISS — ${r.miss}`);
+            console.log(`    Welcome first 400: ${r.welcomeFirst400}`);
+          } else {
+            console.log(`  Ethan Run ${run}: PASS — asks=${r.asks} classifier=${r.classifierCaught} banner="${r.bannerText}"`);
+          }
+        } catch (e) {
+          dNoFalseCompleteMisses++;
+          console.log(`  Ethan Run ${run}: ERROR — ${e.message}`);
+          dRecallReport.push({ fixture: 'Ethan', run, error: e.message });
+        }
+      }
+
+      // Count asks across all runs as audit signal.
+      const totalAsks = dRecallReport.filter(r => r.asks).length;
+      const totalCaught = dRecallReport.filter(r => r.classifierCaught).length;
+      console.log(`Group D-NO-FALSE-COMPLETE: ${10 - dNoFalseCompleteMisses}/10 runs passed, ${dNoFalseCompleteMisses}/10 missed`);
+      console.log(`  Recall audit: ground-truth asks=${totalAsks}/10, classifier caught=${totalCaught}/10`);
+      if (dNoFalseCompleteMisses > 0) {
+        // Surface every miss with verbatim welcome text — the evading phrasing
+        // is the load-bearing diagnostic data per the pre-committed escalation.
+        const misses = dRecallReport.filter(r => r.miss || r.error);
+        console.log('\n  EVADING PHRASING DUMP (for plan escalation — do NOT pattern-extend):');
+        for (const m of misses) {
+          console.log(`    ${m.fixture} run ${m.run}: ${m.miss || m.error}`);
+          if (m.welcomeFirst400) console.log(`      welcome: ${m.welcomeFirst400}`);
+        }
+        throw new Error(`FAIL [Group D-NO-FALSE-COMPLETE]: ${dNoFalseCompleteMisses}/10 missed. 0-miss bar breached — classifier insufficient on real-Postmark replay. Per pre-committed escalation: STOP, surface evading phrasing (above), do NOT pattern-extend, reorder batch (Cluster B first → D gates on B's pre-Claude structural signal).`);
+      }
+
+      // ════════════════════════════════════════════════════════════
+      // GROUP D-CLEAN-NO-FP — Derek initial 3x (0-FP bar)
+      // ════════════════════════════════════════════════════════════
+      // Derek's real-Postmark initial inbound: 4 docs, no exit strategy
+      // mentioned. Vienna emits a doc-request response — NOT a clarification
+      // ask. Bar: classifier must return false on Vienna's doc-request output
+      // every run. A clean PRELIMINARY (docs-missing) flow must NOT be
+      // wrongly held as clarification-pending.
+      console.log('\n========== GROUP D-CLEAN-NO-FP — Derek initial real-Postmark replay (3x, 0-FP bar) ==========');
+      const derekSubject = 'New Submission — Derek Olsen, 5519 Henwood Road SW Calgary';
+      const derekBody = `Hi,
+
+Submitting a deal for your review. Second mortgage on a Calgary property.
+
+*Borrower:* Derek Olsen *Property:* 5519 Henwood Road SW, Calgary, AB T3E
+7C2 *Appraised Value:* $730,000*Mortgage Amount Requested:* $452,600 *LTV:*
+~62%
+
+I have a few more documents coming — will follow up shortly with the income
+doc and a couple of others.
+
+*Ryan O'Brien*
+
+Lakeside Mortgage Partners Lic. #MB227593`;
+      const derekSavedDocs = [
+        { file_name: 'LoanApplication_Derek_Olsen.pdf', classification: 'loan_application',
+          extracted_data: { text: 'LOAN APPLICATION FORM\nRequested loan amount: $ (blank)\nName: (blank)' } },
+        { file_name: 'PNW_Statement_Derek_Olsen.pdf', classification: 'pnw_statement',
+          extracted_data: { text: 'Personal Statement of Affairs\nName: (blank)' } },
+        { file_name: 'Appraisal_5519_Henwood_Road_SW_Calgary.pdf', classification: 'appraisal',
+          extracted_data: { text: 'PINNACLE PROPERTY APPRAISALS\nSubject Property: 5519 Henwood Road SW Calgary AB T3E 7C2\nOPINION OF VALUE: $730,000' } },
+        { file_name: 'Credit_Bureau_Derek_Olsen.pdf', classification: 'credit_report',
+          extracted_data: { text: 'CREDIT BUREAU REPORT\nFull Name: Derek James Olsen\nDate of Birth: March 28, 1974\nCurrent Address: 5519 Henwood Road SW Calgary AB T3E 7C2\nEquifax: 728 TransUnion: 731' } },
+      ];
+      const derekAttachments = derekSavedDocs.map(d => ({ Name: d.file_name, ContentType: 'application/pdf', Content: dStubPdf, ContentLength: dStubPdf.length }));
+
+      let dCleanFPs = 0;
+      for (let run = 1; run <= 3; run++) {
+        try {
+          const r = await dAi.processInitialEmail('Ryan O\'Brien', derekBody, derekAttachments, derekSavedDocs, true, true, false, derekSubject);
+          const welcome = r.welcomeEmail || '';
+          const asks = dDoesAsk(welcome);
+          const classifierCaught = dAi.welcomeEmailIsAskingClarification(welcome);
+          if (classifierCaught && !asks) {
+            dCleanFPs++;
+            console.log(`  Derek Run ${run}: FP — classifier=true but ground-truth=false (false-positive on doc-request)`);
+            console.log(`    Welcome first 400: ${dStripHtml(welcome).slice(0, 400)}`);
+          } else if (classifierCaught && asks) {
+            // Both true — Vienna unexpectedly asked clarification on a clean fixture
+            // (rare but possible if Claude e.g. flagged a hedged figure). Not an FP
+            // of the classifier per se, but worth surfacing for visibility.
+            console.log(`  Derek Run ${run}: UNEXPECTED-ASK — Vienna asked clarification on clean Derek (classifier correctly caught it). Welcome first 400: ${dStripHtml(welcome).slice(0, 400)}`);
+          } else {
+            console.log(`  Derek Run ${run}: PASS — classifier=${classifierCaught} (no FP on clean doc-request)`);
+          }
+        } catch (e) {
+          dCleanFPs++;
+          console.log(`  Derek Run ${run}: ERROR — ${e.message}`);
+        }
+      }
+      console.log(`Group D-CLEAN-NO-FP: ${3 - dCleanFPs}/3 runs passed, ${dCleanFPs}/3 FP'd`);
+      if (dCleanFPs > 0) {
+        throw new Error(`FAIL [Group D-CLEAN-NO-FP]: ${dCleanFPs}/3 false-positived. Classifier flagging a clean doc-request as clarification = common-path regression (wrongly suppressing COMPLETE on clean files). Per plan: surface evading phrasing, escalate.`);
+      }
+
+      // ════════════════════════════════════════════════════════════
+      // GROUP D-IDENTITY-CLASH-COMPATIBLE — Anna 3x (S15-E compat)
+      // ════════════════════════════════════════════════════════════
+      // generateIdentityClashMinimalAsk produces a clarification-shaped
+      // welcome ("Could you confirm which is the correct borrower"). The
+      // classifier MUST classify this as clarification-asking so that if
+      // the identity-clash routing path ever did fire the prelim review
+      // (it doesn't today — the awaiting_identity_confirmation status
+      // suppresses it), the gate would still correctly route to
+      // PRELIMINARY-CLARIFICATION. Cluster D compatibility with S15-E.
+      console.log('\n========== GROUP D-IDENTITY-CLASH-COMPATIBLE — Anna real-Postmark replay (3x) ==========');
+      // Reuse the S15-E real-multidoc fixture (Anna in subject, Grace docs).
+      const annaSubject = 'Second Mortgage — Anna Bergstrom, 1801 Varsity Estates Dr NW Calgary';
+      const annaBody = `Hi,
+
+I'm Oliver Patel with Meridian Mortgage Group (Lic. #MB552934). I have a
+client looking for a $92,000 second mortgage on a residential property in
+Calgary.
+
+I've attached our own loan application form along with the credit bureau
+and appraisal for your review. Please note we use our brokerage's own forms
+rather than the lender's.
+
+Please let me know what else you need to proceed.
+
+Thanks,
+Oliver Patel
+Meridian Mortgage Group Lic. #MB552934`;
+      const annaSavedDocs = [
+        { file_name: 'Appraisal_88_Harvest_Hills.pdf', classification: 'appraisal',
+          extracted_data: { text: 'PINNACLE PROPERTY APPRAISALS\nSUBJECT PROPERTY\nCivic Address: 88 Harvest Hills Blvd NE, Calgary, AB T3K 4J9\nOPINION OF VALUE: $615,000' } },
+        { file_name: 'Credit_Bureau_Grace_Paulson.pdf', classification: 'credit_report',
+          extracted_data: { text: 'CREDIT BUREAU REPORT\nFull Name: Grace Marie Paulson\nDOB: September 4, 1986\nCurrent Address: 88 Harvest Hills Blvd NE, Calgary, AB T3K 4J9' } },
+        { file_name: 'LoanApplication_Grace_Paulson.pdf', classification: 'loan_application',
+          extracted_data: { text: 'LOAN APPLICATION FORM\nRequested loan amount: $ (blank)\nName: (blank)' } },
+      ];
+      const annaAttachments = annaSavedDocs.map(d => ({ Name: d.file_name, ContentType: 'application/pdf', Content: dStubPdf, ContentLength: dStubPdf.length }));
+
+      let dAnnaCompatFails = 0;
+      for (let run = 1; run <= 3; run++) {
+        try {
+          const r = await dAi.processInitialEmail('Oliver Patel', annaBody, annaAttachments, annaSavedDocs, true, false, false, annaSubject);
+          const welcome = r.welcomeEmail || '';
+          const dealSummary = r.dealSummary || {};
+          const classifierCaught = dAi.welcomeEmailIsAskingClarification(welcome);
+          // Identity-clash path should produce a clarification-shaped minimal-ask.
+          // Verify both: (a) the S15-E routing fired (identity_clash=true), and
+          // (b) the classifier catches the minimal-ask as clarification-shaped.
+          if (dealSummary.identity_clash !== true) {
+            dAnnaCompatFails++;
+            console.log(`  Anna Run ${run}: FAIL — identity_clash routing did not fire (S15-E regression?). identity_clash=${dealSummary.identity_clash}`);
+          } else if (!classifierCaught) {
+            dAnnaCompatFails++;
+            console.log(`  Anna Run ${run}: FAIL — identity-clash minimal-ask not classified as clarification. classifier=false on minimal-ask. Welcome first 400: ${dStripHtml(welcome).slice(0, 400)}`);
+          } else {
+            console.log(`  Anna Run ${run}: PASS — identity_clash routing fired AND classifier caught minimal-ask as clarification`);
+          }
+        } catch (e) {
+          dAnnaCompatFails++;
+          console.log(`  Anna Run ${run}: ERROR — ${e.message}`);
+        }
+      }
+      console.log(`Group D-IDENTITY-CLASH-COMPATIBLE: ${3 - dAnnaCompatFails}/3 runs passed, ${dAnnaCompatFails}/3 failed`);
+      if (dAnnaCompatFails > 0) {
+        throw new Error(`FAIL [Group D-IDENTITY-CLASH-COMPATIBLE]: ${dAnnaCompatFails}/3 failed. Either S15-E routing regressed or D classifier doesn't catch identity-clash minimal-ask.`);
+      }
+    } else {
+      console.log('\n---------- Group D-NO-FALSE-COMPLETE + D-CLEAN-NO-FP + D-IDENTITY-CLASH-COMPATIBLE: SKIPPED (set RUN_D_D=1 to run) ----------');
     }
   } else {
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
