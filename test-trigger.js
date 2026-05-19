@@ -2512,6 +2512,288 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   }
   console.log(`  PASS [B-2a renderDealSnapshot]: ${snapshotPassed}/${snapshotCases.length} cases (Marcus full + NULL graceful + tax-assessment fallback + commercial + admin-transparency multi-value + LTV-uncomputable TBD)`);
 
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C4-COMBINED-LTV-COMPUTE — R4-Bucket-C.4 helper purity + math (S4 Ryan)
+  // ════════════════════════════════════════════════════════════════
+  // Pure-function tests for computeCombinedLtv. C1 verifies S4 Ryan's arithmetic
+  // and grounded-source threading. C2 is the LOAD-BEARING OVER-FIRE NEGATIVE
+  // pulled from REAL Linda Okafor corpus (deal cf3f1db0) — a genuine clean
+  // first-mortgage purchase deal. The real extractor is run against Linda's
+  // real email + credit_report fixtures; existing_first_mortgage_balance must
+  // be []; computeCombinedLtv must return null. Methodology: real artifacts,
+  // real extractor, NOT a synthesized canonical map that could accidentally
+  // encode the absence we're testing for. C3-C5 cover degenerate inputs (each
+  // returns null — fail-safe direction over a wrong figure).
+  console.log('\n========== GROUP C4-COMBINED-LTV-COMPUTE — helper purity + math + REAL-corpus over-fire negative ==========');
+
+  // ─── C1: S4 Ryan shape — arithmetic correctness + components threading ───
+  const c4S4Map = {
+    existing_first_mortgage_balance: [{ value: 385000, source: 'Credit_Bureau_Ryan_Callahan.pdf', lender_canonical: 'BMO' }],
+    requested_loan_amount: [{ value: 452900, source: 'email_body' }],
+    subject_property_market_value: [{ value: 545000, source: 'email_body' }, { value: 545000, source: 'Appraisal_2847_Whitemud_Drive_NW_Edmonton.pdf' }],
+  };
+  const c4S4Result = dEngine.computeCombinedLtv(c4S4Map);
+  if (!c4S4Result || c4S4Result.combined_ltv_percent !== 153.7) {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C1 S4 Ryan]: expected combined_ltv_percent=153.7, got ${JSON.stringify(c4S4Result)}`);
+  }
+  if (c4S4Result.components.existing !== 385000 || c4S4Result.components.requested !== 452900 || c4S4Result.components.market !== 545000 || c4S4Result.components.existing_source !== 'Credit_Bureau_Ryan_Callahan.pdf' || c4S4Result.components.existing_lender !== 'BMO') {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C1 components]: components mismatch — got ${JSON.stringify(c4S4Result.components)}`);
+  }
+  console.log(`  PASS [C4-COMBINED-LTV-COMPUTE C1]: S4 Ryan shape → 153.7% ($385,000 BMO + $452,900) / $545,000 — math + grounded-source threading verified`);
+
+  // ─── C2: REAL Linda Okafor corpus (deal cf3f1db0) — over-fire negative ───
+  // Verbatim broker inbound msg [0] body from production Supabase. Linda is a
+  // first-mortgage purchase deal (no existing mortgage on subject property).
+  const lindaEmailBody = `Hi Vienna,
+
+I have a client looking to place a first mortgage on her primary residence
+in Spruce Grove. Here are the details:
+
+   - *Borrower:* Linda Okafor, 44, registered nurse, 9 years with Alberta
+   Health Services
+   - *Property:* 45 Calico Court, Spruce Grove, AB T7X 0M3
+   - *Appraised value:* $525,000
+   - *Mortgage requested:* $367,500
+   - *LTV:* 70%
+   - *Purpose:* Purchase
+   - *Term:* 1 year
+
+I've attached the credit bureau. Appraisal, income docs, and the
+application will follow shortly.
+
+Jason Mercer
+
+Capital Bridge Mortgage Group License #: MBL-AB-20847`;
+  const lindaEmailSubject = 'First Mortgage Inquiry — Linda Okafor | 45 Calico Court,';
+
+  // Verbatim Linda credit_report extracted_data.text from production. KEY
+  // PROPERTY: zero mortgage trade lines (TD revolving / Scotia Visa / Toyota
+  // auto / CIBC LOC / Rogers telecom — no mortgage anywhere). B's Format-A
+  // and Format-B mortgage-line patterns find nothing → existing_first_mortgage_balance: [].
+  const lindaCreditReportText = `CREDIT BUREAU REPORT
+Confidential — For Mortgage Underwriting Purposes Only
+Report Date:April 26, 2026File Reference:CB-2026-04-8812
+Requested By:Capital Bridge Mortgage GroupReport Type:Full Consumer Report
+BORROWER INFORMATION
+Full Name:Linda Adaeze OkaforDate of Birth:July 19, 1981
+Current Address:45 Calico Court, Spruce Grove, AB  T7X 0M3SIN (last 4):XXXX
+Previous Address:9231 149 Street NW, Edmonton, AB  T5R 1B2Years at Address:2
+CREDIT SCORES
+741756
+Equifax ScoreTransUnion Score
+GoodGood
+TRADE LINES
+CreditorTypeOpenedLimit/ValueBalancePaymentRating
+TD BankRevolvingFeb 2012$10,000$2,100$63/moR1
+Scotiabank VisaRevolvingAug 2014$12,000$4,400$132/moR1
+Toyota FinancialInstallmentJan 2023$42,000$31,200$712/moI1
+CIBC LOCLine of CreditMar 2018$20,000$0$0/moR1
+Rogers Comm.TelecomNov 2016$3,200$0$0/moO1
+PUBLIC RECORDS & COLLECTIONS
+No bankruptcies, judgments, consumer proposals, or collections on file.`;
+
+  // Verbatim Linda appraisal extracted_data.text excerpt (OPINION OF VALUE
+  // anchor + civic address are the load-bearing extraction surfaces).
+  const lindaAppraisalText = `PINNACLE PROPERTY APPRAISALS
+Certified Real Estate Appraisal Report
+File No.:PPA-2026-04-0391Report Date:April 25, 2026
+SUBJECT PROPERTY
+Civic Address:45 Calico Court, Spruce Grove, AB  T7X 0M3
+Property Type:Single-family detached residential
+OPINION OF VALUE
+$525,000
+Five Hundred Twenty-Five Thousand Dollars
+As of April 23, 2026`;
+
+  const lindaSavedDocs = [
+    { file_name: 'Credit_Bureau_Linda_Okafor.pdf', classification: 'credit_report', extracted_data: { text: lindaCreditReportText } },
+    { file_name: 'Appraisal_45_Calico_Court_Spruce_Grove.pdf', classification: 'appraisal', extracted_data: { text: lindaAppraisalText } },
+  ];
+  // Run REAL B extractor on REAL Linda corpus.
+  const lindaCanonicalMap = cFields.extractCanonicalFields(lindaEmailBody, lindaSavedDocs, { emailSubject: lindaEmailSubject });
+  // LOAD-BEARING ASSERTION 1: real corpus + real extractor produces no
+  // first-mortgage signal. The credit_report has zero mortgage trade lines
+  // (TD revolving / Scotia Visa / Toyota auto / CIBC LOC / Rogers telecom),
+  // so B's Format-A and Format-B mortgage-line patterns find nothing.
+  if (lindaCanonicalMap.existing_first_mortgage_balance.length !== 0) {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C2 over-fire negative / real extractor]: expected existing_first_mortgage_balance=[] on clean Linda Okafor corpus, got ${JSON.stringify(lindaCanonicalMap.existing_first_mortgage_balance)}. If this fires, B's credit_report extractor is matching a non-mortgage trade line — investigate before proceeding (a regression here would mean clean first-mortgage deals start showing inflated combined LTV).`);
+  }
+  // LOAD-BEARING ASSERTION 2: end-to-end — real extractor output flows through
+  // computeCombinedLtv → null. (Note: Linda's email body uses "Mortgage requested"
+  // phrasing, which B's email extractor doesn't match — requested_loan_amount=[]
+  // for this fixture. That's a separate B-Commit-3 gap, NOT C.4's scope. The
+  // null return here is reached via the existing_first_mortgage_balance=[] branch
+  // first, which is what the over-fire test cares about. Explicit branch
+  // coverage for "empty balance + non-empty loan + non-empty market → null" is
+  // added below as C2b to pin the over-fire branch directly.)
+  const lindaCombined = dEngine.computeCombinedLtv(lindaCanonicalMap);
+  if (lindaCombined !== null) {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C2 OVER-FIRE NEGATIVE]: expected null on clean first-mortgage Linda Okafor real corpus (existing_first_mortgage_balance=[]), got ${JSON.stringify(lindaCombined)}. Over-fire = inflating a clean borrower's leverage to 150%+ on the admin surface = catastrophic underwriting error.`);
+  }
+  console.log(`  PASS [C4-COMBINED-LTV-COMPUTE C2 OVER-FIRE NEGATIVE / real corpus]: REAL Linda Okafor (deal cf3f1db0) → real extractor → existing_first_mortgage_balance=[] → computeCombinedLtv=null. Clean first-mortgage deals do NOT over-fire.`);
+
+  // ─── C2b: over-fire branch coverage — explicit "empty balance + non-empty loan + non-empty market → null" ───
+  // Pins the over-fire BRANCH directly: a clean borrower with a loan and a
+  // value but no existing balance must still produce null. This guards against
+  // a future code change that might (e.g.) accept `0` as a default balance
+  // when the array is empty, which would inflate combined LTV to (0 + loan)/value
+  // = standard LTV — a no-op in math but a semantic regression (combined LTV row
+  // would fire on clean deals). Synthesized canonical map is appropriate here —
+  // the question is "what does computeCombinedLtv do given an explicit empty
+  // balance with loan+market populated," not "is real corpus correctly empty"
+  // (C2 already proved that).
+  const c4OverFireBranch = dEngine.computeCombinedLtv({
+    existing_first_mortgage_balance: [],
+    requested_loan_amount: [{ value: 367500, source: 'email_body' }],
+    subject_property_market_value: [{ value: 525000, source: 'Appraisal.pdf' }],
+  });
+  if (c4OverFireBranch !== null) {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C2b OVER-FIRE BRANCH]: empty existing_first_mortgage_balance + non-empty loan + non-empty market MUST return null. Got ${JSON.stringify(c4OverFireBranch)}. If this fires, the over-fire guard has been weakened — clean first-mortgage deals would start showing a Combined LTV row.`);
+  }
+  console.log(`  PASS [C4-COMBINED-LTV-COMPUTE C2b OVER-FIRE BRANCH]: explicit empty-balance branch with loan+market populated → null (over-fire guard semantically locked)`);
+
+  // ─── C3: missing requested_loan_amount → null ───
+  const c4MissingLoan = dEngine.computeCombinedLtv({
+    existing_first_mortgage_balance: [{ value: 200000, source: 'x', lender_canonical: 'TD' }],
+    requested_loan_amount: [],
+    subject_property_market_value: [{ value: 500000, source: 'y' }],
+  });
+  if (c4MissingLoan !== null) {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C3]: expected null on missing requested_loan_amount, got ${JSON.stringify(c4MissingLoan)}`);
+  }
+  console.log(`  PASS [C4-COMBINED-LTV-COMPUTE C3]: missing requested_loan_amount → null (fail-safe direction)`);
+
+  // ─── C4: missing subject_property_market_value → null ───
+  const c4MissingMarket = dEngine.computeCombinedLtv({
+    existing_first_mortgage_balance: [{ value: 200000, source: 'x', lender_canonical: 'TD' }],
+    requested_loan_amount: [{ value: 100000, source: 'y' }],
+    subject_property_market_value: [],
+  });
+  if (c4MissingMarket !== null) {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C4]: expected null on missing subject_property_market_value, got ${JSON.stringify(c4MissingMarket)}`);
+  }
+  console.log(`  PASS [C4-COMBINED-LTV-COMPUTE C4]: missing subject_property_market_value → null (fail-safe direction)`);
+
+  // ─── C5: market === 0 → null (degenerate divide-by-zero guard) ───
+  const c4ZeroMarket = dEngine.computeCombinedLtv({
+    existing_first_mortgage_balance: [{ value: 200000, source: 'x', lender_canonical: 'TD' }],
+    requested_loan_amount: [{ value: 100000, source: 'y' }],
+    subject_property_market_value: [{ value: 0, source: 'z' }],
+  });
+  if (c4ZeroMarket !== null) {
+    throw new Error(`FAIL [C4-COMBINED-LTV-COMPUTE C5]: expected null on market=0, got ${JSON.stringify(c4ZeroMarket)}`);
+  }
+  console.log(`  PASS [C4-COMBINED-LTV-COMPUTE C5]: market=0 → null (degenerate guard)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C4-SNAPSHOT-COMBINED-LTV-ROW — renderDealSnapshot extension
+  // ════════════════════════════════════════════════════════════════
+  // R1 verifies S4 input produces the Combined LTV row with math suffix.
+  // R2 verifies Linda real-corpus (over-fire negative) produces NO Combined
+  // LTV row in the rendered Snapshot. R3 pins additive-only — the standard
+  // LTV row continues to appear in both cases (no semantic shift to the
+  // existing 8/8 B-2a renderDealSnapshot truth table).
+  console.log('\n========== GROUP C4-SNAPSHOT-COMBINED-LTV-ROW — Snapshot rendering ==========');
+
+  // R1: S4 shape — both rows present.
+  const c4SnapS4Map = {
+    subject_property_address: [{ value: '2847 whitemud drive nw', source: 'Appraisal_2847_Whitemud_Drive_NW_Edmonton.pdf' }],
+    subject_property_postal_code: [{ value: 'T6J4Y3', source: 'email_body' }],
+    subject_property_market_value: [{ value: 545000, source: 'email_body' }],
+    subject_property_assessment_value: [],
+    requested_loan_amount: [{ value: 452900, source: 'email_body' }],
+    existing_first_mortgage_lender: [{ value: 'BMO', source: 'Credit_Bureau_Ryan_Callahan.pdf' }],
+    existing_first_mortgage_balance: [{ value: 385000, source: 'Credit_Bureau_Ryan_Callahan.pdf', lender_canonical: 'BMO' }],
+    existing_first_mortgage_payout_total: [],
+    primary_borrower_full_name: [],
+    mortgage_position: [{ value: '2nd', source: 'email_body' }],
+    requested_loan_term_months: [],
+  };
+  const c4SnapS4 = dEngine.renderDealSnapshot(c4SnapS4Map, { ownershipType: 'Personal', isCommercial: false });
+  if (!c4SnapS4.includes('<strong>LTV:</strong> 83% (computed)')) {
+    throw new Error(`FAIL [C4-SNAPSHOT R1 / standard LTV preserved]: expected '<strong>LTV:</strong> 83% (computed)' in Snapshot. Got:\n${c4SnapS4}`);
+  }
+  if (!c4SnapS4.includes('<strong>Combined LTV (incl. existing 1st):</strong> 153.7%')) {
+    throw new Error(`FAIL [C4-SNAPSHOT R1 / Combined LTV row]: expected '<strong>Combined LTV (incl. existing 1st):</strong> 153.7%' in Snapshot. Got:\n${c4SnapS4}`);
+  }
+  if (!c4SnapS4.includes('(BMO $385,000 + $452,900) / $545,000')) {
+    throw new Error(`FAIL [C4-SNAPSHOT R1 / math suffix]: expected math suffix '(BMO $385,000 + $452,900) / $545,000' for admin transparency. Got:\n${c4SnapS4}`);
+  }
+  console.log(`  PASS [C4-SNAPSHOT R1]: S4 Ryan shape — standard LTV 83% row + Combined LTV 153.7% row with math suffix '(BMO $385,000 + $452,900) / $545,000'`);
+
+  // R2: REAL Linda Okafor corpus over-fire negative — NO Combined LTV row.
+  // The standard LTV row appears as TBD here because Linda's email body uses
+  // "Mortgage requested" phrasing (B-Commit-3 email-extractor gap noted in C2;
+  // residual flagged in commit body), so requested_loan_amount=[] → LTV TBD.
+  // The over-fire test point is "no Combined LTV row" — that holds regardless
+  // of the standard-LTV row's value.
+  const c4SnapLinda = dEngine.renderDealSnapshot(lindaCanonicalMap, { ownershipType: 'Personal', isCommercial: false });
+  if (!c4SnapLinda.includes('<strong>LTV:</strong>')) {
+    throw new Error(`FAIL [C4-SNAPSHOT R2 / standard LTV row preserved]: expected an '<strong>LTV:</strong>' row on Linda's Snapshot (even if value is TBD due to email-extractor gap). Got:\n${c4SnapLinda}`);
+  }
+  if (c4SnapLinda.includes('Combined LTV')) {
+    throw new Error(`FAIL [C4-SNAPSHOT R2 OVER-FIRE NEGATIVE]: clean first-mortgage Linda Okafor MUST NOT have a Combined LTV row in Snapshot. The presence of this row means clean borrowers are getting their leverage inflated. Got:\n${c4SnapLinda}`);
+  }
+  console.log(`  PASS [C4-SNAPSHOT R2 OVER-FIRE NEGATIVE]: Linda Okafor real-corpus Snapshot has standard LTV row, NO Combined LTV row — clean first-mortgage deals unaffected`);
+
+  // R3: additive-only — the standard LTV row continues to render in both cases.
+  // (Implicitly verified by R1+R2; explicit regression-lock counts the rows.)
+  const c4R1LtvRows = (c4SnapS4.match(/<strong>LTV:<\/strong>/g) || []).length;
+  const c4R2LtvRows = (c4SnapLinda.match(/<strong>LTV:<\/strong>/g) || []).length;
+  if (c4R1LtvRows !== 1 || c4R2LtvRows !== 1) {
+    throw new Error(`FAIL [C4-SNAPSHOT R3 / additive-only]: expected exactly 1 '<strong>LTV:</strong>' row in each Snapshot (standard LTV preserved as own row; Combined LTV is an ADDITIONAL row, not a replacement). Got S4=${c4R1LtvRows}, Linda=${c4R2LtvRows}.`);
+  }
+  console.log(`  PASS [C4-SNAPSHOT R3 / additive-only]: standard LTV row remains exactly once in both Snapshots — Combined LTV is additive, not replacement`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C4-ESCALATION-INJECTION — structural locks
+  // ════════════════════════════════════════════════════════════════
+  // E1 (correctness req (c) — grounded-source discipline): computeCombinedLtv
+  //    body MUST consume canonicalMap.existing_first_mortgage_balance and MUST
+  //    NOT contain text-parsing patterns. Locks against future "let's also try
+  //    parsing the loan_application annotations" drift that would violate the
+  //    grounded-canonical-fields-only discipline.
+  // E2: escalation call-site wiring source-grep — sendEscalationToAdmin body
+  //    invokes computeCombinedLtv (the actual S4-surface wiring).
+  // E3 (S7-B2 same-category gate protection): computeCombinedLtv body must NOT
+  //    reference existing_first_mortgage_payout_total — proves we honor B's
+  //    category boundary between balance and payout_total.
+  console.log('\n========== GROUP C4-ESCALATION-INJECTION — structural locks ==========');
+  const c4DiscEngineSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/discrepancy-engine.js'), 'utf8');
+  const c4WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+
+  // Extract computeCombinedLtv body. Match start `const computeCombinedLtv = (canonicalMap)` through the closing `};`.
+  const c4HelperMatch = c4DiscEngineSrc.match(/const computeCombinedLtv = \(canonicalMap\) =>[\s\S]*?\n\};/);
+  if (!c4HelperMatch) {
+    throw new Error(`FAIL [C4-ESCALATION-INJECTION E1 / helper-not-found]: computeCombinedLtv definition not found in discrepancy-engine.js`);
+  }
+  const c4HelperBody = c4HelperMatch[0];
+  if (!c4HelperBody.includes('canonicalMap.existing_first_mortgage_balance')) {
+    throw new Error(`FAIL [C4-ESCALATION-INJECTION E1 / grounded-source]: computeCombinedLtv must consume canonicalMap.existing_first_mortgage_balance. Helper body:\n${c4HelperBody}`);
+  }
+  for (const forbidden of ['.match(', 'extracted_data', '\\.text', 'callClaude', 'aiService.']) {
+    if (c4HelperBody.includes(forbidden)) {
+      throw new Error(`FAIL [C4-ESCALATION-INJECTION E1 / purity violation]: computeCombinedLtv body contains forbidden pattern '${forbidden}'. The helper MUST be a pure consumer of canonicalMap — no text parsing, no Claude calls, no extracted_data fallback. This is the grounded-source discipline.`);
+    }
+  }
+  console.log(`  PASS [C4-ESCALATION-INJECTION E1 / grounded-source purity]: computeCombinedLtv consumes only canonicalMap.existing_first_mortgage_balance; no text parsing, no Claude, no extracted_data fallback`);
+
+  // E2: escalation call-site wiring.
+  if (!c4WebhookSrc.includes('dEngine.computeCombinedLtv(')) {
+    throw new Error(`FAIL [C4-ESCALATION-INJECTION E2 / call-site wiring]: webhook.js must invoke dEngine.computeCombinedLtv (escalation surface wiring). C.4's S4 surface is the LTV-over-80 escalation email; without this call, the Combined LTV callout never reaches admin.`);
+  }
+  const c4EscalationSection = c4WebhookSrc.match(/const sendEscalationToAdmin = [\s\S]*?\n\};/);
+  if (!c4EscalationSection || !c4EscalationSection[0].includes('computeCombinedLtv(')) {
+    throw new Error(`FAIL [C4-ESCALATION-INJECTION E2 / escalation-surface scope]: dEngine.computeCombinedLtv must be called within sendEscalationToAdmin, not elsewhere.`);
+  }
+  console.log(`  PASS [C4-ESCALATION-INJECTION E2 / call-site wiring]: sendEscalationToAdmin invokes computeCombinedLtv (S4 escalation surface wired)`);
+
+  // E3: S7-B2 same-category gate protection.
+  if (c4HelperBody.includes('existing_first_mortgage_payout_total')) {
+    throw new Error(`FAIL [C4-ESCALATION-INJECTION E3 / S7-B2 category protection]: computeCombinedLtv body references existing_first_mortgage_payout_total — this muddies B's same-category gate that separates balance from payout_total. C.4 must use balance only (underwriting-correct + S7-B2-preserving + S4-pragmatic). If a future cluster needs payout_total here, that's a deliberate gate redesign with its own plan, not a quiet additive.`);
+  }
+  console.log(`  PASS [C4-ESCALATION-INJECTION E3 / S7-B2 protection]: computeCombinedLtv does NOT reference existing_first_mortgage_payout_total — B's balance-vs-payout same-category gate preserved`);
+
   // ─── stripVienna_DiscrepancyContent — defense-in-depth backstop ───
   const stripDiscCases = [
     {

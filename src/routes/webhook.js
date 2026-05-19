@@ -514,7 +514,30 @@ const sendEscalationToAdmin = async (deal, dealSummary, ltv, options = {}) => {
   // mis-attribute Franco's admin-direction inbounds to the broker.
   const escalationBrokerName = dealSummary?.broker_name || dealSummary?.sender_name || deal.borrower_name;
   const labeledEscalationMessages = labelMessagesForLeadSummary(dealMessages, escalationBrokerName);
-  const escalationEmail = await aiService.generateEscalationNotification(dealSummary, labeledEscalationMessages, dealDocs);
+  // R4-Bucket-C.4 (S4 Ryan): compute combined LTV from B's canonical-fields BEFORE
+  // generateEscalationNotification, then post-Claude prepend a JS-rendered callout
+  // when applicable. Same pattern as B 2b's Deal Snapshot prepend — pure JS, no
+  // prompt-instruction hallucination surface. Pre-C.4: escalation email rendered
+  // standard LTV (Vienna's ltv_percent = new_loan/appraised) only — for a 2nd-mortgage
+  // deal with a $385K existing first, the surfaced 83% misrepresented the actual
+  // 153% leverage.
+  const _c4InboundForCanonical = dealMessages.find(m => m.direction === 'inbound');
+  const _c4Detect = _c4InboundForCanonical ? dEngine.runDiscrepancyDetection(
+    _c4InboundForCanonical.body || '',
+    dealDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
+    escalationBrokerName,
+    { emailSubject: _c4InboundForCanonical.subject || '' }
+  ) : null;
+  const _c4Combined = _c4Detect ? dEngine.computeCombinedLtv(_c4Detect.canonical_map) : null;
+  let escalationEmail = await aiService.generateEscalationNotification(dealSummary, labeledEscalationMessages, dealDocs);
+  if (_c4Combined) {
+    const c = _c4Combined.components;
+    const lenderTag = c.existing_lender ? `${c.existing_lender} ` : '';
+    const fmt = (n) => '$' + Number(n).toLocaleString('en-US');
+    const calloutHtml = `<p><strong>Combined LTV (incl. existing 1st):</strong> ${_c4Combined.combined_ltv_percent}% — (${lenderTag}${fmt(c.existing)} + ${fmt(c.requested)}) / ${fmt(c.market)}. <em>The standard ${ltv}% LTV figure below reflects the new loan only; combined LTV is the leverage figure for second-mortgage deals.</em></p>\n`;
+    escalationEmail = calloutHtml + escalationEmail;
+    console.log(`C.4: prepended Combined LTV callout (${_c4Combined.combined_ltv_percent}%) to escalation email`);
+  }
 
   let escalationAttachments = [];
   if (dealDocs.length > 0) {

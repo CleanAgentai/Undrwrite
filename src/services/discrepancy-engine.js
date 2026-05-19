@@ -257,6 +257,56 @@ const renderSnapshotRow = (label, tuples, opts = {}) => {
   return `<p><strong>${label}:</strong> ${parts}</p>`;
 };
 
+// R4-Bucket-C.4 (S4 Ryan): combined LTV for second-mortgage deals.
+//
+// Inputs sourced EXCLUSIVELY from B's already-anchored canonical-fields schema
+// — no text parsing, no Claude calls, no extracted_data fallback. The function
+// is a pure consumer of canonicalMap; an empty existing_first_mortgage_balance
+// returns null (over-fire guard for clean first-mortgage deals).
+//
+// Field choice: existing_first_mortgage_balance, not payout_total. Three reasons:
+//   1. Underwriting semantics: balance = principal owed on property (the actual
+//      encumbrance). Payout total includes one-time discharge costs (penalty,
+//      per-diem interest, discharge fee) that aren't permanent leverage.
+//   2. S7-B2 same-category protection: B's discrepancy engine intentionally
+//      separates balance from payout_total — using balance here honors B's
+//      category boundary and protects S7-B2's same-category gate.
+//   3. S4 pragmatic: S4 Ryan has NO payout statement (loan_type=2nd mortgage,
+//      no mortgage_statement classification); credit-bureau Format A extracts
+//      $385K balance. Using payout_total wouldn't compute for S4 at all.
+//
+// Over-fire guard (correctness req 2 — load-bearing): clean first-mortgage
+// deals (credit bureau has no mortgage trade line) → existing balance is
+// []  → return null. No Combined LTV row in Snapshot, no escalation injection.
+// Verified against real Linda Okafor deal cf3f1db0 (purchase, zero credit-
+// bureau mortgages).
+//
+// Fail-safe: null over a wrong figure. An underwriting number is too dangerous
+// to fabricate from partial signals.
+const computeCombinedLtv = (canonicalMap) => {
+  const balances = (canonicalMap && canonicalMap.existing_first_mortgage_balance) || [];
+  const loans = (canonicalMap && canonicalMap.requested_loan_amount) || [];
+  const values = (canonicalMap && canonicalMap.subject_property_market_value) || [];
+  if (balances.length === 0) return null;
+  if (loans.length === 0 || values.length === 0) return null;
+  const existing = balances[0].value;
+  const requested = loans[0].value;
+  const market = values[0].value;
+  if (!Number.isFinite(existing) || !Number.isFinite(requested) || !Number.isFinite(market)) return null;
+  if (market <= 0) return null;
+  const combined = ((existing + requested) / market) * 100;
+  return {
+    combined_ltv_percent: Math.round(combined * 10) / 10,
+    components: {
+      existing,
+      requested,
+      market,
+      existing_source: balances[0].source,
+      existing_lender: balances[0].lender_canonical || null,
+    },
+  };
+};
+
 const renderDealSnapshot = (canonicalMap, opts = {}) => {
   const { ownershipType = null, isCommercial = false } = opts;
   const lines = [];
@@ -319,6 +369,20 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     lines.push(`<p><strong>LTV:</strong> ${ltv}% (computed)</p>`);
   } else {
     lines.push(`<p><strong>LTV:</strong> TBD</p>`);
+  }
+
+  // R4-Bucket-C.4 (S4 Ryan): Combined LTV row — second-mortgage deals only.
+  // Rendered immediately after the standard LTV row so admin sees BOTH figures
+  // side-by-side: standard (new loan / appraised — what Vienna typically cites)
+  // and combined (existing + new) / appraised — the true leverage. Math
+  // suffix is for admin transparency / audit. computeCombinedLtv returns null
+  // for clean first-mortgage deals (no existing_first_mortgage_balance) — no
+  // row rendered, no over-fire. See helper docblock for field-choice rationale.
+  const combined = computeCombinedLtv(canonicalMap);
+  if (combined) {
+    const c = combined.components;
+    const lenderTag = c.existing_lender ? `${c.existing_lender} ` : '';
+    lines.push(`<p><strong>Combined LTV (incl. existing 1st):</strong> ${combined.combined_ltv_percent}% — (${lenderTag}${formatMoney(c.existing)} + ${formatMoney(c.requested)}) / ${formatMoney(c.market)}</p>`);
   }
 
   lines.push(renderSnapshotRow('Loan Term Requested', canonicalMap.requested_loan_term_months, { suffix: ' months' }));
@@ -450,6 +514,7 @@ module.exports = {
   renderDiscrepancyBullet,
   renderDiscrepancySection,
   renderDealSnapshot,
+  computeCombinedLtv,
   formatCanonicalFieldsForPrompt,
   filterBrokerFacing,
   runDiscrepancyDetection,
