@@ -366,7 +366,14 @@ const IDENTITY_FAST_RESOLVE_PATTERNS = [
 
 // Single-space-only name capture — prevents crossing newlines (e.g., "Anna
 // Bergstrom\nProperty: 1801..." won't capture "Anna Bergstrom Property").
-const _S15_NAME_CAPTURE = '([A-Z][a-z]+(?: [A-Z][a-z]+){0,3})';
+// Each name token may have an optional hyphen-suffix (e.g., "Ji-Young" as a
+// single token) — S15-E-followup FP measurement against real Postmark corpus
+// surfaced "Lena Ji-Young Park" being truncated to "Lena Ji" by the pre-
+// hyphen-support regex, causing false-positive clashes on legitimate
+// hyphenated-name borrowers. Hyphen pattern is conservative: requires
+// proper-case on both sides (Title-Case), so it doesn't match doc-numbers
+// like "T3K-4J9" or compound nouns like "Credit-Report".
+const _S15_NAME_CAPTURE = '([A-Z][a-z]+(?:-[A-Z][a-z]+)?(?: [A-Z][a-z]+(?:-[A-Z][a-z]+)?){0,3})';
 
 // Patterns extracting borrower name from broker email body. Conservative —
 // only fires on explicit borrower labeling. False-negative bias: missing
@@ -397,14 +404,22 @@ const BORROWER_BODY_PATTERNS = [
 // Matches structured labels common across loan apps, credit bureaus,
 // and appraisal reports. Same /i-flag avoidance as the body patterns above.
 const BORROWER_DOC_PATTERNS = [
-  // "Full Legal Name: <Name>" — most common in loan applications
+  // "Full Legal Name: <Name>" — synthetic loan-app fixture shape
   new RegExp(`(?:^|\\n)\\s*[Ff]ull [Ll]egal [Nn]ame:\\s*${_S15_NAME_CAPTURE}`, 'm'),
+  // "Full Name: <Name>" — REAL Equifax/credit bureau shape (Franco's R3 S15
+  // real fixture had "Full Name: Grace Marie Paulson"; synthetic
+  // reconstructions used "Full Legal Name:" — fixture-faithfulness gap).
+  new RegExp(`(?:^|\\n)\\s*[Ff]ull [Nn]ame:\\s*${_S15_NAME_CAPTURE}`, 'm'),
   // "Applicant: <Name>" — common in credit bureau / appraisal reports
   new RegExp(`(?:^|\\n)\\s*[Aa]pplicant:\\s*${_S15_NAME_CAPTURE}`, 'm'),
   // "Borrower: <Name>" — alternate explicit label
   new RegExp(`(?:^|\\n)\\s*[Bb]orrower:\\s*${_S15_NAME_CAPTURE}`, 'm'),
-  // "Primary Borrower" then "Full Legal Name:" on a subsequent line (common loan-app shape)
+  // "Borrower Name: <Name>" — loan-app variant
+  new RegExp(`(?:^|\\n)\\s*[Bb]orrower [Nn]ame:\\s*${_S15_NAME_CAPTURE}`, 'm'),
+  // "Primary Borrower" then "Full Legal Name:" on a subsequent line (synthetic loan-app)
   new RegExp(`[Pp]rimary [Bb]orrower\\s*\\n\\s*[Ff]ull [Ll]egal [Nn]ame:\\s*${_S15_NAME_CAPTURE}`),
+  // "Primary Borrower" then "Full Name:" (real loan-app variant)
+  new RegExp(`[Pp]rimary [Bb]orrower\\s*\\n\\s*[Ff]ull [Nn]ame:\\s*${_S15_NAME_CAPTURE}`),
 ];
 
 const extractBorrowerFromEmailBody = (emailBody) => {
@@ -452,54 +467,149 @@ const sameName = (a, b) => {
 const isIdentityClash = (emailName, docName) =>
   Boolean(emailName) && Boolean(docName) && !sameName(emailName, docName);
 
+// ════════════════════════════════════════════════════════════════
+// S15-E-followup: subject parsing + absence-based clash detection
+// ════════════════════════════════════════════════════════════════
+// Franco's real R3 Anna/Bergstrom submission (Postmark msg 2a2fb13a,
+// 2026-05-18 11:37 MDT) revealed the original S15-E's fixture-faithfulness
+// gap: the broker email body said "I have a client looking for ..." with
+// NO borrower name. Anna appeared in the SUBJECT LINE only. None of
+// BORROWER_BODY_PATTERNS matched → JS-side detection missed → fell through
+// to Option C (proven 5/5 leak). Our HHH-MULTI-DOC fixture had
+// "The borrower is Anna Bergstrom" baked into the body — that
+// reconstruction overspecified what real broker emails look like.
+//
+// Inversion: instead of extracting one canonical email body name and
+// comparing to doc names, treat the broker's STATED CONTENT (subject +
+// body, since signatures are typically the broker's own name) as a
+// search surface. For each doc-extracted borrower name, check whether
+// BOTH first AND last tokens appear anywhere in the broker content
+// (case-insensitive). If a doc names a person the broker never mentioned,
+// that's the clash signal.
+//
+// Why inversion vs subject-extraction-then-compare:
+//   - Real broker subjects vary widely: "Second Mortgage — Anna Bergstrom,
+//     <address>", "New Private Mortgage Application — Ethan Broussard —
+//     <address>", "Mortgage Application — Marcus Webb, <address>", etc.
+//     Extracting one canonical name from these formats is regex-heavy
+//     and brittle.
+//   - The absence-check inverts the burden: we already have reliable
+//     doc-name extraction (locked at 11/11 with false-positive bait).
+//     We just check whether each doc name shows up in broker content.
+//   - Handles signatures naturally — broker's own name in signature
+//     is fine; what we care about is whether the DOC's borrower is
+//     mentioned anywhere.
+
+// Subject patterns — used as fallback for the minimal-ask's [body name]
+// slot when the email body has no extractable name. Conservative patterns
+// matching the broker subject formats observed in real Postmark inbound.
+const BORROWER_SUBJECT_PATTERNS = [
+  // "Second Mortgage — <Name>, <property>" / "Second Mortgage - <Name>, <property>"
+  new RegExp(`(?:Second|First)\\s+Mortgage\\s*[—–\\-]\\s*${_S15_NAME_CAPTURE}\\s*[,—–]`),
+  // "New Mortgage Submission — <Name>, <property>"
+  new RegExp(`New\\s+Mortgage\\s+Submission\\s*[—–\\-]\\s*${_S15_NAME_CAPTURE}\\s*[,—–]`),
+  // "Mortgage Application — <Name>, <property>"
+  new RegExp(`Mortgage\\s+Application\\s*[—–\\-]\\s*${_S15_NAME_CAPTURE}\\s*[,—–]`),
+  // "New Private Mortgage Application — <Name> — <property>"
+  new RegExp(`New\\s+Private\\s+Mortgage\\s+Application\\s*[—–\\-]\\s*${_S15_NAME_CAPTURE}\\s*[—–\\-]`),
+];
+
+const extractBorrowerFromEmailSubject = (subject) => {
+  if (!subject || typeof subject !== 'string') return null;
+  for (const re of BORROWER_SUBJECT_PATTERNS) {
+    const m = subject.match(re);
+    if (m && m[1]) return m[1].trim();
+  }
+  return null;
+};
+
+// Absence-based clash detection. Returns { docName, docFile, missingTokens }
+// when a doc's borrower name has tokens absent from the broker's stated
+// content. Returns null when no clash detected (or undeterminable).
+//
+// Conservative on undeterminable cases:
+//   - Empty broker content → null (can't compare; fall through to Option C)
+//   - Single-token doc names → skipped (too ambiguous to compare-by-presence;
+//     e.g., a doc with "Borrower: Anna" only could plausibly be the same
+//     Anna mentioned somewhere)
+//   - Doc-name extraction returns null for that doc → skipped
+// Only fires when we have a multi-token doc name AND at least one token
+// is missing from broker content.
+const isIdentityClashByAbsence = (emailSubject, emailBody, savedDocs) => {
+  const brokerContent = `${emailSubject || ''}\n${emailBody || ''}`.toLowerCase();
+  if (brokerContent.trim().length === 0) return null;
+  for (const sd of (savedDocs || [])) {
+    const docName = extractBorrowerFromDocText(sd?.extracted_data?.text || '');
+    if (!docName) continue;
+    const tokens = tokenizeNameForCompare(docName);
+    if (tokens.length < 2) continue; // single-token doc names too ambiguous
+    const firstPresent = brokerContent.includes(tokens[0]);
+    const lastPresent = brokerContent.includes(tokens[tokens.length - 1]);
+    if (!firstPresent || !lastPresent) {
+      return { docName, docFile: sd.file_name, missingTokens: { firstPresent, lastPresent } };
+    }
+  }
+  return null;
+};
+
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
-  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false) => {
+  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false, emailSubject = '') => {
     try {
-      // ─── S15-E: JS-side identity clash pre-detection (Anna Bergstrom 2026-05-18) ───
-      // Detect deterministically BEFORE the Claude call. If detected, route to
-      // generateIdentityClashMinimalAsk (zero-accumulation prompt). Build the
-      // dealSummary JS-side (line 236 BORROWER_NAME DISPOSITION applied here as
-      // a hard JS assignment, not a probabilistic Claude emission). If JS-side
-      // misses the clash (extraction regex didn't fire), execution falls
-      // through to the existing Claude path which still carries the Option C
-      // guards (STEP 0 + line 113 block + conflict-site counter-instructions
-      // + line 236 disposition rule) as the safety-net layer.
-      // 95% non-clash case: unchanged from prior behavior — JS detection
-      // returns no match, fall-through, identical Claude invocation.
-      const _s15BodyName = extractBorrowerFromEmailBody(emailBody);
-      if (_s15BodyName) {
-        for (const sd of (savedDocs || [])) {
-          const _s15DocName = extractBorrowerFromDocText(sd?.extracted_data?.text || '');
-          if (_s15DocName && isIdentityClash(_s15BodyName, _s15DocName)) {
-            console.log(`S15-E: identity clash detected JS-side — emailBody="${_s15BodyName}", doc="${_s15DocName}" (file: ${sd.file_name}). Routing to generateIdentityClashMinimalAsk; bypassing the main INITIAL_EMAIL_PROMPT path.`);
-            const welcomeEmail = await module.exports.generateIdentityClashMinimalAsk(emailBody, _s15BodyName, _s15DocName, senderName);
-            // Build minimal dealSummary JS-side. borrower_name = email body's
-            // name (line 236 disposition rule, applied deterministically).
-            // misattached_documents enumerates every saved doc whose extracted
-            // borrower name clashes with the email body's name (mirrors JJJJ).
-            // Other fields intentionally undefined — they get populated on
-            // subsequent turns via generateBrokerResponse after the clash
-            // resolves, same as the existing identity_clash flow.
-            const _s15Misattached = (savedDocs || [])
-              .filter(d => {
-                const dn = extractBorrowerFromDocText(d?.extracted_data?.text || '');
-                return dn && isIdentityClash(_s15BodyName, dn);
-              })
-              .map(d => d.file_name);
-            const dealSummary = {
-              sender_type: 'broker',
-              sender_name: senderName,
-              broker_name: senderName,
-              borrower_name: _s15BodyName,
-              identity_clash: true,
-              misattached_documents: _s15Misattached,
-              key_risks_or_notes: `Email body says "${_s15BodyName}" but attached documents are for "${_s15DocName}" — needs clarification before doc requests.`,
-              summary: `Identity clash detected: broker (${senderName}) submitted documents for ${_s15DocName} but stated the borrower as ${_s15BodyName}. File held pending clarification.`,
-            };
-            return { welcomeEmail, dealSummary };
-          }
-        }
+      // ─── S15-E-followup: absence-based JS-side identity clash pre-detection (Anna Bergstrom 2026-05-18 real-Postmark) ───
+      // Detect deterministically BEFORE the Claude call. Inversion of the
+      // original S15-E body-name-extract-then-compare: Franco's real R3
+      // submission had Anna only in the SUBJECT (body said "I have a client"
+      // with no name), so body extraction returned null and original S15-E
+      // missed the clash. Inversion uses the broker's stated content
+      // (subject + body) as a SEARCH SURFACE for each doc-extracted
+      // borrower name. If a doc names someone whose first AND last tokens
+      // are absent from broker content, that's the clash signal.
+      //
+      // FP rate measured against real clean-broker corpus (37 deals) before
+      // promoting this to production routing path — see GROUP S15-E-FP-CORPUS
+      // in test-trigger.js for the deterministic check.
+      //
+      // If JS-side misses (returns null — undeterminable / no extractable
+      // doc name / single-token doc name / etc.), execution falls through
+      // to the existing Claude path with Option C guards as safety net.
+      // 95% non-clash case: identical to prior behavior — falls through.
+      const _s15Clash = isIdentityClashByAbsence(emailSubject, emailBody, savedDocs);
+      if (_s15Clash) {
+        const _s15DocName = _s15Clash.docName;
+        // bodyName for the minimal-ask's [body name] slot: try body first,
+        // then subject, then fall back to generic phrasing.
+        const _s15BodyName = extractBorrowerFromEmailBody(emailBody)
+          || extractBorrowerFromEmailSubject(emailSubject)
+          || 'the borrower named in your email';
+        console.log(`S15-E-followup: identity clash detected JS-side (absence) — broker mentioned "${_s15BodyName}", doc names "${_s15DocName}" (file: ${_s15Clash.docFile}, missingTokens=${JSON.stringify(_s15Clash.missingTokens)}). Routing to generateIdentityClashMinimalAsk.`);
+        const welcomeEmail = await module.exports.generateIdentityClashMinimalAsk(emailBody, _s15BodyName, _s15DocName, senderName);
+        // Build minimal dealSummary JS-side. borrower_name = email-side name
+        // (body extraction first, subject fallback, generic last) — line 236
+        // disposition applied deterministically.
+        // misattached_documents enumerates every saved doc whose name is
+        // absent from the broker's stated content (mirrors JJJJ).
+        const _s15Misattached = (savedDocs || [])
+          .filter(d => {
+            const dn = extractBorrowerFromDocText(d?.extracted_data?.text || '');
+            if (!dn) return false;
+            const tokens = tokenizeNameForCompare(dn);
+            if (tokens.length < 2) return false;
+            const content = `${emailSubject || ''}\n${emailBody || ''}`.toLowerCase();
+            return !content.includes(tokens[0]) || !content.includes(tokens[tokens.length - 1]);
+          })
+          .map(d => d.file_name);
+        const dealSummary = {
+          sender_type: 'broker',
+          sender_name: senderName,
+          broker_name: senderName,
+          borrower_name: _s15BodyName,
+          identity_clash: true,
+          misattached_documents: _s15Misattached,
+          key_risks_or_notes: `Email broker statement names "${_s15BodyName}" but attached documents are for "${_s15DocName}" — needs clarification before doc requests.`,
+          summary: `Identity clash detected: broker (${senderName}) submitted documents for ${_s15DocName} but the email content names ${_s15BodyName}. File held pending clarification.`,
+        };
+        return { welcomeEmail, dealSummary };
       }
       // No JS-side clash → existing Claude flow unchanged (byte-identical to prior behavior).
 
@@ -2566,4 +2676,7 @@ ${JSON.stringify(summaryData, null, 2)}`,
   extractBorrowerFromDocText,
   sameName,
   isIdentityClash,
+  // S15-E-followup additions (Anna Bergstrom 2026-05-18 real-Postmark fixture):
+  extractBorrowerFromEmailSubject,
+  isIdentityClashByAbsence,
 };

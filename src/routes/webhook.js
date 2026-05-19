@@ -1276,7 +1276,8 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           savedDocs,
           hasOwnApplication,
           hasOwnPnw,
-          initialFromCollision
+          initialFromCollision,
+          email.subject  // S15-E-followup: subject used by JS-side absence-based clash detection
         );
         // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
         // when Claude's extraction is null/Unknown/Franco-collision. F2 adds the

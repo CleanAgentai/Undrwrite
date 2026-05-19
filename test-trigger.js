@@ -1501,6 +1501,129 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`  PASS [S15-E extractBorrowerFromDocText]: ${docExtractPassed}/${docExtractCases.length} cases (POSITIVE + false-positive-bait)`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP S15-E-FOLLOWUP-HELPERS — deterministic truth tables for the
+  // S15-E-followup subject extraction + absence-based clash detection
+  // (Anna Bergstrom 2026-05-18 real-Postmark fixture-faithfulness surface)
+  // ════════════════════════════════════════════════════════════════
+  // Original S15-E failed in production because Franco's real broker
+  // email had Anna in SUBJECT only (body said "I have a client" — no name).
+  // body-name-extract-then-compare missed the clash. Inversion: treat
+  // broker subject+body as a SEARCH SURFACE; check whether each doc-
+  // extracted borrower name's tokens appear in broker content. If
+  // absent → clash. FP rate measured against 47 real Postmark clean
+  // broker deals (post-hyphen-fix): 0/44 (3 of the 47 are pre-S15-E
+  // mis-classifications of Anna+Grace test variants — true positives
+  // the inversion correctly catches).
+  console.log('\n========== GROUP S15-E-FOLLOWUP-HELPERS — subject extraction + absence-based clash ==========');
+
+  // Subject extraction — covers the 4 broker-subject formats observed in
+  // real Postmark inbound from Franco's submissions.
+  const subjectExtractCases = [
+    // POSITIVE — real-Postmark-observed broker subject formats
+    ['Second Mortgage — Anna Bergstrom, 1801 Varsity Estates Dr NW Calgary', 'Anna Bergstrom'],
+    ['First Mortgage — Anna Bergstrom, 1801 Varsity', 'Anna Bergstrom'],
+    ['New Mortgage Submission — Grace Paulson, 88 Harvest Hills Blvd NE Calgary', 'Grace Paulson'],
+    ['New Mortgage Submission — Marcus Webb, 1142 Tory Road NW Edmonton', 'Marcus Webb'],
+    ['Mortgage Application — Marcus Webb, 1142 Tory Road NW, Edmonton AB', 'Marcus Webb'],
+    ['New Private Mortgage Application — Ethan Broussard — 819 Strathmore Drive SW, Calgary', 'Ethan Broussard'],
+    // NEGATIVE — must NOT extract a name from non-broker-submission subjects
+    ['Inquiry', null],
+    ['Re: Re: Re: ACTION REQUIRED: COMPLETE Review — Ethan James Broussard — 59.8% LTV', null], // admin reply chain
+    ['ACTION REQUIRED: PRELIMINARY Review — Marcus James Webb — 60% LTV', null], // admin-facing subject
+    ['Random subject with no broker pattern', null],
+  ];
+  let subjectExtractPassed = 0;
+  for (const [input, expected] of subjectExtractCases) {
+    const got = aiService.extractBorrowerFromEmailSubject(input);
+    if (got === expected) {
+      subjectExtractPassed++;
+    } else {
+      throw new Error(`FAIL [S15-E-followup extractBorrowerFromEmailSubject]: input ${JSON.stringify(input).slice(0, 100)} expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`  PASS [S15-E-followup subject extraction]: ${subjectExtractPassed}/${subjectExtractCases.length} cases (real Postmark subject formats + admin-reply / non-broker negatives)`);
+
+  // Absence-based clash detection — locks the production routing path.
+  // Cases cover: (a) Franco's real R3 S15 fixture shape (subject names Anna,
+  // body silent, docs name Grace → clash), (b) clean Anna deal (Anna in
+  // subject + Anna docs → no clash), (c) hyphenated-name handling (Lena
+  // Ji-Young Park docs vs subject Lena Park → must NOT clash — the FP
+  // measurement caught the pre-hyphen-fix bug here), (d) doc with no
+  // extractable name (skip), (e) single-token doc name (skip — too ambiguous).
+  const absenceCases = [
+    {
+      label: 'Franco real R3 S15: subject Anna, body silent, docs Grace → CLASH',
+      subject: 'Second Mortgage — Anna Bergstrom, 1801 Varsity Estates Dr NW Calgary',
+      body: 'Hi, I have a client looking for a $92,000 second mortgage. Thanks, Oliver Patel',
+      savedDocs: [{ file_name: 'CB.pdf', extracted_data: { text: 'CREDIT BUREAU\nFull Name: Grace Marie Paulson\nDOB: ...' } }],
+      expectClash: true,
+    },
+    {
+      label: 'Clean Anna deal: Anna in subject + Anna docs → no clash',
+      subject: 'Second Mortgage — Anna Bergstrom, 1801 Varsity Estates Dr NW Calgary',
+      body: 'Hi, please review the attached docs. Thanks, Jason Mercer',
+      savedDocs: [{ file_name: 'CB.pdf', extracted_data: { text: 'CREDIT BUREAU\nFull Name: Anna Bergstrom\nDOB: ...' } }],
+      expectClash: false,
+    },
+    {
+      label: 'Hyphenated name: subject "Lena Park", docs "Lena Ji-Young Park" → no clash (hyphen handled)',
+      subject: 'Second Mortgage — Lena Park, 3704 Parkhill Street SW Calgary',
+      body: 'Hi, please review. Thanks, Daniel Wright',
+      savedDocs: [{ file_name: 'CB.pdf', extracted_data: { text: 'CREDIT BUREAU\nFull Name: Lena Ji-Young Park\nDOB: ...' } }],
+      expectClash: false,
+    },
+    {
+      label: 'Hyphenated name: subject "Anna Bergstrom-Lee", docs "Anna Bergstrom-Lee" → no clash',
+      subject: 'Second Mortgage — Anna Bergstrom-Lee, 1801 Varsity',
+      body: 'Hi, please review.',
+      savedDocs: [{ file_name: 'CB.pdf', extracted_data: { text: 'Full Name: Anna Bergstrom-Lee' } }],
+      expectClash: false,
+    },
+    {
+      label: 'Doc with no extractable name → skip',
+      subject: 'New Mortgage Submission — Marcus Webb, 1142 Tory Road',
+      body: 'Hi, please review.',
+      savedDocs: [{ file_name: 'Appraisal.pdf', extracted_data: { text: 'APPRAISAL REPORT\nProperty: 1142 Tory Road\nValue: $890,000' } }],
+      expectClash: false,
+    },
+    {
+      label: 'Single-token doc name → skip (too ambiguous)',
+      subject: 'New Mortgage Submission — Marcus Webb, 1142 Tory Road',
+      body: 'Hi, please review.',
+      savedDocs: [{ file_name: 'CB.pdf', extracted_data: { text: 'Borrower: Marcus' } }],
+      expectClash: false,
+    },
+    {
+      label: 'Empty broker content → null (undeterminable)',
+      subject: '',
+      body: '',
+      savedDocs: [{ file_name: 'CB.pdf', extracted_data: { text: 'Full Name: Grace Paulson' } }],
+      expectClash: null,
+    },
+    {
+      label: 'Body-only name present, subject empty (legacy S15-E shape) — Grace docs → CLASH',
+      subject: '',
+      body: 'Hi, I have a client Anna Bergstrom looking for a $92K second mortgage. Oliver',
+      savedDocs: [{ file_name: 'CB.pdf', extracted_data: { text: 'Full Name: Grace Marie Paulson' } }],
+      expectClash: true,
+    },
+  ];
+  let absencePassed = 0;
+  for (const tc of absenceCases) {
+    const r = aiService.isIdentityClashByAbsence(tc.subject, tc.body, tc.savedDocs);
+    let ok;
+    if (tc.expectClash === true) ok = (r !== null);
+    else if (tc.expectClash === false) ok = (r === null);
+    else if (tc.expectClash === null) ok = (r === null);
+    if (ok) {
+      absencePassed++;
+    } else {
+      throw new Error(`FAIL [S15-E-followup absence ${tc.label}]: expected clash=${tc.expectClash}, got ${JSON.stringify(r)}`);
+    }
+  }
+  console.log(`  PASS [S15-E-followup isIdentityClashByAbsence]: ${absencePassed}/${absenceCases.length} cases (real-shape + hyphen handling + edge cases)`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
   // ════════════════════════════════════════════════════════════════
   // Production observed 9 reminder emails fired to one broker at the same 9 PM
@@ -11878,6 +12001,101 @@ Capital Bridge Mortgage Group`;
       console.log(`Group HHH-MULTI-DOC: ${5 - hhhMultiLeaks}/5 passed, ${hhhMultiLeaks}/5 leaked (threshold: ≤1)`);
       if (hhhMultiLeaks > 1) {
         throw new Error(`FAIL [Group HHH-MULTI-DOC escalation]: ${hhhMultiLeaks}/5 leaked. The S15-E JS-side detection + minimal-ask routing isn't holding under production-shape (3 docs + hasOwnApplication=true). Either JS-side detection isn't firing (extraction helper false-negative) OR generateIdentityClashMinimalAsk's prompt still produces a non-minimal welcome. Surface diff before commit.`);
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // GROUP S15-E-REAL-MULTIDOC — LOAD-BEARING REAL POSTMARK FIXTURE
+      // ════════════════════════════════════════════════════════════════
+      // Anna Bergstrom 2026-05-18 11:37 MDT real Postmark submission
+      // (msg 2a2fb13a, deal 6847b1f1). The fixture is COPIED VERBATIM
+      // from Postmark inbound + Supabase documents.extracted_data — NOT
+      // a reconstruction. Original S15-E shipped against a reconstructed
+      // fixture (HHH-MULTI-DOC above) that overspecified what real broker
+      // emails look like — Franco's real body said "I have a client" with
+      // no name, Anna appeared only in subject, and the credit bureau used
+      // "Full Name:" (not "Full Legal Name:" as in our reconstruction).
+      // Both gaps caused the original S15-E to leak in production despite
+      // 5/5 green on HHH-MULTI-DOC. This block uses the real artifacts as
+      // the primary load-bearing test; HHH-MULTI-DOC stays as additional
+      // reconstructed shape coverage. Methodology correction (batch-wide
+      // from here): future fixture-builds anchor on real Postmark inbound,
+      // not reconstructions.
+      console.log('\n========== GROUP S15-E-REAL-MULTIDOC — Franco real R3 S15 Postmark fixture (5x) ==========');
+      // Subject: Anna in SUBJECT only (broker convention — borrower in subject).
+      // Body: "Oliver Patel ... I have a client looking for ..." — NO name in body.
+      // Docs: real Supabase extracted_data from deal 6847b1f1 (appraisal uses
+      // "SUBJECT PROPERTY", credit bureau uses "Full Name: Grace Marie Paulson",
+      // loan-app is blank template).
+      const realSubject = 'Second Mortgage — Anna Bergstrom, 1801 Varsity Estates Dr NW Calgary';
+      const realBody = `Hi,
+
+I'm Oliver Patel with Meridian Mortgage Group (Lic. #MB552934). I have a
+client looking for a $92,000 second mortgage on a residential property in
+Calgary.
+
+I've attached our own loan application form along with the credit bureau
+and appraisal for your review. Please note we use our brokerage's own forms
+rather than the lender's.
+
+Please let me know what else you need to proceed.
+
+Thanks,
+Oliver Patel
+Meridian Mortgage Group Lic. #MB552934`;
+      // Real Supabase extracted_data per doc (deal 6847b1f1):
+      const realSavedDocs = [
+        { file_name: 'Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf', classification: 'appraisal',
+          extracted_data: { text: 'PINNACLE PROPERTY APPRAISALS\nCertified Real Estate Appraisal Report\nFile No.: PPA-2026-04-0441 Report Date: April 27, 2026\nInspection Date: April 25, 2026\nClient: Capital Bridge Mortgage Group\nIntended User: Private Mortgage Link\nSUBJECT PROPERTY\nCivic Address: 88 Harvest Hills Blvd NE, Calgary, AB T3K 4J9\nLegal Description: Lot 8, Block 3, Plan 9812044\nProperty Type: Single-family detached residential\nYear Built: 2006\nOPINION OF VALUE: $615,000\nSix Hundred Fifteen Thousand Dollars\nAppraiser: Michael T. Drummond, AACI P.App' } },
+        { file_name: 'Credit_Bureau_Grace_Paulson.pdf', classification: 'credit_report',
+          extracted_data: { text: 'CREDIT BUREAU REPORT\nConfidential — For Mortgage Underwriting Purposes Only\nReport Date: April 28, 2026 File Reference: CB-2026-04-9201\nBORROWER INFORMATION\nFull Name: Grace Marie Paulson\nDate of Birth: September 4, 1986\nCurrent Address: 88 Harvest Hills Blvd NE, Calgary, AB T3K 4J9\nCREDIT SCORES\nEquifax Score: 763 (Good)\nTransUnion Score: 771 (Good)\nTRADE LINES\nTD Bank Mortgage Jul 2018 $480,000/$290,000 $1,980/mo R1\nScotiabank Visa Revolving Jun 2013 $15,000/$3,800 $114/mo R1\nCIBC Visa Revolving Aug 2015 $8,000/$1,100 $33/mo R1' } },
+        { file_name: 'LoanApplication_Grace_Paulson.pdf', classification: 'loan_application',
+          extracted_data: { text: 'LOAN APPLICATION FORM\nLoan Details\nRequested loan amount:\nUse of funds:\nDate that loan is required:\nRequested Term (eg. 6, 12 or 18 months):\nExit Strategy (how you plan on repaying the loan):\nDOB: Gender:\nSIN: Marital Status:\nCity: Prov:\nPhone No.: Cell No.:\nPostal Code:\nOccupation: Years Worked:\nAnnual Income:\nPrimary Borrower\nGeneral\nName:\nEmail:\nAddress:' } },
+      ];
+      const realAttachments = realSavedDocs.map(d => ({ Name: d.file_name, ContentType: 'application/pdf', Content: hhhMultiStubPdf, ContentLength: hhhMultiStubPdf.length }));
+
+      let realMultiLeaks = 0;
+      for (let run = 1; run <= 5; run++) {
+        try {
+          // Note: 8th arg is realSubject — the new emailSubject param plumbed via webhook.js
+          const r = await realAi.processInitialEmail(
+            'Oliver Patel', realBody, realAttachments, realSavedDocs,
+            true, false, false, realSubject  // hasOwnApplication=true (broker submitted own loan app form)
+          );
+          const welcome = r.welcomeEmail || '';
+          const summary = r.dealSummary || {};
+          let runLeak = null;
+          if (summary.identity_clash !== true) {
+            runLeak = `identity_clash=${JSON.stringify(summary.identity_clash)}, expected true (this is the load-bearing real-Postmark check — JS-side absence detection must fire on subject-only borrower name + Grace docs)`;
+          } else if (/<ul>/i.test(welcome)) {
+            runLeak = '<ul> doc list leaked into welcome';
+          } else if (/\b(?:exit\s+strategy|payout\s+statement|proof\s+of\s+income|credit\s+bureau|property\s+tax\s+assessment|government[\s-]?issued\s+ID)\b/i.test(welcome)) {
+            const m = welcome.match(/\b(?:exit\s+strategy|payout\s+statement|proof\s+of\s+income|credit\s+bureau|property\s+tax\s+assessment|government[\s-]?issued\s+ID)\b/i);
+            runLeak = `doc-list keyword leaked: ${JSON.stringify(m && m[0])}`;
+          } else if (/(?:I'?ve|I\s+have)\s+received\s+(?:the\s+)?(?:loan\s+app|application|credit\s+bureau|appraisal|docs?)|thanks\s+for\s+sending\s+(?:those\s+)?(?:through|over)/i.test(welcome)) {
+            runLeak = 'receipt acknowledgment leaked';
+          } else if (!/(?:could\s+you|can\s+you)\s+(?:please\s+)?confirm/i.test(welcome) && !/\bwhich\s+(?:is\s+)?(?:the\s+)?correct/i.test(welcome)) {
+            runLeak = "clarification ask missing";
+          } else if (!/\bAnna\s+Bergstrom\b/.test(welcome)) {
+            runLeak = 'email-side name "Anna Bergstrom" not cited (extracted from subject as bodyName fallback)';
+          } else if (!/\bGrace\s+(?:Marie\s+)?Paulson\b/.test(welcome)) {
+            runLeak = 'doc name "Grace Marie Paulson" not cited';
+          } else if (!/\bAnna\s+Bergstrom\b/i.test(summary.borrower_name || '')) {
+            runLeak = `borrower_name disposition wrong — got ${JSON.stringify(summary.borrower_name)}, expected "Anna Bergstrom"`;
+          }
+          if (runLeak) {
+            realMultiLeaks++;
+            console.log(`  Run ${run}: LEAK — ${runLeak}\n    Welcome first 500: ${welcome.slice(0, 500).replace(/\n/g, ' ')}\n    borrower_name=${JSON.stringify(summary.borrower_name)}, identity_clash=${JSON.stringify(summary.identity_clash)}`);
+          } else {
+            console.log(`  Run ${run}: PASS — minimal-ask, both names cited, borrower_name=Anna (subject-fallback worked)`);
+          }
+        } catch (e) {
+          realMultiLeaks++;
+          console.log(`  Run ${run}: ERROR — ${e.message}`);
+        }
+      }
+      console.log(`Group S15-E-REAL-MULTIDOC: ${5 - realMultiLeaks}/5 passed, ${realMultiLeaks}/5 leaked (threshold: ≤1)`);
+      if (realMultiLeaks > 1) {
+        throw new Error(`FAIL [Group S15-E-REAL-MULTIDOC escalation]: ${realMultiLeaks}/5 leaked. This is THE load-bearing real-Postmark test (Franco's actual R3 S15 submission). If this leaks, the inversion + subject plumbing isn't fully closing the real-world shape. Surface diff + leak reason before commit.`);
       }
 
       // ════════════════════════════════════════════════════════════════
