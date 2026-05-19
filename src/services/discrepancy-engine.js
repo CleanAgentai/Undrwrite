@@ -261,7 +261,29 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
   const { ownershipType = null, isCommercial = false } = opts;
   const lines = [];
 
-  lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address));
+  // Property Address row — when subject_property_postal_code has multi-value
+  // (a real discrepancy), surface postal disambiguation inline so admin sees
+  // BOTH postals in the Snapshot block (transparency requirement for the
+  // calibration-gated case — postal IS objective and broker-facing, but admin
+  // also needs to see the conflict on the structured admin-review surface).
+  const postalTuples = canonicalMap.subject_property_postal_code || [];
+  const distinctPostals = [];
+  for (const t of postalTuples) {
+    if (t.value != null && !distinctPostals.some(d => d.value === t.value)) {
+      distinctPostals.push({ value: t.value, source: t.source });
+    }
+  }
+  if (distinctPostals.length > 1) {
+    // Multi-postal: render Property Address row + postal-disambiguation suffix.
+    const baseRow = renderSnapshotRow('Property Address', canonicalMap.subject_property_address);
+    const postalSuffix = distinctPostals.map(d =>
+      `${d.value} (per ${d.source.replace(/\.pdf$/i, '').replace(/_/g, ' ').replace('email body', 'email body')})`
+    ).join(' / ');
+    // Inject postal suffix into the Property Address row (before closing </p>)
+    lines.push(baseRow.replace(/<\/p>$/, ` — postal codes differ: ${postalSuffix}</p>`));
+  } else {
+    lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address));
+  }
 
   // City / Province derived from address.
   const addressTuples = canonicalMap.subject_property_address || [];

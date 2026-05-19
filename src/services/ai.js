@@ -722,7 +722,15 @@ const enforceReviewBanner = (leadSummaryHtml, bannerText) => {
 
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
-  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false, emailSubject = '') => {
+  processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false, emailSubject = '', opts = {}) => {
+    // Cluster B Commit 2b opts:
+    //   discrepancyDetected: true → JS pre-detected ≥1 discrepancy and will JS-inject the
+    //     authoritative section post-Claude. Prompt is instructed NOT to generate any
+    //     discrepancy / clarification content (PURE JS injection per Q1).
+    //   canonicalFieldsPrompt: optional pre-rendered "CANONICAL FIELD VALUES" block —
+    //     authoritative values JS extracted; Vienna should reference these (not raw
+    //     extracted_data) for field-level claims.
+    const { discrepancyDetected = false, canonicalFieldsPrompt = '' } = opts;
     try {
       // ─── S15-E-followup: absence-based JS-side identity clash pre-detection (Anna Bergstrom 2026-05-18 real-Postmark) ───
       // Detect deterministically BEFORE the Claude call. Inversion of the
@@ -822,11 +830,31 @@ module.exports = {
         .replace('{{APPLICATION_FORM_INSTRUCTIONS}}', appFormInstructions)
         .replace('{{PNW_FORM_INSTRUCTIONS}}', pnwFormInstructions);
 
+      // Cluster B Commit 2b — PURE JS injection of discrepancy section.
+      // When discrepancyDetected, JS pre-extracted ≥1 cross-source mismatch
+      // and will inject the authoritative discrepancy section post-Claude.
+      // Vienna's prompt is instructed NOT to generate any discrepancy content;
+      // JS owns the section verbatim. The strip backstop catches probabilistic
+      // non-compliance (Cluster E lesson — prompt-only enforcement of output
+      // rules is unreliable). Compliance rate is measured + decision-relevant
+      // per Req-1 thinness-aware escalation matrix.
+      const noGenerateDiscrepancyBlock = discrepancyDetected
+        ? `\n\nCRITICAL — NO-GENERATE-DISCREPANCY (Cluster B Commit 2b):
+- JS has pre-detected one or more cross-source discrepancies on this submission. JS will inject a structured discrepancy section into your reply between your acknowledgment and your closing signature.
+- You MUST NOT generate ANY discrepancy bullets, clarification questions, "I noticed" phrasing, "your email mentions X but the document shows Y" sentences, or any "could you confirm / clarify" closing about specific values. JS owns ALL discrepancy content.
+- Your job for this email body: (1) friendly opener using the sender's first name (or generic "Hi there!" per collision rules); (2) ONE short sentence acknowledging the submission and what was received (briefly — do not enumerate every document); (3) closing signature ("Vienna<br>Private Mortgage Link"). That's it.
+- Do NOT mention specific numeric or postal or lender mismatches. Do NOT include any <ul> bullet lists. Do NOT phrase any closing question of the form "could you confirm which is correct?". JS will append all of that.
+- The deal summary JSON output continues unchanged — populate it normally with extracted values.`
+        : '';
+      const canonicalFieldsContext = canonicalFieldsPrompt
+        ? `\n\nCANONICAL FIELD VALUES (JS-extracted authority — use ONLY these for any field-level claim; do not infer from raw extracted_data):\n${canonicalFieldsPrompt}`
+        : '';
+
       content.push({
         type: 'text',
         text: `${prompt}
 
-The sender's name is: ${senderName || 'Unknown'}${nameCollisionInstructions}
+The sender's name is: ${senderName || 'Unknown'}${nameCollisionInstructions}${noGenerateDiscrepancyBlock}${canonicalFieldsContext}
 
 Their initial email says:
 ---
@@ -867,7 +895,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   },
 
   // Conversational broker response — reads full context and responds naturally
-  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [] } = {}) => {
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '' } = {}) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -1223,6 +1251,17 @@ ${emailBody}
 
 New attachments: ${attachmentNames}
 ${attachments.length > 0 ? 'The supported attachments have been provided above for review.' : ''}
+${discrepancyDetected ? `
+
+CRITICAL — NO-GENERATE-DISCREPANCY (Cluster B Commit 2b):
+- JS has pre-detected one or more cross-source discrepancies on this turn. JS will inject a structured discrepancy section into your reply between your acknowledgment and your closing signature.
+- You MUST NOT generate ANY discrepancy bullets, clarification questions, "I noticed" phrasing, "your email mentions X but the document shows Y" sentences, or any "could you confirm / clarify" closing about specific values. JS owns ALL discrepancy content.
+- Your job for the email body: (1) friendly opener using the broker's first name; (2) ONE short sentence acknowledging the latest correspondence/docs; (3) closing signature ("Vienna<br>Private Mortgage Link"). That's it.
+- Do NOT mention specific numeric / postal / lender mismatches. Do NOT include any <ul> bullet lists. Do NOT phrase any "could you confirm which is correct?" closing question. JS will append all of that.
+- The ANALYSIS JSON block continues unchanged.` : ''}${canonicalFieldsPrompt ? `
+
+CANONICAL FIELD VALUES (JS-extracted authority — use ONLY these for any field-level claim; do not infer from raw extracted_data):
+${canonicalFieldsPrompt}` : ''}
 
 === RESPONSE FORMAT ===
 
@@ -1817,7 +1856,12 @@ Classification guidance:
   },
 
   // Generate comprehensive lead summary for Franco — reads all documents + deal data
-  generateLeadSummary: async (dealSummary, ownershipType, documents, missingDocs, messages = []) => {
+  generateLeadSummary: async (dealSummary, ownershipType, documents, missingDocs, messages = [], opts = {}) => {
+    // Cluster B Commit 2b opts:
+    //   noSnapshot: true → JS will prepend the canonical Deal Snapshot block; Vienna's
+    //     prompt is instructed to OMIT Section 1 and start narrative at Section 2.
+    //     Pure JS injection (symmetric with broker-side discrepancy section).
+    const { noSnapshot = false } = opts;
     try {
       // Build document text sections from extracted data
       const docSections = documents
@@ -1852,7 +1896,10 @@ This summary must be usable in three ways:
 FORMAT: Return the summary as HTML. Use <h2> for section headers, <p> for text and label/value rows, <ul>/<li> for lists. DO NOT use <table> anywhere — tables don't survive copy-paste from this email into outgoing lender emails (borders drop, columns misalign across clients). Group HHHH: Franco forwards Sections 1-9 to lenders; the markup must be paragraph-based so the paste lands clean.
 
 === SECTION 1: DEAL SNAPSHOT (Top of Page) ===
-Present as a stack of <p> elements, one per field, with the field label in <strong> followed by a colon and the value on the same line. Renders top-to-bottom like a label/value table without the <table> tag.
+${noSnapshot ? `CRITICAL — DO NOT GENERATE SECTION 1 (Cluster B Commit 2b PURE JS injection):
+- JS will PREPEND the canonical Deal Snapshot block from the JS-extracted canonical field map. You MUST OMIT Section 1 entirely.
+- Start your output at SECTION 2: BORROWER OVERVIEW. Do NOT write any <h2>Deal Snapshot</h2> heading, do NOT write any "Property Address:" / "Loan Amount Requested:" / "Appraised Value:" / "LTV:" label/value rows, do NOT include any structured field list at the top of your output.
+- The narrative sections (Borrower Overview, Loan Purpose, Exit Strategy, Collateral, Financial Snapshot, Risk Mitigants, Deal Rating, Documents Included) you still write normally. JS owns ONLY the Deal Snapshot block.` : `Present as a stack of <p> elements, one per field, with the field label in <strong> followed by a colon and the value on the same line. Renders top-to-bottom like a label/value table without the <table> tag.
 
 Example shape (use exactly this pattern — one <p> per field, label in <strong>):
 <p><strong>Property Address:</strong> 412 Windermere Close SW, Edmonton, AB</p>
@@ -1868,7 +1915,7 @@ Fields to render (in this order):
 - LTV (combined if applicable)
 - Loan Term Requested
 - Borrower Type (Personal / Corporate / Trust)
-- Ownership Type: ${ownershipType || 'TBD'}
+- Ownership Type: ${ownershipType || 'TBD'}`}
 
 === SECTION 2: BORROWER OVERVIEW ===
 A short paragraph explaining who the borrower is:

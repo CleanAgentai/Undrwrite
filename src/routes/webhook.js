@@ -19,6 +19,7 @@ const config = require('../config');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
 const dealsService = require('../services/deals');
+const dEngine = require('../services/discrepancy-engine');
 
 // Track processed message IDs to prevent duplicate processing
 const processedMessages = new Set();
@@ -592,13 +593,38 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // the broker (existing production bug at Kevin Tran 65676a8f).
   const leadSummaryBrokerName = dealSummary?.broker_name || dealSummary?.sender_name || deal.borrower_name;
   const labeledMessages = labelMessagesForLeadSummary(dealMessages, leadSummaryBrokerName);
-  const leadSummary = await aiService.generateLeadSummary(
+
+  // Cluster B Commit 2b — admin Snapshot pure JS injection (symmetric with broker-side).
+  // JS pre-renders the entire Snapshot block from the canonical-field map; Vienna's
+  // generateLeadSummary prompt is instructed NO-SNAPSHOT (start at Section 2). Post-Claude
+  // strip backstop + prepend the JS Snapshot ensures admin Snapshot is JS-authoritative.
+  // Admin sees full transparency on calibration-gated fields (market value, balance) even
+  // though those are suppressed broker-facing pending Franco calibration.
+  const _bDetectAdmin = dEngine.runDiscrepancyDetection(
+    (dealMessages.find(m => m.direction === 'inbound')?.body) || '',
+    dealDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
+    leadSummaryBrokerName,
+    { emailSubject: dealMessages.find(m => m.direction === 'inbound')?.subject || '' }
+  );
+  const _bSnapshotHtml = dEngine.renderDealSnapshot(_bDetectAdmin.canonical_map, {
+    ownershipType,
+    isCommercial: !!_bDetectAdmin.commercial,
+  });
+
+  let leadSummary = await aiService.generateLeadSummary(
     dealSummary,
     ownershipType,
     dealDocs,
     missingDocs,
-    labeledMessages
+    labeledMessages,
+    { noSnapshot: true }
   );
+  // Post-Claude: strip any residual Vienna-emitted Snapshot block + prepend the JS canonical Snapshot.
+  const _snapStrip = aiService.stripVienna_DealSnapshot(leadSummary);
+  leadSummary = aiService.prependDealSnapshot(_snapStrip.stripped, _bSnapshotHtml);
+  if (_snapStrip.strippedAny) {
+    console.log('B-2b (admin Snapshot): Vienna emitted a Snapshot block despite NO-SNAPSHOT instruction — backstop stripped it before prepending JS canonical.');
+  }
 
   let reviewAttachments = [];
   if (dealDocs.length > 0) {
@@ -1295,6 +1321,26 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         // common; it does not mean "Franco-collision".
         const initialFromCollision = firstNameMatchesAdmin(email.fromName);
 
+        // Cluster B Commit 2b — pre-Claude discrepancy detection (PURE JS injection).
+        // Engine yields automatically on commercial / S15-E identity-clash deals.
+        // filterBrokerFacing applies the Req-3 calibration gate: objective fields
+        // (postal / lender / address / borrower_name) always broker-facing; market-
+        // delta fields admin-only pending Franco's calibration.
+        const _bDetect = dEngine.runDiscrepancyDetection(
+          email.textBody,
+          savedDocs,
+          email.fromName,
+          { emailSubject: email.subject }
+        );
+        const _bBrokerFacing = dEngine.filterBrokerFacing(_bDetect.discrepancy_set, { marketDeltaFlagsEnabled: false });
+        const _bDiscrepancyDetected = _bBrokerFacing.length > 0;
+        const _bCanonicalPromptCtx = (_bDetect.canonical_map && Object.keys(_bDetect.canonical_map).length > 0)
+          ? dEngine.formatCanonicalFieldsForPrompt(_bDetect.canonical_map)
+          : '';
+        if (_bDiscrepancyDetected) {
+          console.log(`B-2b: pre-Claude discrepancy detection fired — ${_bBrokerFacing.length} broker-facing entries (${_bDetect.discrepancy_set.length} total before separability filter). Prompt instructed NO-GENERATE-DISCREPANCY; JS will inject section post-Claude.`);
+        }
+
         // Single Claude call: generate welcome email + deal summary together
         // Passes pre-extracted text from savedDocs — no second pdf-parse run
         console.log('Processing initial email with Claude...');
@@ -1309,8 +1355,19 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           hasOwnApplication,
           hasOwnPnw,
           initialFromCollision,
-          email.subject  // S15-E-followup: subject used by JS-side absence-based clash detection
+          email.subject,  // S15-E-followup: subject used by JS-side absence-based clash detection
+          { discrepancyDetected: _bDiscrepancyDetected, canonicalFieldsPrompt: _bCanonicalPromptCtx }
         );
+        // Cluster B Commit 2b — post-Claude strip + inject (pure JS injection completes).
+        // strip is defense-in-depth backstop (Cluster E lesson — prompt enforcement is
+        // probabilistic). injection writes the JS-authoritative discrepancy section
+        // verbatim from the canonical-field map.
+        if (_bDiscrepancyDetected) {
+          const _stripRes = aiService.stripVienna_DiscrepancyContent(welcomeEmail);
+          const _section = dEngine.renderDiscrepancySection(_bBrokerFacing);
+          welcomeEmail = aiService.injectDiscrepancySection(_stripRes.stripped, _section);
+          console.log(`B-2b: strip stripped-any=${_stripRes.strippedAny}; injected JS discrepancy section (${_bBrokerFacing.length} entries)`);
+        }
         // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
         // when Claude's extraction is null/Unknown/Franco-collision. F2 adds the
         // both-Franco branch — sets name_collides_with_admin: true on the summary
@@ -1621,6 +1678,22 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         const labeledReviewHistory = labelMessagesForLeadSummary(reviewConversationHistory, reviewBrokerName);
         // Items 3+4: pass deal status so Vienna's reply is state-aware (no future-tense
         // forwarding language when the file has already been sent to admin).
+        // Cluster B Commit 2b — pre-Claude discrepancy detection for existing-deal under_review path.
+        const _bDetectReview = dEngine.runDiscrepancyDetection(
+          email.textBody,
+          savedDocs.concat(reviewDocumentsOnFile.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' }))),
+          email.fromName,
+          { emailSubject: email.subject }
+        );
+        const _bBrokerFacingReview = dEngine.filterBrokerFacing(_bDetectReview.discrepancy_set, { marketDeltaFlagsEnabled: false });
+        const _bDiscrepancyDetectedReview = _bBrokerFacingReview.length > 0;
+        const _bCanonicalCtxReview = (_bDetectReview.canonical_map && Object.keys(_bDetectReview.canonical_map).length > 0)
+          ? dEngine.formatCanonicalFieldsForPrompt(_bDetectReview.canonical_map)
+          : '';
+        if (_bDiscrepancyDetectedReview) {
+          console.log(`B-2b (review path): pre-Claude discrepancy detection fired — ${_bBrokerFacingReview.length} broker-facing entries`);
+        }
+
         const reviewResult = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -1628,8 +1701,16 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           reviewSummaryIn,
           labeledReviewHistory,
           reviewDocumentsOnFile,
-          existingDeal.status
+          existingDeal.status,
+          { discrepancyDetected: _bDiscrepancyDetectedReview, canonicalFieldsPrompt: _bCanonicalCtxReview }
         );
+        // Cluster B Commit 2b — post-Claude strip + inject on reply (even though NNN may suppress it from broker;
+        // the suppressed text is still passed to sendPreliminaryReviewToAdmin via brokerFacingReplyText for D's gate).
+        if (_bDiscrepancyDetectedReview && reviewResult.responseEmail) {
+          const _stripRes = aiService.stripVienna_DiscrepancyContent(reviewResult.responseEmail);
+          const _section = dEngine.renderDiscrepancySection(_bBrokerFacingReview);
+          reviewResult.responseEmail = aiService.injectDiscrepancySection(_stripRes.stripped, _section);
+        }
         // Normalize the freshly-updated summary on the way back, before persisting.
         reviewResult.updatedSummary = normalizeSenderName(reviewResult.updatedSummary, email.fromName);
 
@@ -1756,6 +1837,22 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           identityClashUnresolved: activeIdentityClashUnresolved,
         });
 
+        // Cluster B Commit 2b — pre-Claude discrepancy detection for existing-deal active path.
+        const _bDetectActive = dEngine.runDiscrepancyDetection(
+          email.textBody,
+          savedDocs.concat(documentsOnFile.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' }))),
+          email.fromName,
+          { emailSubject: email.subject }
+        );
+        const _bBrokerFacingActive = dEngine.filterBrokerFacing(_bDetectActive.discrepancy_set, { marketDeltaFlagsEnabled: false });
+        const _bDiscrepancyDetectedActive = _bBrokerFacingActive.length > 0;
+        const _bCanonicalCtxActive = (_bDetectActive.canonical_map && Object.keys(_bDetectActive.canonical_map).length > 0)
+          ? dEngine.formatCanonicalFieldsForPrompt(_bDetectActive.canonical_map)
+          : '';
+        if (_bDiscrepancyDetectedActive) {
+          console.log(`B-2b (active path): pre-Claude discrepancy detection fired — ${_bBrokerFacingActive.length} broker-facing entries`);
+        }
+
         const result = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -1764,8 +1861,14 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           labeledActiveHistory,
           documentsOnFile,
           existingDeal.status,
-          { postApprovalAmlPepAsk, stillMissingForReview }
+          { postApprovalAmlPepAsk, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive }
         );
+        // Cluster B Commit 2b — post-Claude strip + inject on broker-facing reply.
+        if (_bDiscrepancyDetectedActive && result.responseEmail) {
+          const _stripRes = aiService.stripVienna_DiscrepancyContent(result.responseEmail);
+          const _section = dEngine.renderDiscrepancySection(_bBrokerFacingActive);
+          result.responseEmail = aiService.injectDiscrepancySection(_stripRes.stripped, _section);
+        }
         // Normalize the freshly-updated summary on the way back, before persisting.
         result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);
 

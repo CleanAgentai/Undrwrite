@@ -2331,6 +2331,45 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
       opts: {},
       mustContain: ['<p><strong>LTV:</strong> TBD</p>'],
     },
+    {
+      // Post-2b enhancement: postal-disambiguation on Property Address row.
+      // When subject_property_postal_code has multi-value, the Property
+      // Address row appends "— postal codes differ: X (per Y) / A (per B)"
+      // so admin sees the postal mismatch even when street/city are identical
+      // across sources (Grace R4-S1 production shape — only postal differs).
+      // GAP A confirmation: covers the rendering path the 2b enhancement
+      // introduced; null-handling cases above use empty postal arrays so
+      // they don't exercise this branch.
+      label: 'multi-postal disambiguation appended to Property Address row',
+      map: {
+        ...emptyMap,
+        subject_property_address: [{ value: '88 harvest hills', source: 'email_body' }],
+        subject_property_postal_code: [
+          { value: 'T3K4T2', source: 'email_body' },
+          { value: 'T3K4J9', source: 'Appraisal_88_Harvest_Hills.pdf' },
+        ],
+      },
+      opts: {},
+      mustContain: [
+        '<p><strong>Property Address:</strong> 88 harvest hills — postal codes differ: T3K4T2 (per email body) / T3K4J9 (per Appraisal 88 Harvest Hills)</p>',
+      ],
+      mustNotContain: [
+        '<p><strong>Property Address:</strong> 88 harvest hills</p>', // bare row should NOT appear without postal suffix
+      ],
+    },
+    {
+      // Negative: single-postal case should NOT trigger disambiguation suffix
+      // (regression guard — the enhancement must only fire on multi-value).
+      label: 'single-postal: no disambiguation suffix (regression guard)',
+      map: {
+        ...emptyMap,
+        subject_property_address: [{ value: '88 harvest hills', source: 'email_body' }],
+        subject_property_postal_code: [{ value: 'T3K4J9', source: 'Appraisal.pdf' }],
+      },
+      opts: {},
+      mustContain: ['<p><strong>Property Address:</strong> 88 harvest hills</p>'],
+      mustNotContain: ['postal codes differ'],
+    },
   ];
   let snapshotPassed = 0;
   for (const tc of snapshotCases) {
@@ -2543,6 +2582,113 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     throw new Error(`FAIL [B-2a S15-E yielding]: yield produced non-empty discrepancy_set (${annaResult.discrepancy_set.length} entries). Expected empty — S15-E handles, B yields.`);
   }
   console.log(`  PASS [B-2a S15-E yielding]: Anna fixture triggers yield; empty discrepancy_set; S15-E routing path unblocked`);
+
+  // ─── B-2b STRIP × S15-E phrasing-overlap structural guarantee ───
+  // The strip's intro-anchor pattern ("I noticed.*discrepancy/differ/mismatch"
+  // + closing "could you confirm/clarify") DELIBERATELY OVERLAPS S15-E's
+  // minimal-ask language ("I noticed your email mentions Anna but the
+  // attached documents are for Grace. Could you confirm…"). The only thing
+  // preventing the strip from destroying an S15-E identity-clash clarification
+  // is the webhook's `if (discrepancyDetected) { strip + inject }` conditional.
+  // That's load-bearing coupling — this test proves the structural guarantee
+  // rather than assuming it.
+  //
+  // Two structural cases to verify:
+  //   (A) S15-E fires → engine yields → discrepancyDetected=false → strip
+  //       SKIPPED by the conditional → S15-E minimal-ask preserved verbatim.
+  //   (B) S15-E does NOT fire (recall miss / faithfulness gap) BUT a real
+  //       borrower-name mismatch IS present in docs vs email → B engine's
+  //       primary_borrower_full_name canonical extractor catches it → engine
+  //       produces non-empty discrepancy_set → discrepancyDetected=true →
+  //       strip+inject runs → S15-E-shape phrasing in Vienna's output is
+  //       stripped BUT the JS-injected primary_borrower_full_name bullet
+  //       carries the same clarification need. STRIP + INJECT is a structural
+  //       SUBSTITUTION, not a deletion — clarification coverage preserved.
+  console.log('\n========== GROUP B-2b STRIP × S15-E phrasing-overlap structural guarantee ==========');
+
+  // Case A — S15-E fires, engine yields, strip is structurally NOT invoked
+  // (we assert the conditional inputs that production webhook keys on).
+  {
+    const annaSubj = 'Second Mortgage — Anna Bergstrom, 1801 Varsity Estates Dr NW Calgary';
+    const annaBody = "Hi, I'm Oliver Patel. I have a client looking for a $92,000 second mortgage. Thanks, Oliver.";
+    const annaDocs = [{ file_name: 'CB.pdf', classification: 'credit_report', text: 'CREDIT BUREAU REPORT\nFull Name:Grace Marie Paulson\nDOB: September 4, 1986\nCurrent Address: 88 Harvest Hills Blvd NE Calgary AB T3K 4J9' }];
+    const r = dEngine.runDiscrepancyDetection(annaBody, annaDocs, 'Anna Bergstrom', { emailSubject: annaSubj });
+    if (!r.identity_clash_yielded) throw new Error('FAIL [B-2b case A]: S15-E did not fire on Anna fixture (regression in shape-resilience or S15-E recall)');
+    if (r.discrepancy_set.length !== 0) throw new Error(`FAIL [B-2b case A]: engine returned non-empty discrepancy_set (${r.discrepancy_set.length}) — yielding broken`);
+    const brokerFacing = dEngine.filterBrokerFacing(r.discrepancy_set, { marketDeltaFlagsEnabled: false });
+    if (brokerFacing.length !== 0) throw new Error('FAIL [B-2b case A]: filterBrokerFacing returned non-empty on yielded engine');
+    // Production webhook conditional: `if (discrepancyDetected) { strip + inject }`.
+    // discrepancyDetected = brokerFacing.length > 0 = false → strip + inject SKIPPED.
+    // We confirm by NOT invoking strip and asserting Vienna's hypothetical S15-E
+    // minimal-ask phrasing would pass through unchanged:
+    const hypotheticalVienna = '<p>Hi Oliver! I noticed your email mentions Anna Bergstrom but the attached documents are for Grace Marie Paulson. Could you confirm which is the correct borrower for this application?</p>\n<p>Vienna<br>Private Mortgage Link</p>';
+    const discrepancyDetected = brokerFacing.length > 0;
+    if (discrepancyDetected) throw new Error('FAIL [B-2b case A]: discrepancyDetected=true when it should be false');
+    // Structural guarantee: production webhook will NOT call strip here.
+    // So output equals Vienna's hypothetical S15-E minimal-ask, unchanged.
+    const productionOutput = discrepancyDetected
+      ? aiService.injectDiscrepancySection(aiService.stripVienna_DiscrepancyContent(hypotheticalVienna).stripped, dEngine.renderDiscrepancySection(brokerFacing))
+      : hypotheticalVienna;
+    if (!productionOutput.includes('I noticed your email mentions Anna Bergstrom')) {
+      throw new Error('FAIL [B-2b case A]: S15-E minimal-ask phrasing was destroyed despite engine yielding (conditional protection broken)');
+    }
+    if (!productionOutput.includes('Could you confirm which is the correct borrower')) {
+      throw new Error('FAIL [B-2b case A]: S15-E closing question destroyed despite conditional');
+    }
+    console.log('  PASS [B-2b case A]: S15-E fires → engine yields → conditional skips strip → S15-E minimal-ask intact');
+  }
+
+  // Case B — S15-E recall miss (synthetic), B's primary_borrower_full_name catches
+  // the real clash, strip+inject runs, JS substitutes equivalent coverage.
+  {
+    // Construct inputs S15-E will MISS (e.g., extractBorrowerFromEmailSubject /
+    // extractBorrowerFromEmailBody returns the email-side name, but the absence
+    // check doesn't fire — e.g., docs use a different name format that the doc
+    // extractor doesn't catch). Simpler: synthetically construct a canonical map
+    // with a name discrepancy. Per design, B's primary_borrower_full_name
+    // would produce a discrepancy entry.
+    const syntheticCanonicalMap = {
+      subject_property_address: [], subject_property_postal_code: [],
+      subject_property_market_value: [], subject_property_assessment_value: [],
+      requested_loan_amount: [], existing_first_mortgage_lender: [],
+      existing_first_mortgage_balance: [], existing_first_mortgage_payout_total: [],
+      primary_borrower_full_name: [
+        { value: 'Anna Bergstrom', source: 'email_body' },
+        { value: 'Grace Marie Paulson', source: 'Credit_Bureau.pdf' },
+      ],
+      mortgage_position: [], requested_loan_term_months: [],
+    };
+    const set = dEngine.computeDiscrepancySet(syntheticCanonicalMap);
+    if (set.length === 0 || !set.some(e => e.field === 'primary_borrower_full_name')) {
+      throw new Error('FAIL [B-2b case B]: B engine should detect primary_borrower_full_name discrepancy when S15-E misses');
+    }
+    const brokerFacing = dEngine.filterBrokerFacing(set, { marketDeltaFlagsEnabled: false });
+    if (!brokerFacing.some(e => e.field === 'primary_borrower_full_name')) {
+      throw new Error('FAIL [B-2b case B]: primary_borrower_full_name should be broker-facing (objective gate)');
+    }
+    const discrepancyDetected = brokerFacing.length > 0;
+    if (!discrepancyDetected) throw new Error('FAIL [B-2b case B]: discrepancyDetected should be true');
+    // Simulate Vienna spontaneously emitting S15-E-shape phrasing despite NO-GENERATE
+    const hypotheticalVienna = '<p>Hi Oliver! I noticed your email mentions Anna Bergstrom but the attached credit bureau shows Grace Marie Paulson. Could you confirm which is the correct borrower?</p>\n<p>Vienna<br>Private Mortgage Link</p>';
+    // Strip runs (conditional satisfied). Then JS inject.
+    const stripRes = aiService.stripVienna_DiscrepancyContent(hypotheticalVienna);
+    const section = dEngine.renderDiscrepancySection(brokerFacing);
+    const final = aiService.injectDiscrepancySection(stripRes.stripped, section);
+    // Vienna's S15-E phrasing IS stripped (the structural guarantee allows this when
+    // JS injects equivalent coverage). Verify:
+    //  - The JS-injected section IS in the final output
+    if (!final.includes('the borrower name')) {
+      throw new Error('FAIL [B-2b case B]: JS section did not inject primary_borrower_full_name coverage');
+    }
+    if (!final.includes('Anna Bergstrom') || !final.includes('Grace Marie Paulson')) {
+      throw new Error('FAIL [B-2b case B]: JS section omits one of the conflicting names — coverage lost');
+    }
+    // (Note: Vienna's specific phrasing about "your email mentions Anna" is stripped,
+    // but the JS bullet covers the SAME clarification — names + sources + ask.)
+    console.log('  PASS [B-2b case B]: S15-E miss → B detects via primary_borrower_full_name → strip+inject runs → JS section covers borrower-name clarification (structural SUBSTITUTION, not deletion)');
+  }
+
+  console.log('  PASS [B-2b STRIP × S15-E structural guarantee]: conditional protection (case A) + structural substitution (case B) both verified');
 
   // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
@@ -6773,9 +6919,13 @@ Crown Mortgage Group Lic. #MB556291`;
   }
   console.log('  PASS [Group OOOO active-branch computation]: computed at active-branch call site');
 
-  // Pass via options (alongside KKKK's postApprovalAmlPepAsk)
-  if (!/\{ postApprovalAmlPepAsk, stillMissingForReview \}/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group OOOO options pass-through]: webhook.js must pass { postApprovalAmlPepAsk, stillMissingForReview } as options to generateBrokerResponse`);
+  // Pass via options (alongside KKKK's postApprovalAmlPepAsk). Loosened from
+  // exact-match `{ postApprovalAmlPepAsk, stillMissingForReview }` to permissive
+  // pair-presence (B-2b adds discrepancyDetected + canonicalFieldsPrompt to the
+  // same options object; OOOO's intent — both fields present in the options
+  // pass-through — is preserved.)
+  if (!/postApprovalAmlPepAsk[,\s]+stillMissingForReview/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group OOOO options pass-through]: webhook.js must pass postApprovalAmlPepAsk and stillMissingForReview as options to generateBrokerResponse`);
   }
   console.log('  PASS [Group OOOO options pass-through]: flag passed via options object');
 

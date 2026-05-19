@@ -1,0 +1,148 @@
+═══════════════════════════════════════════════════════════════════════════════
+CLUSTER B — MARKET-VALUE CALIBRATION SAMPLE FOR FRANCO
+═══════════════════════════════════════════════════════════════════════════════
+
+INTERIM-STATE NOTICE — READ FIRST
+───────────────────────────────────────────────────────────────────────────────
+Market-value and numeric-tolerance discrepancies are, BY DELIBERATE DESIGN,
+currently surfaced ADMIN-ONLY (visible in the Deal Snapshot block on every
+review email). They are intentionally NOT broker-facing pending YOUR
+calibration answer to the questions at the bottom of this report.
+
+This means: any interim re-test showing Vienna NOT asking the broker to
+confirm a property-value mismatch is INTENDED conservative behavior, NOT a
+regression. Your calibration answer is what enables broker-facing emission.
+
+The objective gates (postal code / lender name / property address / borrower
+name / grounding / same-category / phantom) ship broker-facing as-validated —
+they are definitional, not threshold-based, and need no calibration.
+
+Only the numeric-tolerance dimension (the 5% market-value / 1% balance
+threshold) carries the circular concern — the threshold is both the gate
+AND the labeling criterion in our internal verification. Whether a 10-25%
+delta is a material discrepancy vs normal variance is the lender's call.
+You are the production arbiter of that materiality bar.
+
+═══════════════════════════════════════════════════════════════════════════════
+CURRENTLY FLAGGED AS DISCREPANCY (above the 5% threshold): 6 cases
+═══════════════════════════════════════════════════════════════════════════════
+
+Deal 275c0922 — Derek Olsen
+  Subject:           Second Mortgage Application — Derek Olsen, 5519 Henwood Road SW Calgary
+  Source:            $830,000 (per email_body)
+  Source:            $730,000 (per Appraisal_5519_Henwood_Road_SW_Calgary.pdf)
+  Delta:             $100,000 (12.0%)
+  Loan amount:       $125,000
+  Hedge in email:    YES (~, approximately, around, etc.)
+  Your call:         [ material ] [ normal variance ] [ hedge-equivalent ] [ other:                  ]
+
+Deal 70ddd45a — Patricia Simmons
+  Subject:           Second Mortgage Application — Patricia Simmons, 412 Coach Side Crescent SW Calgary
+  Source:            $580,000 (per email_body)
+  Source:            $650,000 (per Appraisal_412_Coach_Side_Crescent_SW_Calgary.pdf)
+  Delta:             $70,000 (10.8%)
+  Loan amount:       $131,000
+  Hedge in email:    YES (~, approximately, around, etc.)
+  Your call:         [ material ] [ normal variance ] [ hedge-equivalent ] [ other:                  ]
+
+Deal 5b2dd601 — Kevin Minh Tran
+  Subject:           Second Mortgage Application — Kevin Tran, 3312 Brentwood Road NW Calgary
+  Source:            $680,000 (per email_body)
+  Source:            $595,000 (per Appraisal_3312_Brentwood_Road_NW_Calgary.pdf)
+  Delta:             $85,000 (12.5%)
+  Loan amount:       $130,000
+  Hedge in email:    YES (~, approximately, around, etc.)
+  Your call:         [ material ] [ normal variance ] [ hedge-equivalent ] [ other:                  ]
+
+Deal feb1a3e9 — Ethan Broussard
+  Subject:           Second Mortgage Application — Ethan Broussard, 819 Strathmore Drive SW Calgary
+  Source:            $700,000 (per email_body)
+  Source:            $560,000 (per Appraisal_819_Strathmore_Drive_SW_Calgary.pdf)
+  Delta:             $140,000 (20.0%)
+  Loan amount:       $134,000
+  Hedge in email:    YES (~, approximately, around, etc.)
+  Your call:         [ material ] [ normal variance ] [ hedge-equivalent ] [ other:                  ]
+
+Deal f400ea99 — Sandra Fletcher
+  Subject:           Second Mortgage Application — Sandra Fletcher, 412 Windermere Close SW Edmonton
+  Source:            $640,000 (per email_body)
+  Source:            $580,000 (per Appraisal_412_Windermere_Close_SW_Edmonton.pdf)
+  Delta:             $60,000 (9.4%)
+  Loan amount:       $140,000
+  Hedge in email:    YES (~, approximately, around, etc.)
+  Your call:         [ material ] [ normal variance ] [ hedge-equivalent ] [ other:                  ]
+
+Deal 5f8e4921 — Grace Marie Paulson
+  Subject:           New Mortgage Submission — Grace Paulson, 88 Harvest Hills Blvd NE Calgary
+  Source:            $480,000 (per email_body)
+  Source:            $615,000 (per Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf)
+  Delta:             $135,000 (22.0%)
+  Loan amount:       $292,800
+  Hedge in email:    YES (~, approximately, around, etc.)
+  Your call:         [ material ] [ normal variance ] [ hedge-equivalent ] [ other:                  ]
+
+═══════════════════════════════════════════════════════════════════════════════
+CURRENTLY CLASSIFIED AS WITHIN-TOLERANCE (cleared by 5% threshold): 4 cases
+───── For reference: should any of these have been flagged? ────
+═══════════════════════════════════════════════════════════════════════════════
+
+Deal 530fc06f — Grace Paulson
+  Values:            $620,000 (email_body) / $615,000 (Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf)
+  Delta:             $5,000 (0.8%)
+  Hedge in email:    YES
+  Your call:         [ should-have-flagged ] [ correctly-cleared ]
+
+Deal c63720a5 — James Okafor
+  Values:            $600,000 (email_body) / $615,000 (Appraisal_2281_Rabbit_Hill_Road_NW_Edmonton.pdf)
+  Delta:             $15,000 (2.4%)
+  Hedge in email:    YES
+  Your call:         [ should-have-flagged ] [ correctly-cleared ]
+
+Deal 9aa136aa — Grace Paulson
+  Values:            $610,000 (email_body) / $615,000 (Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf)
+  Delta:             $5,000 (0.8%)
+  Hedge in email:    YES
+  Your call:         [ should-have-flagged ] [ correctly-cleared ]
+
+Deal 610d31a4 — Grace Marie Paulson
+  Values:            $625,000 (email_body) / $615,000 (Appraisal_88_Harvest_Hills_Blvd_NE_Calgary.pdf)
+  Delta:             $10,000 (1.6%)
+  Hedge in email:    no
+  Your call:         [ should-have-flagged ] [ correctly-cleared ]
+
+═══════════════════════════════════════════════════════════════════════════════
+CALIBRATION QUESTIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Is 5% the right threshold for "material discrepancy" on property values?
+   Should it move up (10%, 15%) or down (3%, 2%)?
+
+2. Should there be a DOLLAR FLOOR alongside the percentage?
+   e.g., "flag only if delta > $25K AND > 5%" — would clear small-dollar
+   percentage flags on cheaper properties.
+
+3. Do HEDGED email values ("~$830K", "approximately $620K") get different
+   treatment than precise ones? The current 5% threshold applies uniformly.
+   The prompt-side UUU rule uses 10% tolerance specifically for hedged values;
+   should the JS gate align with that (looser tolerance when hedged)?
+
+4. Are there SPECIAL CASES that override either direction?
+   e.g., stale appraisal, cross-region disagreement, broker explicitly noted
+   "appraisal lower than expected" — should these be treated differently?
+
+5. Once calibrated, do these flags go BROKER-FACING as discrepancy bullets in
+   Vienna's reply email, or stay admin-only as PRELIMINARY-CLARIFICATION
+   banner items on the admin review (you see them on the Snapshot but the
+   broker is not asked)?
+
+GRACE R4-S1 NOTE: deal 5f8e4921 (Grace Marie Paulson, R4-S1 retest, 2026-05-18)
+   is in the FLAGGED list above. This is the exact scenario where your R4
+   report expected the broker-facing property-value clarification. Under the
+   current interim state, Vienna would NOT emit that ask broker-facing —
+   admin would see the discrepancy in the Snapshot but the broker round-trip
+   wouldn't fire on the value mismatch. Your calibration answer above is what
+   tells us whether to enable that broker-facing ask, and at what threshold.
+
+═══════════════════════════════════════════════════════════════════════════════
+END OF SAMPLE
+═══════════════════════════════════════════════════════════════════════════════
