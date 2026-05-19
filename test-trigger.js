@@ -11330,6 +11330,33 @@ Brian`;
     }
     console.log(`  PASS [Group JJJ-hardening]: all ${jjjHardeningMarkers.length} explicit rule fragments present inside INITIAL_EMAIL_PROMPT bounds`);
 
+    // ════════════════════════════════════════════════════════════════
+    // GROUP JJJ.1-CREDIT-OMISSION — source-string lock on the explicit
+    // MUST-ASK CRITICAL block (S15-followup, Anna Bergstrom 2026-05-18)
+    // ════════════════════════════════════════════════════════════════
+    // S15-E verification surfaced a 2/10 (~20%) omission rate of the
+    // credit ask in Vienna's welcome — implicit-in-a-list fragility on
+    // the conditional bullet at INITIAL_EMAIL_PROMPT's WHAT TO ASK FOR
+    // section. Same shape as pre-hardening JJJ.1/AML-PEP. The fix mirrors
+    // JJJ-hardening: explicit "CRITICAL — MUST ASK FOR CREDIT BUREAU
+    // REPORT IF NOT ATTACHED" block. This source-string assertion locks
+    // the block presence so future edits can't quietly drop it.
+    const jjj1CreditMarkers = [
+      'CRITICAL — MUST ASK FOR CREDIT BUREAU REPORT IF NOT ATTACHED',
+      'If NO credit bureau (CB) document is attached',
+      'you MUST ask for credit',
+      'Credit bureau report(s) for [borrower]',
+      'Have you pulled credit for the borrower(s)?',
+      'If a CB document IS attached, do NOT ask',
+      'Same implicit-in-a-list fragility as pre-hardening JJJ.1/AML-PEP',
+    ];
+    for (const marker of jjj1CreditMarkers) {
+      if (!initialPromptBody.includes(marker)) {
+        throw new Error(`FAIL [Group JJJ.1-credit-omission]: explicit MUST-ASK CRITICAL block fragment missing from INITIAL_EMAIL_PROMPT. Missing marker: ${JSON.stringify(marker)}. The block must be inside INITIAL_EMAIL_PROMPT (not just somewhere in ai.js) — its job is to harden processInitialEmail's credit-ask against the implicit-in-a-list omission failure mode.`);
+      }
+    }
+    console.log(`  PASS [Group JJJ.1-credit-omission]: all ${jjj1CreditMarkers.length} explicit MUST-ASK rule fragments present inside INITIAL_EMAIL_PROMPT bounds`);
+
     // JJJ.1 — INITIAL email must NOT mention AML/PEP
     // ════════════════════════════════════════════════════════════════
     // GROUP JJJ.1-REGEX — deterministic credit-ask regex coverage
@@ -11369,6 +11396,16 @@ Brian`;
       ['Have you pulled credit for the borrower(s)?',                true],  // production wording that exposed the dead third alt
       ['Have you already pulled a credit report?',                   true],  // alt 1 matches "credit report"
       ['Credit bureau reports — have you pulled credit for Marcus?', true],  // observed in prior green run
+      // BLOCK-PRESCRIBED CANONICAL PHRASINGS (LOCKSTEP COUPLING — must move
+      // in lockstep if the CRITICAL — MUST ASK FOR CREDIT BUREAU REPORT IF
+      // NOT ATTACHED block's prescription text in INITIAL_EMAIL_PROMPT changes.
+      // The CRITICAL block currently prescribes these two exact phrasings;
+      // the regex must accept both. Without this lockstep coupling, a future
+      // edit to the CRITICAL block's prescription could recreate the test-
+      // honesty bug at the prescription/regex boundary — same shape as the
+      // original JJJ.1 dead-third-alternative.)
+      ['Credit bureau report(s) for Marcus',                         true],  // block-prescribed canonical — list-bullet form
+      ['Have you pulled credit for the borrower(s)?',                true],  // block-prescribed canonical — interrogative form (intentionally duplicates the production case above; the coupling lock is the comment, not uniqueness)
       // NEGATIVE — regression-guard intent preserved
       ['Some other text with no credit ask',                         false],
       ['discredit reports',                                          false], // leading \b before "credit" blocks inside "discredit"
@@ -11438,6 +11475,80 @@ Apex Mortgage`;
     } catch (e) {
       if (e.message.startsWith('FAIL')) throw e;
       console.warn(`  Group JJJ.1 smoke skipped due to API error: ${e.message}`);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROUP JJJ.1-CREDIT-RATE — n=10 omission-rate measurement (gated)
+    // ════════════════════════════════════════════════════════════════
+    // Direct rate measurement of Vienna's credit-ask omission against the
+    // exact JJJ.1 fixture. Pre-fix baseline measured 2/10 (~20% omission).
+    // Post-fix expectation: 0/10 (explicit MUST-ASK CRITICAL blocks must
+    // beat implicit decisively — JJJ-hardening / KKKK D3 / S15 precedent).
+    //   - 0/10 → completion gate closes, ship.
+    //   - 1/10 → ships per standing ≤1 bar BUT completion gate NOT
+    //     reliably closed (in-harness JJJ.1 is single-shot, residual rate
+    //     flakes harness). Surface omitting run's full welcome for judgment.
+    //   - ≥2/10 → fix insufficient, escalate, do not iterate without direction.
+    // Gated under RUN_JJJ1_CREDIT_D=1 — NOT in-harness (in-harness JJJ.1
+    // single-shot stays the standing test, this is a separate rate-check).
+    if (process.env.RUN_JJJ1_CREDIT_D === '1') {
+      console.log('\n========== GROUP JJJ.1-CREDIT-RATE — n=10 omission-rate measurement ==========');
+      const jjj1CreditRegex = /\bcredit\s+(?:bureau|report)s?\b|\bpulled\s+credit\b/i;
+      const jjj1RateBody = `Hi Franco,
+
+New second mortgage submission for review.
+
+Borrower: Marcus Webb
+Property: 142 Vine Avenue, Edmonton, AB
+Property Value: $890,000
+Existing First Mortgage: $318,000 (Scotiabank)
+Loan Amount Requested: $90,000
+Approximate LTV: ~46%
+Exit Strategy: refinance with Scotiabank at maturity
+
+Loan application attached. Will follow up with the rest shortly.
+
+Thanks,
+Jason Mercer
+Apex Mortgage`;
+      let asked = 0, omitted = 0;
+      const omittedRuns = [];
+      for (let run = 1; run <= 10; run++) {
+        try {
+          const { welcomeEmail } = await realAi.processInitialEmail(
+            'Jason Mercer', jjj1RateBody, [], [], false, false, false
+          );
+          const matched = jjj1CreditRegex.test(welcomeEmail || '');
+          if (matched) {
+            asked++;
+            console.log(`  Run ${run}: ASKED`);
+          } else {
+            omitted++;
+            omittedRuns.push({ run, welcome: welcomeEmail || '' });
+            console.log(`  Run ${run}: OMITTED (credit ask absent from welcome)`);
+          }
+        } catch (e) {
+          omitted++;
+          omittedRuns.push({ run, welcome: `ERROR: ${e.message}` });
+          console.log(`  Run ${run}: ERROR — ${e.message}`);
+        }
+      }
+      console.log(`\nGroup JJJ.1-CREDIT-RATE: ${asked}/10 asked, ${omitted}/10 omitted (pre-fix baseline: 2/10; post-fix target: 0/10)`);
+      if (omittedRuns.length > 0) {
+        console.log('\nOMITTING RUN(S) — full welcome output for judgment:');
+        for (const r of omittedRuns) {
+          console.log(`\n--- Run ${r.run} ---\n${r.welcome.slice(0, 1500).replace(/\n/g, ' ')}`);
+        }
+      }
+      if (omitted >= 2) {
+        throw new Error(`FAIL [Group JJJ.1-CREDIT-RATE]: ${omitted}/10 omitted (≥2 — fix insufficient). Expected post-fix: 0/10 (explicit MUST-ASK CRITICAL block must beat implicit decisively). Surface the omitting runs' full welcome output for judgment — block may be present but not engaging at TASK 1 render time. Same accumulation-vs-replacement failure mode as S15-E's three prompt-only attempts — may need STEP 0 / pre-check / counter-instruction layer, OR move the credit ask out of the conditional list entirely. Do NOT iterate without direction.`);
+      } else if (omitted === 1) {
+        console.log(`\nNOTE: 1/10 omission — ships per standing ≤1 bar BUT in-harness JJJ.1 single-shot flakes at ~10% rate. Completion gate NOT reliably closed. Surface the omitting run above for judgment.`);
+      } else {
+        console.log(`\nGREEN: 0/10 omission. Completion gate closes — explicit MUST-ASK beat implicit decisively, matching JJJ-hardening / KKKK D3 / S15 precedent.`);
+      }
+    } else {
+      console.log('\n---------- Group JJJ.1-CREDIT-RATE: SKIPPED (set RUN_JJJ1_CREDIT_D=1 to run) ----------');
     }
 
     // JJJ.2 — generateBrokerResponse (broker sender, active state) must NOT mention AML/PEP
