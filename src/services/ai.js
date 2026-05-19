@@ -899,6 +899,24 @@ const ROUTING_LEAK_PATTERNS = [
   // C3-b2 — "we should be able to move forward with the review" (E-b-adjacent variant)
   { match: /\bwe\s+should\s+be\s+able\s+to\s+move\s+forward\s+with\s+(?:the|our)\s+review\b[.!?]?/gi,
     replace: "I'll review the file." },
+  // ── R4-RESIDUAL-4 patterns (real-corpus extension to C.3) ─────────────
+  // REAL-CORPUS-OBSERVED leak (Grace 5f8e4921 Vienna outbound): "I believe
+  // we have everything we need to send the file for review. I'll get this
+  // forwarded to Franco for final review and we'll be back in touch."
+  // Two distinct phrasings:
+  // C3-c — "send (the file|this) for review" — broker-facing premature
+  // routing commitment. Anchored on "send" + "for review" with bounded
+  // object (file/deal/this) to avoid matching unrelated "for review"
+  // contexts (e.g. admin-facing email body quotes).
+  { match: /\bsend\s+(?:the\s+(?:file|deal)|this)\s+for\s+review\b[.!?]?/gi,
+    replace: "I'll be in touch shortly." },
+  // C3-d — "forwarded to Franco for final review" — names admin to broker
+  // + premature routing. Bounded recipient set (Franco / admin / lender /
+  // underwriter) + required "for ... review" tail. Without the "for review"
+  // tail the pattern would be too broad: "forwarded to the lender" alone
+  // is a legitimate phrase in many non-leak contexts.
+  { match: /\b(?:I'?ll\s+get\s+)?(?:this\s+|it\s+)?forwarded\s+to\s+(?:Franco|the\s+(?:admin|lender|underwriter))\s+for\s+(?:final\s+)?review\b[.!?]?/gi,
+    replace: "I'll be in touch shortly." },
 ];
 
 const enforceNoRoutingLeak = (html) => {

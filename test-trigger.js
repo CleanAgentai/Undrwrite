@@ -5525,30 +5525,38 @@ WEBSITE.  unionfinancialcorp.com`;
 
   // P3: deterministic empirical residual probe (REQUIRED 2 lock).
   // E's bounded pattern set does NOT cover the broader GGG-concern forward-look
-  // class. Verified by sending 8 plausible Vienna forward-look phrasings
-  // through enforceNoRoutingLeak — all pass unchanged. This test LOCKS the
-  // documented gap: if patterns are ever added that change this result, this
-  // test trips → conscious review of whether lifting GGG suppression
-  // (deferred Edit 2 / Grace-shape fix) becomes safe.
+  // class. This test LOCKS the documented gap with explicit conscious-review
+  // outcome: if patterns are added that change the count, the test trips →
+  // conscious review of whether lifting GGG suppression (deferred / Grace-
+  // shape fix) becomes safe.
+  //
+  // R4-RESIDUAL-4 conscious-review (Item 4 widened C.3 with C3-c/C3-d):
+  // C3-c ("send X for review") now catches GGG-6 specifically. 7/8 probes
+  // still pass unchanged. PARTIAL COVERAGE — the other 7 forward-look
+  // variants (forward-along, submit-this, sending-to-underwriting, etc.)
+  // still escape, so the GGG-suppression-class is NOT meaningfully reduced.
+  // Lifting GGG remains UNSAFE. Lock updated from 8/8 to 7/8; Grace-shape
+  // residual unchanged.
   const c5GggProbes = [
     "<p>Thanks for clarifying! Let me know if you have any other questions — I'll send for review.</p>",
     "<p>Got it — thanks. I will submit this to admin shortly.</p>",
     "<p>Appreciate the quick reply — sending this to underwriting now.</p>",
     "<p>Thanks for the corrections! I'll forward this along to Franco.</p>",
     "<p>Got those — going to underwriting now.</p>",
-    "<p>Thanks for clarifying — I'll send this for review right away.</p>",
+    "<p>Thanks for clarifying — I'll send this for review right away.</p>",  // GGG-6: caught by R4-RESIDUAL-4 C3-c
     "<p>Thanks. I'll be submitting this for review shortly.</p>",
     "<p>Great — I'll get this off to our team now.</p>",
   ];
+  const C5_GGG_UNCHANGED_EXPECTED = 7;  // R4-RESIDUAL-4 conscious-review: 1/8 caught (GGG-6), 7/8 still escape
   let c5UnchangedCount = 0;
   for (const probe of c5GggProbes) {
     const r = aiService.enforceNoRoutingLeak(probe);
     if (!r.sweptAny && r.swept === probe) c5UnchangedCount++;
   }
-  if (c5UnchangedCount !== c5GggProbes.length) {
-    throw new Error(`FAIL [C5-CLARIFICATION-ACK P3 / Grace-residual lock SHIFTED]: ${c5UnchangedCount}/${c5GggProbes.length} GGG-concern probes pass enforceNoRoutingLeak unchanged. C.5 documented this as 8/8 unchanged (E's bounded patterns don't cover the GGG-concern forward-look class). If this count changes, E's coverage shifted — conscious review needed: does the change cover the class fully (Grace-shape Edit 2 becomes safe to ship)? Or is it a partial coverage shift that still doesn't justify lifting GGG? This test trips on any drift to force the decision.`);
+  if (c5UnchangedCount !== C5_GGG_UNCHANGED_EXPECTED) {
+    throw new Error(`FAIL [C5-CLARIFICATION-ACK P3 / Grace-residual lock SHIFTED]: ${c5UnchangedCount}/${c5GggProbes.length} GGG-concern probes pass enforceNoRoutingLeak unchanged. C.5 + R4-RESIDUAL-4 documented this as ${C5_GGG_UNCHANGED_EXPECTED}/${c5GggProbes.length} unchanged (E's bounded patterns cover only 1/8 = the "send X for review" shape via C3-c). If this count drops further (more patterns added), CONSCIOUS REVIEW needed: does the new coverage fully cover the GGG-class (Grace-shape Edit 2 becomes safe to ship)? Or is it still partial (lift remains unsafe)? This test trips on any drift to force the decision — DO NOT just update the count without re-evaluating the lift question.`);
   }
-  console.log(`  PASS [C5-CLARIFICATION-ACK P3 / Grace-residual lock]: ${c5GggProbes.length}/${c5GggProbes.length} GGG-concern probes pass enforceNoRoutingLeak unchanged — E coverage gap is the documented evidence for Grace-shape residual (lifting GGG L2142 unsafe at MVP); future pattern-set changes trip this test → conscious review`);
+  console.log(`  PASS [C5-CLARIFICATION-ACK P3 / Grace-residual lock]: ${c5UnchangedCount}/${c5GggProbes.length} GGG-concern probes pass enforceNoRoutingLeak unchanged (R4-RESIDUAL-4: 1/8 caught by C3-c — PARTIAL coverage, lift remains UNSAFE; the other 7 forward-look variants still escape — Grace-shape residual preserved)`);
 
   // ════════════════════════════════════════════════════════════════
   // GROUP C7-SIGNATURE-PARSER — R4-Bucket-C.7 broker-name parsing (R4-S2 Marcus)
@@ -6235,6 +6243,131 @@ Lender:
     throw new Error(`FAIL [RES2-WIRING / call]: PNW branch must call extractFromPnwStatement.`);
   }
   console.log(`  PASS [RES2-WIRING]: extractCanonicalFields aggregation switch wires PNW classification through extractFromPnwStatement`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP RES4-C3-EXTENDED-LEAK-VARIANTS — R4-RESIDUAL-4 real-corpus widening
+  // ════════════════════════════════════════════════════════════════
+  // C.3 (5d9731a) extended ROUTING_LEAK_PATTERNS with C3-a/C3-b1/C3-b2 — the
+  // S3 + S9 Franco-reported patterns. Bounded MVP scope: enumerated shapes,
+  // not exhaustive. Real-corpus scan (Vienna outbound, post-E-sweep) found
+  // ONE additional unhandled leak instance — Grace 5f8e4921: "I believe we
+  // have everything we need to send the file for review. I'll get this
+  // forwarded to Franco for final review and we'll be back in touch."
+  //
+  // Two patterns added (C3-c + C3-d). Bounded discipline preserved:
+  //   - E_EXPECTED_SWEEP_CALL_COUNT = 3 unchanged (no new call sites).
+  //   - enforceNoRoutingLeak / ROUTING_LEAK_PATTERNS names unchanged.
+  //   - No sibling sweep, no exhaustive FP corpus (post-pilot, logged).
+  //   - C.3's 12/12 truth table + over-fire negatives stay green.
+  //
+  // Sharpening per user direction: the forwarded-to pattern is broader than
+  // send-for-review (optional preamble + recipient set + required tail);
+  // explicit over-fire negatives stress legitimate "forward" contexts
+  // (forwarded to the lender / forward this email / forwarded to me / etc.)
+  // to verify the structural anchors hold.
+  console.log('\n========== GROUP RES4-C3-EXTENDED-LEAK-VARIANTS — real-corpus widening + sharpened over-fire negatives ==========');
+  const r4Cases = [
+    // ─── POSITIVES (real-corpus Grace verbatim + close variants) ───
+    {
+      label: 'P1 Grace 5f8e4921 verbatim — "send the file for review"',
+      input: '<p>I believe we have everything we need to send the file for review.</p>',
+      mustChange: true,
+      mustNotContain: ['send the file for review'],
+    },
+    {
+      label: 'P2 Grace 5f8e4921 verbatim — "forwarded to Franco for final review"',
+      input: "<p>I'll get this forwarded to Franco for final review and we'll be back in touch.</p>",
+      mustChange: true,
+      mustNotContain: ['forwarded to Franco for final review'],
+    },
+    {
+      label: 'P3 variant — "send this for review"',
+      input: '<p>I think we can send this for review now.</p>',
+      mustChange: true,
+      mustNotContain: ['send this for review'],
+    },
+    {
+      label: 'P4 variant — "forwarded to the admin for review" (bounded recipient set, no "final" qualifier)',
+      input: '<p>I have forwarded to the admin for review now.</p>',
+      mustChange: true,
+      mustNotContain: ['forwarded to the admin for review'],
+    },
+
+    // ─── OVER-FIRE NEGATIVES — sharpened per user direction: stress the broader forwarded-to pattern ───
+    {
+      label: 'N1 (REQUIRED-Item-4 sharpening): "forwarded to the lender" WITHOUT for-review tail — must NOT trigger',
+      input: '<p>The application has been forwarded to the lender so they can begin underwriting.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N2: "forward this email to your manager" (manager NOT in recipient set + no for-review tail)',
+      input: '<p>Could you forward this email to your manager when you get a chance?</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N3: "forwarded to me" (me NOT in recipient set)',
+      input: '<p>The documents were forwarded to me yesterday.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N4: "Going forward" — verb-adverb idiom (no recipient, no review tail)',
+      input: '<p>Going forward, please send updates by Friday.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N5: "for review" alone (no send/forwarded anchor)',
+      input: '<p>The file is ready for review on Monday.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N6: "send X" alone (no for-review tail)',
+      input: '<p>Could you send the appraisal report when you have it?</p>',
+      mustChange: false,
+    },
+
+    // ─── C.3 12/12 regression-direction sample (re-verifies pre-Item-4 cases still hold) ───
+    {
+      label: 'C.3 regression-pin — S3 "perfect!" interjection still substitutes',
+      input: '<p>...a couple others coming — perfect! Feel free to send those along when ready.</p>',
+      mustChange: true,
+      mustNotContain: ['— perfect!'],
+    },
+    {
+      label: 'C.3 regression-pin — adjective "the perfect time" still NOT touched',
+      input: '<p>This is the perfect time to refinance.</p>',
+      mustChange: false,
+    },
+  ];
+  let r4Passed = 0;
+  for (const tc of r4Cases) {
+    const { swept, sweptAny } = aiService.enforceNoRoutingLeak(tc.input);
+    if (tc.mustChange && !sweptAny) {
+      throw new Error(`FAIL [RES4 ${tc.label}]: expected substitution (sweptAny=true), got unchanged.\nInput: ${tc.input}`);
+    }
+    if (!tc.mustChange && sweptAny) {
+      throw new Error(`FAIL [RES4 ${tc.label}]: OVER-FIRE — expected no change on benign content, got mutation.\nInput:  ${tc.input}\nOutput: ${swept}`);
+    }
+    if (!tc.mustChange && swept !== tc.input) {
+      throw new Error(`FAIL [RES4 ${tc.label}]: OVER-FIRE — content mutated despite sweptAny=false.\nInput:  ${tc.input}\nOutput: ${swept}`);
+    }
+    for (const needle of (tc.mustNotContain || [])) {
+      if (swept.includes(needle)) {
+        throw new Error(`FAIL [RES4 ${tc.label}]: expected output to NOT contain "${needle}" (substitution incomplete).\nOutput: ${swept}`);
+      }
+    }
+    console.log(`  PASS [${tc.label}]: ${tc.mustChange ? 'substituted' : 'untouched'}`);
+    r4Passed++;
+  }
+  console.log(`Group RES4-C3-EXTENDED-LEAK-VARIANTS: ${r4Passed}/${r4Cases.length} passed (4 real-corpus positives + 6 sharpened over-fire negatives + 2 C.3 regression-pins)`);
+
+  // GROUP RES4-CARVE-OUT-PRESERVED — E_EXPECTED_SWEEP_CALL_COUNT still 3.
+  console.log('\n========== GROUP RES4-CARVE-OUT-PRESERVED — E closed-set count==3 unchanged ==========');
+  const r4WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const r4SweepInvocations = (r4WebhookSrc.match(/aiService\.enforceNoRoutingLeak\s*\(/g) || []).length;
+  if (r4SweepInvocations !== 3) {
+    throw new Error(`FAIL [RES4-CARVE-OUT]: E_EXPECTED_SWEEP_CALL_COUNT should remain 3 (no new call sites in R4-RESIDUAL-4 — bounded ask). Got ${r4SweepInvocations}.`);
+  }
+  console.log(`  PASS [RES4-CARVE-OUT-PRESERVED]: enforceNoRoutingLeak invoked at EXACTLY 3 call sites (E closed-set unchanged; R4-RESIDUAL-4 extended ROUTING_LEAK_PATTERNS only, not call sites)`);
 
   // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
