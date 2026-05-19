@@ -307,6 +307,37 @@ const computeCombinedLtv = (canonicalMap) => {
   };
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// R4-RESIDUAL-1: Combined-LTV escalation trigger (closes C.4 (c) residual)
+// ──────────────────────────────────────────────────────────────────────────
+// Pre-fix: escalation gates keyed ONLY on dealSummary.ltv_percent (standalone).
+// Gap: 2nd mortgage with standalone LTV ≤80 but combined LTV >80 did NOT
+// auto-escalate. Dangerous direction — system never flagged the over-
+// leveraged file.
+//
+// Fix: ADDITIVE trigger. Anything escalating today on standalone STILL
+// escalates (no replacement, no regression). Combined-LTV-over-threshold
+// adds a SECOND escalation reason. Null combined (clean first-mortgage,
+// Linda-shape: existing_first_mortgage_balance=[]) → falls back to
+// standalone-only (no over-fire on clean borrowers — preserves C.4's
+// inverse-bug protection).
+//
+// COMBINED_LTV_ESCALATION_THRESHOLD_PCT is FRANCO-CALIBRATION-PENDING:
+// shipped at conservative default (80%, matches standalone threshold).
+// Lender's call on the actual threshold — adjust after Franco's first
+// batch of combined-LTV-triggered escalations confirms or recalibrates.
+const COMBINED_LTV_ESCALATION_THRESHOLD_PCT = 80;
+
+const shouldEscalateOnAnyLtv = ({ standaloneLtv, combinedLtv, standaloneThreshold, combinedThreshold } = {}) => {
+  const stdT = (standaloneThreshold !== undefined && standaloneThreshold !== null) ? standaloneThreshold : 80;
+  const cmbT = (combinedThreshold !== undefined && combinedThreshold !== null) ? combinedThreshold : COMBINED_LTV_ESCALATION_THRESHOLD_PCT;
+  const stdHit = Number.isFinite(standaloneLtv) && standaloneLtv > stdT;
+  // Null combined → fall back to standalone-only (no over-fire on clean
+  // first-mortgage deals where existing_first_mortgage_balance is absent).
+  const cmbHit = Number.isFinite(combinedLtv) && combinedLtv > cmbT;
+  return stdHit || cmbHit;
+};
+
 const renderDealSnapshot = (canonicalMap, opts = {}) => {
   const { ownershipType = null, isCommercial = false } = opts;
   const lines = [];
@@ -515,6 +546,9 @@ module.exports = {
   renderDiscrepancySection,
   renderDealSnapshot,
   computeCombinedLtv,
+  // R4-RESIDUAL-1: combined-LTV escalation trigger
+  COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
+  shouldEscalateOnAnyLtv,
   formatCanonicalFieldsForPrompt,
   filterBrokerFacing,
   runDiscrepancyDetection,

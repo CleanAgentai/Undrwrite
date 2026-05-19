@@ -5930,6 +5930,176 @@ Footer`,
   console.log(`  PASS [C6-CLAUDE-STRIP-WIRING / ordering]: prependDealSnapshot → stripAndInjectDocumentsIncluded → enforceReviewBanner (offsets ${c6PrependIdx}/${c6StripIdx}/${c6EnforceBannerIdx})`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP RES1-COMBINED-LTV-ESCALATION-GATE — R4-RESIDUAL-1 (closes C.4 (c))
+  // ════════════════════════════════════════════════════════════════
+  // C.4 shipped computeCombinedLtv (admin-informational). C.4 (c) residual:
+  // escalation gates still keyed ONLY on standalone ltv_percent. A 2nd
+  // mortgage with standalone ≤80 but combined >80 did NOT auto-escalate —
+  // the dangerous direction (system never flagged the over-leveraged file).
+  // R4-RESIDUAL-1 adds combined-LTV-over-threshold as an ADDITIVE trigger:
+  // anything escalating today on standalone STILL escalates (no replacement);
+  // null combined (clean first-mortgage, Linda-shape) falls back to
+  // standalone-only — preserves C.4's inverse-bug protection.
+  console.log('\n========== GROUP RES1-COMBINED-LTV-ESCALATION-GATE — helper truth table + S4/Linda regression-direction pins ==========');
+  const { shouldEscalateOnAnyLtv, COMBINED_LTV_ESCALATION_THRESHOLD_PCT, computeCombinedLtv: r1ComputeCombinedLtv } = require('./src/services/discrepancy-engine');
+  const r1Cases = [
+    // ─── Helper truth table ───
+    {
+      label: 'T1 standalone 83% (S4 Ryan), combined 154% → escalate (pre-fix already escalated; preserved)',
+      input: { standaloneLtv: 83, combinedLtv: 154 },
+      expected: true,
+    },
+    {
+      label: 'T2 standalone 70% (Linda Okafor clean first), combined null → NO escalate (over-fire negative; preserves C.4 inverse-bug)',
+      input: { standaloneLtv: 70, combinedLtv: null },
+      expected: false,
+    },
+    {
+      label: 'T3 standalone 75%, combined 95% (NEW behavior — captures previously-unflagged dangerous-leverage case)',
+      input: { standaloneLtv: 75, combinedLtv: 95 },
+      expected: true,
+    },
+    {
+      label: 'T4 standalone null, combined null → false (no decision possible)',
+      input: { standaloneLtv: null, combinedLtv: null },
+      expected: false,
+    },
+    {
+      label: 'T5 standalone 80% (at threshold, not over), combined null → false',
+      input: { standaloneLtv: 80, combinedLtv: null },
+      expected: false,
+    },
+    {
+      label: 'T6 standalone 80.1% (just over), combined null → true (existing behavior preserved)',
+      input: { standaloneLtv: 80.1, combinedLtv: null },
+      expected: true,
+    },
+    {
+      label: 'T7 standalone null, combined 81% → true (NEW — escalate on combined alone when standalone unknown)',
+      input: { standaloneLtv: null, combinedLtv: 81 },
+      expected: true,
+    },
+    {
+      label: 'T8 standalone 60%, combined 80% (at combined threshold, not over) → false',
+      input: { standaloneLtv: 60, combinedLtv: 80 },
+      expected: false,
+    },
+  ];
+  let r1Passed = 0;
+  for (const tc of r1Cases) {
+    const got = shouldEscalateOnAnyLtv(tc.input);
+    if (got !== tc.expected) {
+      throw new Error(`FAIL [RES1-COMBINED-LTV-ESCALATION-GATE ${tc.label}]: expected ${tc.expected}, got ${got}. Input: ${JSON.stringify(tc.input)}`);
+    }
+    console.log(`  PASS [${tc.label}]`);
+    r1Passed++;
+  }
+  console.log(`Group RES1 helper truth table: ${r1Passed}/${r1Cases.length} passed`);
+
+  // ─── Threshold sanity ───
+  if (COMBINED_LTV_ESCALATION_THRESHOLD_PCT !== 80) {
+    throw new Error(`FAIL [RES1 / threshold]: expected COMBINED_LTV_ESCALATION_THRESHOLD_PCT=80 (conservative default, FRANCO-CALIBRATION-PENDING), got ${COMBINED_LTV_ESCALATION_THRESHOLD_PCT}`);
+  }
+  console.log(`  PASS [RES1 / threshold]: COMBINED_LTV_ESCALATION_THRESHOLD_PCT = 80 (conservative default, FRANCO-CALIBRATION-PENDING)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP RES1-S4-RYAN-REGRESSION — artifact-pinned: S4 still escalates
+  // ════════════════════════════════════════════════════════════════
+  // HARD CONSTRAINT (a) — additive only: Franco's reference deal for C.4
+  // combined-LTV (Ryan 1f1e7ac4 / ff8c809e: standalone 83%, combined 154%
+  // — both via canonical-extracted BMO $385K balance + email-stated $452.9K
+  // loan + $545K appraisal). Item 1 must NOT regress S4's escalation.
+  console.log('\n========== GROUP RES1-S4-RYAN-REGRESSION — S4 still escalates after Item 1 ==========');
+  const r1RyanCanonicalMap = {
+    existing_first_mortgage_balance: [{ value: 385000, source: 'Credit_Bureau_Ryan_Callahan.pdf', lender_canonical: 'BMO' }],
+    requested_loan_amount: [{ value: 452900, source: 'email_body' }],
+    subject_property_market_value: [{ value: 545000, source: 'email_body' }],
+  };
+  const r1RyanCombined = r1ComputeCombinedLtv(r1RyanCanonicalMap);
+  if (!r1RyanCombined || r1RyanCombined.combined_ltv_percent !== 153.7) {
+    throw new Error(`FAIL [RES1-S4-RYAN-REGRESSION / combined LTV]: expected 153.7%, got ${JSON.stringify(r1RyanCombined)}`);
+  }
+  const r1RyanShouldEscalate = shouldEscalateOnAnyLtv({ standaloneLtv: 83, combinedLtv: r1RyanCombined.combined_ltv_percent });
+  if (!r1RyanShouldEscalate) {
+    throw new Error(`FAIL [RES1-S4-RYAN-REGRESSION / additive-only]: S4 Ryan must still escalate after Item 1 (pre-fix escalated on standalone 83% > 80; post-fix must STILL escalate). Got false.`);
+  }
+  console.log(`  PASS [RES1-S4-RYAN-REGRESSION]: S4 Ryan still escalates (standalone 83% > 80 AND combined 153.7% > 80 — BOTH trigger; additive preserves pre-fix behavior)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP RES1-LINDA-OKAFOR-REGRESSION — over-fire negative (clean first-mortgage stays clean)
+  // ════════════════════════════════════════════════════════════════
+  // C.4 over-fire negative (verified at C.4 ship): Linda Okafor cf3f1db0
+  // canonical_map.existing_first_mortgage_balance=[] → computeCombinedLtv null.
+  // Item 1 must NOT make Linda escalate. standalone 70% (under threshold) +
+  // combined null → shouldEscalateOnAnyLtv returns false.
+  console.log('\n========== GROUP RES1-LINDA-OKAFOR-REGRESSION — clean first-mortgage stays NON-escalated ==========');
+  const r1LindaCanonicalMap = {
+    existing_first_mortgage_balance: [],
+    requested_loan_amount: [{ value: 367500, source: 'email_body' }],
+    subject_property_market_value: [{ value: 525000, source: 'email_body' }],
+  };
+  const r1LindaCombined = r1ComputeCombinedLtv(r1LindaCanonicalMap);
+  if (r1LindaCombined !== null) {
+    throw new Error(`FAIL [RES1-LINDA / C.4 over-fire negative preserved]: Linda must have computeCombinedLtv === null. Got ${JSON.stringify(r1LindaCombined)}`);
+  }
+  const r1LindaShouldEscalate = shouldEscalateOnAnyLtv({ standaloneLtv: 70, combinedLtv: null });
+  if (r1LindaShouldEscalate) {
+    throw new Error(`FAIL [RES1-LINDA / over-fire]: Linda (clean first-mortgage, standalone 70%, combined null) must NOT escalate. Got true. C.4's inverse-bug protection regressed.`);
+  }
+  console.log(`  PASS [RES1-LINDA-OKAFOR-REGRESSION]: Linda Okafor (clean first-mortgage, standalone 70%, combined null) stays NON-escalated — C.4 inverse-bug protection preserved`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP RES1-WIRING — source-grep both gate sites use shouldEscalateOnAnyLtv
+  // ════════════════════════════════════════════════════════════════
+  // HARD CONSTRAINT (a): both escalation-decision sites (initial-submission
+  // L1629 area + active-branch willGoToCollateralCheck L2127 area) MUST be
+  // wired through shouldEscalateOnAnyLtv. The active-branch conjunction
+  // remains byte-identical except the LTV term — NNNN/S7.1/S9.1 scope-lock.
+  console.log('\n========== GROUP RES1-WIRING — both escalation gates wired ==========');
+  const r1WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  // Initial-submission gate
+  if (!/_r1InitialShouldEscalate/.test(r1WebhookSrc)) {
+    throw new Error(`FAIL [RES1-WIRING / initial-gate]: initial-submission gate must reference _r1InitialShouldEscalate (R4-RESIDUAL-1 wiring).`);
+  }
+  if (!/else if \(_r1InitialShouldEscalate\)/.test(r1WebhookSrc)) {
+    throw new Error(`FAIL [RES1-WIRING / initial-gate predicate]: initial-submission predicate must be \`else if (_r1InitialShouldEscalate)\` — Item 1 replaces the pre-fix \`else if (initialLtv && initialLtv > 80)\` standalone-only check.`);
+  }
+  console.log('  PASS [RES1-WIRING / initial-gate]: initial-submission gate uses _r1InitialShouldEscalate (additive trigger)');
+  // Active-branch willGoToCollateralCheck — conjunction byte-identical except LTV term
+  const r1ActiveMatch = r1WebhookSrc.match(/const willGoToCollateralCheck = ([^;\n]+);/);
+  if (!r1ActiveMatch) {
+    throw new Error(`FAIL [RES1-WIRING / active-gate]: willGoToCollateralCheck definition not found in webhook.js.`);
+  }
+  const r1ActiveConjunction = r1ActiveMatch[1];
+  // (a) MUST contain the combined-LTV-aware term
+  if (!/_r1ActiveLtvShouldEscalate/.test(r1ActiveConjunction)) {
+    throw new Error(`FAIL [RES1-WIRING / active-gate predicate]: willGoToCollateralCheck must use _r1ActiveLtvShouldEscalate (R4-RESIDUAL-1 additive trigger). Got: ${r1ActiveConjunction}`);
+  }
+  // (b) MUST NOT contain the pre-fix bare \`ltv && ltv > 80\` predicate (regression-direction)
+  if (/ltv && ltv > 80/.test(r1ActiveConjunction)) {
+    throw new Error(`FAIL [RES1-WIRING / active-gate pre-fix predicate present]: willGoToCollateralCheck still contains \`ltv && ltv > 80\` after R4-RESIDUAL-1. The LTV term must be swapped to _r1ActiveLtvShouldEscalate (the helper handles standalone + combined).`);
+  }
+  // (c) HARD CONSTRAINT — the rest of the conjunction MUST stay byte-identical: NNNN/S7.1/S9.1 scope-lock
+  for (const requiredTerm of [
+    "existingDeal.status === 'active'",
+    "!collateralAlreadyOffered",
+    "!identityClashUnresolved",
+  ]) {
+    if (!r1ActiveConjunction.includes(requiredTerm)) {
+      throw new Error(`FAIL [RES1-WIRING / active-gate NNNN scope-lock]: willGoToCollateralCheck conjunction must preserve \`${requiredTerm}\` byte-identical (NNNN/S7.1/S9.1 duplicate-prelim scope-lock). Got: ${r1ActiveConjunction}`);
+    }
+  }
+  console.log(`  PASS [RES1-WIRING / active-gate]: willGoToCollateralCheck = _r1ActiveLtvShouldEscalate && (NNNN-scope-lock conjunction preserved byte-identical: status==='active' + !collateralAlreadyOffered + !identityClashUnresolved)`);
+  // (d) Side-effect-free pure path confirmation: gate uses cFields.extractCanonicalFields + dEngine.computeCombinedLtv, NOT runDiscrepancyDetection
+  if (!/cFields\.extractCanonicalFields\(/.test(r1WebhookSrc)) {
+    throw new Error(`FAIL [RES1-WIRING / pure path]: gate must use cFields.extractCanonicalFields (narrowest pure path — no B-pipeline side effect at the escalation-decision layer).`);
+  }
+  if (!/dEngine\.computeCombinedLtv\(/.test(r1WebhookSrc)) {
+    throw new Error(`FAIL [RES1-WIRING / pure path]: gate must use dEngine.computeCombinedLtv (C.4 shipped helper).`);
+  }
+  console.log('  PASS [RES1-WIRING / pure path]: gate uses cFields.extractCanonicalFields + dEngine.computeCombinedLtv (narrowest pure path; no B-pipeline side effect at escalation layer)');
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask

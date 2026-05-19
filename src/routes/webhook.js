@@ -20,6 +20,11 @@ const emailService = require('../services/email');
 const aiService = require('../services/ai');
 const dealsService = require('../services/deals');
 const dEngine = require('../services/discrepancy-engine');
+// R4-RESIDUAL-1: combined-LTV escalation gate uses the narrowest pure path —
+// cFields.extractCanonicalFields + dEngine.computeCombinedLtv. Both are
+// side-effect-free read-only helpers; no B-pipeline injection or admin-
+// Snapshot side effect fires at the escalation-decision layer.
+const cFields = require('../services/canonical-fields');
 
 // Track processed message IDs to prevent duplicate processing
 const processedMessages = new Set();
@@ -1618,6 +1623,20 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         const initialHasExitStrategy = !!(dealSummary?.exit_strategy && String(dealSummary.exit_strategy).trim());
         const initialLtv = dealSummary?.ltv_percent;
 
+        // R4-RESIDUAL-1: compute combined-LTV for the escalation gate using the
+        // NARROWEST pure path (extractCanonicalFields + computeCombinedLtv —
+        // confirmed side-effect-free, no B-pipeline injection or admin-Snapshot
+        // side effects at this site). Falls back to null on clean first-mortgage
+        // deals (no existing_first_mortgage_balance) → standalone-only gate
+        // applies, preserving the C.4 Linda-Okafor over-fire negative.
+        const _r1InitialCanonicalMap = cFields.extractCanonicalFields(email.textBody, savedDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })), { emailSubject: email.subject || '' });
+        const _r1InitialCombined = dEngine.computeCombinedLtv(_r1InitialCanonicalMap);
+        const _r1InitialCombinedLtv = _r1InitialCombined ? _r1InitialCombined.combined_ltv_percent : null;
+        const _r1InitialShouldEscalate = dEngine.shouldEscalateOnAnyLtv({
+          standaloneLtv: initialLtv,
+          combinedLtv: _r1InitialCombinedLtv,
+        });
+
         if (dealSummary?.identity_clash) {
           // Group HHH (S15.1): identity gate runs FIRST, before LTV gates. Vienna's
           // welcome email asks ONLY for the borrower-name clarification (per the
@@ -1626,13 +1645,17 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           // nothing during this state — same silent-pending pattern as Fix 7.
           console.log('Initial submission identity_clash=true — entering awaiting_identity_confirmation state (HHH)');
           await dealsService.update(deal.id, { status: 'awaiting_identity_confirmation' });
-        } else if (initialLtv && initialLtv > 80) {
-          // Fix 7: do NOT escalate immediately. Set status to 'awaiting_collateral'
-          // and let Vienna's welcome email carry the collateral question. Admin sees
-          // nothing until the broker confirms no-collateral (then we silently
-          // escalate) or offers collateral (then status flips back to active).
-          // Reverses Bradley's e93f657 parallel-fire model per Franco's S4 retest.
-          console.log(`Initial submission LTV ${initialLtv}% > 80 — entering awaiting_collateral state (Fix 7)`);
+        } else if (_r1InitialShouldEscalate) {
+          // Fix 7 + R4-RESIDUAL-1: do NOT escalate immediately. Set status to
+          // 'awaiting_collateral'. ADDITIVE escalation trigger — fires if
+          // standalone > 80 (existing behavior, S4 Ryan preserved) OR
+          // combined > COMBINED_LTV_ESCALATION_THRESHOLD_PCT (NEW — captures
+          // the dangerous-leverage case a 2nd mortgage with standalone ≤80 but
+          // combined >80 was previously not flagging).
+          const _r1Reason = (initialLtv && initialLtv > 80)
+            ? `standalone LTV ${initialLtv}% > 80`
+            : `combined LTV ${_r1InitialCombinedLtv}% > ${dEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT} (standalone ${initialLtv ?? 'null'}% under threshold)`;
+          console.log(`Initial submission escalation gate triggered (Fix 7 + R4-RESIDUAL-1): ${_r1Reason} — entering awaiting_collateral state`);
           await dealsService.update(deal.id, { status: 'awaiting_collateral' });
         } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
           console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
@@ -2124,7 +2147,26 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // before reaching this gate, so resolved deals proceed normally.
         const identityClashUnresolved = !!existingDeal.extracted_data?.identity_clash
           || !!result.updatedSummary?.identity_clash;
-        const willGoToCollateralCheck = ltv && ltv > 80 && existingDeal.status === 'active' && !collateralAlreadyOffered && !identityClashUnresolved;
+        // R4-RESIDUAL-1: compute combined-LTV via the narrowest pure path
+        // (extractCanonicalFields + computeCombinedLtv — side-effect-free,
+        // no B-pipeline injection at this gate). Active-branch conjunction
+        // PRESERVED BYTE-IDENTICAL except the LTV term: NNNN/S7.1/S9.1
+        // scope-lock requires `status==='active' && !collateralAlreadyOffered
+        // && !identityClashUnresolved` unchanged — relaxing any of those
+        // reopens the duplicate-prelim regression.
+        const _r1ActiveDocsWithText = await dealsService.getDocumentsWithText(existingDeal.id);
+        const _r1ActiveCanonicalMap = cFields.extractCanonicalFields(
+          email.textBody,
+          _r1ActiveDocsWithText.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
+          { emailSubject: email.subject || '' }
+        );
+        const _r1ActiveCombined = dEngine.computeCombinedLtv(_r1ActiveCanonicalMap);
+        const _r1ActiveCombinedLtv = _r1ActiveCombined ? _r1ActiveCombined.combined_ltv_percent : null;
+        const _r1ActiveLtvShouldEscalate = dEngine.shouldEscalateOnAnyLtv({
+          standaloneLtv: ltv,
+          combinedLtv: _r1ActiveCombinedLtv,
+        });
+        const willGoToCollateralCheck = _r1ActiveLtvShouldEscalate && existingDeal.status === 'active' && !collateralAlreadyOffered && !identityClashUnresolved;
         // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
         // Mirrors the initial-branch gate at line 1041. Pre-BBBB prelim fired with
         // exit_strategy: null → admin saw [MISSING] Exit Strategy → broker provided
