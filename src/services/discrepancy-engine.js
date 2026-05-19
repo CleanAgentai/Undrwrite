@@ -23,6 +23,16 @@
 // the artifact-verified clean corpus.
 
 const cf = require('./canonical-fields');
+// S15-E lives in ai.js. Late-require to avoid circular import (ai.js doesn't yet
+// require discrepancy-engine in Commit 1; will in Commit 2 wiring).
+let _aiServiceForS15;
+const getS15Detector = () => {
+  if (_aiServiceForS15 === undefined) {
+    try { _aiServiceForS15 = require('./ai').isIdentityClashByAbsence; }
+    catch { _aiServiceForS15 = null; }
+  }
+  return _aiServiceForS15;
+};
 
 // Fields with categorical partitioning (compare only within partition).
 const PARTITIONED_FIELDS = new Set(['existing_first_mortgage_balance', 'existing_first_mortgage_payout_total']);
@@ -149,6 +159,153 @@ const computeDiscrepancySet = (canonicalMap) => {
   return out;
 };
 
+// ════════════════════════════════════════════════════════════════════
+// Cluster B Commit 2 — separability (objective vs calibration-gated)
+// ════════════════════════════════════════════════════════════════════
+// Per the Commit 2 plan: market-value / numeric-tolerance discrepancies
+// are NOT broker-facing until Franco calibrates the threshold. Admin
+// Snapshot still shows full transparency (both sources visible). This
+// gate filters the broker-facing emission only.
+const MARKET_DELTA_FIELDS = new Set([
+  'subject_property_market_value',
+  'subject_property_assessment_value',
+  'existing_first_mortgage_balance',
+  'existing_first_mortgage_payout_total',
+  'requested_loan_amount',
+]);
+
+const filterBrokerFacing = (discrepancySet, opts = {}) => {
+  const { marketDeltaFlagsEnabled = false } = opts;
+  if (marketDeltaFlagsEnabled) return discrepancySet.slice();
+  return discrepancySet.filter(e => !MARKET_DELTA_FIELDS.has(e.field));
+};
+
+// ════════════════════════════════════════════════════════════════════
+// Commit 2 — broker-side discrepancy section renderer (pure JS)
+// ════════════════════════════════════════════════════════════════════
+// Generates the discrepancy clarification section verbatim from the
+// canonical-field-derived discrepancy set. Vienna's prompt is instructed
+// to NOT generate this content; JS owns it.
+const renderDiscrepancySection = (discrepancySet) => {
+  if (!discrepancySet || discrepancySet.length === 0) return '';
+  const bullets = discrepancySet.map(e => '<li>' + renderDiscrepancyBullet(e) + '</li>').join('\n');
+  const intro = discrepancySet.length === 1
+    ? '<p>I noticed an item that needs clarification before we move forward:</p>'
+    : discrepancySet.length === 2
+      ? '<p>I noticed a couple of items that need clarification before we move forward:</p>'
+      : '<p>I noticed a few items that need clarification before we move forward:</p>';
+  return `${intro}\n<ul>\n${bullets}\n</ul>\n<p>Could you confirm those details so we have accurate information on file?</p>`;
+};
+
+// ════════════════════════════════════════════════════════════════════
+// Commit 2 — admin Deal Snapshot renderer (pure JS, symmetric with broker)
+// ════════════════════════════════════════════════════════════════════
+// Generates the entire Deal Snapshot block from the canonical-field map.
+// Vienna's generateLeadSummary prompt is instructed to NOT generate the
+// Snapshot — JS owns this block in full.
+//
+// Admin transparency: when a canonical field has multiple distinct values
+// (a real discrepancy), the row shows BOTH values with their sources —
+// admin sees the full picture regardless of the broker-facing calibration
+// gate. The discrepancy is visible to admin even when not broker-facing.
+
+// Derive city/province from a normalized address string.
+// Heuristic: address pattern "<num> <name> <suffix>, <city>, <prov> <postal>"
+// or concatenated equivalents. Conservative — returns null if unable to parse.
+const deriveCityProvince = (normalizedAddress) => {
+  if (!normalizedAddress) return null;
+  // Look for ", <city>, <prov>" or "<city> <prov>" trailing pattern
+  const m = normalizedAddress.match(/,\s*([a-z][a-z\s'\-]+?),\s*(ab|bc|sk|mb|on|qc|nb|ns|pe|nl|nt|yt|nu)\b/i)
+         || normalizedAddress.match(/\s([a-z][a-z\s'\-]+?)\s+(ab|bc|sk|mb|on|qc|nb|ns|pe|nl|nt|yt|nu)\b/i);
+  if (!m) return null;
+  const city = m[1].split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+  const province = m[2].toUpperCase();
+  return { city, province };
+};
+
+const formatMoney = (n) => '$' + Number(n).toLocaleString('en-US');
+
+// Render a single Snapshot row. Handles single-value, multi-value-with-discrepancy,
+// and missing cases. Uses canonical sources for source attribution.
+const renderSnapshotRow = (label, tuples, opts = {}) => {
+  const { format = 'string', suffix = '', fallback = null, fallbackLabel = null } = opts;
+  const formatValue = (v) => format === 'money' ? formatMoney(v) : String(v) + suffix;
+  if (!tuples || tuples.length === 0) {
+    if (fallback && fallback.length > 0) {
+      const v = formatValue(fallback[0].value);
+      return `<p><strong>${label}:</strong> ${v}${fallbackLabel ? ' (' + fallbackLabel + ')' : ''}</p>`;
+    }
+    return `<p><strong>${label}:</strong> TBD</p>`;
+  }
+  // Group by normalized value via valuesEqual
+  // (assume tuples are within same canonical field — we don't know field name here,
+  //  so we use a simpler dedup by string-stringified value).
+  const groups = [];
+  for (const t of tuples) {
+    if (t.value == null) continue;
+    const existing = groups.find(g => String(g.value) === String(t.value)
+                                    && (g.lender || null) === (t.lender_canonical || null));
+    if (existing) existing.sources.push(t.source);
+    else groups.push({ value: t.value, sources: [t.source], lender: t.lender_canonical || null });
+  }
+  if (groups.length === 0) return `<p><strong>${label}:</strong> TBD</p>`;
+  if (groups.length === 1) {
+    return `<p><strong>${label}:</strong> ${formatValue(groups[0].value)}</p>`;
+  }
+  // Multiple distinct values — admin transparency: show all sources.
+  const parts = groups.map(g => `${formatValue(g.value)} (per ${g.sources[0].replace(/\.pdf$/i, '').replace(/_/g, ' ')})`).join(' / ');
+  return `<p><strong>${label}:</strong> ${parts}</p>`;
+};
+
+const renderDealSnapshot = (canonicalMap, opts = {}) => {
+  const { ownershipType = null, isCommercial = false } = opts;
+  const lines = [];
+
+  lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address));
+
+  // City / Province derived from address.
+  const addressTuples = canonicalMap.subject_property_address || [];
+  let cityProv = null;
+  for (const t of addressTuples) {
+    cityProv = deriveCityProvince(t.value);
+    if (cityProv) break;
+  }
+  if (cityProv) {
+    lines.push(`<p><strong>City / Province:</strong> ${cityProv.city} / ${cityProv.province}</p>`);
+  } else {
+    lines.push(`<p><strong>City / Province:</strong> TBD</p>`);
+  }
+
+  lines.push(renderSnapshotRow('Loan Amount Requested', canonicalMap.requested_loan_amount, { format: 'money' }));
+  lines.push(renderSnapshotRow('Mortgage Position', canonicalMap.mortgage_position));
+
+  // Appraised Value with fallback to tax assessment
+  lines.push(renderSnapshotRow('Appraised Value', canonicalMap.subject_property_market_value, {
+    format: 'money',
+    fallback: canonicalMap.subject_property_assessment_value,
+    fallbackLabel: 'tax assessment — appraisal pending',
+  }));
+
+  // LTV — computed from canonical loan_amount + market_value (or assessment fallback)
+  const loanTuples = canonicalMap.requested_loan_amount || [];
+  const marketTuples = canonicalMap.subject_property_market_value || [];
+  const assessmentTuples = canonicalMap.subject_property_assessment_value || [];
+  const loan = loanTuples.length > 0 ? loanTuples[0].value : null;
+  const value = marketTuples.length > 0 ? marketTuples[0].value : (assessmentTuples.length > 0 ? assessmentTuples[0].value : null);
+  if (loan != null && value != null && value > 0) {
+    const ltv = Math.round((loan / value) * 100);
+    lines.push(`<p><strong>LTV:</strong> ${ltv}% (computed)</p>`);
+  } else {
+    lines.push(`<p><strong>LTV:</strong> TBD</p>`);
+  }
+
+  lines.push(renderSnapshotRow('Loan Term Requested', canonicalMap.requested_loan_term_months, { suffix: ' months' }));
+  lines.push(`<p><strong>Borrower Type:</strong> ${isCommercial ? 'Corporate' : 'Personal'}</p>`);
+  lines.push(`<p><strong>Ownership Type:</strong> ${ownershipType || 'TBD'}</p>`);
+
+  return `<h2>Deal Snapshot</h2>\n` + lines.join('\n');
+};
+
 // Render a single discrepancy entry as a broker-facing template bullet.
 // Used by Commit 2's injection helper. Stable phrasing (D's classifier
 // catches it — locked in D-CLARIFICATION-DETECT 19/19).
@@ -222,13 +379,24 @@ const detectJointMultiBorrower = (savedDocs) => {
   return cbBorrowerNames.size >= 2 ? Array.from(cbBorrowerNames) : null;
 };
 
-const runDiscrepancyDetection = (emailBody, savedDocs, borrowerName = null) => {
+const runDiscrepancyDetection = (emailBody, savedDocs, borrowerName = null, opts = {}) => {
+  const { emailSubject = '' } = opts;
   // Commercial / corporate submissions: out-of-scope (residential 2nd-mortgage gate only).
   const comm = cf.isCommercialSubmission(emailBody, savedDocs, borrowerName);
   if (comm.commercial) {
     return { commercial: true, commercial_signal: comm.signal, canonical_map: {}, discrepancy_set: [] };
   }
-  const canonical_map = cf.extractCanonicalFields(emailBody, savedDocs);
+  // S15-E yielding: identity-clash deals are routed via S15-E's dedicated path
+  // (generateIdentityClashMinimalAsk + awaiting_identity_confirmation status).
+  // B's engine must not interfere — return empty discrepancy_set so no broker-
+  // facing discrepancy section is injected and no admin-side discrepancy banner
+  // contention occurs with S15-E's gate.
+  const s15 = getS15Detector();
+  const clash = s15 ? s15(emailSubject, emailBody, savedDocs) : null;
+  if (clash) {
+    return { commercial: false, identity_clash_yielded: true, identity_clash_info: clash, canonical_map: {}, discrepancy_set: [] };
+  }
+  const canonical_map = cf.extractCanonicalFields(emailBody, savedDocs, { emailSubject });
   // Joint-multi-borrower suppression: clear the existing_first_mortgage_*
   // fields when 2+ distinct borrowers' credit bureaus are present. The
   // existing first mortgage isn't a single canonical entity in that case.
@@ -253,10 +421,14 @@ const runDiscrepancyDetection = (emailBody, savedDocs, borrowerName = null) => {
 module.exports = {
   PARTITIONED_FIELDS,
   FIELD_DISPLAY_NAMES,
+  MARKET_DELTA_FIELDS,
   valuesEqual,
   groupTuples,
   computeDiscrepancySet,
   renderDiscrepancyBullet,
+  renderDiscrepancySection,
+  renderDealSnapshot,
   formatCanonicalFieldsForPrompt,
+  filterBrokerFacing,
   runDiscrepancyDetection,
 };

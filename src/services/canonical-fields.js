@@ -61,16 +61,20 @@
 //     `Current Address\n<addr>` (borrower-declared address — OUT OF SCOPE
 //        for subject_property)
 //
-// Fields (9, all role-scoped):
-//   subject_property_postal_code
-//   subject_property_address
-//   subject_property_market_value (appraisal-derived)
-//   subject_property_assessment_value (property_tax-derived; DISTINCT field)
-//   requested_loan_amount
-//   existing_first_mortgage_lender
-//   existing_first_mortgage_balance (BY-LENDER partition)
-//   existing_first_mortgage_payout_total (BY-LENDER partition)
-//   primary_borrower_full_name
+// Fields (11, all role-scoped):
+//   Defect-surface fields (in discrepancy compute list):
+//     subject_property_postal_code
+//     subject_property_address
+//     subject_property_market_value (appraisal-derived)
+//     subject_property_assessment_value (property_tax-derived; DISTINCT field)
+//     requested_loan_amount
+//     existing_first_mortgage_lender
+//     existing_first_mortgage_balance (BY-LENDER partition)
+//     existing_first_mortgage_payout_total (BY-LENDER partition)
+//     primary_borrower_full_name
+//   Display-only fields (Commit-2 Snapshot completeness, NOT in discrepancy compute):
+//     mortgage_position (1st / 2nd / 3rd)
+//     requested_loan_term_months (numeric)
 
 // ════════════════════════════════════════════════════════════════════
 // LENDER_SYNONYMS — hardcoded entity-resolution map
@@ -256,13 +260,44 @@ const findAllAnchorBlocks = (text, anchorReGlobal, windowChars = 250) => {
 //   *Borrower:* <name> *Property:* <addr line 1>\n<line 2 with postal>*<next-tag>
 // The `*` markers come from Postmark's inbound conversion of `*bold*` markdown.
 
-const extractFromEmailBody = (emailBody) => {
+const extractFromEmailBody = (emailBody, emailSubject = '') => {
   const out = {
     subject_property_address: null,
     subject_property_postal_code: null,
     requested_loan_amount: null,
     subject_property_market_value: null,
+    mortgage_position: null,
+    requested_loan_term_months: null,
   };
+  if (!emailBody && !emailSubject) return out;
+  // Mortgage position — anchored to email subject ("Second Mortgage —", "First Mortgage Inquiry —")
+  // or email body ("*Mortgage Position:* 2nd"). Subject is the strongest signal (broker convention).
+  const subjPosM = (emailSubject || '').match(/\b(First|Second|Third|1st|2nd|3rd)\s+Mortgage\b/i);
+  if (subjPosM) {
+    const v = subjPosM[1].toLowerCase();
+    out.mortgage_position = (v === 'first' || v === '1st') ? '1st' : (v === 'second' || v === '2nd') ? '2nd' : '3rd';
+  } else if (emailBody) {
+    const bodyPosM = emailBody.match(/\*?\s*Mortgage\s+Position\s*:?\s*\*?\s*(1st|2nd|3rd|First|Second|Third)/i);
+    if (bodyPosM) {
+      const v = bodyPosM[1].toLowerCase();
+      out.mortgage_position = (v === 'first' || v === '1st') ? '1st' : (v === 'second' || v === '2nd') ? '2nd' : '3rd';
+    } else {
+      // Fallback: "second mortgage on" / "first mortgage for" prose.
+      const proseM = emailBody.match(/\b(first|second|third)\s+mortgage\b/i);
+      if (proseM) {
+        const v = proseM[1].toLowerCase();
+        out.mortgage_position = (v === 'first') ? '1st' : (v === 'second') ? '2nd' : '3rd';
+      }
+    }
+  }
+  // Loan term — broker template "*Term:* 12 months" or prose mention.
+  if (emailBody) {
+    const termM = emailBody.match(/\*?\s*(?:Loan\s+)?Term(?:\s+Requested)?\s*:?\s*\*?\s*(\d+)\s*(?:[-\s]?month|mo\.?)/i);
+    if (termM) {
+      const n = parseInt(termM[1], 10);
+      if (n >= 1 && n <= 60) out.requested_loan_term_months = n;
+    }
+  }
   if (!emailBody) return out;
   // Property block: between `*Property:*` and next `*`
   const propM = emailBody.match(/\*\s*Property\s*:\s*\*\s*([\s\S]+?)\*/i);
@@ -487,6 +522,7 @@ const extractBorrowerFromPropertyTax = (doc) => {
 // ─── Top-level: extract everything per submission ───
 
 const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
+  const emailSubject = opts.emailSubject || '';
   const map = {
     subject_property_address: [],
     subject_property_postal_code: [],
@@ -497,6 +533,9 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     existing_first_mortgage_balance: [],
     existing_first_mortgage_payout_total: [],
     primary_borrower_full_name: [],
+    // Display-only fields (Snapshot completeness — NOT in discrepancy compute list):
+    mortgage_position: [],
+    requested_loan_term_months: [],
   };
 
   const push = (field, value, source, extra = {}) => {
@@ -504,12 +543,14 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     map[field].push({ value, source, ...extra });
   };
 
-  // Email body
-  const email = extractFromEmailBody(emailBody);
+  // Email body + subject
+  const email = extractFromEmailBody(emailBody, emailSubject);
   push('subject_property_address', email.subject_property_address, 'email_body');
   push('subject_property_postal_code', email.subject_property_postal_code, 'email_body');
   push('subject_property_market_value', email.subject_property_market_value, 'email_body');
   push('requested_loan_amount', email.requested_loan_amount, 'email_body');
+  push('mortgage_position', email.mortgage_position, 'email_subject_or_body');
+  push('requested_loan_term_months', email.requested_loan_term_months, 'email_body');
 
   // Per-doc
   for (const doc of (savedDocs || [])) {

@@ -539,7 +539,10 @@ const isIdentityClashByAbsence = (emailSubject, emailBody, savedDocs) => {
   const brokerContent = `${emailSubject || ''}\n${emailBody || ''}`.toLowerCase();
   if (brokerContent.trim().length === 0) return null;
   for (const sd of (savedDocs || [])) {
-    const docName = extractBorrowerFromDocText(sd?.extracted_data?.text || '');
+    // Shape resilience (Cluster B Commit 2 wiring): accept either
+    // `{ extracted_data: { text } }` (webhook savedDocs shape — original S15-E
+    // contract) OR `{ text }` (corpus pilot + canonical-fields adapter shape).
+    const docName = extractBorrowerFromDocText(sd?.extracted_data?.text || sd?.text || '');
     if (!docName) continue;
     const tokens = tokenizeNameForCompare(docName);
     if (tokens.length < 2) continue; // single-token doc names too ambiguous
@@ -590,6 +593,101 @@ const welcomeEmailIsAskingClarification = (welcomeEmailHtml) => {
     if (re.test(plain)) return true;
   }
   return false;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Cluster B Commit 2 — broker-side discrepancy strip (defense-in-depth)
+// ──────────────────────────────────────────────────────────────────────────
+// Removes any Vienna-generated discrepancy bullets / clarification language
+// from the broker reply HTML. Backstop for the NO-GENERATE-DISCREPANCY
+// prompt instruction (Cluster E predicts probabilistic non-compliance).
+// JS injection (renderDiscrepancySection) is the authoritative source;
+// the strip is the safety net.
+//
+// Strip is INTRO-ANCHORED + BULLET-PATTERN hybrid (more structural than per-bullet
+// pattern-match). Bullet-only pattern-matching has gaps — Marcus msg [2] has a
+// B-phantom bullet ("$680K = $680K — these match, my mistake") that contains no
+// clarification phrasing and would survive per-bullet patterns. Intro-anchored
+// strip catches the WHOLE discrepancy section (intro + ul + closing) regardless
+// of individual bullet content; per-bullet patterns catch stray bullets not
+// embedded in a section.
+//
+// Strip removes:
+//   (A) STRUCTURAL: an <p>I noticed...discrepancy/differ/mismatch...</p> intro
+//       paragraph + the immediately-following <ul>...</ul> bullet list + an
+//       optional closing <p>Could you confirm/clarify...</p> paragraph. The
+//       intro is the anchor — bullets between intro and signature are stripped
+//       wholesale.
+//   (B) PER-PARAGRAPH: standalone <p> containing clarification phrasing not
+//       inside a (A)-shape section.
+//   (C) PER-BULLET: standalone <li> with clarification phrasing (rare; safety
+//       net for malformed structure).
+
+// (A) — intro paragraph + following <ul> + optional closing paragraph.
+// The intro tells us "this whole block is the discrepancy section."
+const DISCREPANCY_SECTION_PATTERN = /<p>\s*(?:I noticed|I'?ve noticed|noticed)[^<]*?(?:discrepanc|don'?t match|doesn'?t match|differ|mismatch|conflict|figures? that don'?t)[^<]*?<\/p>\s*(?:<ul>[\s\S]*?<\/ul>)?\s*(?:<p>[^<]*?(?:could|can) you[^<]*?(?:confirm|clarify)[^<]*?<\/p>)?/gi;
+
+// (B) — standalone clarification paragraphs not part of a (A) section.
+const DISCREPANCY_P_PATTERN = /<p>\s*(?:I noticed|I'?ve noticed)[^<]*?(?:discrepanc|don'?t match|doesn'?t match|differ|mismatch|conflict)[^<]*?<\/p>|<p>[^<]*?\b(?:could|can|please)\s+you\s+(?:please\s+)?(?:confirm|clarify)\b[^<]*?(?:which|details|amounts|figures|accurate|correct)[^<]*?<\/p>|<p>[^<]*?\bwhich\s+(?:is|are)\s+(?:the\s+)?(?:correct|accurate|right|actual)\b[^<]*?\?\s*<\/p>/gi;
+
+// (C) — orphan clarification bullets.
+const DISCREPANCY_LI_PATTERN = /<li>[^<]*?(?:I noticed|noticed)[^<]*?(?:discrepanc|don'?t match|differ|mismatch|conflict)[^<]*?<\/li>|<li>[^<]*?\bcould you (?:please\s+)?(?:confirm|clarify)\b[^<]*?<\/li>|<li>[^<]*?\bwhich\s+(?:is|are)\s+(?:the\s+)?(?:correct|accurate|right|actual)\b[^<]*?\?[^<]*?<\/li>/gi;
+
+const EMPTY_UL_PATTERN = /<ul>\s*<\/ul>\s*/gi;
+
+const stripVienna_DiscrepancyContent = (html) => {
+  if (!html || typeof html !== 'string') return { stripped: html, strippedAny: false };
+  let out = html;
+  const before = out;
+  // Order matters: structural (A) first so it captures intro + ul + closing as a
+  // single match; (B) and (C) clean up residuals.
+  out = out.replace(DISCREPANCY_SECTION_PATTERN, '');
+  out = out.replace(DISCREPANCY_P_PATTERN, '');
+  out = out.replace(DISCREPANCY_LI_PATTERN, '');
+  out = out.replace(EMPTY_UL_PATTERN, '');
+  return { stripped: out, strippedAny: out !== before };
+};
+
+// Inject the JS-rendered discrepancy section into the broker reply at a
+// stable position (before the closing signature paragraph). The section
+// is the authoritative discrepancy content — JS owns it verbatim.
+const SIGNATURE_PATTERN = /(<p>\s*Vienna\s*<br\s*\/?>\s*Private\s+Mortgage\s+Link\s*<\/p>)/i;
+
+const injectDiscrepancySection = (html, sectionHtml) => {
+  if (!sectionHtml) return html;
+  if (!html || typeof html !== 'string') return sectionHtml;
+  if (SIGNATURE_PATTERN.test(html)) {
+    return html.replace(SIGNATURE_PATTERN, `${sectionHtml}\n\n$1`);
+  }
+  // Fallback: append before any trailing whitespace
+  return html.trimEnd() + '\n\n' + sectionHtml;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Cluster B Commit 2 — admin Deal Snapshot strip + prepend
+// ──────────────────────────────────────────────────────────────────────────
+// Strips any Vienna-emitted Deal Snapshot block, prepends JS-rendered one.
+// Symmetric with broker-side: pure JS generation owns the structured field
+// rows; Vienna writes the narrative sections (Borrower Overview, Risk
+// Mitigants, etc.) around them.
+const DEAL_SNAPSHOT_BLOCK_PATTERN = /<h2>\s*Deal\s+Snapshot\s*<\/h2>[\s\S]*?(?=<h2>|<hr>|$)/i;
+
+const stripVienna_DealSnapshot = (html) => {
+  if (!html || typeof html !== 'string') return { stripped: html, strippedAny: false };
+  if (!DEAL_SNAPSHOT_BLOCK_PATTERN.test(html)) return { stripped: html, strippedAny: false };
+  const stripped = html.replace(DEAL_SNAPSHOT_BLOCK_PATTERN, '');
+  return { stripped, strippedAny: true };
+};
+
+const prependDealSnapshot = (html, snapshotHtml) => {
+  if (!snapshotHtml) return html;
+  if (!html) return snapshotHtml;
+  // If a FILE STATUS line exists at the top, prepend Snapshot AFTER it; otherwise prepend at top.
+  const fileStatusM = html.match(/^(\s*<p>\s*<strong>\s*FILE STATUS[^<]*<\/strong>[^<]*<\/p>\s*)/i);
+  if (fileStatusM) {
+    return fileStatusM[1] + snapshotHtml + '\n\n' + html.slice(fileStatusM[0].length);
+  }
+  return snapshotHtml + '\n\n' + html;
 };
 
 // JS-enforced banner substitution. Strips Claude's FILE STATUS paragraph
@@ -2752,4 +2850,9 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // Cluster D (Marcus 1f1e7ac4 + Ethan 830f9ad5 2026-05-18 real-Postmark): false-COMPLETE gate.
   welcomeEmailIsAskingClarification,
   enforceReviewBanner,
+  // Cluster B Commit 2 — symmetric pure-injection strip + inject helpers.
+  stripVienna_DiscrepancyContent,
+  injectDiscrepancySection,
+  stripVienna_DealSnapshot,
+  prependDealSnapshot,
 };

@@ -2129,6 +2129,422 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log(`  PASS [B Ethan-shape classifier recall]: ${ethanRecallPassed}/${ethanShapes.length} cases — D's classifier catches all category-confusion shapes (carry-forward closure)`);
 
   // ════════════════════════════════════════════════════════════════
+  // CLUSTER B Commit 2a — deterministic helper tests (NO behavior change)
+  // ════════════════════════════════════════════════════════════════
+  // 2a foundation: ships the helpers + Snapshot schema additions, NOT yet
+  // wired into ai.js/webhook.js. Every new helper has its own deterministic
+  // truth table per the 2a commit-go conditions (built ≠ measured).
+  // 2b carries the load-bearing behavioral 0-miss gate (real-Postmark replays).
+  console.log('\n========== GROUP B-2A — Commit 2a helper deterministic tests ==========');
+
+  // ─── filterBrokerFacing — separability (objective vs calibration-gated) ───
+  const filterCases = [
+    {
+      label: 'objective fields always pass',
+      set: [
+        { field: 'subject_property_postal_code', groups: [{ value: 'T6R3K2', sources: ['email_body'] }, { value: 'T6R0S4', sources: ['RBC_Payout.pdf'] }] },
+        { field: 'existing_first_mortgage_lender', groups: [{ value: 'RBC', sources: ['RBC_Payout.pdf'] }, { value: 'Scotiabank', sources: ['CB.pdf'] }] },
+      ],
+      flag: false,
+      expectedFields: ['subject_property_postal_code', 'existing_first_mortgage_lender'],
+    },
+    {
+      label: 'market-delta fields gated when flag off',
+      set: [
+        { field: 'subject_property_postal_code', groups: [{ value: 'T6R3K2' }, { value: 'T6R0S4' }] },
+        { field: 'subject_property_market_value', groups: [{ value: 830000 }, { value: 730000 }] },
+      ],
+      flag: false,
+      expectedFields: ['subject_property_postal_code'],
+    },
+    {
+      label: 'market-delta fields pass when flag ON',
+      set: [
+        { field: 'subject_property_postal_code', groups: [{ value: 'T6R3K2' }, { value: 'T6R0S4' }] },
+        { field: 'subject_property_market_value', groups: [{ value: 830000 }, { value: 730000 }] },
+      ],
+      flag: true,
+      expectedFields: ['subject_property_postal_code', 'subject_property_market_value'],
+    },
+    {
+      label: 'all calibration-gated fields suppressed when flag off',
+      set: [
+        { field: 'subject_property_market_value', groups: [{ value: 830000 }, { value: 730000 }] },
+        { field: 'subject_property_assessment_value', groups: [{ value: 600000 }, { value: 615000 }] },
+        { field: 'existing_first_mortgage_balance', groups: [{ value: 400000 }, { value: 318000 }], lender: 'RBC' },
+        { field: 'existing_first_mortgage_payout_total', groups: [{ value: 402000 }, { value: 264000 }], lender: 'CIBC' },
+        { field: 'requested_loan_amount', groups: [{ value: 408000 }, { value: 95000 }] },
+      ],
+      flag: false,
+      expectedFields: [],
+    },
+    { label: 'empty set in, empty set out', set: [], flag: false, expectedFields: [] },
+  ];
+  let filterPassed = 0;
+  for (const tc of filterCases) {
+    const got = dEngine.filterBrokerFacing(tc.set, { marketDeltaFlagsEnabled: tc.flag });
+    const gotFields = got.map(e => e.field).sort();
+    const expected = tc.expectedFields.slice().sort();
+    if (JSON.stringify(gotFields) !== JSON.stringify(expected)) {
+      throw new Error(`FAIL [B-2a filterBrokerFacing]: ${tc.label} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(gotFields)}`);
+    }
+    filterPassed++;
+  }
+  console.log(`  PASS [B-2a filterBrokerFacing]: ${filterPassed}/${filterCases.length} cases (objective always-pass + market-delta gated by flag)`);
+
+  // ─── renderDiscrepancySection — broker-facing JS bullets ───
+  const renderSectionCases = [
+    {
+      label: 'empty set → empty string (no injection)',
+      set: [],
+      mustContain: [],
+      mustEqual: '',
+    },
+    {
+      label: 'single entry — "an item that needs"',
+      set: [{ field: 'subject_property_postal_code', groups: [
+        { value: 'T6R3K2', sources: ['email_body'] },
+        { value: 'T6R0S4', sources: ['RBC_Payout_Statement.pdf'] },
+      ] }],
+      mustContain: ['I noticed an item that needs clarification', '<li>', 'T6R3K2', 'T6R0S4', 'Could you confirm'],
+      mustNotContain: ['couple of items', 'few items'],
+    },
+    {
+      label: 'two entries — "a couple of items"',
+      set: [
+        { field: 'subject_property_postal_code', groups: [{ value: 'T6R3K2', sources: ['email_body'] }, { value: 'T6R0S4', sources: ['RBC_Payout.pdf'] }] },
+        { field: 'existing_first_mortgage_lender', groups: [{ value: 'RBC', sources: ['RBC_Payout.pdf'] }, { value: 'Scotiabank', sources: ['Credit_Bureau.pdf'] }] },
+      ],
+      mustContain: ['couple of items', '<ul>', 'T6R3K2', 'RBC', 'Scotiabank'],
+      mustNotContain: ['an item', 'few items'],
+    },
+    {
+      label: 'three entries — "a few items"',
+      set: [
+        { field: 'subject_property_postal_code', groups: [{ value: 'T6R3K2', sources: ['email_body'] }, { value: 'T6R0S4', sources: ['RBC_Payout.pdf'] }] },
+        { field: 'existing_first_mortgage_lender', groups: [{ value: 'RBC', sources: ['RBC_Payout.pdf'] }, { value: 'Scotiabank', sources: ['Credit_Bureau.pdf'] }] },
+        { field: 'subject_property_address', groups: [{ value: '47 maple crest drive', sources: ['email_body'] }, { value: '88 harvest hills', sources: ['Appraisal.pdf'] }] },
+      ],
+      mustContain: ['few items', '47 maple crest drive', '88 harvest hills'],
+      mustNotContain: ['an item', 'couple of items'],
+    },
+  ];
+  let renderSecPassed = 0;
+  for (const tc of renderSectionCases) {
+    const got = dEngine.renderDiscrepancySection(tc.set);
+    if (tc.mustEqual !== undefined) {
+      if (got !== tc.mustEqual) throw new Error(`FAIL [B-2a renderDiscrepancySection]: ${tc.label} — expected exact "${tc.mustEqual}", got "${got}"`);
+    }
+    for (const needle of (tc.mustContain || [])) {
+      if (!got.includes(needle)) throw new Error(`FAIL [B-2a renderDiscrepancySection]: ${tc.label} — missing "${needle}". Got: ${got.slice(0,300)}`);
+    }
+    for (const needle of (tc.mustNotContain || [])) {
+      if (got.includes(needle)) throw new Error(`FAIL [B-2a renderDiscrepancySection]: ${tc.label} — unexpected "${needle}". Got: ${got.slice(0,300)}`);
+    }
+    renderSecPassed++;
+  }
+  console.log(`  PASS [B-2a renderDiscrepancySection]: ${renderSecPassed}/${renderSectionCases.length} cases (empty + 1/2/3 entries + plural phrasing)`);
+
+  // ─── renderDealSnapshot — Snapshot completeness + null-field graceful degradation ───
+  const fullMarcusMap = {
+    subject_property_address: [{ value: '1142 tory road nw, edmonton, ab', source: 'Appraisal.pdf' }],
+    subject_property_postal_code: [{ value: 'T6R3K2', source: 'email_body' }, { value: 'T6R0S4', source: 'RBC_Payout.pdf' }],
+    subject_property_market_value: [{ value: 680000, source: 'email_body' }, { value: 680000, source: 'Appraisal.pdf' }],
+    subject_property_assessment_value: [{ value: 664000, source: 'PropertyTax.pdf' }],
+    requested_loan_amount: [{ value: 408000, source: 'email_body' }],
+    existing_first_mortgage_lender: [{ value: 'RBC', source: 'RBC_Payout.pdf' }, { value: 'Scotiabank', source: 'CB.pdf' }],
+    existing_first_mortgage_balance: [{ value: 400000, source: 'RBC_Payout.pdf', lender_canonical: 'RBC' }],
+    existing_first_mortgage_payout_total: [{ value: 402183, source: 'RBC_Payout.pdf', lender_canonical: 'RBC' }],
+    primary_borrower_full_name: [{ value: 'Marcus James Webb', source: 'CB.pdf' }],
+    mortgage_position: [{ value: '2nd', source: 'email_subject_or_body' }],
+    requested_loan_term_months: [{ value: 12, source: 'email_body' }],
+  };
+  const emptyMap = {
+    subject_property_address: [], subject_property_postal_code: [], subject_property_market_value: [],
+    subject_property_assessment_value: [], requested_loan_amount: [], existing_first_mortgage_lender: [],
+    existing_first_mortgage_balance: [], existing_first_mortgage_payout_total: [], primary_borrower_full_name: [],
+    mortgage_position: [], requested_loan_term_months: [],
+  };
+  const snapshotCases = [
+    {
+      label: 'Marcus full map → all rows populated, FALLBACK does NOT fire (market_value present)',
+      map: fullMarcusMap,
+      opts: { ownershipType: 'Personal', isCommercial: false },
+      mustContain: [
+        '<h2>Deal Snapshot</h2>',
+        '<p><strong>Property Address:</strong>',
+        '<p><strong>City / Province:</strong> Edmonton / AB</p>',
+        '<p><strong>Loan Amount Requested:</strong> $408,000</p>',
+        '<p><strong>Mortgage Position:</strong> 2nd</p>',
+        '<p><strong>Appraised Value:</strong> $680,000</p>',
+        '<p><strong>LTV:</strong> 60% (computed)</p>',
+        '<p><strong>Loan Term Requested:</strong> 12 months</p>',
+        '<p><strong>Borrower Type:</strong> Personal</p>',
+        '<p><strong>Ownership Type:</strong> Personal</p>',
+      ],
+      mustNotContain: ['TBD', 'tax assessment — appraisal pending'],
+    },
+    {
+      label: 'NULL-HANDLING: empty map → every row still rendered with TBD placeholder',
+      map: emptyMap,
+      opts: { ownershipType: null, isCommercial: false },
+      mustContain: [
+        '<h2>Deal Snapshot</h2>',
+        '<p><strong>Property Address:</strong> TBD</p>',
+        '<p><strong>City / Province:</strong> TBD</p>',
+        '<p><strong>Loan Amount Requested:</strong> TBD</p>',
+        '<p><strong>Mortgage Position:</strong> TBD</p>',
+        '<p><strong>Appraised Value:</strong> TBD</p>',
+        '<p><strong>LTV:</strong> TBD</p>',
+        '<p><strong>Loan Term Requested:</strong> TBD</p>',
+        '<p><strong>Borrower Type:</strong> Personal</p>',
+        '<p><strong>Ownership Type:</strong> TBD</p>',
+      ],
+      mustNotContain: ['undefined', 'null', '$NaN'],
+    },
+    {
+      label: 'partial map: appraised value missing → falls back to tax assessment with label',
+      map: { ...emptyMap, subject_property_assessment_value: [{ value: 664000, source: 'PropertyTax.pdf' }], requested_loan_amount: [{ value: 408000, source: 'email_body' }] },
+      opts: { ownershipType: 'Personal', isCommercial: false },
+      mustContain: ['<p><strong>Appraised Value:</strong> $664,000 (tax assessment — appraisal pending)</p>'],
+    },
+    {
+      label: 'commercial deal → Borrower Type = Corporate',
+      map: emptyMap,
+      opts: { ownershipType: null, isCommercial: true },
+      mustContain: ['<p><strong>Borrower Type:</strong> Corporate</p>'],
+    },
+    {
+      label: 'multi-value Property Address → both values + sources shown (admin transparency)',
+      // Property Address IS a Snapshot row (subject_property_postal_code isn't —
+      // postal is embedded in the address string and surfaces via address rendering).
+      map: { ...emptyMap, subject_property_address: [
+        { value: '47 maple crest drive', source: 'email_body' },
+        { value: '88 harvest hills blvd ne', source: 'Appraisal_88_Harvest_Hills.pdf' },
+      ] },
+      opts: {},
+      mustContain: ['47 maple crest drive (per email body)', '88 harvest hills blvd ne (per Appraisal 88 Harvest Hills)'],
+    },
+    {
+      label: 'LTV not computable when either loan or value missing → TBD',
+      map: { ...emptyMap, requested_loan_amount: [{ value: 408000, source: 'email_body' }] /* no property_value */ },
+      opts: {},
+      mustContain: ['<p><strong>LTV:</strong> TBD</p>'],
+    },
+  ];
+  let snapshotPassed = 0;
+  for (const tc of snapshotCases) {
+    const got = dEngine.renderDealSnapshot(tc.map, tc.opts);
+    for (const needle of (tc.mustContain || [])) {
+      if (!got.includes(needle)) throw new Error(`FAIL [B-2a renderDealSnapshot]: ${tc.label} — missing "${needle}".\nGot:\n${got}`);
+    }
+    for (const needle of (tc.mustNotContain || [])) {
+      if (got.includes(needle)) throw new Error(`FAIL [B-2a renderDealSnapshot]: ${tc.label} — unexpected "${needle}".\nGot:\n${got}`);
+    }
+    snapshotPassed++;
+  }
+  console.log(`  PASS [B-2a renderDealSnapshot]: ${snapshotPassed}/${snapshotCases.length} cases (Marcus full + NULL graceful + tax-assessment fallback + commercial + admin-transparency multi-value + LTV-uncomputable TBD)`);
+
+  // ─── stripVienna_DiscrepancyContent — defense-in-depth backstop ───
+  const stripDiscCases = [
+    {
+      label: 'Marcus msg [2] verbatim — strip all 3 bullets + intro + closing question',
+      input: `<p>Hi there!</p>
+<p>I'm Vienna. Thanks for submitting Marcus Webb's application!</p>
+<p>I noticed a few discrepancies in the documents that need clarification:</p>
+<ul>
+<li>Your email mentions an appraised value of $680,000, but the appraisal report shows $680,000 — actually, these match, my mistake</li>
+<li>Your email states the mortgage amount requested is $408,000, but the loan application shows $95,000 — could you confirm which amount is correct?</li>
+<li>The RBC payout statement shows an outstanding balance of $400,000, but your email and other documents reference different figures</li>
+</ul>
+<p>Could you clarify these amounts so we have accurate data on file?</p>
+<p>Vienna<br>Private Mortgage Link</p>`,
+      mustNotContain: ['$95,000', '$680,000', 'I noticed a few discrepancies', 'could you confirm which amount', '<li>'],
+      mustContain: ['Hi there!', 'Thanks for submitting', 'Vienna<br>Private Mortgage Link'],
+    },
+    {
+      label: 'Ethan msg [2] verbatim — strip the category-confusion bullet',
+      input: `<p>Hi Steven!</p>
+<p>Thanks for the comprehensive submission.</p>
+<p>I noticed a discrepancy in the mortgage balance figures — your email mentions a loan amount of $334,880, but the CIBC payout statement shows a total payout amount of $264,810.42. Could you confirm which figure is accurate for the requested loan amount?</p>
+<p>Vienna<br>Private Mortgage Link</p>`,
+      mustNotContain: ['I noticed a discrepancy', '$334,880', '$264,810', 'could you confirm which figure'],
+      mustContain: ['Hi Steven!', 'Thanks for the comprehensive submission'],
+    },
+    {
+      label: 'clean reply — strip leaves intact',
+      input: `<p>Hi Ryan!</p>
+<p>Thanks for sending Derek's deal through. I've received everything and we're starting on the file.</p>
+<p>Vienna<br>Private Mortgage Link</p>`,
+      mustContain: ['Hi Ryan!', "Thanks for sending Derek's deal through", 'Vienna<br>Private Mortgage Link'],
+      mustNotContain: [],
+      assertNoChange: true,
+    },
+    {
+      label: 'doc-request reply — must NOT strip (no "I noticed discrepancy" / no "confirm which is accurate")',
+      input: `<p>Hi Ryan!</p>
+<p>To complete the file, I'll need: Government ID, Property Tax Assessment, Payout Statement.</p>
+<p>Vienna<br>Private Mortgage Link</p>`,
+      mustContain: ['Government ID', "I'll need"],
+      assertNoChange: true,
+    },
+  ];
+  let stripDiscPassed = 0;
+  for (const tc of stripDiscCases) {
+    const r = aiService.stripVienna_DiscrepancyContent(tc.input);
+    if (tc.assertNoChange && r.strippedAny) {
+      throw new Error(`FAIL [B-2a stripVienna_DiscrepancyContent]: ${tc.label} — strip removed something it shouldn't have. Before:\n${tc.input}\nAfter:\n${r.stripped}`);
+    }
+    for (const needle of (tc.mustContain || [])) {
+      if (!r.stripped.includes(needle)) throw new Error(`FAIL [B-2a stripVienna_DiscrepancyContent]: ${tc.label} — strip removed "${needle}" which should have stayed`);
+    }
+    for (const needle of (tc.mustNotContain || [])) {
+      if (r.stripped.includes(needle)) throw new Error(`FAIL [B-2a stripVienna_DiscrepancyContent]: ${tc.label} — strip left "${needle}" which should have been removed`);
+    }
+    stripDiscPassed++;
+  }
+  console.log(`  PASS [B-2a stripVienna_DiscrepancyContent]: ${stripDiscPassed}/${stripDiscCases.length} cases (Marcus + Ethan verbatim production strips + clean reply unchanged + doc-request unchanged)`);
+
+  // ─── injectDiscrepancySection — positioning ───
+  const injectCases = [
+    {
+      label: 'inject before <p>Vienna<br>Private Mortgage Link</p> signature',
+      reply: `<p>Hi Marcus!</p>\n<p>Thanks for sending.</p>\n<p>Vienna<br>Private Mortgage Link</p>`,
+      section: `<p>I noticed an item that needs clarification:</p>\n<ul><li>postal mismatch</li></ul>`,
+      mustContain: ['Thanks for sending.</p>', '<p>I noticed an item', 'Vienna<br>Private Mortgage Link'],
+      orderCheck: ['Thanks for sending.', 'I noticed an item', 'Vienna<br>Private Mortgage Link'],
+    },
+    {
+      label: 'empty section → reply unchanged',
+      reply: `<p>Hi Marcus!</p><p>Vienna<br>Private Mortgage Link</p>`,
+      section: '',
+      assertNoChange: true,
+    },
+    {
+      label: 'no signature line → append at end',
+      reply: `<p>Hi Marcus!</p>\n<p>Thanks.</p>`,
+      section: `<p>I noticed an item:</p>`,
+      orderCheck: ['Thanks.', 'I noticed an item'],
+    },
+  ];
+  let injectPassed = 0;
+  for (const tc of injectCases) {
+    const got = aiService.injectDiscrepancySection(tc.reply, tc.section);
+    if (tc.assertNoChange && got !== tc.reply) {
+      throw new Error(`FAIL [B-2a injectDiscrepancySection]: ${tc.label} — modified when it shouldn't have. Before: ${tc.reply}\nAfter: ${got}`);
+    }
+    for (const needle of (tc.mustContain || [])) {
+      if (!got.includes(needle)) throw new Error(`FAIL [B-2a injectDiscrepancySection]: ${tc.label} — missing "${needle}". Got:\n${got}`);
+    }
+    if (tc.orderCheck) {
+      let lastIdx = -1;
+      for (const seg of tc.orderCheck) {
+        const idx = got.indexOf(seg);
+        if (idx === -1) throw new Error(`FAIL [B-2a injectDiscrepancySection]: ${tc.label} — order check missing "${seg}"`);
+        if (idx < lastIdx) throw new Error(`FAIL [B-2a injectDiscrepancySection]: ${tc.label} — order wrong (${seg} should be after previous segment). Got:\n${got}`);
+        lastIdx = idx;
+      }
+    }
+    injectPassed++;
+  }
+  console.log(`  PASS [B-2a injectDiscrepancySection]: ${injectPassed}/${injectCases.length} cases (before signature + empty no-op + no-signature append)`);
+
+  // ─── stripVienna_DealSnapshot — admin backstop ───
+  const stripSnapshotCases = [
+    {
+      label: 'Marcus production Snapshot block — fully stripped',
+      input: `<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>
+<h2>Deal Snapshot</h2>
+<p><strong>Property Address:</strong> 1142 Tory Road NW, Edmonton</p>
+<p><strong>Loan Amount Requested:</strong> DISCREPANCY - Email states $408,000 but loan application shows $95,000</p>
+<p><strong>Appraised Value:</strong> $680,000</p>
+<h2>Borrower Overview</h2>
+<p>Marcus is a Project Manager at Stantec.</p>`,
+      mustNotContain: ['<h2>Deal Snapshot</h2>', '$95,000', 'DISCREPANCY - Email states', 'Loan Amount Requested:'],
+      mustContain: ['<p><strong>FILE STATUS:</strong>', '<h2>Borrower Overview</h2>', 'Project Manager at Stantec'],
+    },
+    {
+      label: 'no Snapshot block → unchanged',
+      input: `<p><strong>FILE STATUS:</strong> COMPLETE</p>
+<h2>Borrower Overview</h2>
+<p>Marcus is solid.</p>`,
+      assertNoChange: true,
+    },
+  ];
+  let stripSnapPassed = 0;
+  for (const tc of stripSnapshotCases) {
+    const r = aiService.stripVienna_DealSnapshot(tc.input);
+    if (tc.assertNoChange && r.strippedAny) throw new Error(`FAIL [B-2a stripVienna_DealSnapshot]: ${tc.label} — modified when shouldn't`);
+    for (const needle of (tc.mustContain || [])) {
+      if (!r.stripped.includes(needle)) throw new Error(`FAIL [B-2a stripVienna_DealSnapshot]: ${tc.label} — missing "${needle}"`);
+    }
+    for (const needle of (tc.mustNotContain || [])) {
+      if (r.stripped.includes(needle)) throw new Error(`FAIL [B-2a stripVienna_DealSnapshot]: ${tc.label} — unexpected "${needle}"`);
+    }
+    stripSnapPassed++;
+  }
+  console.log(`  PASS [B-2a stripVienna_DealSnapshot]: ${stripSnapPassed}/${stripSnapshotCases.length} cases (production Marcus stripped + non-Snapshot unchanged)`);
+
+  // ─── prependDealSnapshot — Snapshot positioning relative to FILE STATUS ───
+  const prependCases = [
+    {
+      label: 'with FILE STATUS — Snapshot inserted AFTER banner',
+      review: `<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>
+<h2>Borrower Overview</h2>
+<p>Marcus is solid.</p>`,
+      snapshot: `<h2>Deal Snapshot</h2>\n<p><strong>Property Address:</strong> 1142 Tory Road NW</p>`,
+      orderCheck: ['FILE STATUS:', 'Deal Snapshot', 'Borrower Overview'],
+    },
+    {
+      label: 'no FILE STATUS — Snapshot prepended at top',
+      review: `<h2>Borrower Overview</h2>\n<p>Marcus is solid.</p>`,
+      snapshot: `<h2>Deal Snapshot</h2>\n<p>...</p>`,
+      orderCheck: ['Deal Snapshot', 'Borrower Overview'],
+    },
+    {
+      label: 'empty snapshot → review unchanged',
+      review: `<p>Hi</p>`,
+      snapshot: '',
+      assertNoChange: true,
+    },
+  ];
+  let prependPassed = 0;
+  for (const tc of prependCases) {
+    const got = aiService.prependDealSnapshot(tc.review, tc.snapshot);
+    if (tc.assertNoChange && got !== tc.review) throw new Error(`FAIL [B-2a prependDealSnapshot]: ${tc.label} — modified when shouldn't`);
+    if (tc.orderCheck) {
+      let lastIdx = -1;
+      for (const seg of tc.orderCheck) {
+        const idx = got.indexOf(seg);
+        if (idx === -1) throw new Error(`FAIL [B-2a prependDealSnapshot]: ${tc.label} — order missing "${seg}". Got:\n${got}`);
+        if (idx < lastIdx) throw new Error(`FAIL [B-2a prependDealSnapshot]: ${tc.label} — order wrong. Got:\n${got}`);
+        lastIdx = idx;
+      }
+    }
+    prependPassed++;
+  }
+  console.log(`  PASS [B-2a prependDealSnapshot]: ${prependPassed}/${prependCases.length} cases (after FILE STATUS + at-top fallback + empty no-op)`);
+
+  // ─── S15-E yielding in runDiscrepancyDetection ───
+  const s15Anna = {
+    subject: 'Second Mortgage — Anna Bergstrom, 1801 Varsity Estates Dr NW Calgary',
+    body: `Hi, I'm Oliver Patel with Meridian Mortgage Group. I have a client looking for a $92,000 second mortgage. Thanks, Oliver.`,
+    docs: [{
+      file_name: 'Credit_Bureau_Grace_Paulson.pdf',
+      classification: 'credit_report',
+      text: 'CREDIT BUREAU REPORT\nFull Name:Grace Marie Paulson\nDOB: September 4, 1986\nCurrent Address: 88 Harvest Hills Blvd NE, Calgary, AB T3K 4J9',
+    }],
+  };
+  const annaResult = dEngine.runDiscrepancyDetection(s15Anna.body, s15Anna.docs, 'Anna Bergstrom', { emailSubject: s15Anna.subject });
+  if (!annaResult.identity_clash_yielded) {
+    throw new Error(`FAIL [B-2a S15-E yielding]: Anna identity-clash fixture did NOT trigger yield. Got: ${JSON.stringify(annaResult)}`);
+  }
+  if (annaResult.discrepancy_set.length !== 0) {
+    throw new Error(`FAIL [B-2a S15-E yielding]: yield produced non-empty discrepancy_set (${annaResult.discrepancy_set.length} entries). Expected empty — S15-E handles, B yields.`);
+  }
+  console.log(`  PASS [B-2a S15-E yielding]: Anna fixture triggers yield; empty discrepancy_set; S15-E routing path unblocked`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
   // ════════════════════════════════════════════════════════════════
   // Production observed 9 reminder emails fired to one broker at the same 9 PM
