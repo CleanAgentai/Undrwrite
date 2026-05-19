@@ -3266,6 +3266,130 @@ As of April 23, 2026`;
   }
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP C3-SWEEP-OVERCLAIM-FILLER — R4-Bucket-C.3 overclaim/filler patterns (S3 + S9)
+  // ════════════════════════════════════════════════════════════════
+  // C.3 extends enforceNoRoutingLeak with three Franco-reported patterns:
+  //   C3-a (em-dash + comma forms): mid-sentence "perfect!" interjection
+  //         that escapes the BANNED OPENERS prompt rule's FIRST-WORD self-check.
+  //   C3-b1: "looks like a complete <file|package|application|submission>" —
+  //         broker-facing analog of the COMPLETE-overclaim Bucket B fixed
+  //         admin-side. Bucket B fixed admin banner; C.3 fixes broker reply.
+  //         Deliberate complement.
+  //   C3-b2: "we should be able to move forward with the review" — distinct
+  //         from E-b's "I'll be able to move forward" (different subject/
+  //         auxiliary); E-b's pattern doesn't catch this variant.
+  // Truth table: P1-P7 positives (must substitute) + N1-N5 negatives
+  // (must NOT touch — over-fire protection on enumerated realistic benign
+  // shapes; not exhaustive — un-enumerated benign phrasings accepted at MVP
+  // given low severity of word substitution on broker-facing prose).
+  console.log('\n========== GROUP C3-SWEEP-OVERCLAIM-FILLER — overclaim/filler substitution truth table ==========');
+  const c3Cases = [
+    // ─── POSITIVES (must substitute) ───
+    {
+      label: 'P1 S3 Derek msg[1] verbatim — em-dash + "perfect!" mid-sentence',
+      input: '<p>You mentioned you have income docs and a couple others coming — perfect! Feel free to send those along when ready.</p>',
+      mustChange: true,
+      mustContain: ['coming. Feel free'],
+      mustNotContain: ['— perfect!', 'coming — perfect'],
+    },
+    {
+      label: 'P2 comma form ", perfect!"',
+      input: '<p>Thanks for the quick reply, perfect! Send when ready.</p>',
+      mustChange: true,
+      mustContain: ['reply. Send'],
+      mustNotContain: [', perfect!'],
+    },
+    {
+      label: 'P3 capitalization + period variant " — Perfect."',
+      input: '<p>I have everything I need — Perfect. Moving on.</p>',
+      mustChange: true,
+      mustContain: ['need. Moving'],
+      mustNotContain: ['— Perfect.', 'need — Perfect'],
+    },
+    {
+      label: 'P4 S9 Bug-2 fragment "This looks like a complete file"',
+      input: '<p>This looks like a complete file. Standing by for next steps.</p>',
+      mustChange: true,
+      mustContain: ["I've received what you've sent"],
+      mustNotContain: ['looks like a complete file'],
+    },
+    {
+      label: 'P5 noun variant "looks like a complete package"',
+      input: '<p>Great — looks like a complete package on our side.</p>',
+      mustChange: true,
+      mustContain: ["I've received what you've sent"],
+      mustNotContain: ['looks like a complete package'],
+    },
+    {
+      label: 'P6 S9 verbatim fragment "we should be able to move forward with the review"',
+      input: '<p>Got the docs — we should be able to move forward with the review.</p>',
+      mustChange: true,
+      mustContain: ["I'll review the file"],
+      mustNotContain: ['we should be able to move forward with the review'],
+    },
+    {
+      label: 'P7 S9 James msg[1] FULL VERBATIM (chained C3-b1 + C3-b2 substitution)',
+      input: '<p>This looks like a complete file and we should be able to move forward with the review. I will get this started right away!</p>',
+      mustChange: true,
+      mustContain: ["I've received what you've sent and I'll review the file"],
+      mustNotContain: ['looks like a complete file', 'we should be able to move forward with the review'],
+    },
+
+    // ─── NEGATIVES (must NOT touch — over-fire protection) ───
+    {
+      label: 'N1 adjective use "the perfect time to refinance"',
+      input: '<p>This is the perfect time to refinance given current rates.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N2 sentence-start "Perfect!" — prompt-rule surface, NOT C.3 scope',
+      input: '<p>Perfect! Thanks for sending those over.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N3 verb-imperative "complete the application form"',
+      input: '<p>Please complete the application form and return it when convenient.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N4 closing-handoff phrasing "the file is now complete and submitted"',
+      input: '<p>Hi Kevin, The file is now complete and submitted. Please direct any further questions to Franco.</p>',
+      mustChange: false,
+    },
+    {
+      label: 'N5 admin-condition phrasing "ready to move forward with additional items"',
+      input: '<p>The file has been reviewed and we are ready to move forward with a few additional items needed before proceeding.</p>',
+      mustChange: false,
+    },
+  ];
+  let c3Passed = 0;
+  for (const tc of c3Cases) {
+    const { swept, sweptAny } = aiService.enforceNoRoutingLeak(tc.input);
+    if (tc.mustChange && !sweptAny) {
+      throw new Error(`FAIL [C3-SWEEP-OVERCLAIM-FILLER ${tc.label}]: expected sweptAny=true, got false. Pattern did not match.\nInput:  ${tc.input}\nOutput: ${swept}`);
+    }
+    if (!tc.mustChange && sweptAny) {
+      throw new Error(`FAIL [C3-SWEEP-OVERCLAIM-FILLER ${tc.label}]: over-fire — expected sweptAny=false on benign content, got true.\nInput:  ${tc.input}\nOutput: ${swept}`);
+    }
+    if (!tc.mustChange && swept !== tc.input) {
+      throw new Error(`FAIL [C3-SWEEP-OVERCLAIM-FILLER ${tc.label}]: over-fire — content mutated despite sweptAny=false.\nInput:  ${tc.input}\nOutput: ${swept}`);
+    }
+    for (const needle of (tc.mustContain || [])) {
+      if (!swept.includes(needle)) {
+        throw new Error(`FAIL [C3-SWEEP-OVERCLAIM-FILLER ${tc.label}]: expected output to contain "${needle}".\nOutput: ${swept}`);
+      }
+    }
+    for (const needle of (tc.mustNotContain || [])) {
+      if (swept.includes(needle)) {
+        throw new Error(`FAIL [C3-SWEEP-OVERCLAIM-FILLER ${tc.label}]: expected output to NOT contain "${needle}".\nOutput: ${swept}`);
+      }
+    }
+    console.log(`  PASS [${tc.label}]: ${tc.mustChange ? 'substituted' : 'untouched'}`);
+    c3Passed++;
+  }
+  console.log(`Group C3-SWEEP-OVERCLAIM-FILLER: ${c3Passed}/${c3Cases.length} passed (P1-P7 Franco-reported substitutions + N1-N5 enumerated over-fire negatives)`);
+
+  // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
   // ════════════════════════════════════════════════════════════════
   // Production observed 9 reminder emails fired to one broker at the same 9 PM

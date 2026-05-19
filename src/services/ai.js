@@ -722,6 +722,44 @@ const prependDealSnapshot = (html, snapshotHtml) => {
 // enforcement is the project-wide direction (same logged direction from B's
 // commit bodies). Generalizing post-gen-enforcement across all prompt-rule
 // classes is explicitly POST-PILOT.
+//
+// ──────────────────────────────────────────────────────────────────────────
+// R4-Bucket-C.3 extension — broker-facing overclaim / filler patterns
+// ──────────────────────────────────────────────────────────────────────────
+// Franco-reported defects (S3 Bug-1 + S9 Bug-2): the BANNED OPENERS prompt
+// rule (which prohibits sentence-start "Perfect!" via a FIRST-WORD self-check)
+// is empirically insufficient — Vienna emits the same word mid-sentence as an
+// em-dash/comma-prefixed interjection that escapes the rule's positional
+// anchor. Re-applying prompt-rule-only to mid-sentence variants would
+// predictably recur; the in-this-bug evidence justifies the E-mechanism
+// (same trust profile, same carve-out, same call-site set).
+//
+// Patterns added (Franco-reported, verbatim from real Supabase artifacts):
+//   C3-a — " — perfect!" / ", perfect!" mid-sentence interjection
+//          (S3 Derek msg[1]: "...a couple others coming — perfect! Feel free...")
+//          Replacement: "." (terminates the preceding clause cleanly).
+//   C3-b1 — "(this) looks like a complete <file|package|application|submission>"
+//          BROKER-FACING ANALOG OF BUCKET B: S9 Bug-2 is the broker-facing
+//          counterpart to the admin-side COMPLETE-overclaim Bucket B fixed.
+//          Bucket B fixed admin banner saying COMPLETE prematurely on first
+//          review; C.3 fixes Vienna saying COMPLETE to the broker prematurely
+//          while docs are still missing. Deliberate complement.
+//   C3-b2 — "we should be able to move forward with the review"
+//          (S9 James msg[1]: distinct from E-b's "I'll be able to move
+//          forward" — different subject/auxiliary, E-b's pattern doesn't
+//          catch this variant.)
+//
+// Carve-out preservation: C.3 adds NO new call sites; enforceNoRoutingLeak
+// is still invoked at exactly the 3 Vienna-autonomous broker-facing locations.
+// The closed-set test (E_EXPECTED_SWEEP_CALL_COUNT === 3) stays valid.
+// Admin-dictated content (executeDraft / draft-preview flow) never invokes
+// this sweep — same structural protection as E.
+//
+// Over-fire protection: deterministic negatives on enumerated realistic
+// benign shapes (the GROUP C3-SWEEP-OVERCLAIM-FILLER N1-N5 cases). Not an
+// exhaustive FP sweep — residual over-fire risk on un-enumerated benign
+// phrasings is accepted at MVP given the low severity (broker-facing prose
+// word substitution, not a leverage figure or HITL gate).
 const ROUTING_LEAK_PATTERNS = [
   // E-a — full-phrase substitution (cleanest output)
   { match: /\bI'?ll\s+get\s+this\s+moving\s+through\s+(?:our|the)\s+review\s+process\b[.!?]?/gi,
@@ -738,6 +776,19 @@ const ROUTING_LEAK_PATTERNS = [
   { match: /\bthe\s+review\s+process\b/gi, replace: 'the file' },
   { match: /\bthe\s+underwriting\s+process\b/gi, replace: 'the file' },
   { match: /\bpassing\s+(?:it|this|the\s+file|everything)\s+along\b/gi, replace: 'working on it' },
+  // ── R4-Bucket-C.3 patterns (S3 + S9 Franco-reported) ─────────────────
+  // C3-a — mid-sentence "perfect!" interjection (S3 Derek msg[1])
+  // Em-dash form: " — perfect!" / " - perfect." → "." (clause terminator)
+  { match: /\s+[—–\-]\s+[Pp]erfect\s*[!.]+/g, replace: '.' },
+  // Comma form: ", perfect!" → "." (same)
+  { match: /,\s+[Pp]erfect\s*[!.]+/g, replace: '.' },
+  // C3-b1 — "looks like a complete <file/package/application/submission>"
+  // Broker-facing analog of the COMPLETE-overclaim Bucket B fixed admin-side.
+  { match: /\b(?:[Tt]his\s+)?looks\s+like\s+a\s+complete\s+(?:file|package|application|submission)\b/g,
+    replace: "I've received what you've sent" },
+  // C3-b2 — "we should be able to move forward with the review" (E-b-adjacent variant)
+  { match: /\bwe\s+should\s+be\s+able\s+to\s+move\s+forward\s+with\s+(?:the|our)\s+review\b[.!?]?/gi,
+    replace: "I'll review the file." },
 ];
 
 const enforceNoRoutingLeak = (html) => {
