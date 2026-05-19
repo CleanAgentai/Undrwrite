@@ -1905,19 +1905,37 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // cycle and looks at conversation history. No clobber of generated draft.
         } else if (dispatch.action === 'text-only-noop') {
           // R4-Bucket-C.1 (S7 Bug 3 / S8 Bug 2): broker text-only reply on
-          // under_review (hasNewDocs=false). No admin-facing emission — Vienna's
-          // broker-facing reply (generateBrokerResponse) already ran upstream
-          // (L1762-1777) and shipped; deal state already persisted at L1801-1808;
-          // broker inbound saved to conversation thread. Admin sees the inbound
-          // when they look at the deal. Pre-C.1 this branch fired
-          // completion-handoff (S7: [File Complete] on a clarification reply,
-          // file complete but admin hadn't approved) or preliminary-update
-          // (S8: redundant [UPDATED] PRELIMINARY with no state change). Per
-          // user direction this is a *conscious scoping* of "suppress the wrong
-          // signal" — whether a CORRECT clarification-resolved signal should
-          // fire on a text-only clarification reply is Cluster C.5's scope
-          // (no-ack-after-clarification), NOT a C.1 decision that admin never
-          // needs to know about clarification replies.
+          // under_review (hasNewDocs=false). No admin-facing emission — pre-C.1
+          // this branch fired completion-handoff (S7: [File Complete] on a
+          // clarification reply, file complete but admin hadn't approved) or
+          // preliminary-update (S8: redundant [UPDATED] PRELIMINARY with no
+          // state change). C.1 correctly suppressed the WRONG admin signal.
+          //
+          // R4-Bucket-C.5 (Ethan no-ack fix): ship Vienna's broker-facing
+          // responseEmail to broker. generateBrokerResponse already ran
+          // upstream (L1762-1777), passing through B-strip+inject + E-sweep,
+          // so the reply is content-filtered. Admin emission stays zero
+          // (C.1 invariant preserved — load-bearing regression-direction).
+          //
+          // C.1/C.5 boundary closure (option b — grounded against real
+          // R4-S1 Grace + R3-S7 Ethan artifacts): admin already has signal
+          // from prior PRELIMINARY-CLARIFICATION (Bucket B) on this branch,
+          // and deal state updates at L1801-1808 reflect the broker's
+          // resolution; no separate admin "resolved-signal" added in MVP.
+          if (reviewResult.responseEmail) {
+            emailService.sendEmailDelayed(
+              email.from,
+              `Re: ${email.subject}`,
+              reviewResult.responseEmail.replace(/<[^>]*>/g, ''),
+              reviewResult.responseEmail,
+              [],
+              [],
+              async (sendResult) => {
+                await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, reviewResult.responseEmail, sendResult.MessageID);
+                console.log('C.5: Vienna broker-facing reply shipped on text-only-noop branch (admin emission still zero per C.1 invariant)');
+              }
+            );
+          }
         } else if (dispatch.action === 'escalation-update') {
           await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
         } else {

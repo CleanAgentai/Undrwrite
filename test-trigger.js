@@ -5481,6 +5481,76 @@ WEBSITE.  unionfinancialcorp.com`;
   console.log(`  PASS [C1-CORRECTNESS-BOUNDARY (d)]: text-only-noop branch body contains NO admin-facing dispatch call (sendPreliminaryReviewToAdmin / sendCompletionHandoff / sendEscalationToAdmin) — D-extension banner cannot mis-trigger from this path`);
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP C5-CLARIFICATION-ACK — R4-Bucket-C.5 broker-facing ack on text-only reply (R3-S7 Ethan)
+  // ════════════════════════════════════════════════════════════════
+  // C.5 ships Vienna's broker-facing responseEmail on C.1's text-only-noop
+  // branch. The broker ack solves Franco's no-ack-after-clarification report
+  // for the Ethan-shape (under_review + text-only reply). C.1's admin-side
+  // suppression (no emission of completion-handoff / preliminary-update on
+  // text-only) is preserved exactly — Edit 1 only ADDS a broker-send call,
+  // does NOT change dispatch.action returned by decideReviewDispatch.
+  //
+  // Grace-shape (active-branch + willReview + text-only) is DEFERRED as
+  // documented residual — GGG L2142 suppression preserved. Lifting GGG would
+  // reopen the contradiction-class risk that GGG was originally protecting
+  // against, and empirical probe (P3 below) verifies E's bounded pattern set
+  // doesn't cover the GGG-concern forward-look class. Trigger to revisit:
+  // broader forward-look filter OR prompt-shaping change that empirically
+  // clears the class.
+  console.log('\n========== GROUP C5-CLARIFICATION-ACK — broker-facing ack on text-only-noop (Ethan-shape) + Grace-residual lock ==========');
+
+  // P1: source-grep — text-only-noop branch now contains a broker-send call.
+  // (Reuses the same regex as C1-CORRECTNESS-BOUNDARY (d) above; noopBranchBody
+  //  was extracted at line 5475.)
+  const c5BrokerSendPatterns = [
+    /emailService\.sendEmail\s*\(/,
+    /emailService\.sendEmailDelayed\s*\(/,
+  ];
+  const c5HasBrokerSend = c5BrokerSendPatterns.some(re => re.test(noopBranchBody));
+  if (!c5HasBrokerSend) {
+    throw new Error(`FAIL [C5-CLARIFICATION-ACK P1 / broker-send wired]: text-only-noop branch body must contain emailService.sendEmail or sendEmailDelayed call to deliver Vienna's broker-facing reply (Ethan-shape no-ack fix). Without this, the broker hears nothing post-clarification.`);
+  }
+  console.log('  PASS [C5-CLARIFICATION-ACK P1]: text-only-noop branch body contains a broker-send call (Ethan-shape no-ack fix wired)');
+
+  // P2: C.1 regression-direction — text-only-noop branch STILL contains NO
+  // admin-dispatch. (This is the same check as C1-CORRECTNESS-BOUNDARY (d)
+  // above; pinning explicitly here so C.5's commit ships with the C.1
+  // invariant proven preserved alongside the new broker-send.)
+  for (const forbiddenCall of ['sendPreliminaryReviewToAdmin', 'sendCompletionHandoff', 'sendEscalationToAdmin']) {
+    if (noopBranchBody.includes(forbiddenCall + '(')) {
+      throw new Error(`FAIL [C5-CLARIFICATION-ACK P2 / C.1 REGRESSION-DIRECTION]: text-only-noop branch body contains \`${forbiddenCall}(\` after C.5. C.5 must ADD a broker-send only; admin emission must stay zero. If admin-dispatch is wired back here, C.1's wrong-signal fix (S7 [File Complete] / S8 [UPDATED] PRELIMINARY) is reopened.`);
+    }
+  }
+  console.log('  PASS [C5-CLARIFICATION-ACK P2 / C.1 REGRESSION-DIRECTION]: admin-emission absence preserved alongside new broker-send (C.1 invariant intact)');
+
+  // P3: deterministic empirical residual probe (REQUIRED 2 lock).
+  // E's bounded pattern set does NOT cover the broader GGG-concern forward-look
+  // class. Verified by sending 8 plausible Vienna forward-look phrasings
+  // through enforceNoRoutingLeak — all pass unchanged. This test LOCKS the
+  // documented gap: if patterns are ever added that change this result, this
+  // test trips → conscious review of whether lifting GGG suppression
+  // (deferred Edit 2 / Grace-shape fix) becomes safe.
+  const c5GggProbes = [
+    "<p>Thanks for clarifying! Let me know if you have any other questions — I'll send for review.</p>",
+    "<p>Got it — thanks. I will submit this to admin shortly.</p>",
+    "<p>Appreciate the quick reply — sending this to underwriting now.</p>",
+    "<p>Thanks for the corrections! I'll forward this along to Franco.</p>",
+    "<p>Got those — going to underwriting now.</p>",
+    "<p>Thanks for clarifying — I'll send this for review right away.</p>",
+    "<p>Thanks. I'll be submitting this for review shortly.</p>",
+    "<p>Great — I'll get this off to our team now.</p>",
+  ];
+  let c5UnchangedCount = 0;
+  for (const probe of c5GggProbes) {
+    const r = aiService.enforceNoRoutingLeak(probe);
+    if (!r.sweptAny && r.swept === probe) c5UnchangedCount++;
+  }
+  if (c5UnchangedCount !== c5GggProbes.length) {
+    throw new Error(`FAIL [C5-CLARIFICATION-ACK P3 / Grace-residual lock SHIFTED]: ${c5UnchangedCount}/${c5GggProbes.length} GGG-concern probes pass enforceNoRoutingLeak unchanged. C.5 documented this as 8/8 unchanged (E's bounded patterns don't cover the GGG-concern forward-look class). If this count changes, E's coverage shifted — conscious review needed: does the change cover the class fully (Grace-shape Edit 2 becomes safe to ship)? Or is it a partial coverage shift that still doesn't justify lifting GGG? This test trips on any drift to force the decision.`);
+  }
+  console.log(`  PASS [C5-CLARIFICATION-ACK P3 / Grace-residual lock]: ${c5GggProbes.length}/${c5GggProbes.length} GGG-concern probes pass enforceNoRoutingLeak unchanged — E coverage gap is the documented evidence for Grace-shape residual (lifting GGG L2142 unsafe at MVP); future pattern-set changes trip this test → conscious review`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
