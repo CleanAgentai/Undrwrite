@@ -1368,6 +1368,16 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           welcomeEmail = aiService.injectDiscrepancySection(_stripRes.stripped, _section);
           console.log(`B-2b: strip stripped-any=${_stripRes.strippedAny}; injected JS discrepancy section (${_bBrokerFacing.length} entries)`);
         }
+        // Cluster E — post-gen routing-leak sweep (Vienna-autonomous broker-facing).
+        // Runs AFTER B's strip+inject so the sweep operates on the final pre-send
+        // content. Substitutes Franco-reported leak phrases + PPPP-listed residuals
+        // with PPPP-allowed safe alternatives. Admin-edited/dictated content
+        // structurally cannot reach this point (carve-out by call-site).
+        {
+          const _eSweep = aiService.enforceNoRoutingLeak(welcomeEmail);
+          welcomeEmail = _eSweep.swept;
+          if (_eSweep.sweptAny) console.log(`E: routing-leak sweep substituted phrasing in welcomeEmail`);
+        }
         // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
         // when Claude's extraction is null/Unknown/Franco-collision. F2 adds the
         // both-Franco branch — sets name_collides_with_admin: true on the summary
@@ -1711,6 +1721,12 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           const _section = dEngine.renderDiscrepancySection(_bBrokerFacingReview);
           reviewResult.responseEmail = aiService.injectDiscrepancySection(_stripRes.stripped, _section);
         }
+        // Cluster E — routing-leak sweep on Vienna-autonomous review-path reply.
+        if (reviewResult.responseEmail) {
+          const _eSweep = aiService.enforceNoRoutingLeak(reviewResult.responseEmail);
+          reviewResult.responseEmail = _eSweep.swept;
+          if (_eSweep.sweptAny) console.log(`E: routing-leak sweep substituted phrasing in review-path responseEmail`);
+        }
         // Normalize the freshly-updated summary on the way back, before persisting.
         reviewResult.updatedSummary = normalizeSenderName(reviewResult.updatedSummary, email.fromName);
 
@@ -1868,6 +1884,12 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           const _stripRes = aiService.stripVienna_DiscrepancyContent(result.responseEmail);
           const _section = dEngine.renderDiscrepancySection(_bBrokerFacingActive);
           result.responseEmail = aiService.injectDiscrepancySection(_stripRes.stripped, _section);
+        }
+        // Cluster E — routing-leak sweep on Vienna-autonomous active-path reply.
+        if (result.responseEmail) {
+          const _eSweep = aiService.enforceNoRoutingLeak(result.responseEmail);
+          result.responseEmail = _eSweep.swept;
+          if (_eSweep.sweptAny) console.log(`E: routing-leak sweep substituted phrasing in active-path responseEmail`);
         }
         // Normalize the freshly-updated summary on the way back, before persisting.
         result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);

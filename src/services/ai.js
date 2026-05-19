@@ -690,6 +690,66 @@ const prependDealSnapshot = (html, snapshotHtml) => {
   return snapshotHtml + '\n\n' + html;
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// Cluster E — broker-facing routing-leak post-gen sweep
+// ──────────────────────────────────────────────────────────────────────────
+// Franco-reported defect (R3-S7 Bug 1): Vienna's broker-facing reply emitted
+// "I'll get this moving through our review process!" despite "our review
+// process" being in PPPP's verbatim prohibition list inside INITIAL_EMAIL_PROMPT.
+// PPPP's prompt-only enforcement was probabilistically violated. Two known
+// variants:
+//   E-a — "I'll get this moving through our review process!" (Ethan msg[2])
+//   E-b — "I'll be able to move forward with the review" (Marcus msg[2])
+//   E-c — "I'll get this over to our lender" (triage observed)
+//
+// Architecture: post-gen JS sweep on Vienna-autonomous broker-facing outbound.
+// Same trust profile as Cluster D's banner enforcer and Cluster B's strip+inject:
+// JS owns the rule, prompt instruction is preserved but not the gate.
+//
+// SCOPE — MVP-cadence: Franco-reported variants + PPPP's existing listed
+// phrases only. NO exhaustive routing-leak taxonomy, NO speculative variant
+// generation, NO corpus sweep for unreported leaks.
+//
+// ADMIN-DICTATED CARVE-OUT: the sweep is invoked at Vienna-autonomous
+// broker-facing call sites ONLY. Admin-edited/dictated content (draft preview
+// flow → reviseEmailWithEdits → executeDraft) NEVER invokes this sweep —
+// structurally protected by call-site, not by content-pattern detection.
+// The closed-set test (GROUP E-ROUTING-LEAK-SWEEP) locks the exact invocation
+// count so any future call-site addition trips the regression.
+//
+// FORWARD-NOTE (logged, NOT actioned): E-a proves prompt-listed-prohibitions
+// are probabilistically violated even inside PPPP-guarded sites. Post-gen JS
+// enforcement is the project-wide direction (same logged direction from B's
+// commit bodies). Generalizing post-gen-enforcement across all prompt-rule
+// classes is explicitly POST-PILOT.
+const ROUTING_LEAK_PATTERNS = [
+  // E-a — full-phrase substitution (cleanest output)
+  { match: /\bI'?ll\s+get\s+this\s+moving\s+through\s+(?:our|the)\s+review\s+process\b[.!?]?/gi,
+    replace: "I'll be in touch shortly with an update." },
+  // E-b — full-phrase substitution
+  { match: /\bI'?ll\s+be\s+able\s+to\s+move\s+forward\s+with\s+(?:the|our)\s+review\b[.!?]?/gi,
+    replace: "I'll be in touch shortly." },
+  // E-c — full-phrase substitution
+  { match: /\bI'?ll\s+get\s+this\s+over\s+to\s+(?:our|the)?\s*(?:lender|underwriter|team)\b[.!?]?/gi,
+    replace: "I'll be in touch shortly." },
+  // PPPP listed residual catch — word-level safe substitution for surviving
+  // PPPP-listed substrings not covered by full-phrase patterns above.
+  { match: /\bour\s+review\s+process\b/gi, replace: 'our process' },
+  { match: /\bthe\s+review\s+process\b/gi, replace: 'the file' },
+  { match: /\bthe\s+underwriting\s+process\b/gi, replace: 'the file' },
+  { match: /\bpassing\s+(?:it|this|the\s+file|everything)\s+along\b/gi, replace: 'working on it' },
+];
+
+const enforceNoRoutingLeak = (html) => {
+  if (!html || typeof html !== 'string') return { swept: html, sweptAny: false };
+  let out = html;
+  const before = out;
+  for (const { match, replace } of ROUTING_LEAK_PATTERNS) {
+    out = out.replace(match, replace);
+  }
+  return { swept: out, sweptAny: out !== before };
+};
+
 // JS-enforced banner substitution. Strips Claude's FILE STATUS paragraph
 // and prepends the JS-determined banner. Also strips the trailing
 // "This file is COMPLETE…" self-consistency line when the banner says
@@ -2902,4 +2962,7 @@ ${JSON.stringify(summaryData, null, 2)}`,
   injectDiscrepancySection,
   stripVienna_DealSnapshot,
   prependDealSnapshot,
+  // Cluster E — broker-facing routing-leak post-gen sweep.
+  enforceNoRoutingLeak,
+  ROUTING_LEAK_PATTERNS,
 };

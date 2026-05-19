@@ -2691,6 +2691,171 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   console.log('  PASS [B-2b STRIP × S15-E structural guarantee]: conditional protection (case A) + structural substitution (case B) both verified');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP E-ROUTING-LEAK-SWEEP (Cluster E — Franco R3-S7 Bug 1 fix)
+  // ════════════════════════════════════════════════════════════════
+  // Validates the post-gen routing-leak sweep on Vienna-autonomous broker-
+  // facing outbound. MVP-cadence: deterministic substitution truth-table +
+  // closed-set carve-out structural lock + B+E composition negative case.
+  // Real-Postmark behavioral + thinness-aware compliance-rate matrix +
+  // FP corpora are explicitly POST-PILOT per the cadence downshift.
+  console.log('\n========== GROUP E-ROUTING-LEAK-SWEEP — substitution + closed-set carve-out + B+E composition ==========');
+
+  // ─── Substitution truth-table — Franco-reported variants + PPPP-listed residual ───
+  const sweepCases = [
+    // E-a verbatim (Ethan msg[2]): full-phrase substitution to PPPP-allowed.
+    {
+      label: 'E-a verbatim (Ethan msg[2])',
+      input: '<p>Once that\'s clarified, I\'ll get this moving through our review process!</p>',
+      mustContain: ["I'll be in touch shortly with an update."],
+      mustNotContain: ["our review process", "I'll get this moving"],
+    },
+    // E-b variant (Marcus msg[2]): full-phrase substitution.
+    {
+      label: 'E-b variant (Marcus msg[2])',
+      input: '<p>Once we resolve these details, I\'ll be able to move forward with the review.</p>',
+      mustContain: ["I'll be in touch shortly."],
+      mustNotContain: ["move forward with the review"],
+    },
+    // E-c variant: full-phrase substitution.
+    {
+      label: 'E-c variant',
+      input: '<p>Thanks for sending those over — I\'ll get this over to our lender.</p>',
+      mustContain: ["I'll be in touch shortly."],
+      mustNotContain: ["I'll get this over to our lender", "to our lender"],
+    },
+    // E-c variant: "I'll get this over to the underwriter"
+    {
+      label: 'E-c variant — underwriter',
+      input: '<p>I\'ll get this over to the underwriter shortly.</p>',
+      mustContain: ["I'll be in touch shortly."],
+      mustNotContain: ["I'll get this over to the underwriter"],
+    },
+    // PPPP residual: standalone "our review process" not in a full-phrase match.
+    {
+      label: 'PPPP residual — "our review process" in different sentence shape',
+      input: '<p>Welcome to our review process here at PML.</p>',
+      mustContain: ['our process'],
+      mustNotContain: ['our review process'],
+    },
+    // PPPP residual: "the review process"
+    {
+      label: 'PPPP residual — "the review process"',
+      input: '<p>The review process will take a few days.</p>',
+      mustContain: ['the file'],
+      mustNotContain: ['The review process', 'the review process'],
+    },
+    // PPPP residual: "the underwriting process"
+    {
+      label: 'PPPP residual — "the underwriting process"',
+      input: '<p>We\'ve started the underwriting process on your file.</p>',
+      mustContain: ['the file'],
+      mustNotContain: ['the underwriting process'],
+    },
+    // PPPP residual: "passing it along"
+    {
+      label: 'PPPP residual — "passing it along"',
+      input: '<p>Thanks — passing it along to the team.</p>',
+      mustContain: ['working on it'],
+      mustNotContain: ['passing it along'],
+    },
+    // Negative: clean Vienna output (no leak) — must NOT modify
+    {
+      label: 'NEGATIVE — clean Vienna acknowledgment',
+      input: '<p>Hi Alex! Thanks for sending over Grace\'s application. I\'ll be in touch shortly.</p><p>Vienna<br>Private Mortgage Link</p>',
+      assertNoChange: true,
+    },
+    // Negative: "I'll review the file" — innocuous use of "review" not in leak context
+    {
+      label: 'NEGATIVE — innocuous "review the file" (not a leak)',
+      input: '<p>I\'ll review the file and get back to you.</p>',
+      assertNoChange: true,
+    },
+    // Negative: admin-dictated content with "patience during our review" — Franco's actual
+    // R3-S7 msg[7] dictation. Even if (hypothetically) this content reached the sweep,
+    // the sweep must NOT modify it (its phrasing doesn't match PPPP's listed prohibitions
+    // — "patience during our review" is NOT in PPPP's list, only "patience with the review"
+    // and "patience with our review process"). Defense-in-depth verification — the
+    // structural carve-out (below) is the actual production protection; the sweep wouldn't
+    // touch admin-dictated text in production anyway.
+    {
+      label: 'NEGATIVE — admin-dictated "patience during our review" (Franco R3-S7 msg[7] verbatim)',
+      input: '<p>The file is now complete and submitted. Thank you for your patience during our review. Please direct any further questions to Franco.</p>',
+      assertNoChange: true,
+    },
+    // Negative: "application process" — innocuous compound, not a routing-leak
+    {
+      label: 'NEGATIVE — innocuous "application process"',
+      input: '<p>I\'ll walk you through the application process step by step.</p>',
+      assertNoChange: true,
+    },
+  ];
+  let sweepPassed = 0;
+  for (const tc of sweepCases) {
+    const r = aiService.enforceNoRoutingLeak(tc.input);
+    if (tc.assertNoChange) {
+      if (r.sweptAny || r.swept !== tc.input) {
+        throw new Error(`FAIL [E sweep ${tc.label}]: input was modified when it shouldn't have been.\n  before: ${tc.input}\n  after:  ${r.swept}`);
+      }
+    } else {
+      for (const needle of (tc.mustContain || [])) {
+        if (!r.swept.includes(needle)) throw new Error(`FAIL [E sweep ${tc.label}]: missing substitute "${needle}". Got:\n${r.swept}`);
+      }
+      for (const needle of (tc.mustNotContain || [])) {
+        if (r.swept.includes(needle)) throw new Error(`FAIL [E sweep ${tc.label}]: leak "${needle}" survived. Got:\n${r.swept}`);
+      }
+    }
+    sweepPassed++;
+  }
+  console.log(`  PASS [E sweep substitution truth-table]: ${sweepPassed}/${sweepCases.length} cases (E-a/E-b/E-c verbatim + PPPP residual + 4 negatives incl. admin-dictated)`);
+
+  // ─── Closed-set carve-out — exact invocation count == N ───
+  // Per strengthening 1: assert enforceNoRoutingLeak is invoked at EXACTLY N call sites
+  // in webhook.js. Any new call site anywhere (including a future admin path) trips
+  // this test and forces conscious review. Lock is structural — not allowlist/denylist.
+  const E_EXPECTED_SWEEP_CALL_COUNT = 3;
+  const _webhookSrcForE = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const sweepInvocations = (_webhookSrcForE.match(/aiService\.enforceNoRoutingLeak\s*\(/g) || []).length;
+  if (sweepInvocations !== E_EXPECTED_SWEEP_CALL_COUNT) {
+    throw new Error(`FAIL [E carve-out closed-set]: webhook.js has ${sweepInvocations} enforceNoRoutingLeak invocations; expected exactly ${E_EXPECTED_SWEEP_CALL_COUNT}. Any new call site MUST be reviewed for admin-content safety — admin-edited/dictated paths must NEVER invoke the sweep. If a new Vienna-autonomous broker-facing path was added intentionally, update E_EXPECTED_SWEEP_CALL_COUNT after confirming the new site is Vienna-autonomous only.`);
+  }
+  console.log(`  PASS [E carve-out closed-set]: enforceNoRoutingLeak invoked at EXACTLY ${E_EXPECTED_SWEEP_CALL_COUNT} call sites (closed set — future drift trips this test)`);
+
+  // ─── B+E composition negative case ───
+  // The shipped pipeline at broker sites: Vienna → B strip+inject (if discrepancy) →
+  // E sweep → send. Verify B's JS-injected discrepancy section passes through E's
+  // sweep unchanged. B's templates use "I noticed a discrepancy on {field}: …" /
+  // "Could you confirm those details" — none of these match any ROUTING_LEAK_PATTERNS,
+  // so E should not modify B's injected content.
+  {
+    const bInjectedSection = dEngine.renderDiscrepancySection([
+      { field: 'subject_property_postal_code', groups: [
+        { value: 'T3K4T2', sources: ['email_body'] },
+        { value: 'T3K4J9', sources: ['Appraisal_88_Harvest_Hills.pdf'] },
+      ] },
+      { field: 'existing_first_mortgage_lender', groups: [
+        { value: 'RBC', sources: ['RBC_Payout.pdf'] },
+        { value: 'Scotiabank', sources: ['Credit_Bureau.pdf'] },
+      ] },
+    ]);
+    const composed = `<p>Hi Alex!</p>\n<p>Thanks for sending these through.</p>\n${bInjectedSection}\n<p>Vienna<br>Private Mortgage Link</p>`;
+    const eSwept = aiService.enforceNoRoutingLeak(composed);
+    if (eSwept.sweptAny) {
+      throw new Error(`FAIL [E×B composition]: E sweep modified content containing B-injected discrepancy section. Composition is unsafe — E patterns may be over-matching B's templates.\nBefore: ${composed}\nAfter:  ${eSwept.swept}`);
+    }
+    if (eSwept.swept !== composed) {
+      throw new Error(`FAIL [E×B composition]: E sweep mutated content despite sweptAny=false (defensive equality check failed)`);
+    }
+    // Also verify B's specific templated phrases survive:
+    if (!eSwept.swept.includes('I noticed a couple of items that need clarification')) {
+      throw new Error(`FAIL [E×B composition]: B intro phrasing destroyed by E sweep`);
+    }
+    if (!eSwept.swept.includes('Could you confirm those details')) {
+      throw new Error(`FAIL [E×B composition]: B closing phrasing destroyed by E sweep`);
+    }
+    console.log('  PASS [E×B composition]: B-injected discrepancy section passes through E sweep unchanged (sweptAny=false; B templates preserved)');
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // BUG A — cron concurrency: claim-then-send pattern
   // ════════════════════════════════════════════════════════════════
   // Production observed 9 reminder emails fired to one broker at the same 9 PM
