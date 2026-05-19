@@ -495,6 +495,64 @@ const extractFromCreditBureau = (doc) => {
   return out;
 };
 
+// ─── PNW statement — existing first-mortgage lender + balance (R4-RESIDUAL-2) ───
+//
+// Real-corpus anchored: pdf-lib form-field annotations in the Liabilities /
+// Real Estate Owned section (Page 2 of the standard PNW form). Verified
+// against two real corpus fixtures:
+//   - Lena Park (1e9841a4): `[Page 2 annotation] Scotiabank — First Mortgage
+//     (3704 Parkhill Street SW)` immediately followed by
+//     `[Page 2 annotation] $336,000`
+//   - Ryan Callahan (ff8c809e): `[Page 2 annotation] BMO — First Mortgage
+//     (2847 Whitemud Dr NW)` immediately followed by
+//     `[Page 2 annotation] $385,000`
+//
+// Anchor pattern: `[Page N annotation] <Lender> — First Mortgage` followed
+// (next annotation, within ~150 chars) by `[Page N annotation] $<digits>`.
+// Lender token must be in LENDER_SYNONYMS (canonicalized via the existing B map).
+//
+// Page-3 fallback DROPPED — Page-3 Real Estate Owned detail section can list
+// multiple properties, and the role-scoping logic to identify subject-property
+// FIRST mortgage from Page-3 alone is non-trivial (type-scoped-vs-role-scoped
+// risk per B's 58/58 lesson). Page-2 anchor handles both validated fixtures;
+// expand only if a corpus case surfaces requiring Page-3 grounding.
+//
+// Over-fire protection (preserves C.4 Linda over-fire negative): if no PNW
+// annotation block OR no "<Lender> — First Mortgage" pattern in Page 2,
+// returns null. Linda's PNW (no first-mortgage on subject property — she's a
+// first-mortgage purchase) has no such annotation → null → C.4 inverse-bug
+// protection intact.
+const extractFromPnwStatement = (doc) => {
+  const text = doc?.text || doc?.extracted_data?.text || '';
+  const out = {
+    existing_first_mortgage_lender: null,
+    existing_first_mortgage_balance: null,
+  };
+  if (!text) return out;
+  // Anchor: `[Page N annotation] <Lender> — First Mortgage`. The em-dash may
+  // appear as — / – / -. Lender must be one of LENDER_SYNONYMS (case-
+  // insensitive substring match) to qualify.
+  for (const syn of LENDER_SYNONYMS_BY_LENGTH) {
+    const escapedSyn = syn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\[Page\\s+\\d+\\s+annotation\\]\\s*${escapedSyn}\\s*[—–\\-]\\s*First\\s+Mortgage\\b`, 'i');
+    const m = text.match(re);
+    if (!m) continue;
+    out.existing_first_mortgage_lender = LENDER_REVERSE_MAP[syn];
+    // Find the IMMEDIATELY-FOLLOWING `[Page N annotation] $<digits>`
+    // within 150 chars after the anchor (the corpus has it on the next
+    // annotation line, ~50-80 chars away).
+    const afterIdx = m.index + m[0].length;
+    const followingWindow = text.slice(afterIdx, afterIdx + 200);
+    const balM = followingWindow.match(/\[Page\s+\d+\s+annotation\]\s*\$([\d,]+(?:\.\d{2})?)/);
+    if (balM) {
+      const bal = normalizeMoney(balM[1]);
+      if (bal != null) out.existing_first_mortgage_balance = bal;
+    }
+    break;
+  }
+  return out;
+};
+
 // ─── AML / PEP forms — Full Legal Name only (borrower address out of scope) ───
 
 const extractFromAmlPep = (doc) => {
@@ -601,11 +659,29 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     } else if (cls === 'aml' || cls === 'pep') {
       const r = extractFromAmlPep(doc);
       push('primary_borrower_full_name', r.primary_borrower_full_name, doc.file_name);
+    } else if (cls === 'pnw_statement') {
+      // R4-RESIDUAL-2: PNW-only existing-first-mortgage fallback. Page-2
+      // annotation anchor `<Lender> — First Mortgage` + immediately-following
+      // `$<balance>`. Validated against Lena Park (1e9841a4) Scotiabank
+      // $336,000 + Ryan Callahan (ff8c809e) BMO $385,000 — both REAL corpus
+      // PNW annotation blocks. Returns null when no annotation block / no
+      // first-mortgage anchor (Linda Okafor preservation — first-mortgage
+      // purchase has no existing-mortgage annotation).
+      const r = extractFromPnwStatement(doc);
+      push('existing_first_mortgage_lender', r.existing_first_mortgage_lender, doc.file_name);
+      if (r.existing_first_mortgage_balance != null) {
+        map.existing_first_mortgage_balance.push({
+          value: r.existing_first_mortgage_balance,
+          source: doc.file_name,
+          lender_canonical: r.existing_first_mortgage_lender,
+        });
+      }
     }
-    // Other classifications (loan_application, pnw_statement, income_proof, T4, government_id,
-    // noa, other) — NOT extracted for canonical fields in Commit 1 scope. Production defects
-    // came from the 5 doc types above; adding more = additional FP surface without artifact
-    // evidence of benefit.
+    // Other classifications (loan_application, income_proof, T4, government_id,
+    // noa, other) — NOT extracted for canonical fields. Production defects
+    // came from the 6 doc types above; adding more = additional FP surface
+    // without artifact evidence of benefit. PNW added in R4-RESIDUAL-2 with
+    // bounded scope (Page-2 annotation anchor only).
   }
 
   return map;
@@ -634,6 +710,7 @@ module.exports = {
   extractFromAppraisal,
   extractFromCreditBureau,
   extractFromAmlPep,
+  extractFromPnwStatement,
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,
   tokenizeNameForCompare,

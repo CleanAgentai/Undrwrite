@@ -6100,6 +6100,143 @@ Footer`,
   console.log('  PASS [RES1-WIRING / pure path]: gate uses cFields.extractCanonicalFields + dEngine.computeCombinedLtv (narrowest pure path; no B-pipeline side effect at escalation layer)');
 
   // ════════════════════════════════════════════════════════════════
+  // GROUP RES2-PNW-EXTRACTOR-LENA-PARK — REAL Lena Park PNW (deal 1e9841a4)
+  // ════════════════════════════════════════════════════════════════
+  // R4-RESIDUAL-2: PNW-only existing-first-mortgage extraction. Anchored on
+  // real pdf-lib annotation block from Lena Park's PNW: `<Lender> — First
+  // Mortgage` Page-2 annotation immediately followed by `$<balance>`
+  // annotation. Anchor strings ARE the real corpus — NOT synthesized.
+  console.log('\n========== GROUP RES2-PNW-EXTRACTOR-LENA-PARK — REAL corpus PNW Page-2 anchor extraction ==========');
+  const r2LenaPnwText = `Personal Statement of Affairs
+Real Estate Owned (Including Primary Residence)
+1.Address:
+Original Mortgage Balance: $
+Current Mortgage Balance: $
+Lender:
+
+=== Form fields and annotations (extracted via pdf-lib) ===
+[Page 1 annotation] Lena Ji-Young Park
+[Page 1 annotation] March 6, 1990
+[Page 1 annotation] 3704 Parkhill Street SW, Calgary, AB  T2S 2Z1
+[Page 1 annotation] Shaw Communications Inc.
+[Page 1 annotation] Marketing Manager
+[Page 1 annotation] $95,400
+[Page 2 annotation] Principal Residence — 3704 Parkhill Street SW, Calgary
+[Page 2 annotation] $580,000
+[Page 2 annotation] Scotiabank — RRSP
+[Page 2 annotation] $42,500
+[Page 2 annotation] Scotiabank — Chequing Account
+[Page 2 annotation] $12,800
+[Page 2 annotation] 2022 Toyota RAV4 (Blue Book)
+[Page 2 annotation] $28,000
+[Page 2 annotation] $663,300
+[Page 2 annotation] Scotiabank — First Mortgage (3704 Parkhill Street SW)
+[Page 2 annotation] $336,000
+[Page 2 annotation] TD Visa
+[Page 2 annotation] $1,890`;
+  const r2LenaPnwResult = cFields.extractFromPnwStatement({ text: r2LenaPnwText });
+  if (r2LenaPnwResult.existing_first_mortgage_lender !== 'Scotiabank') {
+    throw new Error(`FAIL [RES2-LENA-PARK / lender]: expected "Scotiabank", got ${JSON.stringify(r2LenaPnwResult.existing_first_mortgage_lender)}`);
+  }
+  if (r2LenaPnwResult.existing_first_mortgage_balance !== 336000) {
+    throw new Error(`FAIL [RES2-LENA-PARK / balance]: expected 336000, got ${JSON.stringify(r2LenaPnwResult.existing_first_mortgage_balance)}`);
+  }
+  console.log(`  PASS [RES2-LENA-PARK]: real-corpus PNW Page-2 anchor → Scotiabank $336,000 extracted (verbatim "Scotiabank — First Mortgage (3704 Parkhill Street SW)" → "$336,000" annotation pair)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP RES2-LINDA-PRESERVATION — REAL Linda PNW (no first-mortgage signal)
+  // ════════════════════════════════════════════════════════════════
+  // Linda's PNW has NO annotation block (first-mortgage purchase, no existing
+  // mortgage to annotate). Extractor MUST return null/null — preserves C.4's
+  // Linda over-fire negative (clean first-mortgage → no false combined LTV).
+  console.log('\n========== GROUP RES2-LINDA-PRESERVATION — clean first-mortgage PNW returns null ==========');
+  // Real Linda PNW text excerpt — no annotation block (blank form, no
+  // first-mortgage on subject property).
+  const r2LindaPnwText = `Personal Statement of Affairs
+DOB: Gender:
+Real Estate Owned (Including Primary Residence)
+1.Address:
+Original Mortgage Balance: $
+Current Mortgage Balance: $
+Lender:
+2.Address:`;
+  const r2LindaPnwResult = cFields.extractFromPnwStatement({ text: r2LindaPnwText });
+  if (r2LindaPnwResult.existing_first_mortgage_lender !== null) {
+    throw new Error(`FAIL [RES2-LINDA-PRESERVATION / lender]: expected null on blank PNW, got ${JSON.stringify(r2LindaPnwResult.existing_first_mortgage_lender)}. Over-fire risk: clean first-mortgage borrowers would get a phantom existing-mortgage balance.`);
+  }
+  if (r2LindaPnwResult.existing_first_mortgage_balance !== null) {
+    throw new Error(`FAIL [RES2-LINDA-PRESERVATION / balance]: expected null on blank PNW, got ${JSON.stringify(r2LindaPnwResult.existing_first_mortgage_balance)}. Linda over-fire negative regressed.`);
+  }
+  console.log(`  PASS [RES2-LINDA-PRESERVATION]: blank-form PNW (no annotation block, no first-mortgage anchor) → null/null. Linda over-fire negative preserved.`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP RES2-RYAN-NO-SUM-BY-LENDER — Ryan REAL values: $385K BMO from BOTH credit_bureau + PNW
+  // ════════════════════════════════════════════════════════════════
+  // The user's REQUIRED-2(a) fixture-correction: Ryan's REAL values are
+  // $385K BMO (NOT $336K Scotiabank — that was Lena's number, conflated in
+  // an earlier plan draft). Item 2 adds PNW to the canonical extraction
+  // path → Ryan's canonical_map now has 2 entries on
+  // existing_first_mortgage_balance (one from credit_bureau, one from PNW),
+  // BOTH $385K BMO. Three invariants pinned:
+  //   (1) computeCombinedLtv uses balances[0].value = $385K — NOT
+  //       balances[0]+balances[1] = $770K (no phantom-inflated balance).
+  //   (2) BY-LENDER discrepancy de-dup: same value + same lender from 2
+  //       sources → 0 false discrepancies (Ryan's 153.7% combined LTV
+  //       unchanged from C.4 ship).
+  //   (3) combined_ltv_percent stays at 153.7% (artifact-faithful).
+  console.log('\n========== GROUP RES2-RYAN-NO-SUM-BY-LENDER — Ryan $385K BMO from 2 sources, no-sum + BY-LENDER de-dup ==========');
+  // Synthesized canonical_map with Ryan's REAL values from both sources
+  // (the BY-LENDER de-dup test operates on the canonical_map shape — full
+  // E2E extraction is exercised in the integration sanity probe above).
+  const r2RyanCanonicalMap = {
+    existing_first_mortgage_balance: [
+      { value: 385000, source: 'PNW_Statement_Ryan_Callahan.pdf', lender_canonical: 'BMO' },
+      { value: 385000, source: 'Credit_Bureau_Ryan_Callahan.pdf', lender_canonical: 'BMO' },
+    ],
+    existing_first_mortgage_lender: [
+      { value: 'BMO', source: 'PNW_Statement_Ryan_Callahan.pdf' },
+      { value: 'BMO', source: 'Credit_Bureau_Ryan_Callahan.pdf' },
+    ],
+    existing_first_mortgage_payout_total: [],
+    requested_loan_amount: [{ value: 452900, source: 'email_body' }],
+    subject_property_market_value: [{ value: 545000, source: 'email_body' }],
+  };
+  // (1) computeCombinedLtv uses single balance, not sum.
+  const r2RyanCombined = r1ComputeCombinedLtv(r2RyanCanonicalMap);
+  if (!r2RyanCombined || r2RyanCombined.combined_ltv_percent !== 153.7) {
+    throw new Error(`FAIL [RES2-RYAN / combined LTV no-sum]: expected 153.7% (uses balances[0]=$385K). Got ${JSON.stringify(r2RyanCombined)}. If 282.0% appears, the function is summing $385K+$385K = $770K (phantom inflation).`);
+  }
+  if (r2RyanCombined.components.existing !== 385000) {
+    throw new Error(`FAIL [RES2-RYAN / no-sum existing]: expected components.existing=385000 (single value, not sum). Got ${r2RyanCombined.components.existing}.`);
+  }
+  console.log(`  PASS [RES2-RYAN-NO-SUM (1)]: 2 same-value same-lender entries → combined LTV = 153.7% (uses balances[0]=$385K, NOT sum $770K). No phantom-inflation.`);
+
+  // (2) BY-LENDER discrepancy de-dup: B's computeDiscrepancySet groups
+  // same-value same-lender entries → no false discrepancy.
+  const r2RyanDiscrepancySet = dEngine.computeDiscrepancySet(r2RyanCanonicalMap);
+  const r2RyanBalDiscs = r2RyanDiscrepancySet.filter(d => d.field === 'existing_first_mortgage_balance');
+  if (r2RyanBalDiscs.length !== 0) {
+    throw new Error(`FAIL [RES2-RYAN / BY-LENDER de-dup]: expected 0 discrepancies on existing_first_mortgage_balance (same value, same lender from 2 sources). Got ${r2RyanBalDiscs.length}: ${JSON.stringify(r2RyanBalDiscs)}. B's same-lender same-value de-dup regressed.`);
+  }
+  console.log(`  PASS [RES2-RYAN-NO-SUM (2)]: BY-LENDER de-dup yields 0 false discrepancies on existing_first_mortgage_balance (same $385K BMO from credit_bureau + PNW grouped into 1 bucket)`);
+
+  // (3) Combined LTV unchanged from C.4 ship — Ryan's 153.7% number must not regress.
+  console.log(`  PASS [RES2-RYAN-NO-SUM (3)]: combined_ltv_percent=153.7% unchanged from C.4 ship (artifact-faithful — Ryan's $385K BMO + $452.9K loan + $545K market preserved)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP RES2-WIRING — PNW classification wired into extractCanonicalFields switch
+  // ════════════════════════════════════════════════════════════════
+  console.log('\n========== GROUP RES2-WIRING — PNW classification wired into canonical-fields switch ==========');
+  const r2CfSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/canonical-fields.js'), 'utf8');
+  if (!/} else if \(cls === 'pnw_statement'\) \{/.test(r2CfSrc)) {
+    throw new Error(`FAIL [RES2-WIRING / switch case]: extractCanonicalFields switch must have \`} else if (cls === 'pnw_statement') {\` branch.`);
+  }
+  if (!/extractFromPnwStatement\(doc\)/.test(r2CfSrc)) {
+    throw new Error(`FAIL [RES2-WIRING / call]: PNW branch must call extractFromPnwStatement.`);
+  }
+  console.log(`  PASS [RES2-WIRING]: extractCanonicalFields aggregation switch wires PNW classification through extractFromPnwStatement`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
