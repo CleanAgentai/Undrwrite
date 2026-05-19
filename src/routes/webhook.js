@@ -562,6 +562,64 @@ const sendEscalationToAdmin = async (deal, dealSummary, ltv, options = {}) => {
 // COMPLETE fired anyway. JS classification used (not a Claude-set flag) per
 // the S15-E lesson: dealSummary.unresolved_discrepancy was empirically unreliable
 // both directions (Marcus true-ignored, Ethan wrongly-false).
+
+// Cluster B (D-extension, R4-Bucket-B): pure helper returning admin-review
+// banner trichotomy. Single source of truth — production wire (below) and the
+// runRecallProbe helper in test-trigger.js both go through this function,
+// structurally eliminating the mirror-drift class that caused the R4 bug.
+//
+// Trichotomy (precedence-ordered):
+//   1. clarificationPending=true        → PRELIMINARY-CLARIFICATION (D)
+//   2. missingDocs.length > 0           → PRELIMINARY (intake/exit_strategy gap;
+//                                          BBBB-relaxed initial-submission path reaches here)
+//   3. !deal.prelim_approved_at         → PRELIMINARY (Franco's rule: first review
+//                                          is ALWAYS preliminary; COMPLETE only post-approval)
+//   4. else                             → COMPLETE (post-approval; see reachability note)
+//
+// Cross-request durability of prelim_approved_at: stamped by Group CCCC at
+// L1043/L1086 in a PRIOR request (admin's APPROVED reply), persisted to the
+// deals row, then read here on a SUBSEQUENT prelim-send request. No within-
+// request staleness possible — the field is durably written cross-request
+// before any subsequent path can re-enter sendPreliminaryReviewToAdmin.
+//
+// Reachability of case 4 (post-approval COMPLETE): today the active-branch
+// dispatch at L1976+ routes post-approval to sendCompletionHandoff, skipping
+// sendPreliminaryReviewToAdmin entirely. Case 4 is therefore not exercised in
+// the current call graph but is pinned in the matrix as defense-in-depth
+// against future refactors that re-open the path.
+//
+// Resolves R4: S3/S6/S7/S9 Bug-1 (COMPLETE instead of PRELIMINARY on first
+// review) and subsumes S6-B2/S9-B2 (subject-line says COMPLETE).
+const computeAdminBanner = ({ clarificationPending, missingDocs, deal }) => {
+  const isPostApproval = !!deal?.prelim_approved_at;
+  if (clarificationPending) {
+    return {
+      statusFlag: 'PRELIMINARY-CLARIFICATION',
+      bannerText: 'PRELIMINARY — BROKER CLARIFICATION PENDING',
+      subjectStatus: 'PRELIMINARY (clarification pending)',
+    };
+  }
+  if ((missingDocs || []).length > 0) {
+    return {
+      statusFlag: 'PRELIMINARY',
+      bannerText: 'PRELIMINARY REVIEW — AWAITING APPROVAL',
+      subjectStatus: 'PRELIMINARY',
+    };
+  }
+  if (!isPostApproval) {
+    return {
+      statusFlag: 'PRELIMINARY',
+      bannerText: 'PRELIMINARY REVIEW — AWAITING APPROVAL',
+      subjectStatus: 'PRELIMINARY',
+    };
+  }
+  return {
+    statusFlag: 'COMPLETE',
+    bannerText: 'COMPLETE — Ready for Review',
+    subjectStatus: 'COMPLETE',
+  };
+};
+
 const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv, options = {}) => {
   // LTV ≤ 80% confirmed — send Franco preliminary review with docs
   console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco${options.isUpdate ? ' (updated)' : ''}`);
@@ -643,21 +701,15 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // asking the broker a clarification question, the admin review must NOT
   // emit COMPLETE — clarification-pending takes precedence over docs-complete.
   const clarificationPending = aiService.welcomeEmailIsAskingClarification(options.brokerFacingReplyText || '');
-  const statusFlag = clarificationPending ? 'PRELIMINARY-CLARIFICATION'
-                   : missingDocs.length > 0 ? 'PRELIMINARY'
-                   : 'COMPLETE';
-  const bannerText = clarificationPending ? 'PRELIMINARY — BROKER CLARIFICATION PENDING'
-                   : missingDocs.length > 0 ? 'PRELIMINARY REVIEW — AWAITING APPROVAL'
-                   : 'COMPLETE — Ready for Review';
+  // R4-Bucket-B (D-extension): banner trichotomy + isPostApproval gate via
+  // computeAdminBanner (single source of truth; see helper docblock above for
+  // precedence, cross-request durability, and case-4 reachability notes).
+  const { statusFlag, bannerText, subjectStatus } = computeAdminBanner({ clarificationPending, missingDocs, deal });
   // JS-enforce the banner — strip Claude's emitted FILE STATUS line and prepend
   // the JS-determined banner; also strips the trailing "This file is COMPLETE…"
   // self-consistency line when the banner contradicts. Same trust profile as
   // Cluster E's planned post-gen sweep: JS owns the rule, not Claude.
   const enforcedLeadSummary = aiService.enforceReviewBanner(leadSummary, bannerText);
-
-  const subjectStatus = clarificationPending ? 'PRELIMINARY (clarification pending)'
-                       : missingDocs.length > 0 ? 'PRELIMINARY'
-                       : 'COMPLETE';
   const subjectPrefix = options.isUpdate ? '[UPDATED] ' : '';
   const subject = `${subjectPrefix}ACTION REQUIRED: ${subjectStatus} Review — ${borrowerName} — ${ltv}% LTV`;
   const reviewResult = await emailService.sendEmail(
@@ -1467,12 +1519,21 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           console.log(`EEEE: skipped intake_asked_items stamp (borrower-path or deferred-intake state — cron will fall back to baseRequired)`);
         }
         const initialHasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => initialClassifications.includes(c));
-        // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
-        // Pre-BBBB prelim fired without exit_strategy → admin saw [MISSING] Exit Strategy
-        // → broker provided exit → NNN's preliminary-update dispatch fired a SECOND prelim.
-        // Post-BBBB: hold prelim until exit_strategy lands. Vienna's welcome email already
-        // asks for it (INITIAL_EMAIL_PROMPT WHAT TO ASK FOR list); when broker provides,
-        // existing-deal active branch fires the (single) prelim.
+        // Group BBBB (S7.1/S9.1) — RELAXED in R4-Bucket-B (S5/Patricia):
+        // Original BBBB required exit_strategy populated before firing prelim,
+        // to prevent NNN's preliminary-update dispatch from firing a SECOND
+        // prelim after broker provided exit. But that gate held the FIRST prelim
+        // ENTIRELY when exit_strategy was missing — S5/Patricia got zero admin
+        // visibility for days (status stayed 'active', no prelim ever fired).
+        // Post-relaxation: drop the exit_strategy precondition. Exit_strategy is
+        // already pushed to missingDocs at L588 (Group C), so admin sees
+        // [MISSING] Exit Strategy in the PRELIMINARY review and decides.
+        // The S7.1/S9.1 duplicate-prelim regression remains closed because: the
+        // initial prelim and the broker's exit-strategy follow-up now both land
+        // on the same under_review state; NNN's preliminary-update dispatch is
+        // an UPDATE to the existing prelim, not a second prelim (subjectPrefix
+        // '[UPDATED]' at L713 and the banner trichotomy keep this honest).
+        // Kept the variable definition because it's referenced in the log line.
         const initialHasExitStrategy = !!(dealSummary?.exit_strategy && String(dealSummary.exit_strategy).trim());
         const initialLtv = dealSummary?.ltv_percent;
 
@@ -1492,8 +1553,8 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           // Reverses Bradley's e93f657 parallel-fire model per Franco's S4 retest.
           console.log(`Initial submission LTV ${initialLtv}% > 80 — entering awaiting_collateral state (Fix 7)`);
           await dealsService.update(deal.id, { status: 'awaiting_collateral' });
-        } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy) {
-          console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc + exit_strategy — sending preliminary review immediately (BBBB-gated)`);
+        } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
+          console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
           // ownership_type is null on initial submission (only set later by generateBrokerResponse).
           // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
           // when null. The remaining (deferred) enhancement is to extract ownership_type directly
@@ -2147,4 +2208,6 @@ module.exports.__test__ = {
   computeStillMissingForReview,
   // Group RRRR: admin decline-reason extraction with mandatory full-text fallback
   extractDeclineReason,
+  // R4-Bucket-B (D-extension): admin banner trichotomy + isPostApproval gate
+  computeAdminBanner,
 };

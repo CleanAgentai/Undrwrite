@@ -354,7 +354,12 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
 
   // 5) COMPLETE Review variant with isUpdate=true (all docs received case).
   //    Stub getDocumentsByDeal to return ALL the baseRequired classifications so
-  //    missingDocs.length === 0 and the helper picks "COMPLETE" instead of "PRELIMINARY".
+  //    missingDocs.length === 0. R4-Bucket-B: also stamp prelim_approved_at on
+  //    the deal so computeAdminBanner case 4 (post-approval COMPLETE) fires.
+  //    Pre-R4 this test passed without prelim_approved_at because all-docs-in
+  //    alone routed to COMPLETE; post-R4 (Franco's rule) COMPLETE requires the
+  //    post-approval signal too. The test's purpose is the [UPDATED] subject
+  //    prefix on the COMPLETE variant, which is what we still verify here.
   console.log('\n========== FIX 2 — [UPDATED] subject with COMPLETE Review variant ==========');
   const completeStubDocs = [
     { classification: 'government_id', file_name: 'GovID.pdf' },
@@ -374,12 +379,15 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
   // shared patriciaSummary deliberately omits exit_strategy for the Group C
   // aggregation tests; this test cares only about the [UPDATED] subject prefix.
   const completeSummaryFix2 = { ...patriciaSummary, exit_strategy: 'refinance with B lender at maturity' };
-  await sendPreliminaryReviewToAdmin(patriciaDeal, completeSummaryFix2, 'personal', 65.7, { isUpdate: true });
+  // R4-Bucket-B: post-approval shape — prelim_approved_at SET so the new
+  // trichotomy routes to COMPLETE (case 4 of D-EXTENSION-BANNER-MATRIX).
+  const postApprovalPatriciaDeal = { ...patriciaDeal, prelim_approved_at: '2026-05-11T04:30:00.000Z' };
+  await sendPreliminaryReviewToAdmin(postApprovalPatriciaDeal, completeSummaryFix2, 'personal', 65.7, { isUpdate: true });
   const completeUpdatedSubject = calls.sendEmail[0]?.subject;
   if (completeUpdatedSubject !== '[UPDATED] ACTION REQUIRED: COMPLETE Review — Patricia Simmons — 65.7% LTV') {
     throw new Error(`FAIL [Fix 2 COMPLETE isUpdate=true]: expected "[UPDATED] ACTION REQUIRED: COMPLETE Review — Patricia Simmons — 65.7% LTV", got "${completeUpdatedSubject}"`);
   }
-  console.log(`  PASS: COMPLETE Review with isUpdate=true → subject="${completeUpdatedSubject}"`);
+  console.log(`  PASS: COMPLETE Review with isUpdate=true → subject="${completeUpdatedSubject}" (post-approval shape: prelim_approved_at SET → case 4 → COMPLETE)`);
   dealsService.getDocumentsByDeal = stashedGetDocsFix2;
   dealsService.getDocumentsWithText = stashedGetDocsWithTextFix2;
 
@@ -1796,6 +1804,126 @@ function fmt(label, value) { console.log(`  ${label}:`, JSON.stringify(value)); 
     }
   }
   console.log(`  PASS [D banner enforcer]: ${bannerPassed}/${bannerCases.length} cases (format A/B + trailing self-consistency strip + missing-banner-prepend)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP D-EXTENSION-BANNER-MATRIX — R4-Bucket-B trichotomy truth table
+  // ════════════════════════════════════════════════════════════════
+  // 5-case deterministic matrix pinning computeAdminBanner — the single
+  // source of truth for the admin-review banner (production wire + the
+  // runRecallProbe helper below both call this). Asserts statusFlag +
+  // bannerText + subjectStatus per case — subjectStatus is load-bearing
+  // because Franco's S6/S7/S9 defect reports literally quote the subject
+  // line ("ACTION REQUIRED: COMPLETE Review") as the visible failure.
+  //
+  // Case 4 (post-approval COMPLETE) is defense-in-depth: today the active-
+  // branch dispatch routes post-approval to sendCompletionHandoff, so the
+  // path isn't exercised — but pinning it guards future refactors.
+  console.log('\n========== GROUP D-EXTENSION-BANNER-MATRIX — R4-Bucket-B trichotomy (5 cases × 3 fields) ==========');
+  const { computeAdminBanner: dxbCompute } = require('./src/routes/webhook').__test__;
+  const dxbMatrix = [
+    {
+      label: 'case 1 — clarificationPending=true → PRELIMINARY-CLARIFICATION (D, precedence over all else)',
+      input: { clarificationPending: true, missingDocs: [], deal: { prelim_approved_at: null } },
+      expected: {
+        statusFlag: 'PRELIMINARY-CLARIFICATION',
+        bannerText: 'PRELIMINARY — BROKER CLARIFICATION PENDING',
+        subjectStatus: 'PRELIMINARY (clarification pending)',
+      },
+    },
+    {
+      label: 'case 2 — missingDocs>0, no prelim_approved_at → PRELIMINARY (intake/exit_strategy gap; BBBB-relaxed path reaches here)',
+      input: { clarificationPending: false, missingDocs: ['noa'], deal: { prelim_approved_at: null } },
+      expected: {
+        statusFlag: 'PRELIMINARY',
+        bannerText: 'PRELIMINARY REVIEW — AWAITING APPROVAL',
+        subjectStatus: 'PRELIMINARY',
+      },
+    },
+    {
+      label: 'case 3 — clean first review, no prelim_approved_at → PRELIMINARY (NEW: Franco rule, the load-bearing R4 fix for S3/S6/S7/S9)',
+      input: { clarificationPending: false, missingDocs: [], deal: { prelim_approved_at: null } },
+      expected: {
+        statusFlag: 'PRELIMINARY',
+        bannerText: 'PRELIMINARY REVIEW — AWAITING APPROVAL',
+        subjectStatus: 'PRELIMINARY',
+      },
+    },
+    {
+      label: 'case 4 — clean post-approval, prelim_approved_at SET → COMPLETE (defense-in-depth; legit COMPLETE path must not regress)',
+      input: { clarificationPending: false, missingDocs: [], deal: { prelim_approved_at: '2026-05-11T04:30:00.000Z' } },
+      expected: {
+        statusFlag: 'COMPLETE',
+        bannerText: 'COMPLETE — Ready for Review',
+        subjectStatus: 'COMPLETE',
+      },
+    },
+    {
+      label: 'case 5 — clarificationPending=true overrides post-approval+missingDocs (precedence: clarification > missing > approval)',
+      input: { clarificationPending: true, missingDocs: ['noa'], deal: { prelim_approved_at: '2026-05-11T04:30:00.000Z' } },
+      expected: {
+        statusFlag: 'PRELIMINARY-CLARIFICATION',
+        bannerText: 'PRELIMINARY — BROKER CLARIFICATION PENDING',
+        subjectStatus: 'PRELIMINARY (clarification pending)',
+      },
+    },
+  ];
+  let dxbPassed = 0;
+  for (const c of dxbMatrix) {
+    const got = dxbCompute(c.input);
+    const okStatus = got.statusFlag === c.expected.statusFlag;
+    const okBanner = got.bannerText === c.expected.bannerText;
+    const okSubject = got.subjectStatus === c.expected.subjectStatus;
+    if (okStatus && okBanner && okSubject) {
+      dxbPassed++;
+    } else {
+      throw new Error(`FAIL [D-EXTENSION-BANNER-MATRIX]: ${c.label}\n  expected ${JSON.stringify(c.expected)}\n  got      ${JSON.stringify(got)}`);
+    }
+  }
+  console.log(`  PASS [D-EXTENSION-BANNER-MATRIX]: ${dxbPassed}/${dxbMatrix.length} cases (statusFlag + bannerText + subjectStatus pinned per case)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP D-EXTENSION-BBBB-FIRES — structural-lock on BBBB relaxation
+  // ════════════════════════════════════════════════════════════════
+  // Patricia/S5 root cause: BBBB's initialHasExitStrategy precondition held
+  // the prelim ENTIRELY when exit_strategy was missing — broker stated
+  // "Purpose: Debt consolidation" (not the canonical exit_strategy shape),
+  // dealSummary.exit_strategy stayed null, prelim never fired, admin saw
+  // nothing for days.
+  // Post-relaxation: exit_strategy gap surfaces as [MISSING] in the admin
+  // PRELIMINARY review (via L588 missingDocs push, the Group C path) and
+  // admin decides. Structural lock — source-grep the gate to prevent
+  // accidental re-tightening + the L588 path to prevent regression of
+  // the exit_strategy → missingDocs surface.
+  console.log('\n========== GROUP D-EXTENSION-BBBB-FIRES — BBBB relaxation structural lock + behavioral pin ==========');
+  const dxbWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  // Lock 1: the relaxed gate must NOT contain `&& initialHasExitStrategy`.
+  // Match the exact final-conditional shape (ltv ≤ 80 + reviewable-doc only).
+  if (!/else if \(initialLtv && initialLtv <= 80 && initialHasReviewableDoc\) \{/.test(dxbWebhookSrc)) {
+    throw new Error('FAIL [D-EXTENSION-BBBB-FIRES / gate-shape]: expected relaxed BBBB gate `else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {` in webhook.js — did the gate get re-tightened with `&& initialHasExitStrategy`? Re-tightening reintroduces S5/Patricia silent-pending.');
+  }
+  if (/initialHasReviewableDoc && initialHasExitStrategy/.test(dxbWebhookSrc)) {
+    throw new Error('FAIL [D-EXTENSION-BBBB-FIRES / re-tightening detected]: webhook.js contains `initialHasReviewableDoc && initialHasExitStrategy` — BBBB re-tightening would reintroduce S5/Patricia silent-pending (broker provided "Purpose: Debt consolidation" not canonical exit_strategy → null → gate held entire prelim → admin saw nothing).');
+  }
+  // Lock 2: the BBBB-relaxed log message must remain (acts as inline doc).
+  if (!/BBBB-relaxed: exit_strategy gap surfaces as \[MISSING\]/.test(dxbWebhookSrc)) {
+    throw new Error('FAIL [D-EXTENSION-BBBB-FIRES / log-message]: expected `BBBB-relaxed: exit_strategy gap surfaces as [MISSING]` in webhook.js log line — removing the inline marker makes future regression harder to diagnose.');
+  }
+  // Lock 3: the L588 missingDocs.push('exit_strategy') path must remain wired.
+  // BBBB-relaxed shifts the exit_strategy surface from a hold-gate to a
+  // [MISSING] enumeration — that surface IS the L588 path. If L588 is ever
+  // removed, BBBB-relaxed produces silent missing exit_strategy (worse than
+  // pre-relaxation).
+  if (!/if \(!dealSummary\?\.exit_strategy\) missingDocs\.push\('exit_strategy'\);/.test(dxbWebhookSrc)) {
+    throw new Error('FAIL [D-EXTENSION-BBBB-FIRES / L588 wiring]: expected `if (!dealSummary?.exit_strategy) missingDocs.push(\'exit_strategy\');` in webhook.js (Group C). Removing this path while BBBB is relaxed produces silent missing exit_strategy — admin would see "COMPLETE" on a Patricia-shape submission with no exit strategy. The relaxation depends on this path.');
+  }
+  // Behavioral pin: the exit_strategy-in-missingDocs case routes to PRELIMINARY
+  // (same shape as matrix case 2, but pinned here with the exit_strategy label
+  // so a future BBBB regression diagnostic surfaces the exact field).
+  const dxbBbbbGot = dxbCompute({ clarificationPending: false, missingDocs: ['exit_strategy'], deal: { prelim_approved_at: null } });
+  if (dxbBbbbGot.statusFlag !== 'PRELIMINARY' || dxbBbbbGot.bannerText !== 'PRELIMINARY REVIEW — AWAITING APPROVAL') {
+    throw new Error(`FAIL [D-EXTENSION-BBBB-FIRES / behavioral pin]: BBBB-relaxed exit_strategy-missing case must route to PRELIMINARY (intake-gap path). Got ${JSON.stringify(dxbBbbbGot)}.`);
+  }
+  console.log('  PASS [D-EXTENSION-BBBB-FIRES]: gate-shape locked (no && initialHasExitStrategy), log-marker present, L588 wiring present, exit_strategy-missing routes to PRELIMINARY');
 
   // ════════════════════════════════════════════════════════════════
   // CLUSTER B (Commit 1) — canonical-fields + discrepancy-engine
@@ -5534,7 +5662,7 @@ renovations.`,
   console.log('  PASS [Group ZZZ Layer 3]: alert-on-no-email path wired in (replaces silent return)');
 
   // ════════════════════════════════════════════════════════════════
-  // GROUP BBBB — exit_strategy gate on initial prelim trigger (S7.1 + S9.1)
+  // GROUP BBBB — exit_strategy gate on prelim trigger (initial RELAXED in R4-Bucket-B; active PRESERVED)
   // ════════════════════════════════════════════════════════════════
   // Pre-BBBB the prelim-review trigger gated on `ltv <= 80 && hasReviewableDoc`
   // at both the new-client INITIAL branch and the existing-deal active branch.
@@ -5543,57 +5671,78 @@ renovations.`,
   // NNN's preliminary-update dispatch fired a SECOND prelim. Production S7.1
   // (Ethan Broussard) + S9.1 (James Okafor): one deal, two prelim reviews.
   //
-  // BBBB adds `&& exit_strategy_populated` to both gates. Vienna's welcome
-  // email + generateBrokerResponse's ADDITIONAL ITEMS block already ask for
-  // exit_strategy when missing (Group C + WWW prompt rules); BBBB just delays
-  // the prelim fire until the answer lands. Net effect: one prelim per deal,
-  // fired only after reviewable docs AND exit_strategy are captured.
-  console.log('\n========== GROUP BBBB — exit_strategy gate on initial prelim trigger ==========');
+  // BBBB original: added `&& exit_strategy_populated` to BOTH gates.
+  //
+  // R4-Bucket-B (S5/Patricia): INITIAL-BRANCH gate RELAXED. The exit_strategy
+  // precondition held the prelim ENTIRELY when broker didn't state the exit
+  // strategy in canonical shape — Patricia's broker wrote "Purpose: Debt
+  // consolidation", dealSummary.exit_strategy stayed null, prelim never fired,
+  // admin saw nothing for days. Post-relaxation: exit_strategy gap surfaces as
+  // [MISSING] Exit Strategy in the PRELIMINARY admin review (via L588
+  // missingDocs push, Group C path); admin decides.
+  //
+  // ACTIVE-BRANCH gate PRESERVED — relaxing it would reintroduce the S7.1/S9.1
+  // duplicate-prelim regression BBBB originally closed. NNNN scope-locked this
+  // explicitly. The post-relaxation invariant: initial-branch BBBB OFF, active-
+  // branch BBBB ON.
+  console.log('\n========== GROUP BBBB — initial RELAXED in R4-Bucket-B; active PRESERVED (NNNN scope-lock) ==========');
 
   // webhookSrc already loaded earlier (in ZZZ source-string regression block)
 
-  // Initial branch gate: `else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy)`
-  if (!/initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group BBBB initial gate]: initial-branch prelim predicate missing 'initialHasExitStrategy' clause`);
+  // Initial branch gate (R4-Bucket-B RELAXED): predicate must be the relaxed
+  // shape (no `&& initialHasExitStrategy`). This is now the EXPECTED form.
+  if (!/else if \(initialLtv && initialLtv <= 80 && initialHasReviewableDoc\) \{/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB initial gate / R4-Bucket-B-relaxed]: expected relaxed initial-branch predicate \`else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {\` in webhook.js — has it been re-tightened with '&& initialHasExitStrategy'? Re-tightening reintroduces S5/Patricia silent-pending.`);
   }
-  console.log('  PASS [Group BBBB initial gate]: initial-branch prelim gate requires initialHasExitStrategy');
+  console.log('  PASS [Group BBBB initial gate / R4-Bucket-B-relaxed]: initial-branch prelim gate RELAXED (no initialHasExitStrategy precondition) — exit_strategy gap routes to [MISSING] in admin prelim');
 
-  // Initial branch defines initialHasExitStrategy from dealSummary?.exit_strategy
-  if (!/const initialHasExitStrategy = !!\(dealSummary\?\.exit_strategy && String\(dealSummary\.exit_strategy\)\.trim\(\)\)/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group BBBB initial const]: initialHasExitStrategy must be derived from dealSummary?.exit_strategy with whitespace trim`);
+  // R4-Bucket-B re-tightening detector: forbid the pre-relaxation predicate.
+  // This is the inverse of the original BBBB initial-gate assertion.
+  if (/initialHasReviewableDoc && initialHasExitStrategy/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB initial gate / re-tightening detected]: pattern \`initialHasReviewableDoc && initialHasExitStrategy\` present in webhook.js — BBBB has been re-tightened, reintroducing S5/Patricia silent-pending (broker provides non-canonical exit phrasing → gate holds entire prelim → admin sees nothing).`);
   }
-  console.log('  PASS [Group BBBB initial const]: initialHasExitStrategy correctly derives from dealSummary?.exit_strategy (whitespace-trim)');
+  console.log('  PASS [Group BBBB re-tightening forbidden]: pre-R4 initial-gate predicate (with && initialHasExitStrategy) is absent — relaxation locked');
+
+  // Initial branch still DEFINES initialHasExitStrategy (kept for the log
+  // message in the relaxed gate's console.log body). The const is no longer
+  // load-bearing for the gate but is retained for diagnostic visibility.
+  if (!/const initialHasExitStrategy = !!\(dealSummary\?\.exit_strategy && String\(dealSummary\.exit_strategy\)\.trim\(\)\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB initial const]: initialHasExitStrategy must remain defined (used by the BBBB-relaxed log line for diagnostic visibility even though no longer gating)`);
+  }
+  console.log('  PASS [Group BBBB initial const]: initialHasExitStrategy still defined (diagnostic-only post-relaxation)');
+
+  // R4-Bucket-B marker: the relaxed gate log line must contain the BBBB-relaxed
+  // marker for grep-ability and future regression diagnostic.
+  if (!/BBBB-relaxed: exit_strategy gap surfaces as \[MISSING\]/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group BBBB R4-Bucket-B marker]: relaxed-gate log line must contain 'BBBB-relaxed: exit_strategy gap surfaces as [MISSING]' for inline doc + grep-able diagnostic`);
+  }
+  console.log('  PASS [Group BBBB R4-Bucket-B marker]: relaxed-gate log line contains BBBB-relaxed marker');
 
   // Active branch gate: post-NNNN the active willReview is computed via the
   // computeWillReview pure helper. The BBBB invariant — "active willReview
-  // requires hasExitStrategy" — still holds: computeWillReview's body computes
+  // requires hasExitStrategy" — STILL HOLDS post-R4 (relaxation is initial-
+  // branch only; NNNN scope-locked). computeWillReview's body computes
   // hasExitStrategy from summary.exit_strategy (with trim()) and gates on it.
-  // We assert the helper body contains the hasExitStrategy clause.
   const bbbbHelperBody = webhookSrc.match(/const computeWillReview = [\s\S]*?\n\};/);
   if (!bbbbHelperBody || !/&& hasExitStrategy/.test(bbbbHelperBody[0])) {
-    throw new Error(`FAIL [Group BBBB active gate]: computeWillReview helper must include hasExitStrategy clause in its gate expression (BBBB invariant: active-branch willReview requires exit_strategy populated)`);
+    throw new Error(`FAIL [Group BBBB active gate]: computeWillReview helper must include hasExitStrategy clause in its gate expression (BBBB invariant: active-branch willReview requires exit_strategy populated; NNNN scope-locked in R4-Bucket-B — relaxing here would reintroduce S7.1/S9.1 duplicate-prelim regression)`);
   }
-  console.log('  PASS [Group BBBB active gate]: computeWillReview helper gates on hasExitStrategy (BBBB invariant preserved post-NNNN refactor)');
+  console.log('  PASS [Group BBBB active gate]: computeWillReview helper gates on hasExitStrategy (NNNN scope-locked — active-branch BBBB preserved)');
 
   // Active branch hasExitStrategy is computed inside the computeWillReview
-  // helper (post-NNNN refactor). Pre-NNNN it was an inline const at the active-
-  // branch call site; the const still exists at the call site for the
-  // willGoToCollateralCheck context, but the willReview gate's authoritative
-  // hasExitStrategy is the one inside the helper.
+  // helper (post-NNNN refactor). The trim() check is BBBB's whitespace-only-
+  // exit_strategy rejection — still load-bearing on the active branch.
   if (!bbbbHelperBody || !/const hasExitStrategy = !!\(summary\?\.exit_strategy && String\(summary\.exit_strategy\)\.trim\(\)\)/.test(bbbbHelperBody[0])) {
-    throw new Error(`FAIL [Group BBBB active const]: computeWillReview helper must define hasExitStrategy from summary?.exit_strategy with whitespace trim — the trim() check is BBBB's whitespace-only-exit_strategy rejection`);
+    throw new Error(`FAIL [Group BBBB active const]: computeWillReview helper must define hasExitStrategy from summary?.exit_strategy with whitespace trim — the trim() check is BBBB's whitespace-only-exit_strategy rejection (active-branch only post-R4)`);
   }
   console.log('  PASS [Group BBBB active const]: hasExitStrategy correctly derives from summary?.exit_strategy (whitespace-trim) inside computeWillReview');
 
-  // Negative regression: the pre-BBBB bare predicates (no exit_strategy clause)
-  // must NOT exist anywhere. Catches accidental rewrite that drops the gate.
-  if (/initialLtv && initialLtv <= 80 && initialHasReviewableDoc\)/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group BBBB regression]: pre-BBBB bare initial-prelim predicate (no exit_strategy) still present in webhook.js`);
-  }
+  // Negative regression on the active branch: the pre-BBBB bare willReview
+  // predicate (no exit_strategy clause) must NOT exist. Active-branch invariant.
   if (/willReview = ltv && ltv <= 80 && existingDeal\.status === 'active' && hasReviewableDoc && !identityClashUnresolved/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group BBBB regression]: pre-BBBB bare willReview predicate (no exit_strategy) still present in webhook.js`);
+    throw new Error(`FAIL [Group BBBB regression]: pre-BBBB bare willReview predicate (no exit_strategy) still present in webhook.js — would reintroduce S7.1/S9.1 duplicate-prelim regression on the active branch`);
   }
-  console.log('  PASS [Group BBBB regression]: pre-BBBB bare-no-exit-check predicates removed at both sites');
+  console.log('  PASS [Group BBBB active regression]: pre-BBBB bare willReview predicate (no exit_strategy) is absent on active branch');
 
   // ════════════════════════════════════════════════════════════════
   // GROUP AAAA — Automated Reminders section restore in daily summary (S13.1)
@@ -9132,13 +9281,16 @@ Jordan`;
 
   // The initial branch's own willReview-shaped condition (inline) should still
   // exist — verify it's still computed via the initialLtv/initialHasReviewableDoc
-  // shape per the existing comment + structure at the initial-branch sendPreliminaryReviewToAdmin
-  // call site. This confirms the initial branch's gate logic is intact post-NNNN
-  // (NNNN should ONLY touch the active branch).
-  if (!/initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy/.test(initialBranchSrc)) {
-    throw new Error(`FAIL [Group NNNN initial branch gate intact]: initial branch's inline willReview-shaped condition (initialLtv && initialLtv <= 80 && initialHasReviewableDoc && initialHasExitStrategy) must still exist — NNNN should ONLY touch the active branch`);
+  // shape per the existing comment + structure at the initial-branch
+  // sendPreliminaryReviewToAdmin call site. Confirms initial-branch gate logic
+  // remains inline (NNNN only touched the active branch).
+  // R4-Bucket-B: the initialHasExitStrategy clause was RELAXED — the gate now
+  // ends at initialHasReviewableDoc. Asserting the relaxed shape here pins the
+  // NNNN-asymmetry invariant under the post-relaxation predicate.
+  if (!/initialLtv && initialLtv <= 80 && initialHasReviewableDoc\) \{/.test(initialBranchSrc)) {
+    throw new Error(`FAIL [Group NNNN initial branch gate intact / R4-Bucket-B-relaxed]: initial branch's inline willReview-shaped condition (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) must still exist — NNNN should ONLY touch the active branch (R4-Bucket-B relaxed the initialHasExitStrategy clause)`);
   }
-  console.log('  PASS [Group NNNN initial branch gate intact]: initialLtv/initialHasReviewableDoc/initialHasExitStrategy inline condition preserved');
+  console.log('  PASS [Group NNNN initial branch gate intact]: initialLtv/initialHasReviewableDoc inline condition preserved (R4-Bucket-B-relaxed shape)');
 
   // ════════════════════════════════════════════════════════════════
   // GROUP LLLL — broker-facing thread anchor on executeDraft (S15.3+)
@@ -13641,14 +13793,20 @@ Crestwood Mortgage Services Lic. #MB779034`;
         const asks = dDoesAsk(welcome);
         const classifierCaught = dAi.welcomeEmailIsAskingClarification(welcome);
 
-        // Apply banner: simulate the webhook gate (missingDocs computed assuming all docs in for these full-package fixtures).
+        // Apply banner: simulate the webhook gate via computeAdminBanner (single
+        // source of truth — production wire and this helper both go through the
+        // same function, eliminating the mirror-drift class that caused the R4
+        // bug). missingDocs=[] for these full-package fixtures; prelim_approved_at
+        // null because this group simulates initial-submission turns (first
+        // review). Post-R4-Bucket-B, full-package non-clarification reaches case
+        // 3 of the matrix → PRELIMINARY (not COMPLETE). The group's load-bearing
+        // invariant — that clarification-pending phrasing reliably suppresses
+        // COMPLETE — is unchanged; the non-clarification baseline shifts only
+        // because production changed underneath.
         const missingDocs = []; // both fixtures are full-package
-        const statusFlag = classifierCaught ? 'PRELIMINARY-CLARIFICATION'
-                         : missingDocs.length > 0 ? 'PRELIMINARY'
-                         : 'COMPLETE';
-        const bannerText = classifierCaught ? 'PRELIMINARY — BROKER CLARIFICATION PENDING'
-                         : missingDocs.length > 0 ? 'PRELIMINARY REVIEW — AWAITING APPROVAL'
-                         : 'COMPLETE — Ready for Review';
+        const { computeAdminBanner: rrpCompute } = require('./src/routes/webhook').__test__;
+        const banner = rrpCompute({ clarificationPending: classifierCaught, missingDocs, deal: { prelim_approved_at: null } });
+        const { statusFlag, bannerText } = banner;
         // Synthetic minimal leadSummary to validate banner enforcer on this turn.
         const synthLeadSummary = `<p><strong>FILE STATUS:</strong> COMPLETE — Ready for Review</p>
 <h2>Deal Snapshot</h2>
@@ -13656,12 +13814,17 @@ Crestwood Mortgage Services Lic. #MB779034`;
 <p>This file is COMPLETE — all required documents have been received.</p>`;
         const enforced = dAi.enforceReviewBanner(synthLeadSummary, bannerText);
         const bannerCorrect = enforced.includes(`<p><strong>FILE STATUS:</strong> ${bannerText}</p>`);
-        const bannerLeak = classifierCaught && enforced.includes('FILE STATUS:</strong> COMPLETE');
+        // R4-Bucket-B generalization: leak check fires whenever the chosen banner
+        // is NOT COMPLETE but enforced still contains a COMPLETE FILE STATUS line.
+        // Pre-R4 the check was classifierCaught-gated (only clarification cases
+        // could leak); post-R4 the clean-first-review case (case 3 of the matrix)
+        // also routes to a non-COMPLETE banner, so the leak surface is broader.
+        const bannerLeak = bannerText !== 'COMPLETE — Ready for Review' && enforced.includes('FILE STATUS:</strong> COMPLETE');
 
         let miss = null;
         if (asks && !classifierCaught) miss = 'asks=true but classifier=false (recall miss — phrasing evaded the classifier)';
         else if (classifierCaught && !bannerCorrect) miss = 'classifier=true but banner enforcement failed';
-        else if (bannerLeak) miss = 'banner still contains COMPLETE despite PRELIMINARY-CLARIFICATION substitution';
+        else if (bannerLeak) miss = `banner still contains COMPLETE despite substitution to "${bannerText}"`;
 
         return { asks, classifierCaught, statusFlag, bannerText, miss, welcomeFirst400: dStripHtml(welcome).slice(0, 400) };
       };
