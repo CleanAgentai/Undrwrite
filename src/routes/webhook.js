@@ -796,7 +796,7 @@ ${closingEmail}
 
 // Group NNN: pure dispatch decision for the under_review/ltv_escalated branch.
 // Extracted from the webhook handler so the truth-table tests can exercise it
-// without mocking the full request pipeline. Returns one of four actions:
+// without mocking the full request pipeline. Returns one of five actions:
 //   - 'completion-handoff' : file is complete (refinance: all 6 docs + exit_strategy;
 //                            purchase: 5 docs + purchase_contract + exit_strategy);
 //                            admin not mid-cycle on an existing draft. Caller
@@ -809,7 +809,26 @@ ${closingEmail}
 //                            sendEscalationToAdmin({ isUpdate: true }).
 //   - 'preliminary-update' : default for under_review when file isn't complete.
 //                            Caller invokes sendPreliminaryReviewToAdmin({ isUpdate: true }).
-const decideReviewDispatch = (deal, reviewSummary, reviewClassifications) => {
+//   - 'text-only-noop'     : R4-Bucket-C.1 (S7 Bug 3 / S8 Bug 2). Broker text-only
+//                            reply on under_review (hasNewDocsThisTurn=false). Caller
+//                            does nothing admin-facing. Vienna's broker-facing reply
+//                            already shipped upstream; deal state already updated;
+//                            broker inbound saved to conversation thread. Admin sees
+//                            the inbound when they look at the deal.
+//
+// R4-Bucket-C.1: hasNewDocsThisTurn 4th param defaults to true for backward-
+// compatibility with the original NNN 12-case truth table — only the under_review
+// path is gated on no-new-docs (ltv_escalated scope-locked; Franco didn't report,
+// scope expansion = MVP creep). draft_email noop precedence preserved (admin mid-
+// preview-cycle takes priority over text-only suppression).
+//
+// S1.3 regression-direction: NNN's Q7 fix routed the hasNewDocs=true +
+// allDocsInNow=true cell to completion-handoff (the *right* shape for a complete
+// file, replacing Fix 2's wrong-shape [UPDATED] COMPLETE Review with APPROVED/
+// DECLINE buttons). C.1's text-only-noop occupies the orthogonal hasNewDocs=false
+// cells — a no-emission terminal action cannot produce S1.3's wrong-shape
+// emission. NNN's Q7 redirect target (the hasNewDocs=true cell) is unchanged.
+const decideReviewDispatch = (deal, reviewSummary, reviewClassifications, hasNewDocsThisTurn = true) => {
   // Group SSS: allDocsInNow requires intake + compliance (AML/PEP) per JJJ's
   // post-approval flow. Pre-SSS this used intake-only, which fired completion-handoff
   // before AML/PEP had been requested.
@@ -819,12 +838,27 @@ const decideReviewDispatch = (deal, reviewSummary, reviewClassifications) => {
 
   if (deal.status === 'under_review' && allDocsInNow) {
     if (!deal.draft_email) {
+      // R4-Bucket-C.1: text-only reply on a complete-file deal → no admin emission.
+      // Pre-C.1 this fired completion-handoff regardless of new-docs presence
+      // (S7 Bug 3: [File Complete] on a clarification-only reply).
+      if (!hasNewDocsThisTurn) {
+        return { action: 'text-only-noop', reason: 'broker text-only reply (no new docs)', allDocsInNow: true, stillMissing };
+      }
       return { action: 'completion-handoff', conditionsFulfilled: !!deal.conditions_sent_at, allDocsInNow: true, stillMissing };
     }
     return { action: 'noop', reason: 'admin mid-cycle (draft_email set)', allDocsInNow: true, stillMissing, draftAction: deal.draft_action };
   }
   if (deal.status === 'ltv_escalated') {
+    // Scope-lock: ltv_escalated unchanged. Franco didn't report; same hasNewDocs
+    // axis would arguably apply, but expansion = MVP creep.
     return { action: 'escalation-update', allDocsInNow, stillMissing };
+  }
+  // under_review + !allDocsInNow.
+  // R4-Bucket-C.1: text-only reply on an incomplete-file deal → no admin emission.
+  // Pre-C.1 this fired preliminary-update regardless of new-docs presence
+  // (S8 Bug 2: [UPDATED] PRELIMINARY on a clarification-only reply).
+  if (deal.status === 'under_review' && !hasNewDocsThisTurn) {
+    return { action: 'text-only-noop', reason: 'broker text-only reply (no new docs)', allDocsInNow, stillMissing };
   }
   return { action: 'preliminary-update', allDocsInNow, stillMissing };
 };
@@ -1829,7 +1863,11 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // truth-table tests can exercise it without mocking the full request
         // pipeline. See helper definition for action semantics.
         const reviewClassifications = reviewDocumentsOnFile.map(d => d.classification).filter(Boolean);
-        const dispatch = decideReviewDispatch(existingDeal, reviewResult.updatedSummary, reviewClassifications);
+        // R4-Bucket-C.1: thread hasNewDocs into the dispatch decision. Broker
+        // text-only replies on under_review (S7 Bug 3 / S8 Bug 2) now route to
+        // 'text-only-noop' instead of producing wrong-shape admin signals
+        // ([File Complete] / [UPDATED] PRELIMINARY on a clarification-only reply).
+        const dispatch = decideReviewDispatch(existingDeal, reviewResult.updatedSummary, reviewClassifications, hasNewDocs);
         console.log(`NNN dispatch decision: ${JSON.stringify(dispatch)}`);
 
         if (dispatch.action === 'completion-handoff') {
@@ -1842,10 +1880,25 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // Admin mid-preview-cycle on an existing draft. Broker inbound already
           // saved to thread (line 781); admin sees it when they finish the current
           // cycle and looks at conversation history. No clobber of generated draft.
+        } else if (dispatch.action === 'text-only-noop') {
+          // R4-Bucket-C.1 (S7 Bug 3 / S8 Bug 2): broker text-only reply on
+          // under_review (hasNewDocs=false). No admin-facing emission — Vienna's
+          // broker-facing reply (generateBrokerResponse) already ran upstream
+          // (L1762-1777) and shipped; deal state already persisted at L1801-1808;
+          // broker inbound saved to conversation thread. Admin sees the inbound
+          // when they look at the deal. Pre-C.1 this branch fired
+          // completion-handoff (S7: [File Complete] on a clarification reply,
+          // file complete but admin hadn't approved) or preliminary-update
+          // (S8: redundant [UPDATED] PRELIMINARY with no state change). Per
+          // user direction this is a *conscious scoping* of "suppress the wrong
+          // signal" — whether a CORRECT clarification-resolved signal should
+          // fire on a text-only clarification reply is Cluster C.5's scope
+          // (no-ack-after-clarification), NOT a C.1 decision that admin never
+          // needs to know about clarification replies.
         } else if (dispatch.action === 'escalation-update') {
           await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
         } else {
-          // 'preliminary-update' — under_review + !allDocsInNow
+          // 'preliminary-update' — under_review + !allDocsInNow + hasNewDocs=true
           // Cluster D: pass the generated-but-NNN-suppressed reviewResult.responseEmail
           // so the gate can still detect a pending clarification ask even though the
           // broker doesn't see Vienna's reply directly on this turn.

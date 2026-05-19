@@ -4816,19 +4816,36 @@ WEBSITE.  unionfinancialcorp.com`;
       expectAction: 'preliminary-update',
     },
     {
-      name: '5. under_review + missing docs + no new docs (text-only reply) → preliminary-update (drops passive [Broker Update])',
+      // R4-Bucket-C.1 INVERSION (S8 Bug 2): pre-C.1 this asserted preliminary-update
+      // ("drops passive [Broker Update]" — NNN's prior tradeoff). Franco's S8 retest
+      // surfaced [UPDATED] PRELIMINARY firing on a no-state-change clarification reply
+      // as wrong-shape semantics. C.1 supersedes: text-only reply → no admin emission.
+      // Vienna's broker-facing reply still ships upstream; admin sees inbound in thread.
+      name: '5. under_review + missing docs + no new docs (text-only reply) → text-only-noop (R4-C.1: S8 Bug 2)',
       deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
       summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
       classifications: refinanceAllDocs.filter(c => c !== 'mortgage_statement'),
-      expectAction: 'preliminary-update',
+      hasNewDocsThisTurn: false,
+      expectAction: 'text-only-noop',
     },
     {
-      name: '6. under_review + all docs in + text-only reply → completion-handoff (Q7 — avoids S1.3 noise shape)',
+      // R4-Bucket-C.1 INVERSION (S7 Bug 3) — ALSO the S1.3-regression-direction pin.
+      // Pre-C.1 this asserted completion-handoff with comment "Q7 — avoids S1.3 noise
+      // shape" (NNN's Q7 prior tradeoff: redirect to right-shape completion-handoff
+      // when text-only lands on complete file, replacing Fix 2's wrong-shape [UPDATED]
+      // COMPLETE Review). Franco's S7 retest surfaced that "right-shape emission" is
+      // still wrong when broker only sent text — [File Complete] on a clarification
+      // reply violates correctness.
+      // C.1 supersedes Q7 with text-only-noop (no emission). Q7 is NOT reintroduced:
+      // S1.3 requires emission of the wrong shape; text-only-noop is a no-emission
+      // terminal action — cannot produce S1.3's wrong-shape emission. NNN's Q7
+      // completion-handoff redirect target (the hasNewDocs=true cell) is unchanged.
+      name: '6. under_review + all docs in + text-only reply → text-only-noop (R4-C.1: S7 Bug 3; S1.3-regression-direction pin)',
       deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
       summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
       classifications: refinanceAllDocs,
-      expectAction: 'completion-handoff',
-      expectConditionsFulfilled: false,
+      hasNewDocsThisTurn: false,
+      expectAction: 'text-only-noop',
     },
     {
       name: '7. under_review + all docs in + conditions_sent_at set → completion-handoff (BBB compatibility)',
@@ -4846,10 +4863,16 @@ WEBSITE.  unionfinancialcorp.com`;
       expectAction: 'escalation-update',
     },
     {
-      name: '9. ltv_escalated + text-only reply → escalation-update (drops passive [Broker Update])',
+      // R4-Bucket-C.1 scope-lock pin: ltv_escalated + text-only reply still routes
+      // to escalation-update. Franco didn't report this shape; same hasNewDocs axis
+      // would arguably apply but expansion = MVP scope creep. If this case ever
+      // flips to text-only-noop, that's deliberate post-C.1 expansion, not silent
+      // drift.
+      name: '9. ltv_escalated + text-only reply → escalation-update (R4-C.1 scope-lock: ltv_escalated branch unchanged)',
       deal: { status: 'ltv_escalated', draft_email: null, conditions_sent_at: null },
       summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
       classifications: refinanceAllDocs.slice(0, 3),
+      hasNewDocsThisTurn: false,
       expectAction: 'escalation-update',
     },
     {
@@ -4884,7 +4907,10 @@ WEBSITE.  unionfinancialcorp.com`;
 
   let nnnPassed = 0;
   for (const tc of nnnCases) {
-    const result = decideReviewDispatch(tc.deal, tc.summary, tc.classifications);
+    // R4-Bucket-C.1: thread hasNewDocsThisTurn (defaults to true if case omits it,
+    // mirroring the helper's backward-compat default). Cases 5/6 (now inverted to
+    // text-only-noop) and case 9 (ltv_escalated scope-lock) set this explicitly.
+    const result = decideReviewDispatch(tc.deal, tc.summary, tc.classifications, tc.hasNewDocsThisTurn);
     if (result.action !== tc.expectAction) {
       throw new Error(`FAIL [Group NNN ${tc.name}]:\n  expected action='${tc.expectAction}'\n  got action='${result.action}'\n  full result: ${JSON.stringify(result)}`);
     }
@@ -4895,6 +4921,158 @@ WEBSITE.  unionfinancialcorp.com`;
     nnnPassed++;
   }
   console.log(`Group NNN decideReviewDispatch: ${nnnPassed}/${nnnCases.length} passed`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C1-NEW-DOCS-GATE — R4-Bucket-C.1 hasNewDocsThisTurn axis (S7 Bug 3 + S8 Bug 2)
+  // ════════════════════════════════════════════════════════════════
+  // Cluster C.1 supersedes NNN's "every broker turn triggers a fresh admin
+  // signal regardless of hasNewDocs" decision (commit 76635b9) based on
+  // Franco's S7 + S8 retest:
+  //   - S7 Ethan (deal 830f9ad5) msg [3] text-only clarification reply →
+  //     msg [4] [File Complete] — wrong shape, file complete but admin
+  //     hadn't approved.
+  //   - S8 Sandra (deal 112b619a) msg [3] text-only clarification reply →
+  //     msg [4] [UPDATED] PRELIMINARY — redundant emission, no state change.
+  //
+  // C.1 adds a 4th param `hasNewDocsThisTurn` to decideReviewDispatch. On
+  // under_review with hasNewDocs=false, dispatch returns 'text-only-noop'
+  // (no admin emission). Vienna's broker-facing reply path (upstream) is
+  // unaffected — generateBrokerResponse runs before decideReviewDispatch
+  // in the existing-deal handler, so text-only clarifications are still
+  // processed and acknowledged to broker, deal state still updates, only
+  // the admin-facing dispatch is suppressed.
+  //
+  // Direction (a): text-only-noop on no-new-docs (S7 + S8 fixes).
+  // Direction (b): positive cases — docs-present still fires the right dispatch
+  //   (proves no over-suppression).
+  // Scope-lock pin: ltv_escalated unchanged (Franco didn't report).
+  // S1.3-regression-direction: text-only-noop is a no-emission terminal action;
+  //   S1.3 required emission of the wrong shape — orthogonal cells of the
+  //   dispatch matrix. T1 doubles as the S1.3-regression-direction pin.
+  console.log('\n========== GROUP C1-NEW-DOCS-GATE — hasNewDocsThisTurn axis (6 cases) ==========');
+  const c1Cases = [
+    {
+      // S1.3-regression-direction pin (same input as case 6 above). Pre-C.1 this
+      // routed to completion-handoff (NNN's Q7 redirect). Post-C.1 routes to
+      // text-only-noop. If future regression returns 'preliminary-update'
+      // (the original Fix-2 S1.3 shape) this case trips first.
+      name: 'T1: under_review + allDocsInNow + hasNewDocs=false + !draft_email → text-only-noop (S7 fix + S1.3-regression-direction)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs,
+      hasNewDocsThisTurn: false,
+      expectAction: 'text-only-noop',
+    },
+    {
+      name: 'T2: under_review + !allDocsInNow + hasNewDocs=false → text-only-noop (S8 fix)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs.filter(c => c !== 'aml' && c !== 'pep'),
+      hasNewDocsThisTurn: false,
+      expectAction: 'text-only-noop',
+    },
+    {
+      name: 'T3: under_review + allDocsInNow + hasNewDocs=false + draft_email SET → noop (draft_email precedence preserved over text-only-noop)',
+      deal: {
+        status: 'under_review',
+        draft_email: '<p>[admin mid-cycle draft]</p>',
+        draft_action: 'approval_completed',
+        conditions_sent_at: null,
+      },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs,
+      hasNewDocsThisTurn: false,
+      expectAction: 'noop',
+    },
+    {
+      // Direction (b): no over-suppression. Existing NNN semantics preserved when
+      // docs present.
+      name: 'T4: under_review + allDocsInNow + hasNewDocs=true → completion-handoff (NNN existing semantics preserved)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs,
+      hasNewDocsThisTurn: true,
+      expectAction: 'completion-handoff',
+      expectConditionsFulfilled: false,
+    },
+    {
+      name: 'T5: under_review + !allDocsInNow + hasNewDocs=true → preliminary-update (NNN existing semantics preserved)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs.filter(c => c !== 'aml' && c !== 'pep'),
+      hasNewDocsThisTurn: true,
+      expectAction: 'preliminary-update',
+    },
+    {
+      // Scope-lock: ltv_escalated branch unchanged on no-new-docs. Franco didn't
+      // report this shape; expansion = MVP creep. If this case ever flips, it's
+      // deliberate post-C.1 expansion, not silent drift.
+      name: 'T6: ltv_escalated + hasNewDocs=false → escalation-update (R4-C.1 scope-lock: ltv_escalated branch unchanged)',
+      deal: { status: 'ltv_escalated', draft_email: null, conditions_sent_at: null },
+      summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
+      classifications: refinanceAllDocs.slice(0, 3),
+      hasNewDocsThisTurn: false,
+      expectAction: 'escalation-update',
+    },
+  ];
+  let c1Passed = 0;
+  for (const tc of c1Cases) {
+    const result = decideReviewDispatch(tc.deal, tc.summary, tc.classifications, tc.hasNewDocsThisTurn);
+    if (result.action !== tc.expectAction) {
+      throw new Error(`FAIL [Group C1-NEW-DOCS-GATE ${tc.name}]:\n  expected action='${tc.expectAction}'\n  got action='${result.action}'\n  full result: ${JSON.stringify(result)}`);
+    }
+    if (tc.expectAction === 'completion-handoff' && tc.expectConditionsFulfilled !== undefined && result.conditionsFulfilled !== tc.expectConditionsFulfilled) {
+      throw new Error(`FAIL [Group C1-NEW-DOCS-GATE ${tc.name}]:\n  expected conditionsFulfilled=${tc.expectConditionsFulfilled}\n  got conditionsFulfilled=${result.conditionsFulfilled}`);
+    }
+    console.log(`  PASS [${tc.name}]: action=${result.action}`);
+    c1Passed++;
+  }
+  console.log(`Group C1-NEW-DOCS-GATE: ${c1Passed}/${c1Cases.length} passed (direction-(a) text-only suppression + direction-(b) docs-present positive + scope-lock pin + S1.3-regression-direction)`);
+
+  // ════════════════════════════════════════════════════════════════
+  // GROUP C1-CORRECTNESS-BOUNDARY — structural locks for the (c)+(d) guarantees
+  // ════════════════════════════════════════════════════════════════
+  // (c) Vienna's broker-facing reply (generateBrokerResponse) must execute
+  //     BEFORE decideReviewDispatch — proves text-only clarifications are still
+  //     processed and acknowledged to broker, deal state still updates, only
+  //     the admin dispatch decision changes.
+  // (d) D-extension banner interaction: text-only-noop branch must NOT call
+  //     sendPreliminaryReviewToAdmin (or any admin-facing dispatch), so no
+  //     banner recompute path can mis-trigger from a text-only reply.
+  console.log('\n========== GROUP C1-CORRECTNESS-BOUNDARY — structural locks (c) + (d) ==========');
+  const c1WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+
+  // (c) Source-order lock: in the existing-deal under_review/ltv_escalated
+  // branch, generateBrokerResponse call must precede decideReviewDispatch
+  // call. Match-positions verify the order.
+  const genBrokerResponseIdx = c1WebhookSrc.indexOf('aiService.generateBrokerResponse');
+  const decideDispatchIdx = c1WebhookSrc.indexOf('decideReviewDispatch(existingDeal');
+  if (genBrokerResponseIdx < 0) {
+    throw new Error(`FAIL [C1-CORRECTNESS-BOUNDARY (c) / call missing]: aiService.generateBrokerResponse call not found in webhook.js. Vienna's broker-facing reply path is the upstream of decideReviewDispatch — its disappearance means text-only clarifications would lose their Vienna-side acknowledgment, violating C.1's correctness boundary.`);
+  }
+  if (decideDispatchIdx < 0) {
+    throw new Error(`FAIL [C1-CORRECTNESS-BOUNDARY (c) / call missing]: decideReviewDispatch(existingDeal call not found in webhook.js.`);
+  }
+  if (genBrokerResponseIdx >= decideDispatchIdx) {
+    throw new Error(`FAIL [C1-CORRECTNESS-BOUNDARY (c) / order violated]: generateBrokerResponse at offset ${genBrokerResponseIdx} must execute BEFORE decideReviewDispatch at offset ${decideDispatchIdx}. Reverse order means text-only clarifications would be suppressed (text-only-noop) before Vienna's reply is even generated — admin loses signal AND broker loses acknowledgment, the worst-of-both shape.`);
+  }
+  console.log(`  PASS [C1-CORRECTNESS-BOUNDARY (c)]: generateBrokerResponse (offset ${genBrokerResponseIdx}) executes before decideReviewDispatch (offset ${decideDispatchIdx}) — Vienna's broker-facing reply path is upstream of dispatch decision`);
+
+  // (d) Branch-body negative lock: the text-only-noop branch in the dispatch
+  // handler must NOT invoke any admin-facing dispatch function. Catches any
+  // future "let's just add a small admin signal here" drift.
+  // Match the text-only-noop branch body (between its else-if and the next else-if).
+  const textOnlyNoopBranchMatch = c1WebhookSrc.match(/else if \(dispatch\.action === 'text-only-noop'\) \{[\s\S]*?\} else if/);
+  if (!textOnlyNoopBranchMatch) {
+    throw new Error(`FAIL [C1-CORRECTNESS-BOUNDARY (d) / branch missing]: text-only-noop branch not found in webhook.js. Expected \`} else if (dispatch.action === 'text-only-noop') { ... } else if\` structure at the existing-deal dispatch handler.`);
+  }
+  const noopBranchBody = textOnlyNoopBranchMatch[0];
+  for (const forbiddenCall of ['sendPreliminaryReviewToAdmin', 'sendCompletionHandoff', 'sendEscalationToAdmin']) {
+    if (noopBranchBody.includes(forbiddenCall + '(')) {
+      throw new Error(`FAIL [C1-CORRECTNESS-BOUNDARY (d) / admin-dispatch leak]: text-only-noop branch body contains \`${forbiddenCall}(\` — text-only-noop must be a no-emission terminal action. Adding admin-facing emission here reintroduces the wrong-shape signals C.1 was designed to suppress (S7 [File Complete] / S8 [UPDATED] PRELIMINARY).`);
+    }
+  }
+  console.log(`  PASS [C1-CORRECTNESS-BOUNDARY (d)]: text-only-noop branch body contains NO admin-facing dispatch call (sendPreliminaryReviewToAdmin / sendCompletionHandoff / sendEscalationToAdmin) — D-extension banner cannot mis-trigger from this path`);
 
   // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
