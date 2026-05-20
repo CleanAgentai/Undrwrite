@@ -25,6 +25,9 @@ const dEngine = require('../services/discrepancy-engine');
 // side-effect-free read-only helpers; no B-pipeline injection or admin-
 // Snapshot side effect fires at the escalation-decision layer.
 const cFields = require('../services/canonical-fields');
+// ADMIN-HANDOFF LINK-SUBMISSION (2026-05-20): pure detection of file-hosting
+// links in inbound broker body. No URL fetching, no link-following.
+const { detectFileHostingLinksInBody } = require('../lib/linkDetector');
 
 // Track processed message IDs to prevent duplicate processing
 const processedMessages = new Set();
@@ -975,6 +978,47 @@ router.post('/inbound', async (req, res) => {
     const adminEmail = config.adminEmail || '';
     const isAdmin = adminEmail && email.from.toLowerCase().includes(adminEmail.toLowerCase());
 
+    // ──────────────────────────────────────────────────────────────────────
+    // ADMIN-HANDOFF LINK-SUBMISSION feature — NOTIFY-ADMIN-ONLY structural gate
+    // ──────────────────────────────────────────────────────────────────────
+    // When a deal has been handed off to admin (link-only submission earlier
+    // in the thread, see the new-deal branch below), Vienna pauses automation
+    // on that deal — broker inbounds are saved + forwarded to admin, no
+    // Vienna response, no attachment processing, no downstream automation.
+    // Per-deal scoped via deal.admin_controlled (NOT email-scoped). Thread-
+    // based deal matching above (L950-967) ensures broker submits for other
+    // deals (different threads) continue to route normally.
+    //
+    // Admin replies (isAdmin) are NOT gated — admin owns the deal end-to-end
+    // after handoff; their replies continue to flow through the existing
+    // admin-reply branch below.
+    if (existingDeal && existingDeal.admin_controlled === true && !isAdmin) {
+      console.log(`Admin-controlled gate: broker inbound on deal ${existingDeal.id} — saving + notifying admin; Vienna paused on this deal.`);
+      // Persist broker's message to the deal thread (pure INSERT, no
+      // automation downstream — verified by saveMessage source-grep).
+      await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody);
+      // Forward to admin so they see the broker's reply in their inbox.
+      const _ahcBorrowerName = existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name || '(unknown borrower)';
+      const _ahcSubject = `[Admin-controlled deal] Broker reply — ${_ahcBorrowerName}`;
+      const _ahcBody = `<p>Broker replied on an admin-controlled deal (Vienna is paused on this deal).</p>
+<p><strong>Deal:</strong> ${existingDeal.id}</p>
+<p><strong>Borrower:</strong> ${_ahcBorrowerName}</p>
+<p><strong>From:</strong> ${email.from}</p>
+<p><strong>Subject:</strong> ${email.subject || '(no subject)'}</p>
+<hr>
+<p><strong>Broker message:</strong></p>
+<div>${(email.textBody || '').replace(/\n/g, '<br>')}</div>
+<hr>
+<p><em>Vienna will NOT respond on this thread. Action manually.</em></p>`;
+      await emailService.sendEmail(
+        config.adminEmail,
+        _ahcSubject,
+        _ahcBody.replace(/<[^>]*>/g, ''),
+        _ahcBody
+      );
+      return;
+    }
+
     if (isAdmin && existingDeal) {
       console.log('Admin reply detected for deal:', existingDeal.id, 'Status:', existingDeal.status);
       await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody);
@@ -1422,6 +1466,66 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
 
         // Save inbound message
         await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
+
+        // ──────────────────────────────────────────────────────────────────
+        // ADMIN-HANDOFF LINK-SUBMISSION 4-step branch (zero attachments + file-hosting link)
+        // ──────────────────────────────────────────────────────────────────
+        // When broker submits with ZERO attachments + a recognized file-
+        // hosting link in the body: (a) flip the deal to admin_controlled=true,
+        // (b) send broker a JS-rendered holding ack (no claim of docs received,
+        // no Vienna processing promise), (c) send admin a handoff with the
+        // broker's verbatim message + detected service+URL, (d) return early —
+        // no processInitialEmail, no welcome, no missing-docs intake. Vienna
+        // emits nothing else on this deal; the structural gate at the top of
+        // this handler routes future broker inbound to NOTIFY-ADMIN-ONLY.
+        const _ahLink = detectFileHostingLinksInBody(email.textBody);
+        const _ahIsLinkOnly = email.attachments.length === 0 && _ahLink.hasLink;
+        if (_ahIsLinkOnly) {
+          console.log(`ADMIN-HANDOFF LINK-SUBMISSION: link-only submission detected (${_ahLink.service}: ${_ahLink.url}) — flipping deal ${deal.id} to admin_controlled=true; Vienna paused.`);
+          // (a) Set admin_controlled = true on the deal (per-deal scoped).
+          await dealsService.update(deal.id, { admin_controlled: true });
+          // (b) Send broker LINK_SUBMISSION_HOLDING acknowledgment (JS-rendered,
+          //     no Claude — deterministic, no fabrication surface). Broker-name
+          //     personalized via C.7's parseBrokerFirstNameFromSignature; falls
+          //     back to "Hi there!" on null (C.7's safe-failure direction).
+          const _ahBrokerFirstName = aiService.parseBrokerFirstNameFromSignature(email.textBody);
+          const _ahGreeting = _ahBrokerFirstName ? `Hi ${_ahBrokerFirstName},` : 'Hi there,';
+          const _ahHoldingBody = `<p>${_ahGreeting}</p>
+<p>Thanks for the submission — got your email. Someone from our team will review the file and be in touch shortly.</p>
+<p>Vienna<br>Private Mortgage Link</p>`;
+          await emailService.sendEmail(
+            email.from,
+            `Re: ${email.subject || 'Mortgage submission'}`,
+            _ahHoldingBody.replace(/<[^>]*>/g, ''),
+            _ahHoldingBody
+          );
+          // Save Vienna's outbound ack to the deal thread.
+          await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject || 'Mortgage submission'}`, _ahHoldingBody);
+          // (c) Send admin ADMIN_LINK_HANDOFF notification.
+          const _ahAdminSubject = `ACTION REQUIRED: Link-only submission — ${email.fromName || email.from}`;
+          const _ahAdminBody = `<p>Broker submitted a deal via <strong>${_ahLink.service}</strong> link (no attachments). Vienna has been paused on this deal — action manually.</p>
+<p><strong>Deal:</strong> ${deal.id}</p>
+<p><strong>From:</strong> ${email.from}</p>
+<p><strong>Subject:</strong> ${email.subject || '(no subject)'}</p>
+<p><strong>Service:</strong> ${_ahLink.service}</p>
+<p><strong>Link:</strong> <a href="${_ahLink.url}">${_ahLink.url}</a></p>
+<hr>
+<h3>Original broker message</h3>
+<div>${(email.textBody || '').replace(/\n/g, '<br>')}</div>
+<hr>
+<p><em>This deal is admin-controlled. Vienna will NOT respond to further broker emails on this thread — action manually and / or update the deal's admin_controlled flag once docs are attached.</em></p>`;
+          await emailService.sendEmail(
+            config.adminEmail,
+            _ahAdminSubject,
+            _ahAdminBody.replace(/<[^>]*>/g, ''),
+            _ahAdminBody
+          );
+          await dealsService.saveMessage(deal.id, 'outbound', _ahAdminSubject, _ahAdminBody);
+          // (d) Return early — no processInitialEmail, no attachment
+          //     processing, no downstream automation.
+          console.log(`ADMIN-HANDOFF LINK-SUBMISSION complete for deal ${deal.id}: broker holding ack + admin handoff sent. Returning early.`);
+          return;
+        }
 
         // Save attachments first — extracts text once, stores in Supabase
         let savedDocs = [];

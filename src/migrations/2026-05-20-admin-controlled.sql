@@ -1,0 +1,37 @@
+-- ADMIN-HANDOFF LINK-SUBMISSION feature (2026-05-20): persist the "admin has
+-- taken over this deal" signal so the inbound webhook can structurally pause
+-- Vienna's automation on a per-deal basis.
+--
+-- Trigger surface: broker submits a deal with zero attachments + a file-
+-- hosting link in the body (Dropbox / Google Drive / OneDrive / WeTransfer /
+-- Box / iCloud). Vienna can't fetch the link (no URL-fetching for security/
+-- scope reasons), so the deal hands off to admin for manual action.
+--
+-- Behavior post-migration:
+--   - admin_controlled FALSE (default, legacy deals) → normal Vienna routing
+--                              throughout the inbound webhook handler.
+--   - admin_controlled TRUE   → set at link-only submission detection;
+--                              NOTIFY-ADMIN-ONLY structural gate at the top
+--                              of the inbound handler routes broker inbound
+--                              to "save + notify admin", suppresses all Vienna
+--                              automation downstream (no welcome generation,
+--                              no missing-docs intake, no preliminary review,
+--                              no reminders, no clarification asks). Admin
+--                              replies on admin-controlled deals continue to
+--                              flow through the existing admin-reply path
+--                              (admin owns the deal end-to-end after handoff).
+--
+-- Per-deal scoping (load-bearing design choice): the pause flag is on the
+-- DEAL record, NOT the broker's email address. A broker who submits link-only
+-- for Deal A may submit normally with attachments for Deal B (different
+-- borrower, different thread). Deal-matching key is thread-based (In-Reply-To
+-- / References headers via dealsService.findByMessageId), not email-based —
+-- structurally preserves per-deal scoping.
+--
+-- Resumption: NOT automatic. admin_controlled stays TRUE until a manual
+-- UPDATE. Resumption workflow (admin attaches docs + flips back to FALSE)
+-- is post-launch.
+--
+-- Idempotent via IF NOT EXISTS. Safe to re-apply.
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS admin_controlled BOOLEAN DEFAULT FALSE;

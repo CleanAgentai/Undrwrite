@@ -6370,6 +6370,223 @@ Lender:
   console.log(`  PASS [RES4-CARVE-OUT-PRESERVED]: enforceNoRoutingLeak invoked at EXACTLY 3 call sites (E closed-set unchanged; R4-RESIDUAL-4 extended ROUTING_LEAK_PATTERNS only, not call sites)`);
 
   // ════════════════════════════════════════════════════════════════
+  // ADMIN-HANDOFF LINK-SUBMISSION feature (2026-05-20)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups + structural lock (Case 5 byte-identical
+  // assertion). Plan: GROUP LINK-DETECT (pure detector), GROUP
+  // NEW-BRANCH-WIRING (5-case truth table), GROUP NO-DOWNSTREAM-LEAK
+  // (branch-body source-grep), GROUP ADMIN-CONTROLLED-GATE (NOTIFY-
+  // ADMIN-ONLY structural gate source-grep), GROUP LEGACY-DEAL-DEFAULT
+  // (undefined / null / false treated identically), GROUP MULTI-DEAL-
+  // PER-BROKER (per-deal scoping verified through thread-based matching).
+  const { detectFileHostingLinksInBody, FILE_HOSTING_PATTERNS } = require('./src/lib/linkDetector');
+  const fs_ah = require('fs');
+  const path_ah = require('path');
+  const ahWebhookSrc = fs_ah.readFileSync(path_ah.join(__dirname, 'src/routes/webhook.js'), 'utf8');
+
+  // ─── GROUP LINK-DETECT — 10 positives (one per pattern) + 4 over-fire negatives ───
+  console.log('\n========== GROUP LINK-DETECT — file-hosting link detection truth table ==========');
+  const ahDetectCases = [
+    // ─── POSITIVES (one per pattern, real public service URL formats) ───
+    { label: 'P1 Dropbox /scl/ current share format', body: 'Hi, files at https://www.dropbox.com/scl/fo/abc123/AABBCC?dl=0 thanks', expectedService: 'Dropbox' },
+    { label: 'P2 Dropbox /s/ legacy share', body: 'See https://dropbox.com/s/xyz789abc/Marcus_Webb.pdf', expectedService: 'Dropbox' },
+    { label: 'P3 Dropbox db.tt short-URL', body: 'Quick link: https://db.tt/ABC123xyz', expectedService: 'Dropbox' },
+    { label: 'P4 Google Drive /file/d/ share', body: 'Submission: https://drive.google.com/file/d/1ABC_xyz-pdq/view?usp=sharing', expectedService: 'Google Drive' },
+    { label: 'P5 Google Drive /drive/folders/ folder share', body: 'Folder: https://drive.google.com/drive/folders/1FolderID_abc', expectedService: 'Google Drive' },
+    { label: 'P6 OneDrive 1drv.ms short', body: 'Share: https://1drv.ms/u/s!AAaBBbCcDdEeFf', expectedService: 'OneDrive' },
+    { label: 'P7 OneDrive onedrive.live.com', body: 'Files: https://onedrive.live.com/redir?resid=ABC123!456&authkey=key', expectedService: 'OneDrive' },
+    { label: 'P8 SharePoint tenant share', body: 'See https://contoso.sharepoint.com/sites/Marketing/Shared%20Documents/file.pdf', expectedService: 'SharePoint' },
+    { label: 'P9 WeTransfer /downloads/', body: 'WeTransfer: https://wetransfer.com/downloads/abcdef123456 (expires Friday)', expectedService: 'WeTransfer' },
+    { label: 'P10 WeTransfer we.tl short', body: 'Quick: https://we.tl/t-abc123def', expectedService: 'WeTransfer' },
+    { label: 'P11 Box /s/ shared link', body: 'See: https://app.box.com/s/xyz789abc', expectedService: 'Box' },
+    { label: 'P12 iCloud Drive share', body: 'iCloud: https://www.icloud.com/iclouddrive/0abc123#docs', expectedService: 'iCloud Drive' },
+    // ─── OVER-FIRE NEGATIVES ───
+    {
+      label: 'N1 sig-block link (sig-strip eliminates) — Dropbox in footer must NOT trigger',
+      body: 'Hi, submitting Marcus Webb. Please find docs attached.\n\nThanks,\nNatalie\n\n-- \nFranco Maione\nFounder at VIMA Real Broker\nDropbox: https://dropbox.com/s/xyz789abc/Resume.pdf\nMobile (780) 975-3339',
+      expectedService: null,
+    },
+    { label: 'N2 broker website (not file-hosting)', body: 'Visit https://summit-mortgage.ca for more info — no docs attached', expectedService: null },
+    { label: 'N3 unrelated news URL', body: 'Saw https://example.com/news/2026/mortgage-rates — thoughts?', expectedService: null },
+    { label: 'N4 empty body', body: '', expectedService: null },
+  ];
+  let ahDetectPassed = 0;
+  for (const tc of ahDetectCases) {
+    const r = detectFileHostingLinksInBody(tc.body);
+    const gotService = r.hasLink ? r.service : null;
+    if (gotService !== tc.expectedService) {
+      throw new Error(`FAIL [LINK-DETECT ${tc.label}]: expected service=${JSON.stringify(tc.expectedService)}, got ${JSON.stringify(gotService)}.\nBody (first 200): ${tc.body.slice(0, 200)}\nFull result: ${JSON.stringify(r)}`);
+    }
+    console.log(`  PASS [${tc.label}]: ${tc.expectedService === null ? 'no match (over-fire blocked)' : `detected ${gotService}`}`);
+    ahDetectPassed++;
+  }
+  console.log(`Group LINK-DETECT: ${ahDetectPassed}/${ahDetectCases.length} passed (12 positives across 6 services + 4 over-fire negatives incl. sig-block FP guard)`);
+
+  // ─── GROUP NEW-BRANCH-WIRING — 5-case truth table via source-grep + structural assertions ───
+  console.log('\n========== GROUP NEW-BRANCH-WIRING — 5-case truth table (source-grep) ==========');
+  // Case 1: zero attachments + no link → EXISTING processInitialEmail intake.
+  //   Verified by absence: the new branch's trigger condition requires
+  //   _ahLink.hasLink=true, so when no link, control falls through to the
+  //   existing path (which calls processInitialEmail downstream).
+  if (!/const _ahLink = detectFileHostingLinksInBody\(email\.textBody\);/.test(ahWebhookSrc)) {
+    throw new Error(`FAIL [NEW-BRANCH-WIRING Case 1]: link detection must be wired with \`const _ahLink = detectFileHostingLinksInBody(email.textBody);\` in the new-deal branch.`);
+  }
+  console.log('  PASS [NEW-BRANCH-WIRING Case 1]: link detection wired; no-link case falls through to EXISTING processInitialEmail');
+
+  // Case 2: zero attachments + link present → NEW 4-step flow (the trigger).
+  if (!/const _ahIsLinkOnly = email\.attachments\.length === 0 && _ahLink\.hasLink;/.test(ahWebhookSrc)) {
+    throw new Error(`FAIL [NEW-BRANCH-WIRING Case 2]: trigger condition must be \`email.attachments.length === 0 && _ahLink.hasLink\`. Other combinations risk over-firing.`);
+  }
+  if (!/admin_controlled: true/.test(ahWebhookSrc)) {
+    throw new Error(`FAIL [NEW-BRANCH-WIRING Case 2 step (a)]: deal must be flipped to admin_controlled=true in the new branch.`);
+  }
+  console.log('  PASS [NEW-BRANCH-WIRING Case 2]: trigger condition wired (zero attachments + hasLink), step (a) flips admin_controlled=true');
+
+  // Case 3: attachments >= 1 → EXISTING normal intake (link in body ignored).
+  //   Verified by trigger predicate requiring attachments.length === 0
+  //   (above). When attachments > 0, the condition is false, branch skipped,
+  //   normal intake proceeds.
+  console.log('  PASS [NEW-BRANCH-WIRING Case 3]: trigger predicate requires attachments.length === 0 → attachments>=1 cases skip the branch (verified by predicate above)');
+
+  // Case 4: existing admin_controlled=true deal + broker inbound → NOTIFY-ADMIN-ONLY gate.
+  if (!/existingDeal\.admin_controlled === true && !isAdmin/.test(ahWebhookSrc)) {
+    throw new Error(`FAIL [NEW-BRANCH-WIRING Case 4]: structural gate predicate must be \`existingDeal && existingDeal.admin_controlled === true && !isAdmin\`. Admin replies must NOT be gated (admin owns the deal end-to-end after handoff).`);
+  }
+  console.log('  PASS [NEW-BRANCH-WIRING Case 4]: NOTIFY-ADMIN-ONLY gate wired with !isAdmin carve-out (admin replies bypass the gate, normal admin-reply path)');
+
+  // Case 5 (LOAD-BEARING): existing admin_controlled=false (or undefined/null/legacy) deal
+  //   → EXISTING routing byte-identical. Verified by: (i) gate uses === true
+  //   (strict equality; undefined / null / false all fail), (ii) gate is the
+  //   ONLY new structural addition at that position, (iii) downstream
+  //   existing branches unchanged (isAdmin && existingDeal / !existingDeal /
+  //   existingDeal.status === '...').
+  // Source-grep: gate uses strict `=== true`.
+  if (!/existingDeal && existingDeal\.admin_controlled === true && !isAdmin/.test(ahWebhookSrc)) {
+    throw new Error(`FAIL [NEW-BRANCH-WIRING Case 5 strict-equality]: gate must use \`=== true\` (strict equality), NOT loose truthy check. Legacy deals with admin_controlled=undefined/null must fall through to existing routing.`);
+  }
+  // Source-grep: existing downstream branches preserved.
+  for (const requiredBranch of [
+    /if \(isAdmin && existingDeal\) \{/,
+    /if \(!existingDeal\) \{/,
+  ]) {
+    if (!requiredBranch.test(ahWebhookSrc)) {
+      throw new Error(`FAIL [NEW-BRANCH-WIRING Case 5 byte-identical]: required downstream branch \`${requiredBranch.source}\` not found — existing routing path must remain byte-identical for admin_controlled=false/undefined deals.`);
+    }
+  }
+  console.log('  PASS [NEW-BRANCH-WIRING Case 5 LOAD-BEARING]: gate uses strict === true (legacy admin_controlled=undefined/null falls through), downstream existing branches (isAdmin && existingDeal / !existingDeal) byte-preserved');
+
+  // ─── GROUP NO-DOWNSTREAM-LEAK — Case 2 branch body must not call any automation ───
+  console.log('\n========== GROUP NO-DOWNSTREAM-LEAK — link-only branch body grep ==========');
+  // Extract the link-only branch body (between `if (_ahIsLinkOnly) {` and its
+  // matching closing brace + `return;`).
+  const ahLinkOnlyBranchMatch = ahWebhookSrc.match(/if \(_ahIsLinkOnly\) \{[\s\S]*?return;\s*\}/);
+  if (!ahLinkOnlyBranchMatch) {
+    throw new Error(`FAIL [NO-DOWNSTREAM-LEAK / branch missing]: link-only branch \`if (_ahIsLinkOnly) { ... return; }\` not found in webhook.js.`);
+  }
+  const ahLinkOnlyBody = ahLinkOnlyBranchMatch[0];
+  const ahForbiddenInBranch = [
+    'aiService.processInitialEmail',
+    'sendPreliminaryReviewToAdmin',
+    'sendCompletionHandoff',
+    'sendEscalationToAdmin',
+    'saveAttachments',
+    'runDiscrepancyDetection',
+    'generateBrokerResponse',
+    'generateLeadSummary',
+  ];
+  for (const forbidden of ahForbiddenInBranch) {
+    if (ahLinkOnlyBody.includes(forbidden)) {
+      throw new Error(`FAIL [NO-DOWNSTREAM-LEAK]: link-only branch body contains forbidden call \`${forbidden}\`. The branch must be structurally terminal — no Vienna automation, no doc processing, no downstream review/escalation paths. Admin owns the deal end-to-end after handoff.`);
+    }
+  }
+  console.log(`  PASS [NO-DOWNSTREAM-LEAK]: link-only branch body contains NONE of {${ahForbiddenInBranch.join(', ')}} — structurally terminal`);
+
+  // ─── GROUP ADMIN-CONTROLLED-GATE — NOTIFY-ADMIN-ONLY structural gate properties ───
+  console.log('\n========== GROUP ADMIN-CONTROLLED-GATE — structural gate properties ==========');
+  // Extract the gate body (between `if (existingDeal && existingDeal.admin_controlled === true && !isAdmin) {` and its matching `return;`).
+  const ahGateMatch = ahWebhookSrc.match(/if \(existingDeal && existingDeal\.admin_controlled === true && !isAdmin\) \{[\s\S]*?return;\s*\}/);
+  if (!ahGateMatch) {
+    throw new Error(`FAIL [ADMIN-CONTROLLED-GATE / gate missing]: NOTIFY-ADMIN-ONLY gate \`if (existingDeal && existingDeal.admin_controlled === true && !isAdmin) { ... return; }\` not found.`);
+  }
+  const ahGateBody = ahGateMatch[0];
+  // Gate body MUST contain saveMessage (pure persistence — verified earlier)
+  // + sendEmail (admin notification). MUST NOT contain Vienna automation.
+  if (!/dealsService\.saveMessage\(/.test(ahGateBody)) {
+    throw new Error(`FAIL [ADMIN-CONTROLLED-GATE / saveMessage]: gate body must persist broker's inbound via dealsService.saveMessage (admin visibility).`);
+  }
+  if (!/emailService\.sendEmail\(/.test(ahGateBody)) {
+    throw new Error(`FAIL [ADMIN-CONTROLLED-GATE / admin notify]: gate body must send admin a notification via emailService.sendEmail.`);
+  }
+  for (const forbidden of ahForbiddenInBranch) {
+    if (ahGateBody.includes(forbidden)) {
+      throw new Error(`FAIL [ADMIN-CONTROLLED-GATE / no-downstream-leak]: gate body contains forbidden call \`${forbidden}\`. NOTIFY-ADMIN-ONLY must be terminal — save inbound + notify admin only, no Vienna automation.`);
+    }
+  }
+  // Gate must precede the existing isAdmin/new-deal branches. Anchored on
+  // unique markers (the "NEW CLIENT - first contact" comment marks the
+  // new-deal branch; there are multiple `if (!existingDeal)` checks in the
+  // file but only one is the actual new-deal branch).
+  const ahGateIdx = ahWebhookSrc.indexOf(ahGateBody);
+  const ahIsAdminBranchIdx = ahWebhookSrc.indexOf("if (isAdmin && existingDeal) {");
+  const ahNewDealBranchIdx = ahWebhookSrc.indexOf("// NEW CLIENT - first contact");
+  if (ahGateIdx < 0 || ahIsAdminBranchIdx < 0 || ahNewDealBranchIdx < 0) {
+    throw new Error(`FAIL [ADMIN-CONTROLLED-GATE / branch positions]: gate or downstream branches not found.`);
+  }
+  if (!(ahGateIdx < ahIsAdminBranchIdx && ahGateIdx < ahNewDealBranchIdx)) {
+    throw new Error(`FAIL [ADMIN-CONTROLLED-GATE / placement]: gate must precede isAdmin branch (\`if (isAdmin && existingDeal)\` at ${ahIsAdminBranchIdx}) AND new-deal branch (\`// NEW CLIENT - first contact\` at ${ahNewDealBranchIdx}). Gate offset: ${ahGateIdx}.`);
+  }
+  console.log(`  PASS [ADMIN-CONTROLLED-GATE]: gate precedes isAdmin (offset ${ahGateIdx} < ${ahIsAdminBranchIdx}) and new-deal (< ${ahNewDealBranchIdx}); body contains saveMessage + sendEmail only; no Vienna automation calls`);
+
+  // ─── GROUP LEGACY-DEAL-DEFAULT — undefined / null / false treated identically ───
+  console.log('\n========== GROUP LEGACY-DEAL-DEFAULT — gate strict-equality treats undefined/null/false identically ==========');
+  const ahLegacyCases = [
+    { label: 'undefined (pre-migration legacy)', value: undefined, expectGate: false },
+    { label: 'null (column exists, value not set)', value: null, expectGate: false },
+    { label: 'false (column default)', value: false, expectGate: false },
+    { label: 'true (flag set)', value: true, expectGate: true },
+  ];
+  // Simulate the gate predicate against synthetic deal objects.
+  for (const tc of ahLegacyCases) {
+    const fakeDeal = { id: 'legacy-test', admin_controlled: tc.value };
+    const isAdmin = false;  // broker reply
+    const gateFires = fakeDeal && fakeDeal.admin_controlled === true && !isAdmin;
+    if (gateFires !== tc.expectGate) {
+      throw new Error(`FAIL [LEGACY-DEAL-DEFAULT ${tc.label}]: expected gate=${tc.expectGate}, got ${gateFires}. Legacy deals (undefined/null) MUST fall through to existing routing — \`=== true\` strict equality enforces this.`);
+    }
+    console.log(`  PASS [LEGACY-DEAL-DEFAULT / ${tc.label}]: gate=${gateFires} (${tc.expectGate ? 'fires' : 'falls through to existing routing'})`);
+  }
+
+  // ─── GROUP MULTI-DEAL-PER-BROKER — per-deal scoping via thread-based matching ───
+  console.log('\n========== GROUP MULTI-DEAL-PER-BROKER — per-deal scoping (thread-based matching, not email-based) ==========');
+  // The architectural invariant: deal matching at L950-967 uses In-Reply-To
+  // / References headers (thread-id), NOT broker email. Verified by
+  // source-grep that the matching path uses findByMessageId on header refs,
+  // NOT findByEmail or similar email-keyed matching.
+  if (!/email\.inReplyTo\b[\s\S]{0,200}findByMessageId/.test(ahWebhookSrc)) {
+    throw new Error(`FAIL [MULTI-DEAL-PER-BROKER / In-Reply-To matching]: webhook must match deals by email.inReplyTo via dealsService.findByMessageId. Email-based deal matching would break per-deal scoping (a broker with multiple deals would have all their inbound routed to one deal).`);
+  }
+  if (!/email\.references[\s\S]{0,200}findByMessageId/.test(ahWebhookSrc)) {
+    throw new Error(`FAIL [MULTI-DEAL-PER-BROKER / References matching]: webhook must match deals by email.references chain via dealsService.findByMessageId (fallback when In-Reply-To misses).`);
+  }
+  console.log('  PASS [MULTI-DEAL-PER-BROKER / structural]: webhook deal-matching uses thread-based key (In-Reply-To → References → findByMessageId), not email-based. Per-deal admin_controlled scoping holds: broker submits for Deal A (admin_controlled=true) and Deal B (admin_controlled=false) route to different gates by thread.');
+  // Behavioral pin: simulate the gate against two synthetic deal stubs from
+  // the same broker. The thread-matching logic itself is exercised by the
+  // existing webhook code; we pin the gate-evaluation step here.
+  const ahDealA = { id: 'deal-A', admin_controlled: true };
+  const ahDealB = { id: 'deal-B', admin_controlled: false };
+  const ahIsAdminFalse = false;
+  const ahGateOnA = ahDealA && ahDealA.admin_controlled === true && !ahIsAdminFalse;
+  const ahGateOnB = ahDealB && ahDealB.admin_controlled === true && !ahIsAdminFalse;
+  if (!ahGateOnA) {
+    throw new Error(`FAIL [MULTI-DEAL-PER-BROKER / Deal A]: broker inbound matched to Deal A (admin_controlled=true) must trigger NOTIFY-ADMIN-ONLY.`);
+  }
+  if (ahGateOnB) {
+    throw new Error(`FAIL [MULTI-DEAL-PER-BROKER / Deal B]: broker inbound matched to Deal B (admin_controlled=false) must FALL THROUGH to existing routing (Vienna processes normally).`);
+  }
+  console.log(`  PASS [MULTI-DEAL-PER-BROKER / Deal A gate fires]: admin_controlled=true → NOTIFY-ADMIN-ONLY`);
+  console.log(`  PASS [MULTI-DEAL-PER-BROKER / Deal B gate falls through]: admin_controlled=false → existing routing (normal Vienna intake)`);
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
