@@ -253,6 +253,70 @@ const shouldFireDailySummaryNow = (now, timezone) => {
   return hour === 21 && minute === 0;
 };
 
+// R5 Cluster F Bug 2 (2026-05-21): Edmonton-date key for the idempotency
+// claim. 'YYYY-MM-DD' formatted in ADMIN_TIMEZONE — used as the UNIQUE
+// key on daily_summaries.date_edmonton. IIII's hour=21 + minute=0 gate
+// runs FIRST and limits cron-tick eligibility to a 60-second window; this
+// key catches the residual within-window race (multi-worker / restart re-fire).
+const edmontonDateKey = (now, timezone = ADMIN_TIMEZONE) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: timezone,
+  }).formatToParts(now);
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
+  return `${y}-${m}-${d}`;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// R5 Cluster F Bug 3 (2026-05-21): partitioned summary section assignment.
+//
+// Pre-F3, summaryData listed the same deal in multiple sections — Section 2
+// "Deals Requiring Action" (ltv_escalated), Section 4 "All Current Deals"
+// (ALL non-terminal incl. ltv_escalated), Section 5 "Stale Deals" (3+ days
+// no activity, includes ltv_escalated stale deals), Section 6b "At Max
+// Reminders" (overlapped with all). Same deal could appear in 4 sections.
+//
+// FIX: each deal lands in EXACTLY ONE classifier section (2 / 4 / 5 / 6b)
+// via a deterministic JS-computed priority order:
+//   1. ltv_escalated → Section 2 (highest priority — admin must act)
+//   2. ELSE isStale (3+ days no inbound activity) → Section 5
+//   3. ELSE isAtMaxReminders → Section 6b
+//   4. ELSE → Section 4 (leftover)
+//
+// Section 6a "Reminders Sent Today" is orthogonal (daily-activity log,
+// not deal-state classification) and stays separate.
+//
+// Context-tag preservation: each deal entry retains ALL its flags
+// (requiresAdminAction, isStale, isAtMaxReminders) even when assigned to
+// one primary section. Rendering for that section can surface secondary
+// context (e.g., an ltv_escalated-AND-stale deal in Section 2 shows
+// "stale: 7 days" tag). Partition strict + context preserved.
+// ──────────────────────────────────────────────────────────────────────────
+const STALE_DAYS_THRESHOLD = 3;
+const computeDealClassification = (deal, lastInboundAt) => {
+  const requiresAdminAction = deal.status === 'ltv_escalated';
+  const daysSinceLastInbound = lastInboundAt
+    ? (Date.now() - new Date(lastInboundAt).getTime()) / (1000 * 60 * 60 * 24)
+    : null;
+  const isStale = daysSinceLastInbound !== null && daysSinceLastInbound >= STALE_DAYS_THRESHOLD;
+  const isAtMaxReminders = (deal.reminder_count || 0) >= MAX_REMINDERS;
+  // Priority-ordered partition (each deal in EXACTLY ONE primary section).
+  let primarySection;
+  if (requiresAdminAction) primarySection = 'requires_action';
+  else if (isStale) primarySection = 'stale';
+  else if (isAtMaxReminders) primarySection = 'at_max_reminders';
+  else primarySection = 'other_active';
+  return {
+    requiresAdminAction,
+    isStale,
+    isAtMaxReminders,
+    daysSinceLastInbound: daysSinceLastInbound === null ? null : Math.round(daysSinceLastInbound),
+    primarySection,
+  };
+};
+
 const runDailySummary = async () => {
   console.log('\n========== DAILY SUMMARY CRON ==========');
   console.log('Timestamp:', new Date().toISOString());
@@ -277,11 +341,29 @@ const runDailySummary = async () => {
       return;
     }
 
+    // R5 Cluster F Bug 2 (2026-05-21): atomic idempotency claim BEFORE any
+    // summary build / send. UNIQUE constraint on daily_summaries.date_edmonton
+    // serializes concurrent workers + restart re-fires at the DB layer.
+    // Layered ON TOP of IIII (time-gate filters to ~60s window; this catches
+    // the residual within-window race).
+    const dateKey = edmontonDateKey(new Date());
+    const { claimed, id: dailySummaryId } = await dealsService.claimDailySummarySlot(dateKey);
+    if (!claimed) {
+      console.log(`Daily summary skipped — already claimed for ${dateKey} by another worker/restart-tick (R5-F-2 idempotency)`);
+      return;
+    }
+    console.log(`R5-F-2: daily summary slot claimed for ${dateKey} (id=${dailySummaryId})`);
+
     const activeDeals = await dealsService.getActiveDeals();
     const recentMessages = await dealsService.getRecentMessages(24);
 
     if (activeDeals.length === 0 && recentMessages.length === 0) {
       console.log('No active deals or recent messages — skipping daily summary');
+      await dealsService.finalizeDailySummary(dailySummaryId, {
+        status: 'sent',
+        activeDealsCount: 0,
+        remindersSent: remindersLog.length,
+      });
       return;
     }
 
@@ -294,38 +376,21 @@ const runDailySummary = async () => {
       m.direction === 'inbound' && !isAdminReplySubject(m.subject)
     );
 
-    // Group deals by status
-    const dealsByStatus = {};
-    for (const deal of activeDeals) {
-      if (!dealsByStatus[deal.status]) dealsByStatus[deal.status] = [];
-      dealsByStatus[deal.status].push(deal);
-    }
-
-    // Build summary data for AI
-    const summaryData = {
-      date: formatAdminDate(new Date()),
-      totalActiveDeals: activeDeals.length,
-      dealsByStatus,
-      recentActivity: {
-        inboundCount: inbound.length,
-        inboundMessages: inbound.map(m => ({
-          dealBorrower: m.deals?.borrower_name || 'Unknown',
-          dealEmail: m.deals?.email,
-          dealStatus: m.deals?.status,
-          subject: m.subject,
-          body: m.body,
-          time: m.created_at,
-        })),
-      },
-      dealsAwaitingAction: activeDeals
-        .filter(d => d.status === 'ltv_escalated')
-        .map(d => ({
-          borrower: d.borrower_name,
-          email: d.email,
-          ltv: d.ltv,
-          created: d.created_at,
-        })),
-      activeDeals: activeDeals.map(d => ({
+    // R5 Cluster F Bug 3 (2026-05-21): partitioned summaryData.
+    // Each deal carries section-membership flags + a single `primarySection`
+    // assignment via computeDealClassification's priority order. AI prompt
+    // reads from one canonical `deals[]` array and filters per section by
+    // primarySection — no overlap by construction. Context tags
+    // (isStale, isAtMaxReminders) preserved on every deal entry so any
+    // section can surface secondary context (e.g., ltv_escalated-AND-stale
+    // deal in Section 2 renders with a "stale: 7 days" tag).
+    //
+    // Per-deal lastInbound query: computed in JS via getLastInboundMessage
+    // (broker-activity signal, not admin-side updates). Deterministic.
+    const dealsWithClassification = await Promise.all(activeDeals.map(async (d) => {
+      const lastInbound = await dealsService.getLastInboundMessage(d.id);
+      const classification = computeDealClassification(d, lastInbound?.created_at);
+      return {
         borrower: d.borrower_name,
         email: d.email,
         status: d.status,
@@ -333,23 +398,65 @@ const runDailySummary = async () => {
         reminderCount: d.reminder_count || 0,
         created: d.created_at,
         updated: d.updated_at,
+        ...classification,
+      };
+    }));
+
+    const summaryData = {
+      date: formatAdminDate(new Date()),
+      totalActiveDeals: activeDeals.length,
+      inboundCount: inbound.length,
+      inboundMessages: inbound.map(m => ({
+        dealBorrower: m.deals?.borrower_name || 'Unknown',
+        dealEmail: m.deals?.email,
+        dealStatus: m.deals?.status,
+        subject: m.subject,
+        body: m.body,
+        time: m.created_at,
       })),
-      automatedReminders: {
-        sentToday: remindersLog,
-        dealsAtMaxReminders: activeDeals
-          .filter(d => (d.reminder_count || 0) >= MAX_REMINDERS)
-          .map(d => ({ borrower: d.borrower_name, email: d.email, status: d.status })),
-      },
+      deals: dealsWithClassification,
+      remindersSentToday: remindersLog,
     };
 
-    const summaryEmail = await aiService.generateDailySummary(summaryData);
+    let summaryEmail;
+    try {
+      summaryEmail = await aiService.generateDailySummary(summaryData);
+    } catch (genErr) {
+      await dealsService.finalizeDailySummary(dailySummaryId, {
+        status: 'failed',
+        activeDealsCount: activeDeals.length,
+        remindersSent: remindersLog.length,
+        errorMessage: `generateDailySummary: ${genErr.message}`,
+      });
+      throw genErr;
+    }
 
-    await emailService.sendEmail(
-      config.adminEmail,
-      `Daily Summary — ${summaryData.date}`,
-      summaryEmail.replace(/<[^>]*>/g, ''),
-      summaryEmail
-    );
+    let sendResult;
+    try {
+      sendResult = await emailService.sendEmail(
+        config.adminEmail,
+        `Daily Summary — ${summaryData.date}`,
+        summaryEmail.replace(/<[^>]*>/g, ''),
+        summaryEmail
+      );
+    } catch (sendErr) {
+      await dealsService.finalizeDailySummary(dailySummaryId, {
+        status: 'failed',
+        activeDealsCount: activeDeals.length,
+        remindersSent: remindersLog.length,
+        htmlLength: summaryEmail.length,
+        errorMessage: `sendEmail: ${sendErr.message}`,
+      });
+      throw sendErr;
+    }
+
+    await dealsService.finalizeDailySummary(dailySummaryId, {
+      status: 'sent',
+      messageId: sendResult?.MessageID || null,
+      htmlLength: summaryEmail.length,
+      activeDealsCount: activeDeals.length,
+      remindersSent: remindersLog.length,
+    });
 
     console.log('Daily summary sent to', config.adminEmail);
   } catch (error) {
@@ -373,4 +480,17 @@ if (REMINDER_TESTING_MODE) {
 
 // Export for manual triggering/testing. formatAdminDate is exposed for the
 // harness to pin Bug 13.1 (timezone wrap on date header).
-module.exports = { runDailySummary, runFollowUpReminders, formatAdminDate, ADMIN_TIMEZONE, isAdminReplySubject, shouldFireDailySummaryNow };
+module.exports = {
+  runDailySummary,
+  runFollowUpReminders,
+  formatAdminDate,
+  ADMIN_TIMEZONE,
+  isAdminReplySubject,
+  shouldFireDailySummaryNow,
+  // R5-F-2 (2026-05-21): Edmonton-date key for idempotency claim
+  edmontonDateKey,
+  // R5-F-3 (2026-05-21): per-deal partition classifier (priority order:
+  // requires_action > stale > at_max_reminders > other_active)
+  computeDealClassification,
+  STALE_DAYS_THRESHOLD,
+};

@@ -3099,23 +3099,25 @@ This is an internal operations email — clean, scannable, and actionable.
 
 Format as clean HTML. Include these sections:
 
-1. **Overview** — Total active deals, total emails received in the past 24 hours.
+1. **Overview** — Total active deals (\`summaryData.totalActiveDeals\`), total emails received in the past 24 hours (\`summaryData.inboundCount\`).
 
-2. **Deals Requiring Your Action** — List any deals with status "ltv_escalated" that need Franco's approval/rejection. Include borrower name, LTV, and how long it's been waiting.
+2. **Deals Requiring Your Action** — List deals with \`primarySection === "requires_action"\`. These are status "ltv_escalated" deals needing approval/rejection. For each: borrower, LTV, time waiting. If a deal also has \`isStale: true\` or \`isAtMaxReminders: true\`, append a context tag (e.g., "stale: 7 days" or "at max reminders"). Pull the deal entry from \`summaryData.deals\` and filter by \`primarySection\`.
 
-3. **Emails Received (Past 24 Hours)** — ONLY inbound emails from brokers. For each, show: borrower name, subject, time, and a brief summary of the email content. Do NOT include outbound/sent emails.
+3. **Emails Received (Past 24 Hours)** — ONLY inbound emails from brokers. Read from \`summaryData.inboundMessages\`. For each: borrower name, subject, time, brief content summary. Do NOT include outbound/sent emails.
 
-4. **All Current Deals** — List ALL active deals with: borrower name, broker email, status, LTV if known, and days since last update. CRITICAL: render every single deal in the activeDeals data array. Do NOT truncate, summarize, omit, or sample rows. If the data has 49 deals, render 49 rows; if it has 200, render 200. The "concise" guidance below applies to per-row content (keep each cell short), NOT to row count. Truncating this table breaks Franco's daily ops review.
+4. **Other Current Deals** — Deals with \`primarySection === "other_active"\` (active, not escalated, not stale, not at max reminders). Render: borrower, broker email, status, LTV if known, days since last update. CRITICAL: render every single deal in this partition. Do NOT truncate, summarize, omit, or sample rows. The "concise" guidance below applies to per-row content (keep each cell short), NOT to row count. Truncating breaks Franco's daily ops review.
 
-5. **Stale Deals** — Flag any deals with no activity for 3+ days.
+5. **Stale Deals** — Deals with \`primarySection === "stale"\` (3+ days no broker activity, not also requiring admin action — those went to Section 2). For each: borrower, status, \`daysSinceLastInbound\`. Add an "at max reminders" tag if also \`isAtMaxReminders: true\`.
 
-6. **Automated Follow-Up Reminders** — Group AAAA (S13.1): this section MUST always be rendered, even when both lists are empty. Read from \`summaryData.automatedReminders\`. Pre-AAAA the conditional opener ("If any automated reminders were sent today...") let Claude skip the section entirely when it judged lists empty — production output had zero "reminder" mentions in the daily summary. OMITTING the section entirely is NOT acceptable; empty-state strings are required when lists are empty.
+6. **Automated Follow-Up Reminders** — Group AAAA (S13.1): this section MUST always be rendered, even when both lists are empty. OMITTING the section entirely is NOT acceptable; empty-state strings are required when lists are empty.
 
-   (a) Reminders sent today: enumerate every entry in \`summaryData.automatedReminders.sentToday\`. For each: borrower name, broker email, reminder number (e.g. "Reminder #2 of 3"), and how many days silent. If the list is empty, render: "No automated reminders sent today."
+   (a) Reminders sent today: enumerate every entry in \`summaryData.remindersSentToday\`. For each: borrower name, broker email, reminder number (e.g. "Reminder #2 of 3"), and how many days silent. If the list is empty, render: "No automated reminders sent today."
 
-   (b) Deals at max reminders: enumerate every entry in \`summaryData.automatedReminders.dealsAtMaxReminders\`. For each: borrower name, email, current status. These need your personal attention or a decision to close. If the list is empty, render: "No deals at max-reminder threshold."
+   (b) Deals at max reminders: deals with \`primarySection === "at_max_reminders"\` (at max reminders, not escalated, not stale — those went to Sections 2/5). For each: borrower, email, current status. These need your personal attention or a decision to close. If the list is empty, render: "No deals at max-reminder threshold."
 
    Render both sub-sections (a) and (b) every day, in that order. The section heading "Automated Follow-Up Reminders" is required regardless of list contents.
+
+PARTITION CONTRACT (R5-F-3 2026-05-21): \`summaryData.deals[]\` is the single canonical source. Each deal has a \`primarySection\` field assigned by JS-side priority order (requires_action > stale > at_max_reminders > other_active). A deal appears in EXACTLY ONE of Sections 2 / 4 / 5 / 6b — DO NOT render a deal in two of those four sections. Secondary context flags (isStale, isAtMaxReminders) remain on the entry so you can append context tags within its assigned section.
 
 Keep per-row content concise (short fields, no fluff). Use tables for sections 2, 4, 5, 6 (anything with multiple entries) — bullet points are fine for shorter sections.
 

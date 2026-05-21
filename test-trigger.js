@@ -7738,6 +7738,239 @@ Lender:
   console.log('Group B2-B1-SNAPSHOT-FRESHNESS: B-2 gates upstream of B-1 wrapper; no freshness interaction risk.');
 
   // ════════════════════════════════════════════════════════════════
+  // R5 CLUSTER F BUGS 2 + 3 — daily summary idempotency + dedup partition
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for the F-2 + F-3 combined commit:
+  //   F-IDEMPOTENCY-MATRIX: edmontonDateKey deterministic truth-table.
+  //   F-DEDUP-PARTITION-MATRIX: computeDealClassification priority order.
+  //   F-AI-PROMPT-CONTRACT: AI prompt source-grep for partition rules.
+  //   F-PERSISTENCE-SCHEMA: migration file present + claimDailySummarySlot
+  //     + finalizeDailySummary exist in dealsService.
+  //   F-IIII-PRESERVED: shouldFireDailySummaryNow + time-gate site intact;
+  //     F-2 layered ON TOP of IIII, not replacing.
+  //   F-CROSS-CLUSTER-INTEGRATION: prior arc holding green.
+  const _fDS = require('./src/cron/dailySummary');
+  const { edmontonDateKey: _fEdmKey, computeDealClassification: _fClassify, STALE_DAYS_THRESHOLD: _fStaleDays, shouldFireDailySummaryNow: _fIIII } = _fDS;
+
+  console.log('\n========== R5-F-IDEMPOTENCY-MATRIX — edmontonDateKey + IIII time-gate deterministic ==========');
+  // edmontonDateKey: same instant produces same string for the day in Edmonton TZ.
+  // Test against fixed timestamps; verify TZ correctness across DST boundaries.
+  const _fEdmCases = [
+    // [iso UTC, expected Edmonton-date, label]
+    ['2026-05-21T01:00:00.000Z', '2026-05-20', 'after UTC midnight, still 2026-05-20 in Edmonton (MDT -06)'],
+    ['2026-05-21T03:00:00.000Z', '2026-05-20', 'late-evening MDT — 21:00 Edmonton on 2026-05-20'],
+    ['2026-05-21T07:00:00.000Z', '2026-05-21', 'after Edmonton midnight (01:00 MDT) — date flipped to 2026-05-21'],
+    ['2026-01-15T02:00:00.000Z', '2026-01-14', 'MST winter (-07) — same-day before Edmonton midnight'],
+    ['2026-01-15T08:00:00.000Z', '2026-01-15', 'MST winter, after Edmonton midnight'],
+  ];
+  let _fEdmFails = 0;
+  for (const [iso, expected, label] of _fEdmCases) {
+    const actual = _fEdmKey(new Date(iso));
+    if (actual !== expected) { _fEdmFails++; console.log(`  FAIL: ${label} — expected ${expected}, got ${actual}`); }
+    else console.log(`  PASS: ${label} (${iso} → ${actual})`);
+  }
+  // IIII time-gate determinism — fires only at hour=21 minute=00 in Edmonton TZ.
+  const _fIIIICases = [
+    ['2026-05-21T03:00:00.000Z', true, '21:00 MDT on 2026-05-20 — fires'],
+    ['2026-05-21T03:00:30.000Z', true, '21:00:30 MDT — minute is still 00, fires'],
+    ['2026-05-21T03:01:00.000Z', false, '21:01 MDT — past the minute, no fire'],
+    ['2026-05-21T02:30:00.000Z', false, '20:30 MDT — wrong hour, no fire'],
+    ['2026-05-21T04:00:00.000Z', false, '22:00 MDT — past the hour, no fire'],
+  ];
+  for (const [iso, expected, label] of _fIIIICases) {
+    const actual = _fIIII(new Date(iso), 'America/Edmonton');
+    if (actual !== expected) { _fEdmFails++; console.log(`  FAIL IIII: ${label} — expected ${expected}, got ${actual}`); }
+    else console.log(`  PASS IIII: ${label}`);
+  }
+  if (_fEdmFails > 0) throw new Error(`FAIL [F-IDEMPOTENCY-MATRIX]: ${_fEdmFails} cases failed.`);
+  console.log(`Group F-IDEMPOTENCY-MATRIX: edmontonDateKey + IIII time-gate deterministic across DST + minute/hour boundaries.`);
+
+  console.log('\n========== R5-F-DEDUP-PARTITION-MATRIX — computeDealClassification priority order ==========');
+  // Priority: requires_action > stale > at_max_reminders > other_active.
+  // Each deal lands in EXACTLY ONE primarySection.
+  const _fNow = Date.now();
+  const _fDaysAgo = (n) => new Date(_fNow - n * 24 * 60 * 60 * 1000).toISOString();
+  const _fPartitionCases = [
+    // [deal, lastInboundAt, expectedPrimarySection, expectedFlags, label]
+    [{ status: 'ltv_escalated', reminder_count: 0 }, _fDaysAgo(0), 'requires_action',
+      { requiresAdminAction: true, isStale: false, isAtMaxReminders: false },
+      'ltv_escalated fresh → requires_action'],
+    [{ status: 'ltv_escalated', reminder_count: 3 }, _fDaysAgo(10), 'requires_action',
+      { requiresAdminAction: true, isStale: true, isAtMaxReminders: true },
+      'ltv_escalated + stale + max — requires_action wins; context tags isStale + isAtMaxReminders preserved'],
+    [{ status: 'active', reminder_count: 0 }, _fDaysAgo(5), 'stale',
+      { requiresAdminAction: false, isStale: true, isAtMaxReminders: false },
+      'active + 5d-stale + not-max → stale'],
+    [{ status: 'active', reminder_count: 3 }, _fDaysAgo(10), 'stale',
+      { requiresAdminAction: false, isStale: true, isAtMaxReminders: true },
+      'active + stale + max — stale wins over at_max_reminders per priority'],
+    [{ status: 'active', reminder_count: 3 }, _fDaysAgo(1), 'at_max_reminders',
+      { requiresAdminAction: false, isStale: false, isAtMaxReminders: true },
+      'active + not-stale + max → at_max_reminders'],
+    [{ status: 'active', reminder_count: 1 }, _fDaysAgo(1), 'other_active',
+      { requiresAdminAction: false, isStale: false, isAtMaxReminders: false },
+      'active + not-stale + not-max → other_active (leftover)'],
+    [{ status: 'under_review', reminder_count: 0 }, _fDaysAgo(0), 'other_active',
+      { requiresAdminAction: false, isStale: false, isAtMaxReminders: false },
+      'under_review (B-2 hold or admin-side) → other_active'],
+    [{ status: 'active', reminder_count: 0 }, null, 'other_active',
+      { requiresAdminAction: false, isStale: false, isAtMaxReminders: false },
+      'no last inbound (lastInboundAt=null) → daysSinceLastInbound=null, isStale=false, leftover'],
+  ];
+  let _fPartFails = 0;
+  for (const [deal, lastInboundAt, expectedSec, expectedFlags, label] of _fPartitionCases) {
+    const c = _fClassify(deal, lastInboundAt);
+    let pass = true;
+    if (c.primarySection !== expectedSec) {
+      pass = false; _fPartFails++;
+      console.log(`  FAIL: ${label} — expected primarySection=${expectedSec}, got ${c.primarySection}`);
+    }
+    for (const [k, v] of Object.entries(expectedFlags)) {
+      if (c[k] !== v) {
+        pass = false; _fPartFails++;
+        console.log(`  FAIL: ${label} — flag ${k} expected ${v}, got ${c[k]}`);
+      }
+    }
+    if (pass) console.log(`  PASS: ${label}`);
+  }
+  if (_fPartFails > 0) throw new Error(`FAIL [F-DEDUP-PARTITION-MATRIX]: ${_fPartFails} case failures.`);
+  console.log(`Group F-DEDUP-PARTITION-MATRIX: priority-ordered partition deterministic; each deal in EXACTLY ONE primarySection; context flags preserved.`);
+
+  console.log('\n========== R5-F-AI-PROMPT-CONTRACT — prompt source-grep for partition rules ==========');
+  // The AI prompt MUST reference the new partition contract + read from summaryData.deals[]
+  // filtering by primarySection (not the pre-fix dealsByStatus / dealsAwaitingAction / activeDeals fields).
+  const _fAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  // (a) partitionsection filter references
+  if (!/primarySection === "requires_action"/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: Section 2 prompt must filter by primarySection === "requires_action"');
+  }
+  if (!/primarySection === "other_active"/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: Section 4 prompt must filter by primarySection === "other_active"');
+  }
+  if (!/primarySection === "stale"/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: Section 5 prompt must filter by primarySection === "stale"');
+  }
+  if (!/primarySection === "at_max_reminders"/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: Section 6b prompt must filter by primarySection === "at_max_reminders"');
+  }
+  // (b) PARTITION CONTRACT block exists
+  if (!/PARTITION CONTRACT \(R5-F-3 2026-05-21\)/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: PARTITION CONTRACT block missing from prompt — Claude won\'t know about the EXACTLY ONE rule');
+  }
+  // (c) DEPRECATED references should be GONE — pre-fix prompt read from activeDeals / dealsByStatus / dealsAwaitingAction / automatedReminders
+  // The new prompt should reference summaryData.deals + summaryData.remindersSentToday + summaryData.inboundMessages.
+  if (/summaryData\.dealsByStatus\b/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: prompt still references deprecated summaryData.dealsByStatus — F-3 restructure incomplete');
+  }
+  if (/summaryData\.activeDeals\b/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: prompt still references deprecated summaryData.activeDeals — F-3 restructure incomplete');
+  }
+  if (/summaryData\.dealsAwaitingAction\b/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: prompt still references deprecated summaryData.dealsAwaitingAction');
+  }
+  if (/summaryData\.automatedReminders\.sentToday\b/.test(_fAiSrc)) {
+    throw new Error('FAIL [F-AI-PROMPT-CONTRACT]: prompt still references deprecated summaryData.automatedReminders.sentToday (now: remindersSentToday)');
+  }
+  console.log('  PASS: prompt filters by primarySection === "requires_action" | "other_active" | "stale" | "at_max_reminders"');
+  console.log('  PASS: PARTITION CONTRACT block present in prompt');
+  console.log('  PASS: deprecated summaryData.dealsByStatus / .activeDeals / .dealsAwaitingAction / .automatedReminders.sentToday all removed');
+  console.log('Group F-AI-PROMPT-CONTRACT: prompt aligned with new partitioned summaryData shape.');
+
+  console.log('\n========== R5-F-PERSISTENCE-SCHEMA — migration + helper presence ==========');
+  const _fMigPath = require('path').join(__dirname, 'src/migrations/2026-05-21-daily-summaries.sql');
+  if (!require('fs').existsSync(_fMigPath)) {
+    throw new Error('FAIL [F-PERSISTENCE-SCHEMA]: migration file src/migrations/2026-05-21-daily-summaries.sql missing');
+  }
+  const _fMigSrc = require('fs').readFileSync(_fMigPath, 'utf8');
+  if (!/CREATE TABLE IF NOT EXISTS daily_summaries/.test(_fMigSrc)) {
+    throw new Error('FAIL [F-PERSISTENCE-SCHEMA]: migration must CREATE TABLE IF NOT EXISTS daily_summaries');
+  }
+  if (!/date_edmonton TEXT NOT NULL UNIQUE/.test(_fMigSrc)) {
+    throw new Error('FAIL [F-PERSISTENCE-SCHEMA]: migration must define date_edmonton TEXT NOT NULL UNIQUE (atomic idempotency key)');
+  }
+  // dealsService helper presence
+  const _fDealsSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/deals.js'), 'utf8');
+  if (!/claimDailySummarySlot:\s*async\s*\(dateEdmonton\)/.test(_fDealsSrc)) {
+    throw new Error('FAIL [F-PERSISTENCE-SCHEMA]: dealsService.claimDailySummarySlot helper missing');
+  }
+  if (!/finalizeDailySummary:\s*async\s*\(id,\s*fields\)/.test(_fDealsSrc)) {
+    throw new Error('FAIL [F-PERSISTENCE-SCHEMA]: dealsService.finalizeDailySummary helper missing');
+  }
+  // 23505 unique-violation handling (claim returns claimed=false instead of throwing)
+  if (!/error\.code === '23505'/.test(_fDealsSrc)) {
+    throw new Error('FAIL [F-PERSISTENCE-SCHEMA]: claimDailySummarySlot must catch Postgres 23505 unique-violation as claimed=false (not throw)');
+  }
+  console.log('  PASS: migration file present with UNIQUE date_edmonton');
+  console.log('  PASS: dealsService.claimDailySummarySlot + finalizeDailySummary helpers present');
+  console.log('  PASS: 23505 unique-violation correctly converted to claimed=false');
+  console.log('Group F-PERSISTENCE-SCHEMA: storage layer complete + atomic claim semantics preserved.');
+
+  console.log('\n========== R5-F-IIII-PRESERVED — IIII time-gate intact, F-2 layered on top ==========');
+  const _fCronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  // (a) shouldFireDailySummaryNow still defined
+  if (!/const shouldFireDailySummaryNow/.test(_fCronSrc)) {
+    throw new Error('FAIL [F-IIII-PRESERVED]: shouldFireDailySummaryNow helper missing from dailySummary.js');
+  }
+  // (b) IIII gate call site still BEFORE the F-2 claim
+  // Confirm source order: shouldFireDailySummaryNow appears before claimDailySummarySlot.
+  const _fIIIIPos = _fCronSrc.search(/if \(!shouldFireDailySummaryNow\(/);
+  const _fClaimPos = _fCronSrc.search(/dealsService\.claimDailySummarySlot\(/);
+  if (_fIIIIPos < 0 || _fClaimPos < 0 || _fIIIIPos >= _fClaimPos) {
+    throw new Error(`FAIL [F-IIII-PRESERVED]: IIII time-gate must run BEFORE the F-2 idempotency claim (layered order matters — IIII filters to 60s window, F-2 catches within-window race). IIII pos=${_fIIIIPos}, claim pos=${_fClaimPos}.`);
+  }
+  // (c) F-2 claim call present
+  if (!/dealsService\.claimDailySummarySlot\(dateKey\)/.test(_fCronSrc)) {
+    throw new Error('FAIL [F-IIII-PRESERVED]: F-2 claimDailySummarySlot call missing in runDailySummary');
+  }
+  // (d) finalize on success path
+  if (!/finalizeDailySummary\(dailySummaryId, \{[\s\S]{0,200}status: 'sent'/.test(_fCronSrc)) {
+    throw new Error('FAIL [F-IIII-PRESERVED]: success-path finalizeDailySummary call must set status: sent');
+  }
+  // (e) finalize on failure paths (catch both generateDailySummary + sendEmail errors)
+  const _fFailedCount = (_fCronSrc.match(/finalizeDailySummary\(dailySummaryId, \{[\s\S]{0,200}status: 'failed'/g) || []).length;
+  if (_fFailedCount < 2) {
+    throw new Error(`FAIL [F-IIII-PRESERVED]: expected at least 2 failure-path finalize calls (one for generateDailySummary, one for sendEmail); found ${_fFailedCount}`);
+  }
+  console.log('  PASS: IIII time-gate (shouldFireDailySummaryNow) intact + runs BEFORE F-2 claim');
+  console.log('  PASS: F-2 claimDailySummarySlot integrated at the entry point');
+  console.log('  PASS: success-path finalize (status: sent) + 2+ failure-path finalize (status: failed) calls present');
+  console.log('Group F-IIII-PRESERVED: F-2 layered ON TOP of IIII; no replacement; defense-in-depth.');
+
+  console.log('\n========== R5-F-CROSS-CLUSTER-INTEGRATION — full prior arc holding ==========');
+  // Prior shipped: A+G, B-3, F-4, ADMIN-HANDOFF, B-1, B-2. Source-grep that each
+  // cluster's structural anchor is still present in webhook.js after this commit.
+  const _fWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  if (!/_r5IsPrelimReviewDraft|_r5IsClosingDraft/.test(_fWebhookSrc)) {
+    throw new Error('FAIL [F-CROSS-CLUSTER-INTEGRATION]: R5-A+G executeDraft guard widening missing.');
+  }
+  if (!/prelim_approved_at[\s\S]{0,500}completion-handoff/.test(_fWebhookSrc)) {
+    throw new Error('FAIL [F-CROSS-CLUSTER-INTEGRATION]: R5-B-3 decideReviewDispatch prelim_approved_at gate missing.');
+  }
+  if (!/ignoredSenders\.some/.test(_fWebhookSrc)) {
+    throw new Error('FAIL [F-CROSS-CLUSTER-INTEGRATION]: R5-F-4 ignoredSenders filter missing.');
+  }
+  if (!/existingDeal\.admin_controlled === true && !isAdmin/.test(_fWebhookSrc)) {
+    throw new Error('FAIL [F-CROSS-CLUSTER-INTEGRATION]: ADMIN-HANDOFF NOTIFY-ADMIN-ONLY gate missing.');
+  }
+  if (!/runDiscrepancyDetectionAggregated/.test(_fWebhookSrc)) {
+    throw new Error('FAIL [F-CROSS-CLUSTER-INTEGRATION]: R5-B-1 aggregating wrapper call missing.');
+  }
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_fWebhookSrc)) {
+    throw new Error('FAIL [F-CROSS-CLUSTER-INTEGRATION]: R5-B-2 discrepancy-resolution gate missing.');
+  }
+  // Also verify the B-2 / F-3 cross-cluster claim: held-at-active deals appear in Section 4
+  // via the partition (status='active' + no ltv_escalated + not stale + not max-reminders →
+  // primarySection='other_active'). Pin this via classification: a B-2-held deal-shape
+  // should land in other_active.
+  const _fB2HeldDeal = _fClassify({ status: 'active', reminder_count: 0 }, _fDaysAgo(0));
+  if (_fB2HeldDeal.primarySection !== 'other_active') {
+    throw new Error(`FAIL [F-CROSS-CLUSTER-INTEGRATION]: B-2-held deal shape (status=active, no reminders, fresh inbound) expected primarySection='other_active', got '${_fB2HeldDeal.primarySection}'. Cross-cluster regression.`);
+  }
+  console.log('  PASS: R5-A+G + R5-B-3 + R5-F-4 + ADMIN-HANDOFF + R5-B-1 + R5-B-2 anchors all present in webhook.js');
+  console.log('  PASS: B-2-held deal shape → primarySection=other_active (Section 4 "Other Current Deals")');
+  console.log('Group F-CROSS-CLUSTER-INTEGRATION: full prior arc holding green.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
@@ -8610,13 +8843,18 @@ renovations.`,
   console.log('  PASS [Group AAAA forbid-omit]: explicit forbidden-action rule present');
 
   // Explicit data-key references.
-  if (!/summaryData\.automatedReminders\.sentToday/.test(aiSource)) {
-    throw new Error(`FAIL [Group AAAA data key]: 'summaryData.automatedReminders.sentToday' reference missing`);
+  // R5-F-3 (2026-05-21): restructured summaryData. The Section 6 references
+  // updated to: summaryData.remindersSentToday (was: automatedReminders.sentToday)
+  // and primarySection === "at_max_reminders" filter on summaryData.deals (was:
+  // automatedReminders.dealsAtMaxReminders). AAAA's "render even when empty"
+  // invariant preserved; only the data-key names changed.
+  if (!/summaryData\.remindersSentToday/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA data key]: 'summaryData.remindersSentToday' reference missing (R5-F-3 renamed from automatedReminders.sentToday)`);
   }
-  if (!/summaryData\.automatedReminders\.dealsAtMaxReminders/.test(aiSource)) {
-    throw new Error(`FAIL [Group AAAA data key]: 'summaryData.automatedReminders.dealsAtMaxReminders' reference missing`);
+  if (!/primarySection === "at_max_reminders"/.test(aiSource)) {
+    throw new Error(`FAIL [Group AAAA data key]: primarySection === "at_max_reminders" filter missing (R5-F-3 partitioned dealsAtMaxReminders into the deals[] entries)`);
   }
-  console.log('  PASS [Group AAAA data keys]: both data-key references present');
+  console.log('  PASS [Group AAAA data keys]: R5-F-3 restructured keys present (remindersSentToday + primarySection === "at_max_reminders")');
 
   // Empty-state strings.
   if (!/No automated reminders sent today/.test(aiSource)) {

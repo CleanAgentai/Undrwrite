@@ -497,6 +497,60 @@ module.exports = {
     if (error) throw error;
     return data || [];
   },
+
+  // R5 Cluster F Bug 2 (2026-05-21): atomic daily-summary slot claim. Mirrors
+  // claimReminderSlot's pattern — UNIQUE constraint on daily_summaries
+  // (date_edmonton) is the DB-layer race serializer. First worker / restart-
+  // tick to INSERT for a given Edmonton-date wins; all subsequent INSERTs
+  // collide on the UNIQUE and return zero rows via the .select() chain.
+  // Caller skips silently when claimed=false.
+  //
+  // Two-vector coverage:
+  //   Vector A: multiple Render workers each scheduling cron → simultaneous
+  //     21:00 fires. INSERTs race; one wins, others get unique-violation =
+  //     empty .select() = claimed=false.
+  //   Vector B: Render restart between 21:00:00 and 21:00:59 → new app boots,
+  //     schedules cron, in-window minute fires again. Same INSERT collision.
+  //
+  // Sequence: claim → send email → finalize (UPDATE status='sent' with
+  // message_id + snapshot fields). If send fails, finalize writes status=
+  // 'failed' + error_message. A crashed worker between claim and finalize
+  // leaves status='pending' for that date — visible in audit queries.
+  claimDailySummarySlot: async (dateEdmonton) => {
+    const { data, error } = await supabase
+      .from('daily_summaries')
+      .insert({ date_edmonton: dateEdmonton })
+      .select('id');
+
+    // Postgres UNIQUE violation surfaces as a Supabase error with code 23505.
+    // That's the expected "another worker won the race" path — convert to
+    // claimed=false instead of throwing. Any OTHER error (network, auth,
+    // schema) is a real problem and re-throws.
+    if (error) {
+      if (error.code === '23505') return { claimed: false, id: null };
+      throw error;
+    }
+    return { claimed: true, id: (data || [])[0]?.id || null };
+  },
+
+  // Update a previously-claimed daily-summary row with terminal state.
+  // status='sent' on successful send, status='failed' on caught send error.
+  finalizeDailySummary: async (id, fields) => {
+    const update = {
+      status: fields.status,
+      completed_at: new Date().toISOString(),
+      ...(fields.messageId !== undefined ? { message_id: fields.messageId } : {}),
+      ...(fields.htmlLength !== undefined ? { html_length: fields.htmlLength } : {}),
+      ...(fields.activeDealsCount !== undefined ? { active_deals_count: fields.activeDealsCount } : {}),
+      ...(fields.remindersSent !== undefined ? { reminders_sent: fields.remindersSent } : {}),
+      ...(fields.errorMessage !== undefined ? { error_message: fields.errorMessage } : {}),
+    };
+    const { error } = await supabase
+      .from('daily_summaries')
+      .update(update)
+      .eq('id', id);
+    if (error) throw error;
+  },
 };
 
 // Test-only exposure for the deterministic classifier truth table (Group B).
