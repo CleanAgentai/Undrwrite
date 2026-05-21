@@ -1082,7 +1082,37 @@ ${draftEmail}
 
       // --- DRAFT REVIEW HANDLING ---
       // If draft_action is set, Franco is reviewing a draft preview
-      if (existingDeal.draft_action && (existingDeal.status === 'ltv_escalated' || existingDeal.status === 'under_review')) {
+      //
+      // R5-A+G (2026-05-21, Franco's R5-S1 Grace + R5-S2 Marcus retest): the
+      // post-CCCC close-out path stranded admin's SEND on closing draft previews.
+      // sendCompletionHandoff (active-branch completion-handoff dispatch) sets
+      // draft_email + draft_action='approval_completed' WITHOUT transitioning
+      // status (status stays 'active' after sendCompletionHandoff). Admin's SEND
+      // reply on the closing draft preview needs to reach executeDraft to
+      // (a) ship the closing email to broker AND
+      // (b) transition status='completed'.
+      // Pre-fix, the L1085 guard's status filter excluded 'active', so executeDraft
+      // never ran on these replies — broker never received the closing email AND
+      // status stayed at 'active' AND reminder cron (filters d.status==='active'
+      // at dailySummary.js:51) kept firing follow-ups on completed files.
+      // Both symptoms (Cluster A no-broker-delivery + Cluster G reminder-misfire)
+      // share this single root via the transitivity:
+      //   executeDraft is the SOLE setter of status='completed' (verified by
+      //   grep — only L1144 in src/) AND the SOLE broker-facing send on
+      //   action='approval_completed'. So if executeDraft fires correctly,
+      //   reminder cron's d.status==='active' filter naturally excludes the deal.
+      //
+      // Conservative guard scoping: 'active' enters ONLY when
+      // draft_action === 'approval_completed' (the empirically-verified close-out
+      // path through sendCompletionHandoff). Defends against legacy/race-condition
+      // stale draft_action on active deals via a code path that doesn't exist
+      // today but might in future. NNNN/Case-5/scope-lock-protective form.
+      const _r5IsPrelimReviewDraft = existingDeal.draft_action && (
+        existingDeal.status === 'ltv_escalated' ||
+        existingDeal.status === 'under_review'
+      );
+      const _r5IsClosingDraft = existingDeal.draft_action === 'approval_completed' && existingDeal.status === 'active';
+      if (_r5IsPrelimReviewDraft || _r5IsClosingDraft) {
         console.log('Draft pending — checking if Franco wants to send, edit, or replace');
         const { action, editInstructions, replacementText } = await aiService.parseDraftReply(email.textBody);
 

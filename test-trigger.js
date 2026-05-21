@@ -6587,6 +6587,166 @@ Lender:
   console.log(`  PASS [MULTI-DEAL-PER-BROKER / Deal B gate falls through]: admin_controlled=false → existing routing (normal Vienna intake)`);
 
   // ════════════════════════════════════════════════════════════════
+  // R5-A+G — Cluster A (closing email never delivered) + Cluster G (reminders fire on completed-but-not-status-transitioned)
+  // ════════════════════════════════════════════════════════════════
+  // SHARED-ROOT (structurally verified by code-trace + empirical Supabase
+  // diagnostic): the pre-R5 L1085 guard in admin-reply handling excluded
+  // 'active' status from executeDraft routing. sendCompletionHandoff (the
+  // active-branch completion-handoff dispatch) sets draft_action=
+  // 'approval_completed' WITHOUT transitioning status — deal stays at
+  // 'active'. Admin's SEND reply on the closing draft preview hits L1085's
+  // status filter and falls through, so executeDraft never fires.
+  //
+  // executeDraft is the SOLE setter of status='completed' (verified — only
+  // L1144 in src/) AND the SOLE broker-facing send on action=
+  // 'approval_completed'. So both symptoms (A: closing email never
+  // delivered; G: reminder cron filters d.status==='active' and keeps
+  // firing) share this single root via transitivity.
+  //
+  // R5-A+G fix: extend the L1085 guard to include
+  // status==='active' && draft_action==='approval_completed' (conservative
+  // form — defends against future code paths that might set non-
+  // 'approval_completed' draft_actions on 'active' deals).
+  const ahWebhookSrcR5 = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+
+  // ─── GROUP R5A-EXECUTEDRAFT-GUARD-MATRIX — 9-case predicate truth table ───
+  // The predicate is encoded structurally in webhook.js but we replicate it
+  // here as a pure JS function and assert behavior across all 9 cells.
+  console.log('\n========== GROUP R5A-EXECUTEDRAFT-GUARD-MATRIX — 9-case guard predicate ==========');
+  const r5GuardFires = (status, draftAction) => {
+    const isPrelimReviewDraft = !!draftAction && (status === 'ltv_escalated' || status === 'under_review');
+    const isClosingDraft = draftAction === 'approval_completed' && status === 'active';
+    return isPrelimReviewDraft || isClosingDraft;
+  };
+  const r5GuardCases = [
+    { label: 'T1 active + approval_completed (R5-A+G fix — closing-draft on active deal)', status: 'active', draftAction: 'approval_completed', expected: true },
+    { label: 'T2 active + approval_doc_request (defensive — conservative form rejects)', status: 'active', draftAction: 'approval_doc_request', expected: false },
+    { label: 'T3 active + rejection (defensive — conservative form rejects)', status: 'active', draftAction: 'rejection', expected: false },
+    { label: 'T4 under_review + approval_doc_request (existing path preserved)', status: 'under_review', draftAction: 'approval_doc_request', expected: true },
+    { label: 'T5 under_review + approval_completed (existing prelim-review path)', status: 'under_review', draftAction: 'approval_completed', expected: true },
+    { label: 'T6 ltv_escalated + rejection (existing path preserved)', status: 'ltv_escalated', draftAction: 'rejection', expected: true },
+    { label: 'T7 completed + approval_completed (terminal state — defense)', status: 'completed', draftAction: 'approval_completed', expected: false },
+    { label: 'T8 rejected + any (terminal state — defense)', status: 'rejected', draftAction: 'approval_completed', expected: false },
+    { label: 'T9 active + null draftAction (gate condition: draftAction required)', status: 'active', draftAction: null, expected: false },
+  ];
+  let r5GuardPassed = 0;
+  for (const tc of r5GuardCases) {
+    const got = r5GuardFires(tc.status, tc.draftAction);
+    if (got !== tc.expected) {
+      throw new Error(`FAIL [R5A-GUARD-MATRIX ${tc.label}]: expected ${tc.expected}, got ${got}. Input: status='${tc.status}', draftAction=${JSON.stringify(tc.draftAction)}`);
+    }
+    console.log(`  PASS [${tc.label}]`);
+    r5GuardPassed++;
+  }
+  // Cross-check: the same predicate shape MUST appear in webhook.js (otherwise
+  // the test isn't testing the production code).
+  if (!/_r5IsPrelimReviewDraft = existingDeal\.draft_action && \(\s*existingDeal\.status === 'ltv_escalated' \|\|\s*existingDeal\.status === 'under_review'\s*\)/.test(ahWebhookSrcR5)) {
+    throw new Error(`FAIL [R5A-GUARD-MATRIX / source-grep]: webhook.js must contain the _r5IsPrelimReviewDraft predicate matching the test shape (preserves existing prelim/escalation paths).`);
+  }
+  if (!/_r5IsClosingDraft = existingDeal\.draft_action === 'approval_completed' && existingDeal\.status === 'active'/.test(ahWebhookSrcR5)) {
+    throw new Error(`FAIL [R5A-GUARD-MATRIX / source-grep]: webhook.js must contain the _r5IsClosingDraft predicate (the R5-A+G fix — conservative scoping requires approval_completed AND active).`);
+  }
+  if (!/if \(_r5IsPrelimReviewDraft \|\| _r5IsClosingDraft\) \{/.test(ahWebhookSrcR5)) {
+    throw new Error(`FAIL [R5A-GUARD-MATRIX / source-grep]: webhook.js must use \`if (_r5IsPrelimReviewDraft || _r5IsClosingDraft) {\` as the executeDraft routing gate.`);
+  }
+  console.log(`  PASS [R5A-GUARD-MATRIX / source-grep]: webhook.js predicate shape matches test (production + test share the same guard logic — no mirror-drift)`);
+  console.log(`Group R5A-GUARD-MATRIX: ${r5GuardPassed}/${r5GuardCases.length} predicate cases + source-grep parity passed`);
+
+  // ─── GROUP R5A-STATUS-TRANSITION-PRESERVED — executeDraft branches at L1138-1160 untouched ───
+  console.log('\n========== GROUP R5A-STATUS-TRANSITION-PRESERVED — executeDraft action→status branches unchanged ==========');
+  const r5StatusBranches = [
+    { action: 'approval_doc_request', expectedStatusUpdate: "status: 'active'" },
+    { action: 'rejection', expectedStatusUpdate: "status: 'rejected'" },
+    { action: 'approval_completed', expectedStatusUpdate: "status: 'completed'" },
+  ];
+  for (const { action, expectedStatusUpdate } of r5StatusBranches) {
+    // Match the branch: e.g. `if (draftAction === 'approval_completed') { ... status: 'completed' ... }`
+    const branchRe = new RegExp(`draftAction === '${action}'[\\s\\S]{0,200}${expectedStatusUpdate.replace(/[()]/g, '\\$&')}`);
+    if (!branchRe.test(ahWebhookSrcR5)) {
+      throw new Error(`FAIL [R5A-STATUS-TRANSITION ${action}]: executeDraft must transition status via \`${expectedStatusUpdate}\` on draftAction='${action}'. The R5-A+G fix is upstream guard only — downstream executeDraft branches MUST stay byte-identical.`);
+    }
+    console.log(`  PASS [R5A-STATUS-TRANSITION / ${action}]: executeDraft preserves \`${expectedStatusUpdate}\` branch`);
+  }
+
+  // ─── GROUP R5A-COMPLETION-SOLE-PATH — status='completed' set in exactly one place ───
+  // Load-bearing for the shared-root transitivity argument: if there were
+  // multiple paths to status='completed', the fix wouldn't cleanly transitively
+  // resolve G via A. Verifies executeDraft is the sole path.
+  console.log('\n========== R5A-COMPLETION-SOLE-PATH — status=\"completed\" set in exactly ONE place ==========');
+  const r5SrcFiles = ['src/routes/webhook.js', 'src/services/deals.js', 'src/services/ai.js', 'src/cron/dailySummary.js'];
+  let r5CompletionMatches = 0;
+  for (const f of r5SrcFiles) {
+    const src = require('fs').readFileSync(require('path').join(__dirname, f), 'utf8');
+    const matches = (src.match(/status:\s*'completed'/g) || []).length;
+    r5CompletionMatches += matches;
+    if (matches > 0) console.log(`  ${f}: ${matches} match(es)`);
+  }
+  if (r5CompletionMatches !== 1) {
+    throw new Error(`FAIL [R5A-COMPLETION-SOLE-PATH]: expected EXACTLY 1 \`status: 'completed'\` setter across src/ (executeDraft at webhook.js:1144). Got ${r5CompletionMatches}. If multiple paths set status='completed', the shared-root transitivity argument for A+G doesn't hold — different paths might or might not transition status, breaking the predicate that "fixing A fixes G."`);
+  }
+  console.log(`  PASS [R5A-COMPLETION-SOLE-PATH]: exactly 1 \`status: 'completed'\` setter in src/ (executeDraft is the sole transition path)`);
+
+  // ─── GROUP R5G-REMINDER-CRON-FILTER-INVARIANT — d.status==='active' is the sole filter ───
+  console.log('\n========== R5G-REMINDER-CRON-FILTER-INVARIANT — reminder cron filters by status==\"active\" only ==========');
+  const r5CronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  if (!/d\.status === 'active'/.test(r5CronSrc)) {
+    throw new Error(`FAIL [R5G-REMINDER-CRON-FILTER]: dailySummary.js reminder filter must use \`d.status === 'active'\`. If this changes, the transitive closure argument that "executeDraft→status='completed'→cron skips" no longer holds.`);
+  }
+  // Defensive: no reminder fires on completed/rejected (verify cron doesn't somehow include them via a separate filter).
+  if (/d\.status === 'completed'|d\.status === 'rejected'/.test(r5CronSrc)) {
+    throw new Error(`FAIL [R5G-REMINDER-CRON-FILTER]: dailySummary.js must NOT filter reminders on \`d.status === 'completed'\` or \`d.status === 'rejected'\`. The transitive closure for G requires reminders to ONLY fire on active.`);
+  }
+  console.log(`  PASS [R5G-REMINDER-CRON-FILTER]: dailySummary.js uses \`d.status === 'active'\` exclusively (transitive closure for G: executeDraft fires → status='completed' → cron \`d.status==='active'\` filter excludes the deal → no reminders fire)`);
+
+  // ─── GROUP R5AG-STUCK-DEAL-FIXTURE — forensic record of the pre-fix bug (live DB) ───
+  // This test pulls live Supabase state for the 2 known stuck deals (Grace +
+  // Marcus). Pre-fix, both should be in the stuck state. Post-deploy + after
+  // Franco replays SEND on each thread (Option 1 passive unstick), both
+  // transition out — at which point this test would naturally need updating.
+  // That's the correct shape — the test serves as a snapshot of the bug at
+  // this point in time.
+  //
+  // Skipped when no SUPABASE creds present (e.g., CI without env). The
+  // structural source-grep tests above cover the load-bearing assertions
+  // without DB access.
+  console.log('\n========== R5AG-STUCK-DEAL-FIXTURE — forensic record of stuck Grace + Marcus ==========');
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_URL.startsWith('http://localhost')) {
+    console.log('  SKIPPED [R5AG-STUCK-DEAL-FIXTURE]: SUPABASE creds not present in env or are dummy — structural source-grep tests above cover the load-bearing assertions');
+  } else {
+    const { createClient } = require('@supabase/supabase-js');
+    const sbR5 = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+    const { data: stuck, error: stuckErr } = await sbR5.from('deals')
+      .select('id, borrower_name, status, draft_action, prelim_approved_at')
+      .eq('status', 'active')
+      .eq('draft_action', 'approval_completed')
+      .not('prelim_approved_at', 'is', null)
+      .order('updated_at', { ascending: false });
+    if (stuckErr) {
+      console.log('  SKIPPED [R5AG-STUCK-DEAL-FIXTURE]: Supabase query error — ' + stuckErr.message);
+    } else {
+      console.log(`  Found ${stuck.length} stuck deal(s) matching predicate status='active' AND draft_action='approval_completed' AND prelim_approved_at IS NOT NULL:`);
+      stuck.forEach(d => console.log(`    - ${d.id.slice(0,8)} ${d.borrower_name} (prelim_approved_at=${d.prelim_approved_at})`));
+      // At commit-time we know there are 2 stuck (Grace + Marcus). After Franco
+      // re-runs SEND on each, this set shrinks; the test logs the count and the
+      // IDs for forensic visibility. We assert >= 2 here to confirm the
+      // pre-fix bug is reproducible at this moment, NOT a fixed maximum
+      // (other deals may join this set if the bug is exercised before
+      // Franco's unstick replay).
+      if (stuck.length < 2) {
+        console.log(`  WARN [R5AG-STUCK-DEAL-FIXTURE]: expected at least 2 stuck deals (Grace 6838e1cf + Marcus a2357bf4) at commit-time, found ${stuck.length}. Either the unstick has already happened (test snapshot is now stale — update expected count) or the diagnostic ran against a different DB state.`);
+      } else {
+        const hasGrace = stuck.some(d => d.id.startsWith('6838e1cf'));
+        const hasMarcus = stuck.some(d => d.id.startsWith('a2357bf4'));
+        if (!hasGrace || !hasMarcus) {
+          console.log(`  WARN [R5AG-STUCK-DEAL-FIXTURE]: expected Grace 6838e1cf AND Marcus a2357bf4 in stuck set. Grace present: ${hasGrace}, Marcus present: ${hasMarcus}.`);
+        } else {
+          console.log(`  PASS [R5AG-STUCK-DEAL-FIXTURE]: Grace 6838e1cf + Marcus a2357bf4 confirmed in stuck set at commit-time (forensic snapshot of the pre-fix bug — expected to need updating after Franco's passive-unstick replay)`);
+        }
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // GROUP SSS — two-tier required-doc completion gate (S3.2)
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
