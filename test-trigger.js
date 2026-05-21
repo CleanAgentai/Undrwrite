@@ -9008,6 +9008,134 @@ Lender:
   console.log('Group ε-CROSS-CLUSTER-INTEGRATION: strip+inject pipeline preserved + full prior arc holding.');
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER λ — admin email ordering on close-out dispatch
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-λ — defense-in-depth fix for admin
+  // close-out email ordering (file-complete notification BEFORE draft
+  // preview). λ-C verdict: 2-second delay + In-Reply-To header threading.
+  // Five harness-deterministic groups + one deferred-post-deploy.
+  //   λ-CODE-ORDER-MATRIX: sendCompletionHandoff source order + structure
+  //   λ-IN-REPLY-TO-FORMAT: Postmark header format <uuid@mtasv.net>
+  //   λ-DELAY-PRESENT: 2-second setTimeout between sends
+  //   λ-CALL-SITE-CHECK: sendCompletionHandoff invocations unchanged
+  //   λ-CROSS-CLUSTER-INTEGRATION: full prior arc + R5-D-B path preserved
+  //   λ-JAMES-FIXTURE-LIVE-RETEST: deferred — Franco production verification
+  const _lWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+
+  console.log('\n========== R6-λ-CODE-ORDER-MATRIX — sendCompletionHandoff structure ==========');
+  // (a) Locate sendCompletionHandoff function body.
+  const _lFnStart = _lWebhookSrc.indexOf('const sendCompletionHandoff = async');
+  // Find function end by matching balanced braces (simple heuristic: until "// Group NNN: pure dispatch decision")
+  const _lFnEnd = _lWebhookSrc.indexOf('// Group NNN: pure dispatch decision', _lFnStart);
+  if (_lFnStart < 0 || _lFnEnd < 0 || _lFnStart >= _lFnEnd) {
+    throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: could not locate sendCompletionHandoff body. start=${_lFnStart}, end=${_lFnEnd}`);
+  }
+  const _lFnBody = _lWebhookSrc.slice(_lFnStart, _lFnEnd);
+  // (b) First sendEmail (info notice) appears BEFORE the second sendEmail (draft preview).
+  // Anchor on "const \w+Result = await emailService.sendEmail(" — the assignment-with-await
+  // pattern matches actual call sites only, not the literal "emailService.sendEmail()" text
+  // that may appear in comment blocks describing the API surface.
+  const _lSendEmailMatches = _lFnBody.match(/const \w+Result = await emailService\.sendEmail\(/g) || [];
+  if (_lSendEmailMatches.length !== 2) {
+    throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: sendCompletionHandoff must invoke emailService.sendEmail exactly 2 times (info notice + draft preview, both assignment-with-await pattern); found ${_lSendEmailMatches.length}.`);
+  }
+  // (c) Info notice subject anchor BEFORE draft preview subject anchor.
+  const _lInfoSubjectPos = _lFnBody.indexOf('infoSubject');
+  const _lPreviewSubjectPos = _lFnBody.indexOf('Re: ${infoSubject}');
+  if (_lInfoSubjectPos < 0 || _lPreviewSubjectPos < 0 || _lInfoSubjectPos >= _lPreviewSubjectPos) {
+    throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: info notice (infoSubject) must appear BEFORE draft preview (Re: \${infoSubject}). infoPos=${_lInfoSubjectPos}, previewPos=${_lPreviewSubjectPos}.`);
+  }
+  console.log('  PASS: sendCompletionHandoff invokes emailService.sendEmail exactly 2 times');
+  console.log('  PASS: info notice send precedes draft preview send in source order');
+  console.log('Group λ-CODE-ORDER-MATRIX: send-order structurally pinned.');
+
+  console.log('\n========== R6-λ-IN-REPLY-TO-FORMAT — Postmark header format ==========');
+  // (a) previewHeaders array constructed inside sendCompletionHandoff.
+  if (!/const previewHeaders = \[\];/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: previewHeaders array initialization missing in sendCompletionHandoff.');
+  }
+  // (b) In-Reply-To header pushed with formatted MessageID.
+  if (!/Name: 'In-Reply-To', Value: formattedInfoMessageId/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: In-Reply-To header push missing or wrong format.');
+  }
+  // (c) References header also pushed (modern Gmail/Outlook threading uses both).
+  if (!/Name: 'References', Value: formattedInfoMessageId/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: References header push missing — Gmail/Outlook threading prefers both In-Reply-To AND References.');
+  }
+  // (d) MessageID formatting matches Postmark convention <uuid@mtasv.net>.
+  if (!/`<\$\{infoResult\.MessageID\}@mtasv\.net>`/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: MessageID formatting must use <uuid@mtasv.net> Postmark convention (mirrors formatMessageId in cron/dailySummary.js).');
+  }
+  // (e) Defensive fallback if MessageID is missing/falsy.
+  if (!/if \(infoResult\?\.MessageID\)/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: defensive guard "if (infoResult?.MessageID)" missing — threading should only attempt with a valid MessageID.');
+  }
+  // (f) previewHeaders passed to draft preview sendEmail call.
+  if (!/previewResult = await emailService\.sendEmail\([\s\S]*?previewHeaders\s*\)/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: previewHeaders not passed to the draft-preview sendEmail call.');
+  }
+  console.log('  PASS: previewHeaders array constructed');
+  console.log('  PASS: In-Reply-To + References headers pushed (both — modern client threading)');
+  console.log('  PASS: MessageID formatted as <uuid@mtasv.net> Postmark convention');
+  console.log('  PASS: defensive guard on infoResult?.MessageID present');
+  console.log('  PASS: previewHeaders threaded to draft-preview sendEmail call');
+  console.log('Group λ-IN-REPLY-TO-FORMAT: Postmark threading wired correctly.');
+
+  console.log('\n========== R6-λ-DELAY-PRESENT — 2-second setTimeout between sends ==========');
+  // Capture the chunk of sendCompletionHandoff BETWEEN the two sendEmail calls.
+  // Anchor on the assignment-with-await pattern to avoid matching the literal
+  // "emailService.sendEmail()" text in adjacent comment blocks.
+  const _lFirstSendIdx = _lFnBody.indexOf('const infoResult = await emailService.sendEmail(');
+  const _lSecondSendIdx = _lFnBody.indexOf('const previewResult = await emailService.sendEmail(');
+  if (_lFirstSendIdx < 0 || _lSecondSendIdx < 0) {
+    throw new Error(`FAIL [λ-DELAY-PRESENT]: could not locate both sendEmail calls (anchor on assignment-with-await). first=${_lFirstSendIdx}, second=${_lSecondSendIdx}`);
+  }
+  const _lBetween = _lFnBody.slice(_lFirstSendIdx, _lSecondSendIdx);
+  // (a) setTimeout-based delay present (Promise wrapper for await).
+  if (!/await new Promise\(\(resolve\) => setTimeout\(resolve, 2000\)\)/.test(_lBetween)) {
+    throw new Error('FAIL [λ-DELAY-PRESENT]: 2-second setTimeout-based delay missing between info notice and draft preview sendEmail calls.');
+  }
+  console.log('  PASS: 2-second delay (await new Promise + setTimeout) present between sends');
+  console.log('Group λ-DELAY-PRESENT: localized 2s delay structurally pinned.');
+
+  console.log('\n========== R6-λ-CALL-SITE-CHECK — sendCompletionHandoff invocation count unchanged ==========');
+  // sendCompletionHandoff is invoked at:
+  //   - active-branch completion-handoff dispatch
+  //   - under_review-branch decideReviewDispatch completion-handoff
+  // Count should be exactly 2 (excluding the function definition itself).
+  const _lCallSiteCount = (_lWebhookSrc.match(/await sendCompletionHandoff\(/g) || []).length;
+  if (_lCallSiteCount !== 2) {
+    throw new Error(`FAIL [λ-CALL-SITE-CHECK]: sendCompletionHandoff invocations = ${_lCallSiteCount}; expected exactly 2 (active-branch + under_review-branch). R6-λ adds NO new call sites — only modifies the function body.`);
+  }
+  console.log(`  PASS: sendCompletionHandoff invoked at exactly 2 call sites (no R6-λ-introduced drift)`);
+  console.log('Group λ-CALL-SITE-CHECK: closed-set invocation count preserved.');
+
+  console.log('\n========== R6-λ-CROSS-CLUSTER-INTEGRATION — prior arc + R5-D-B path holding ==========');
+  // Full prior R5+R6 arc anchors source-grep-present.
+  if (!/_r5IsPrelimReviewDraft|_r5IsClosingDraft/.test(_lWebhookSrc)) throw new Error('FAIL: R5-A+G anchor missing');
+  if (!/prelim_approved_at[\s\S]{0,500}completion-handoff/.test(_lWebhookSrc)) throw new Error('FAIL: R5-B-3 anchor missing');
+  if (!/ignoredSenders\.some/.test(_lWebhookSrc)) throw new Error('FAIL: R5-F-4 anchor missing');
+  if (!/runDiscrepancyDetectionAggregated/.test(_lWebhookSrc)) throw new Error('FAIL: R5-B-1 anchor missing');
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_lWebhookSrc)) throw new Error('FAIL: R5-B-2 anchor missing');
+  if (!/selectGreetingFirstName/.test(_lWebhookSrc)) throw new Error('FAIL: R5-E anchor missing');
+  if (!/was_in_identity_clash: true/.test(_lWebhookSrc)) throw new Error('FAIL: R5-D-B anchor missing');
+  // ai.js anchors.
+  const _lAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  if (!/R6 Cluster η patterns/.test(_lAiSrc)) throw new Error('FAIL: R6-η anchor missing');
+  if (!/R6-ε widening/.test(_lAiSrc)) throw new Error('FAIL: R6-ε anchor missing');
+  console.log('  PASS: full prior R5+R6 arc anchors source-grep-present (A+G + B-3 + F-4 + B-1 + B-2 + E + D-B + η + ε)');
+  console.log('Group λ-CROSS-CLUSTER-INTEGRATION: prior-arc anchors holding green.');
+
+  console.log('\n========== R6-λ-JAMES-FIXTURE-LIVE-RETEST — DEFERRED (post-deploy Franco verification) ==========');
+  // Cannot fully verify in harness — depends on Postmark + email-client behavior.
+  // Code-side fix-shape is pinned by the 5 deterministic groups above. The
+  // empirical close of R6-λ requires Franco's next retest cycle observing
+  // correct close-out admin email ordering in production.
+  console.log('  DEFERRED: harness pins CODE-side fix-shape; END-TO-END ordering depends on Postmark + email-client behavior');
+  console.log('  POST-DEPLOY: Franco retest cycle next close-out dispatch should arrive in correct order ([File Complete] before Re: [File Complete] in admin inbox)');
+  console.log('Group λ-JAMES-FIXTURE-LIVE-RETEST: deferred-post-deploy verification logged for Franco retest cycle.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin

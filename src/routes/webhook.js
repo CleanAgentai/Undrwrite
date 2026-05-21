@@ -869,6 +869,37 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   await dealsService.saveMessage(deal.id, 'outbound', infoSubject, infoBody, infoResult.MessageID);
   console.log(`Completion-handoff informational notice sent to admin (conditionsFulfilled=${conditionsFulfilled})`);
 
+  // ────────────────────────────────────────────────────────────────────
+  // R6-λ (2026-05-21): admin email ordering on close-out dispatch.
+  //
+  // Franco's R5 S9 Bug 4 (James Okafor 004cf263): "Closing draft preview
+  // arrived first, File complete notification arrived second" in his admin
+  // inbox — opposite of the code's intended order. Two root mechanisms
+  // can produce this:
+  //   (1) Postmark queue/MTA parallelism — await emailService.sendEmail()
+  //       resolves when Postmark ACCEPTS the API call, not when delivered;
+  //       Postmark may dispatch the two emails to recipient MTA in parallel
+  //       or in any order.
+  //   (2) Email-client display order — Gmail/Outlook may sort by various
+  //       fields (Received header, threading-position, content) that differ
+  //       from server-timestamp order.
+  //
+  // Defense-in-depth fix (per R6-λ Q1 verdict — λ-C):
+  //   (a) 2-second explicit delay between the two sendEmail calls. Forces
+  //       sequential Postmark API acceptance; reduces queue-parallelism risk.
+  //   (b) In-Reply-To header on the draft preview pointing to the file-
+  //       complete notification's MessageID. Email clients thread the two
+  //       as a single conversation; chronological display within thread is
+  //       reliable. Mirrors the cron/dailySummary.js reminder-threading
+  //       pattern (formatMessageId helper).
+  //
+  // Cannot fully verify in harness — depends on Postmark + email-client
+  // behavior. Two-stage verification: (1) deterministic harness pins code-
+  // side fix-shape NOW; (2) Franco's next retest cycle observes correct
+  // close-out ordering in production. Residual (a) acknowledged.
+  // ────────────────────────────────────────────────────────────────────
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
   // 2. Closing draft preview — replicate saveDraftAndPreview pattern (the helper
   // is scoped inside the admin-reply branch, not reachable here). Sets draft_email,
   // draft_subject, draft_action; sends preview to admin in-thread. Admin's eventual
@@ -888,15 +919,27 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
 ${closingEmail}
 <hr>
 <p><strong>Reply SEND to confirm, or reply with your edits.</strong></p>`;
+  // R6-λ: In-Reply-To header threading. Postmark MessageIDs are UUIDs without
+  // an @ delimiter; the email wire format requires <uuid@mtasv.net>. Mirrors
+  // formatMessageId in cron/dailySummary.js (kept inline here — single use site).
+  const previewHeaders = [];
+  if (infoResult?.MessageID) {
+    const formattedInfoMessageId = infoResult.MessageID.includes('@')
+      ? `<${infoResult.MessageID}>`
+      : `<${infoResult.MessageID}@mtasv.net>`;
+    previewHeaders.push({ Name: 'In-Reply-To', Value: formattedInfoMessageId });
+    previewHeaders.push({ Name: 'References', Value: formattedInfoMessageId });
+  }
   const previewResult = await emailService.sendEmail(
     config.adminEmail,
     `Re: ${infoSubject}`,
     previewHtml.replace(/<[^>]*>/g, ''),
     previewHtml,
-    []
+    [],
+    previewHeaders
   );
   await dealsService.saveMessage(deal.id, 'outbound', `Re: ${infoSubject}`, previewHtml, previewResult.MessageID);
-  console.log('Closing draft preview sent to admin (in-thread with informational notice)');
+  console.log(`R6-λ: closing draft preview sent to admin (in-thread via In-Reply-To: ${infoResult?.MessageID ? 'set' : 'no-id'}; 2s delay after info notice)`);
 };
 
 // Group NNN: pure dispatch decision for the under_review/ltv_escalated branch.
