@@ -723,13 +723,54 @@ const renderDocumentsIncludedSection = (documents, missingDocs) => {
 // EXACTLY on `<h2>Documents Included</h2>` followed by `<ul>...</ul>` —
 // does NOT match `<h2>Deal Snapshot</h2>` (B 2b's prepended block) or any
 // other section heading. Non-greedy through the FIRST `</ul>` closer.
-const DOCUMENTS_INCLUDED_BLOCK_PATTERN = /<h2>\s*Documents\s+Included\s*<\/h2>\s*<ul>[\s\S]*?<\/ul>/i;
+//
+// R6-ε widening (2026-05-21): allow zero-or-more <p>...</p> paragraphs
+// between `<h2>` and `<ul>`. Pre-fix, the pattern required <h2> immediately
+// followed by <ul> (whitespace-only between). Production failure
+// (Kevin Tran 178d714e S6 + Ethan Broussard 533fbd4f S7 PRELIMINARY emails):
+// Claude probabilistically emitted "<h2>Documents Included</h2><p>This file
+// is COMPLETE — all required documents have been received:</p><ul>...</ul>"
+// — the intermediate <p> broke the strip pattern → Claude block survived
+// → stripAndInjectDocumentsIncluded ALSO injected the JS-rendered section
+// additively → "Documents Included" appeared twice back-to-back. Widening
+// to (?:\s*<p>...</p>)* is strictly broader than the original strict format
+// (zero-`<p>` shape still matches) — backward-compat preserved by
+// construction. Standing widening discipline: superset, never different-shape.
+//
+// R6-θ SIDE-EFFECT (worth noting): the <p>This file is COMPLETE...</p>
+// sentence WAS Franco's S7 Bug 2 (PRELIMINARY-incorrectly-declares-COMPLETE).
+// Widening the strip pattern removes that sentence as a side effect (it's
+// inside the stripped block). R6-θ status: may be closed by this side effect
+// on Documents-Included-internal manifestation; remains open in backlog for
+// any COMPLETE-language surface OUTSIDE the Documents Included block. Close
+// from backlog after Franco retest confirms no recurrence.
+//
+// /g FLAG IS LOAD-BEARING (empirical surface during R6-ε impl): production
+// HTML on Kevin S6 + Ethan S7 contained TWO Documents Included blocks back-
+// to-back — one with the <p>COMPLETE</p> intermediate (caught by R6-ε
+// widening) AND one with the strict <h2><ul> format (caught by the original
+// pattern). Without /g, String.replace() only removes the FIRST match;
+// the duplicate survives + JS injection adds a third → header count post
+// strip+inject = 2 instead of the intended 1. /g flag makes String.replace()
+// strip ALL matches in a single call. lastIndex reset defensively in
+// stripAndInjectDocumentsIncluded since /g makes .test() stateful.
+const DOCUMENTS_INCLUDED_BLOCK_PATTERN = /<h2>\s*Documents\s+Included\s*<\/h2>(?:\s*<p>[\s\S]*?<\/p>)*\s*<ul>[\s\S]*?<\/ul>/gi;
 
 const stripAndInjectDocumentsIncluded = (html, documents, missingDocs) => {
   if (!html || typeof html !== 'string') {
     return { result: html, stripped: false, injected: false };
   }
+  // /g flag on DOCUMENTS_INCLUDED_BLOCK_PATTERN makes .test() stateful via
+  // lastIndex. Reset defensively before .test() so the boolean check is
+  // deterministic across calls. .replace() doesn't use lastIndex (always
+  // scans from start), so the second reset is precautionary for future
+  // .test() reuse.
+  DOCUMENTS_INCLUDED_BLOCK_PATTERN.lastIndex = 0;
   const stripped = DOCUMENTS_INCLUDED_BLOCK_PATTERN.test(html);
+  DOCUMENTS_INCLUDED_BLOCK_PATTERN.lastIndex = 0;
+  // R6-ε (2026-05-21): /g flag strips ALL Claude-emitted blocks in one pass —
+  // production Kevin S6 + Ethan S7 had TWO blocks back-to-back; without /g
+  // only the first survived stripping.
   const withoutClaudeSection = stripped ? html.replace(DOCUMENTS_INCLUDED_BLOCK_PATTERN, '') : html;
   const jsSection = renderDocumentsIncludedSection(documents, missingDocs);
   // Insert BEFORE the first <hr> (Section-10 separator) so the JS section

@@ -8773,6 +8773,241 @@ Lender:
   console.log('Group η-CROSS-CLUSTER-INTEGRATION: closed-set call-count preserved + cascade order pinned + prior arc holding.');
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER ε — Documents Included duplication strip-pattern widening
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-ε — strict superset widening of
+  // DOCUMENTS_INCLUDED_BLOCK_PATTERN to handle optional <p>...</p>
+  // paragraphs between <h2> header and <ul> list.
+  //   ε-PATTERN-MATRIX: 6-case truth-table (incl. backward-compat
+  //     zero-<p> + new one-<p> + multi-<p> + 3 negative shapes)
+  //   ε-S6-FIXTURE: Kevin Tran 178d714e PRELIMINARY HTML verbatim replay
+  //   ε-S7-FIXTURE: Ethan Broussard 533fbd4f PRELIMINARY HTML verbatim
+  //   ε-BACKWARD-COMPAT: original strict <h2><ul> tests still pass
+  //   ε-NON-GREEDY-BOUNDED: malformed <p> content doesn't over-match
+  //   ε-CROSS-CLUSTER-INTEGRATION: strip+inject pipeline intact +
+  //     renderDocumentsIncludedSection still authoritative; full prior arc
+  const _epsAi = require('./src/services/ai');
+
+  console.log('\n========== R6-ε-PATTERN-MATRIX — strip-pattern truth-table (6 cases) ==========');
+  // Use the actual exported function stripAndInjectDocumentsIncluded — it
+  // tests the strip pattern + the JS-injection in one call. We provide
+  // empty documents/missingDocs arrays so the JS injection is a known shape.
+  const _epsCases = [
+    {
+      label: 'backward-compat: zero <p> intermediate (original strict format)',
+      input: '<h2>Documents Included</h2>\n<ul>\n<li>[RECEIVED] X.pdf</li>\n</ul>\n<hr>\nNext section',
+      expectStripped: true,
+    },
+    {
+      label: 'NEW: one <p> intermediate (the Kevin/Ethan production shape)',
+      input: '<h2>Documents Included</h2>\n<p>This file is COMPLETE — all required documents have been received:</p>\n<ul>\n<li>[RECEIVED] X.pdf</li>\n</ul>\n<hr>\nNext section',
+      expectStripped: true,
+    },
+    {
+      label: 'NEW: two <p> intermediate (future variants)',
+      input: '<h2>Documents Included</h2>\n<p>Paragraph one.</p>\n<p>Paragraph two.</p>\n<ul>\n<li>[RECEIVED] X.pdf</li>\n</ul>\n<hr>',
+      expectStripped: true,
+    },
+    {
+      label: 'NEGATIVE: different header (Deal Snapshot, NOT Documents Included)',
+      input: '<h2>Deal Snapshot</h2>\n<p>blah</p>\n<ul>\n<li>X</li>\n</ul>\n<hr>',
+      expectStripped: false,
+    },
+    {
+      label: 'NEGATIVE: no <ul> follows (defensive — only header + paragraph)',
+      input: '<h2>Documents Included</h2>\n<p>This file is COMPLETE</p>\n<p>No list yet.</p>\n<hr>',
+      expectStripped: false,
+    },
+    {
+      label: 'NEGATIVE: malformed <h2>Documents Included</h2><ul> unclosed',
+      input: '<h2>Documents Included</h2>\n<ul>\n<li>partial',
+      expectStripped: false,
+    },
+  ];
+  let _epsMatrixFails = 0;
+  for (const c of _epsCases) {
+    const r = _epsAi.stripAndInjectDocumentsIncluded(c.input, [], []);
+    if (r.stripped !== c.expectStripped) {
+      _epsMatrixFails++;
+      console.log(`  FAIL: ${c.label}`);
+      console.log(`    input:    ${JSON.stringify(c.input).slice(0, 100)}...`);
+      console.log(`    expected stripped=${c.expectStripped}, got stripped=${r.stripped}`);
+    } else {
+      console.log(`  PASS: ${c.label}`);
+    }
+  }
+  if (_epsMatrixFails > 0) throw new Error(`FAIL [R6-ε-PATTERN-MATRIX]: ${_epsMatrixFails}/${_epsCases.length} cases failed.`);
+  console.log(`Group ε-PATTERN-MATRIX: ${_epsCases.length}/${_epsCases.length} cases pass.`);
+
+  console.log('\n========== R6-ε-S6-FIXTURE — Kevin Tran 178d714e production replay (LOAD-BEARING) ==========');
+  // Synthesized from PRODUCTION VERBATIM (Kevin Tran 178d714e PRELIMINARY out[1]).
+  // Two Documents Included blocks back-to-back — first has <p>COMPLETE</p>
+  // intermediate (the R6-ε-widening shape), second has strict <h2><ul> format
+  // (the original-pattern shape). /g flag in DOCUMENTS_INCLUDED_BLOCK_PATTERN
+  // is load-bearing to strip BOTH in a single pass.
+  const _epsS6Html = `<h1>Heading</h1>
+<p>Some preceding context. Multiple layers of protection make this an attractive private lending opportunity.</p>
+
+<h2>Documents Included</h2>
+<p>This file is COMPLETE — all required documents have been received:</p>
+<ul>
+<li>[RECEIVED] CIBC_Payout_Statement_Kevin_Tran.pdf (mortgage_statement)</li>
+<li>[RECEIVED] Appraisal_3312_Brentwood_Road_NW_Calgary.pdf (appraisal)</li>
+<li>[RECEIVED] T4_Kevin_Tran_2025.pdf (income_proof)</li>
+<li>[RECEIVED] LoanApplication_Kevin_Tran.pdf (loan_application)</li>
+<li>[RECEIVED] PNW_Statement_Kevin_Tran.pdf (pnw_statement)</li>
+<li>[RECEIVED] Credit_Bureau_Kevin_Tran.pdf (credit_report)</li>
+<li>[RECEIVED] GovernmentID_Kevin_Tran.pdf (government_id)</li>
+<li>[RECEIVED] PropertyTaxAssessment_Kevin_Tran.pdf (property_tax)</li>
+</ul>
+
+<h2>Documents Included</h2>
+<ul>
+<li>[RECEIVED] CIBC_Payout_Statement_Kevin_Tran.pdf (mortgage_statement)</li>
+<li>[RECEIVED] Appraisal_3312_Brentwood_Road_NW_Calgary.pdf (appraisal)</li>
+<li>[RECEIVED] T4_Kevin_Tran_2025.pdf (income_proof)</li>
+<li>[RECEIVED] LoanApplication_Kevin_Tran.pdf (loan_application)</li>
+<li>[RECEIVED] PNW_Statement_Kevin_Tran.pdf (pnw_statement)</li>
+<li>[RECEIVED] Credit_Bureau_Kevin_Tran.pdf (credit_report)</li>
+<li>[RECEIVED] GovernmentID_Kevin_Tran.pdf (government_id)</li>
+<li>[RECEIVED] PropertyTaxAssessment_Kevin_Tran.pdf (property_tax)</li>
+</ul>
+
+<hr>
+
+<h2>Next Section</h2>
+<p>Other content</p>`;
+  const _epsS6Docs = [
+    { file_name: 'CIBC_Payout_Statement_Kevin_Tran.pdf', classification: 'mortgage_statement' },
+    { file_name: 'Appraisal_3312_Brentwood_Road_NW_Calgary.pdf', classification: 'appraisal' },
+    { file_name: 'T4_Kevin_Tran_2025.pdf', classification: 'income_proof' },
+    { file_name: 'LoanApplication_Kevin_Tran.pdf', classification: 'loan_application' },
+    { file_name: 'PNW_Statement_Kevin_Tran.pdf', classification: 'pnw_statement' },
+    { file_name: 'Credit_Bureau_Kevin_Tran.pdf', classification: 'credit_report' },
+    { file_name: 'GovernmentID_Kevin_Tran.pdf', classification: 'government_id' },
+    { file_name: 'PropertyTaxAssessment_Kevin_Tran.pdf', classification: 'property_tax' },
+  ];
+  const _epsS6Result = _epsAi.stripAndInjectDocumentsIncluded(_epsS6Html, _epsS6Docs, []);
+  let _epsS6Fails = 0;
+  if (!_epsS6Result.stripped) { _epsS6Fails++; console.log(`  FAIL: strip did not fire on production-shape Kevin HTML`); }
+  if (!_epsS6Result.injected) { _epsS6Fails++; console.log(`  FAIL: inject did not fire`); }
+  const _epsS6HeaderCount = (_epsS6Result.result.match(/Documents Included/gi) || []).length;
+  if (_epsS6HeaderCount !== 1) {
+    _epsS6Fails++;
+    console.log(`  FAIL: "Documents Included" header count = ${_epsS6HeaderCount}; expected EXACTLY 1`);
+  }
+  // R6-θ side-effect: COMPLETE sentence inside the stripped block should be gone
+  if (/This file is COMPLETE/i.test(_epsS6Result.result)) {
+    _epsS6Fails++;
+    console.log(`  FAIL: "This file is COMPLETE" sentence survived (R6-θ side-effect-closure breach)`);
+  }
+  if (_epsS6Fails > 0) throw new Error(`FAIL [ε-S6-FIXTURE]: ${_epsS6Fails} assertions failed.`);
+  console.log(`  PASS: strip+inject fired; "Documents Included" appears EXACTLY 1× post-fix; "COMPLETE" sentence removed (R6-θ side-effect-closure)`);
+  console.log(`Group ε-S6-FIXTURE: Kevin Tran production shape duplication closed + R6-θ side-effect-closure verified.`);
+
+  console.log('\n========== R6-ε-S7-FIXTURE — Ethan Broussard 533fbd4f production replay (LOAD-BEARING) ==========');
+  // Synthesized from PRODUCTION VERBATIM (Ethan Broussard 533fbd4f PRELIMINARY).
+  // Same two-block back-to-back shape as Kevin S6.
+  const _epsS7Html = `<h2>Documents Included</h2>
+<p>This file is COMPLETE — all required documents have been received:</p>
+<ul>
+<li>[RECEIVED] PropertyTaxAssessment_Ethan_Broussard.pdf (property_tax)</li>
+<li>[RECEIVED] GovernmentID_Ethan_Broussard.pdf (government_id)</li>
+<li>[RECEIVED] T4_Ethan_Broussard_2025.pdf (income_proof)</li>
+<li>[RECEIVED] LoanApplication_Ethan_Broussard.pdf (loan_application)</li>
+<li>[RECEIVED] PNW_Statement_Ethan_Broussard.pdf (pnw_statement)</li>
+<li>[RECEIVED] CIBC_Payout_Statement_Ethan_Broussard.pdf (mortgage_statement)</li>
+<li>[RECEIVED] Appraisal_819_Strathmore_Drive_SW.pdf (appraisal)</li>
+<li>[RECEIVED] Credit_Bureau_Ethan_Broussard.pdf (credit_report)</li>
+</ul>
+
+<h2>Documents Included</h2>
+<ul>
+<li>[RECEIVED] PropertyTaxAssessment_Ethan_Broussard.pdf (property_tax)</li>
+<li>[RECEIVED] GovernmentID_Ethan_Broussard.pdf (government_id)</li>
+<li>[RECEIVED] T4_Ethan_Broussard_2025.pdf (income_proof)</li>
+<li>[RECEIVED] LoanApplication_Ethan_Broussard.pdf (loan_application)</li>
+<li>[RECEIVED] PNW_Statement_Ethan_Broussard.pdf (pnw_statement)</li>
+<li>[RECEIVED] CIBC_Payout_Statement_Ethan_Broussard.pdf (mortgage_statement)</li>
+<li>[RECEIVED] Appraisal_819_Strathmore_Drive_SW.pdf (appraisal)</li>
+<li>[RECEIVED] Credit_Bureau_Ethan_Broussard.pdf (credit_report)</li>
+</ul>
+
+<hr>`;
+  const _epsS7Docs = [
+    { file_name: 'PropertyTaxAssessment_Ethan_Broussard.pdf', classification: 'property_tax' },
+    { file_name: 'GovernmentID_Ethan_Broussard.pdf', classification: 'government_id' },
+    { file_name: 'T4_Ethan_Broussard_2025.pdf', classification: 'income_proof' },
+    { file_name: 'LoanApplication_Ethan_Broussard.pdf', classification: 'loan_application' },
+    { file_name: 'PNW_Statement_Ethan_Broussard.pdf', classification: 'pnw_statement' },
+    { file_name: 'CIBC_Payout_Statement_Ethan_Broussard.pdf', classification: 'mortgage_statement' },
+    { file_name: 'Appraisal_819_Strathmore_Drive_SW.pdf', classification: 'appraisal' },
+    { file_name: 'Credit_Bureau_Ethan_Broussard.pdf', classification: 'credit_report' },
+  ];
+  const _epsS7Result = _epsAi.stripAndInjectDocumentsIncluded(_epsS7Html, _epsS7Docs, []);
+  let _epsS7Fails = 0;
+  if (!_epsS7Result.stripped || !_epsS7Result.injected) _epsS7Fails++;
+  const _epsS7HeaderCount = (_epsS7Result.result.match(/Documents Included/gi) || []).length;
+  if (_epsS7HeaderCount !== 1) _epsS7Fails++;
+  if (/This file is COMPLETE/i.test(_epsS7Result.result)) _epsS7Fails++;
+  if (_epsS7Fails > 0) throw new Error(`FAIL [ε-S7-FIXTURE]: ${_epsS7Fails} assertions failed. headerCount=${_epsS7HeaderCount}`);
+  console.log(`  PASS: Ethan Broussard production shape — strip+inject fired; header count=1; COMPLETE removed (R6-θ side-effect-closure)`);
+  console.log(`Group ε-S7-FIXTURE: Ethan Broussard production shape duplication closed + R6-θ side-effect-closure verified.`);
+
+  console.log('\n========== R6-ε-BACKWARD-COMPAT — original strict <h2><ul> shape still strips ==========');
+  // Pre-R6-ε format (no <p> intermediate) — verifies the * quantifier preserves
+  // backward-compat. R5-C/R4-Bucket-C.6 tests on this exact shape should still pass.
+  const _epsBcInput = '<h2>Documents Included</h2>\n<ul>\n<li>[RECEIVED] X.pdf (loan_application)</li>\n</ul>\n<hr>';
+  const _epsBcResult = _epsAi.stripAndInjectDocumentsIncluded(_epsBcInput, [{file_name: 'X.pdf', classification: 'loan_application'}], []);
+  if (!_epsBcResult.stripped) throw new Error('FAIL [ε-BACKWARD-COMPAT]: original strict <h2><ul> format strip regressed under R6-ε widening. Quantifier should be * (zero-or-more), not + (one-or-more).');
+  console.log('  PASS: original strict <h2><ul> format still strips (quantifier * preserves backward-compat)');
+  console.log('Group ε-BACKWARD-COMPAT: zero-<p> shape continues to match (strict-superset widening discipline preserved).');
+
+  console.log('\n========== R6-ε-NON-GREEDY-BOUNDED — <p> content non-greedy + downstream protected ==========');
+  // If the <p> content contains nested HTML, the [\s\S]*? should still non-greedy to the FIRST </p>,
+  // not over-match into downstream content.
+  const _epsNgInput = `<h2>Documents Included</h2>
+<p>Para with <strong>nested formatting</strong> and (parens).</p>
+<ul>
+<li>[RECEIVED] X.pdf</li>
+</ul>
+<hr>
+<h2>Downstream Section</h2>
+<p>Other content that must NOT be stripped.</p>`;
+  const _epsNgResult = _epsAi.stripAndInjectDocumentsIncluded(_epsNgInput, [], []);
+  if (!_epsNgResult.stripped) throw new Error('FAIL [ε-NON-GREEDY-BOUNDED]: rich-formatting <p> content broke strip');
+  if (!_epsNgResult.result.includes('Downstream Section')) {
+    throw new Error('FAIL [ε-NON-GREEDY-BOUNDED]: downstream "Downstream Section" was over-stripped — non-greedy bound failed');
+  }
+  if (!_epsNgResult.result.includes('Other content that must NOT be stripped.')) {
+    throw new Error('FAIL [ε-NON-GREEDY-BOUNDED]: downstream content past the </ul> was over-stripped.');
+  }
+  console.log('  PASS: <p> with nested formatting strip; downstream "Downstream Section" preserved');
+  console.log('Group ε-NON-GREEDY-BOUNDED: non-greedy [\\s\\S]*? inside <p> correctly bounded; downstream content survives.');
+
+  console.log('\n========== R6-ε-CROSS-CLUSTER-INTEGRATION — strip+inject pipeline + prior arc ==========');
+  // Strip+inject is still called from sendPreliminaryReviewToAdmin per C.6 invariant.
+  const _epsWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  if (!/stripAndInjectDocumentsIncluded/.test(_epsWebhookSrc)) {
+    throw new Error('FAIL [ε-CROSS-CLUSTER]: stripAndInjectDocumentsIncluded call site missing from webhook.js (C.6 invariant violation).');
+  }
+  // renderDocumentsIncludedSection still JS-authoritative.
+  const _epsAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  if (!/renderDocumentsIncludedSection/.test(_epsAiSrc)) {
+    throw new Error('FAIL [ε-CROSS-CLUSTER]: renderDocumentsIncludedSection helper missing.');
+  }
+  // R6-η + R5-C + R5-D anchors source-grep-present.
+  if (!/R6 Cluster η patterns/.test(_epsAiSrc)) throw new Error('FAIL: R6-η anchor missing');
+  if (!/_r5dWasInClash = existingDeal/.test(_epsWebhookSrc)) throw new Error('FAIL: R5-D-B anchor missing');
+  if (!/runDiscrepancyDetectionAggregated/.test(_epsWebhookSrc)) throw new Error('FAIL: R5-B-1 anchor missing');
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_epsWebhookSrc)) throw new Error('FAIL: R5-B-2 anchor missing');
+  if (!/selectGreetingFirstName/.test(_epsWebhookSrc)) throw new Error('FAIL: R5-E anchor missing');
+  console.log('  PASS: stripAndInjectDocumentsIncluded call-site intact in webhook.js (C.6 invariant)');
+  console.log('  PASS: renderDocumentsIncludedSection JS-renderer present');
+  console.log('  PASS: R6-η + R5-D-B + R5-B-1 + R5-B-2 + R5-E anchors source-grep-present');
+  console.log('Group ε-CROSS-CLUSTER-INTEGRATION: strip+inject pipeline preserved + full prior arc holding.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
