@@ -689,11 +689,21 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // strip backstop + prepend the JS Snapshot ensures admin Snapshot is JS-authoritative.
   // Admin sees full transparency on calibration-gated fields (market value, balance) even
   // though those are suppressed broker-facing pending Franco calibration.
-  const _bDetectAdmin = dEngine.runDiscrepancyDetection(
-    (dealMessages.find(m => m.direction === 'inbound')?.body) || '',
+  //
+  // R5-B-1 (2026-05-21): runDiscrepancyDetectionAggregated walks ALL inbound
+  // messages (msg[0..N]) and quote-strips each before feeding canonical_map.
+  // Pre-B-1 this site used msg[0].body only — broker corrections in turn 2+
+  // (Grace 6838e1cf msg[2] loan/value/position correction) were lost from the
+  // admin Snapshot. F3 quote-strip-only resolution (latest-non-empty wins)
+  // prevents the admin-reply-with-quoted-Vienna leakage that naive aggregation
+  // would have produced. See discrepancy-engine.js header for F3's known
+  // limitation (substantive admin-typed inline content not currently filtered).
+  const _bInboundMessages = dealMessages.filter(m => m.direction === 'inbound');
+  const _bDetectAdmin = dEngine.runDiscrepancyDetectionAggregated(
+    _bInboundMessages,
     dealDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
     leadSummaryBrokerName,
-    { emailSubject: dealMessages.find(m => m.direction === 'inbound')?.subject || '' }
+    { emailSubject: _bInboundMessages[0]?.subject || '' }
   );
   const _bSnapshotHtml = dEngine.renderDealSnapshot(_bDetectAdmin.canonical_map, {
     ownershipType,

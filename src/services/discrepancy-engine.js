@@ -535,6 +535,133 @@ const runDiscrepancyDetection = (emailBody, savedDocs, borrowerName = null, opts
   };
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// R5 Cluster B Sub-root 1 (2026-05-21): Snapshot canonical_map staleness fix.
+//
+// Pre-B-1, the admin Snapshot at webhook.js:693 fed extractCanonicalFields with
+// `dealMessages.find(m => m.direction === 'inbound')?.body` — msg[0] only.
+// Subsequent broker correction turns never fed canonical_map, so Franco's
+// Snapshot showed stale msg[0] data even when the broker corrected figures
+// in turn 2+.
+//
+// Real-Postmark fixture grounding (Grace Paulson 6838e1cf-ca2d-40a8-a1d1-
+// 8597d8c4ab50): broker corrected loan_amount $85k + market_value $615k +
+// mortgage_position 2nd in msg[2]; pre-fix Snapshot rendered "1st" only from
+// msg[0]. msg[3+] are admin-reply approvals containing quoted Vienna output;
+// naive latest-non-empty across all inbounds would let admin-quoted-Vienna
+// overwrite the true broker correction (mortgage_position "1st" leak).
+//
+// FIX SHAPE (F3 quote-strip-only, per F-3 verdict 2026-05-21):
+//   1. Per-inbound quote-strip via stripQuotedReplyChain (C3 fall-through:
+//      Gmail-style "On X wrote:" regex first, else strip > -prefixed lines).
+//   2. extractFromEmailBody per inbound on the stripped body.
+//   3. Latest-non-empty-wins resolution across inbounds (single-value shape
+//      preserved — canonical_map's tuple shape unchanged; renderDealSnapshot
+//      + computeDiscrepancySet untouched).
+//   4. Result feeds extractCanonicalFields via opts.preExtractedEmailFields,
+//      bypassing the internal single-body extract.
+//
+// EXPLICIT KNOWN LIMITATION (logged residual, NOT a bug):
+// F3 is empirically defensible on the current admin-reply workflow (one-word
+// verbs: "approved" / "SEND" / "send"). Admin-typed substantive inline content
+// containing canonical-field text (e.g., "Approved — adjust loan to $90k")
+// survives quote-strip and would feed canonical_map as if it were a broker
+// statement. Trigger for revisit: any Franco-side report of admin-stated
+// overrides surfacing in Snapshot, OR admin workflow shifting toward
+// substantive inline content. The structural fix at that point is F1
+// (schema migration to persist messages.from_email + add broker-filter at
+// the extraction layer). NOT in B-1 scope.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Quote-strip per C3 fall-through: Gmail-style header first, > -line strip second.
+// NOT covered (logged residual): Outlook "-----Original Message-----" + bare
+// "From: X Sent: Y" reply-chain markers. Trigger: future fixture surfacing
+// Outlook-style quoted leakage → add Outlook alternation to the regex.
+const stripQuotedReplyChain = (body) => {
+  if (!body || typeof body !== 'string') return '';
+  // Gmail-style: `^On <date / sender info, possibly multi-line> wrote:$`.
+  // /s makes . match \n (multi-line tolerant — Grace fixture wraps email
+  // address across lines); /m makes ^ and $ match line boundaries.
+  const gmailMatch = body.match(/^On .+? wrote:[ \t]*$/ms);
+  if (gmailMatch) {
+    return body.slice(0, gmailMatch.index).trim();
+  }
+  // Fall-through: per-line strip of `> `-prefixed lines (the per-line quote
+  // marker). Handles clients that emit > -prefixed quoted lines without a
+  // Gmail-style header.
+  const nonQuoted = body.split('\n').filter((line) => !line.startsWith('>'));
+  return nonQuoted.join('\n').trim();
+};
+
+// Aggregating wrapper: per-inbound quote-strip + extractFromEmailBody + latest-
+// non-empty-wins resolution; result feeds extractCanonicalFields via
+// opts.preExtractedEmailFields. canonical_map shape unchanged (single-value
+// email_body tuple per field, plus the standard per-doc tuples).
+const extractCanonicalFieldsAggregated = (inboundMessages, savedDocs, opts = {}) => {
+  const { emailSubject = '' } = opts;
+  const inbounds = (inboundMessages || []).filter((m) => m && (m.body || m.subject));
+
+  // Same shape as extractFromEmailBody return value — null until populated.
+  const resolved = {
+    subject_property_address: null,
+    subject_property_postal_code: null,
+    subject_property_market_value: null,
+    requested_loan_amount: null,
+    mortgage_position: null,
+    requested_loan_term_months: null,
+  };
+
+  // Per-msg in ascending order: strip + extract + latest-non-empty resolution.
+  for (const msg of inbounds) {
+    const strippedBody = stripQuotedReplyChain(msg.body || '');
+    const extracted = cf.extractFromEmailBody(strippedBody, msg.subject || emailSubject);
+    for (const field of Object.keys(resolved)) {
+      const v = extracted[field];
+      if (v != null && v !== '') resolved[field] = v;
+    }
+  }
+
+  return cf.extractCanonicalFields('', savedDocs, {
+    emailSubject,
+    preExtractedEmailFields: resolved,
+  });
+};
+
+// Aggregated discrepancy detection — mirrors runDiscrepancyDetection but uses
+// the multi-inbound canonical_map aggregator. Upstream guards (commercial /
+// S15-E identity-clash) use msg[0] body since they're deal-wide decisions
+// not aggregation-semantics-sensitive (a deal is or isn't commercial based on
+// initial submission shape; identity-clash detection runs against docs +
+// initial body).
+const runDiscrepancyDetectionAggregated = (inboundMessages, savedDocs, borrowerName = null, opts = {}) => {
+  const { emailSubject = '' } = opts;
+  const initialBody = (inboundMessages || [])[0]?.body || '';
+  const comm = cf.isCommercialSubmission(initialBody, savedDocs, borrowerName);
+  if (comm.commercial) {
+    return { commercial: true, commercial_signal: comm.signal, canonical_map: {}, discrepancy_set: [] };
+  }
+  const s15 = getS15Detector();
+  const clash = s15 ? s15(emailSubject, initialBody, savedDocs) : null;
+  if (clash) {
+    return { commercial: false, identity_clash_yielded: true, identity_clash_info: clash, canonical_map: {}, discrepancy_set: [] };
+  }
+  const canonical_map = extractCanonicalFieldsAggregated(inboundMessages, savedDocs, { emailSubject });
+  const jointBorrowers = detectJointMultiBorrower(savedDocs);
+  if (jointBorrowers) {
+    canonical_map.existing_first_mortgage_lender = [];
+    canonical_map.existing_first_mortgage_balance = [];
+    canonical_map.existing_first_mortgage_payout_total = [];
+    canonical_map.primary_borrower_full_name = [];
+  }
+  const discrepancy_set = computeDiscrepancySet(canonical_map);
+  return {
+    commercial: false,
+    joint_multi_borrower: jointBorrowers || null,
+    canonical_map,
+    discrepancy_set,
+  };
+};
+
 module.exports = {
   PARTITIONED_FIELDS,
   FIELD_DISPLAY_NAMES,
@@ -552,4 +679,8 @@ module.exports = {
   formatCanonicalFieldsForPrompt,
   filterBrokerFacing,
   runDiscrepancyDetection,
+  // R5-B-1 (2026-05-21): aggregating Snapshot fix
+  stripQuotedReplyChain,
+  extractCanonicalFieldsAggregated,
+  runDiscrepancyDetectionAggregated,
 };

@@ -7175,6 +7175,332 @@ Lender:
   console.log('Group F4-ADMIN-HANDOFF-CONSISTENCY: cross-feature integration with ADMIN-HANDOFF LINK-SUBMISSION confirmed.');
 
   // ════════════════════════════════════════════════════════════════
+  // R5 CLUSTER B SUB-ROOT 1 — Snapshot canonical_map staleness fix
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for B-1 (extractCanonicalFieldsAggregated wrapper +
+  // F3 quote-strip-only resolution).
+  //   B1-MSG-AGGREGATION-MATRIX: 12-case truth-table over the aggregating
+  //     wrapper. Includes ONE documented F3-LIMITATION case (named, NOT
+  //     expected to pass) pinning where F3's boundary sits.
+  //   B1-QUOTE-STRIP-FALLTHROUGH: deterministic C3 fall-through (Gmail-style
+  //     regex first, > -line strip second).
+  //   B1-GRACE-FIXTURE: real-Postmark replay confirming post-fix canonical_map
+  //     reflects msg[2] broker corrections (loan $85k / value $615k /
+  //     mortgage_position "2nd") while msg[3+] admin replies contribute
+  //     nothing post-strip.
+  //   B1-SNAPSHOT-AUTHORITY-PRESERVED: renderDealSnapshot byte-stability on
+  //     SAME canonical_map input (not pre/post-fix; values are expected to
+  //     differ — that's the point). Rendering pipeline unchanged.
+  //   B1-NO-DOWNSTREAM-LEAK: stripVienna_DealSnapshot + prependDealSnapshot
+  //     pipeline at webhook.js holds; admin Snapshot stays JS-authoritative.
+  //   B1-CROSS-CLUSTER-INTEGRATION: full prior arc (A+G, B-3, F-4, ADMIN-
+  //     HANDOFF, R4 RESIDUAL-BATCH) holding green.
+  const _b1Engine = require('./src/services/discrepancy-engine');
+  const _b1Cf = require('./src/services/canonical-fields');
+
+  console.log('\n========== R5-B1-QUOTE-STRIP-FALLTHROUGH — C3 fall-through ==========');
+  // C3: Gmail-style regex first, > -line strip second.
+  const _b1StripCases = [
+    {
+      name: 'no quoted content → preserved verbatim',
+      input: 'Hi Vienna,\n\nLoan amount: $85,000. Property value: $615,000.\n\nSophie',
+      expectContains: ['Loan amount: $85,000', '$615,000', 'Sophie'],
+      expectAbsent: [],
+    },
+    {
+      name: 'Gmail-style header → prefix only',
+      input: 'Hi Vienna,\n\nThe loan is $85,000.\n\nSophie\n\nOn Wed, 20 May 2026 at 20:41, Lead Underwriter wrote:\n\n> Hi Sophie!\n> Could you confirm the loan amount?\n',
+      expectContains: ['$85,000', 'Sophie'],
+      expectAbsent: ['Could you confirm', 'Hi Sophie!'],
+    },
+    {
+      name: 'Gmail header multi-line (Grace fixture shape) → prefix only',
+      input: 'approved\n\nOn Wed, 20 May 2026 at 21:38, Lead Underwriter @ Private Mortgage Link <\ninfo@privatemortgagelink.com> wrote:\n\n> *FILE STATUS:* PRELIMINARY REVIEW\n> *Property Address:* 88 harvest hills\n> *Loan Amount Requested:* $85,000\n',
+      expectContains: ['approved'],
+      expectAbsent: ['PRELIMINARY REVIEW', '88 harvest hills', '$85,000'],
+    },
+    {
+      name: '> -prefixed lines, no Gmail header → non-quoted lines preserved',
+      input: 'send\n\n> Closing draft preview\n> Loan amount $85,000\n> Property $615,000\n',
+      expectContains: ['send'],
+      expectAbsent: ['Closing draft', '$85,000', '$615,000'],
+    },
+    {
+      name: 'BOTH Gmail header AND > lines → Gmail regex wins (prefix only)',
+      input: 'OK\n\nOn Wed wrote:\n> stuff\n> more stuff\n',
+      expectContains: ['OK'],
+      expectAbsent: ['stuff'],
+    },
+    {
+      name: 'empty body → empty output (defensive)',
+      input: '',
+      expectContains: [],
+      expectAbsent: [],
+    },
+  ];
+  let _b1StripFails = 0;
+  for (const c of _b1StripCases) {
+    const stripped = _b1Engine.stripQuotedReplyChain(c.input);
+    let pass = true;
+    for (const phrase of c.expectContains) {
+      if (!stripped.includes(phrase)) { pass = false; console.log(`  FAIL: ${c.name} — expected to contain "${phrase}", got: ${JSON.stringify(stripped.slice(0, 200))}`); }
+    }
+    for (const phrase of c.expectAbsent) {
+      if (stripped.includes(phrase)) { pass = false; console.log(`  FAIL: ${c.name} — expected NOT to contain "${phrase}", got: ${JSON.stringify(stripped.slice(0, 200))}`); }
+    }
+    if (pass) console.log(`  PASS: ${c.name}`);
+    else _b1StripFails++;
+  }
+  if (_b1StripFails > 0) throw new Error(`FAIL [B1-QUOTE-STRIP-FALLTHROUGH]: ${_b1StripFails}/${_b1StripCases.length} cases failed.`);
+  console.log(`Group B1-QUOTE-STRIP-FALLTHROUGH: ${_b1StripCases.length}/${_b1StripCases.length} cases pass.`);
+
+  console.log('\n========== R5-B1-MSG-AGGREGATION-MATRIX — 12-case wrapper truth-table ==========');
+  // The wrapper: extractCanonicalFieldsAggregated walks inbounds in order,
+  // strips quoted-reply-chain per msg, extractFromEmailBody per stripped body,
+  // latest-non-empty-wins resolves email-body tuple values.
+  //
+  // Cases probe extracted-field outcomes for the canonical-map shape (email_body
+  // tuple contents). Each case provides inbounds + asserts the resulting
+  // canonical_map.requested_loan_amount[] / mortgage_position[] / etc. email_body
+  // tuple values match the expected latest-non-empty resolution.
+  const _b1Subj = 'New Private Mortgage Application — TestCase — 88 Harvest Hills Blvd NE, Calgary';
+  const _b1ExtractEmailBodyValue = (cm, field) => {
+    const tuples = (cm[field] || []).filter(t => t.source === 'email_body' || t.source === 'email_subject_or_body');
+    return tuples.length > 0 ? tuples[0].value : null;
+  };
+  // Canonical phrasings (must match extractFromEmailBody regex anchors):
+  //   - Loan amount: `(Loan|Mortgage) Amount( Requested)?: $X` — bold or plain
+  //   - Property value: `(Appraised Value|Property Value|Purchase Price): $X`
+  const _b1Matrix = [
+    {
+      name: '1 inbound, broker, no quotes → extracted unchanged',
+      inbounds: [{ body: 'Hi Vienna, Loan Amount Requested: $85,000.', subject: _b1Subj }],
+      expect: { requested_loan_amount: 85000 },
+    },
+    {
+      name: '1 inbound, broker, Gmail-style quoted chain → extract from prefix only',
+      inbounds: [{ body: 'Hi Vienna, Loan Amount: $85,000.\n\nOn Wed wrote:\n> Previous: Loan Amount: $50,000\n', subject: _b1Subj }],
+      expect: { requested_loan_amount: 85000 },
+    },
+    {
+      name: '1 inbound, broker, > -prefixed quoted lines (no Gmail header) → non-quoted only',
+      inbounds: [{ body: 'Hi Vienna, Loan Amount: $85,000.\n\n> Previous quote: Loan Amount: $50,000\n> More quote\n', subject: _b1Subj }],
+      expect: { requested_loan_amount: 85000 },
+    },
+    {
+      name: '1 inbound, BOTH Gmail header AND > lines → Gmail regex catches all',
+      inbounds: [{ body: 'Loan Amount: $85,000\n\nOn Wed wrote:\n> Older: Loan Amount: $50,000\n', subject: _b1Subj }],
+      expect: { requested_loan_amount: 85000 },
+    },
+    {
+      name: '2 inbounds, both broker, latest contains correction → correction wins',
+      inbounds: [
+        { body: 'Initial: Loan Amount: $50,000', subject: _b1Subj },
+        { body: 'Correction: Loan Amount: $85,000', subject: _b1Subj },
+      ],
+      expect: { requested_loan_amount: 85000 },
+    },
+    {
+      name: '3 inbounds, msg[0] broker initial, msg[1] broker correction, msg[2] admin reply with quoted Vienna → broker correction preserved (Grace failure mode pinned)',
+      inbounds: [
+        { body: 'Initial: Loan Amount: $50,000', subject: _b1Subj },
+        { body: 'Correction: Loan Amount: $85,000', subject: _b1Subj },
+        { body: 'approved\n\nOn Wed wrote:\n> *Loan Amount Requested:* $50,000\n> Other Vienna output\n', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review' },
+      ],
+      expect: { requested_loan_amount: 85000 },  // msg[2]'s quoted $50k stripped; broker correction preserved
+    },
+    {
+      name: '2 inbounds, msg[0] broker, msg[1] admin reply with NO quoted content → broker statement preserved',
+      inbounds: [
+        { body: 'Loan Amount: $85,000', subject: _b1Subj },
+        { body: 'approved', subject: 'Re: ACTION REQUIRED' },
+      ],
+      expect: { requested_loan_amount: 85000 },
+    },
+    {
+      name: '3 inbounds, broker → admin → broker correction → latest broker wins',
+      inbounds: [
+        { body: 'Initial: Loan Amount: $50,000', subject: _b1Subj },
+        { body: 'SEND\n\nOn Wed wrote:\n> draft Loan Amount: $50,000\n', subject: 'Re: Draft Preview' },
+        { body: 'Final correction: Loan Amount: $85,000', subject: _b1Subj },
+      ],
+      expect: { requested_loan_amount: 85000 },
+    },
+    {
+      name: '0 inbounds → empty canonical_map, no crash',
+      inbounds: [],
+      expect: { requested_loan_amount: null },
+    },
+    {
+      name: 'inbound with empty body → no contribution, no crash',
+      inbounds: [{ body: '', subject: _b1Subj }],
+      expect: { requested_loan_amount: null },
+    },
+    {
+      name: 'two inbounds, first has value, second has empty → first preserved (non-empty wins)',
+      inbounds: [
+        { body: 'Loan Amount: $85,000', subject: _b1Subj },
+        { body: 'short reply', subject: _b1Subj },
+      ],
+      expect: { requested_loan_amount: 85000 },
+    },
+    // ─── F3 LIMITATION pin (documented, NOT a bug) ───
+    // Forensic-pin discipline: this case documents F3's boundary deterministically.
+    // Admin types substantive inline content with canonical-field text BEFORE the
+    // quote marker — quote-strip preserves admin text → extractFromEmailBody picks
+    // up admin-stated value as if broker. The structural fix at this trigger is
+    // F1 (schema migration to persist messages.from_email). Logged residual in
+    // commit body; F3 is empirically defensible on the CURRENT admin-reply
+    // workflow (one-word verbs).
+    {
+      name: '[F3 LIMITATION PIN] admin reply with substantive canonical-field content → F3 picks up admin value (KNOWN BOUNDARY)',
+      inbounds: [
+        { body: 'Initial broker submission: Loan Amount: $85,000', subject: _b1Subj },
+        { body: 'Approved — Loan Amount: $90,000', subject: 'Re: ACTION REQUIRED' },
+      ],
+      expect: { requested_loan_amount: 90000 },  // F3 LIMITATION: admin override wins
+      isLimitationPin: true,
+    },
+  ];
+  let _b1MatrixFails = 0;
+  for (const c of _b1Matrix) {
+    const cm = _b1Engine.extractCanonicalFieldsAggregated(c.inbounds, [], { emailSubject: _b1Subj });
+    let pass = true;
+    for (const [field, expected] of Object.entries(c.expect)) {
+      const actual = _b1ExtractEmailBodyValue(cm, field);
+      if (actual !== expected) {
+        pass = false;
+        console.log(`  FAIL: ${c.name} — ${field} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+      }
+    }
+    if (pass) {
+      const tag = c.isLimitationPin ? '  PIN (F3 LIMITATION)' : '  PASS';
+      console.log(`${tag}: ${c.name}`);
+    } else {
+      _b1MatrixFails++;
+    }
+  }
+  if (_b1MatrixFails > 0) throw new Error(`FAIL [B1-MSG-AGGREGATION-MATRIX]: ${_b1MatrixFails}/${_b1Matrix.length} cases failed.`);
+  console.log(`Group B1-MSG-AGGREGATION-MATRIX: ${_b1Matrix.length}/${_b1Matrix.length} cases pass (incl. 1 F3 LIMITATION pin).`);
+
+  console.log('\n========== R5-B1-GRACE-FIXTURE — real-Postmark replay (LOAD-BEARING) ==========');
+  // Real-Postmark fixture: synthetic minimal-replay of Grace Paulson 6838e1cf
+  // (verified empirically via /tmp/r5-b1-fixture-pull.js against production DB).
+  // Pre-fix: msg[0]-only canonical_map shows mortgage_position "1st" only.
+  // Naive latest-non-empty: msg[3]'s quoted Vienna would overwrite mortgage_position
+  // to "1st" (leakage). F3 quote-strip: msg[3+] strip to empty, msg[2]'s broker
+  // correction wins.
+  const _b1GraceInbounds = [
+    { body: "Hi, I'm Sophie Delacroix with Landmark Mortgage Corp (Lic. #MB221043). I have a client looking for a private first mortgage.\n\nSophie Delacroix\n\nLandmark Mortgage Corp Lic. #MB221043",
+      subject: 'New Private Mortgage Application — Grace Paulson — 88 Harvest Hills Blvd NE, Calgary' },
+    { body: "Hi Vienna,\n\nThanks for the quick response! Please find Grace's government ID, property tax assessment, and completed PNW Statement attached.\n\nSophie",
+      subject: 'Re: New Private Mortgage Application — Grace Paulson — 88 Harvest Hills Blvd NE, Calgary' },
+    { body: "Hi Vienna,\n\nApologies for the confusion in my email — the loan application figures are correct. To clarify:\n\n   1. Loan amount: $85,000 — my earlier figure was an error\n   2. Property value: $615,000 per the appraisal — correct\n   3. Mortgage position: 2nd\n\nSophie",
+      subject: 'Re: Re: New Private Mortgage Application — Grace Paulson' },
+    { body: "approved\n\nOn Wed, 20 May 2026 at 21:38, Lead Underwriter @ Private Mortgage Link <\ninfo@privatemortgagelink.com> wrote:\n\n> *FILE STATUS:* PRELIMINARY REVIEW\n> *Property Address:* 88 harvest hills\n> *Loan Amount Requested:* $85,000\n> *Mortgage Position:* 1st\n",
+      subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Grace Marie Paulson — 61% LTV' },
+    { body: "SEND\n\nOn Wed wrote:\n> draft preview\n",
+      subject: 'Re: Re: ACTION REQUIRED: PRELIMINARY Review' },
+  ];
+  const _b1GraceCm = _b1Engine.extractCanonicalFieldsAggregated(_b1GraceInbounds, [], {
+    emailSubject: _b1GraceInbounds[0].subject,
+  });
+  const _b1GraceLoan = _b1ExtractEmailBodyValue(_b1GraceCm, 'requested_loan_amount');
+  const _b1GraceValue = _b1ExtractEmailBodyValue(_b1GraceCm, 'subject_property_market_value');
+  const _b1GracePos = _b1ExtractEmailBodyValue(_b1GraceCm, 'mortgage_position');
+  let _b1GraceFails = 0;
+  if (_b1GraceLoan !== 85000) { _b1GraceFails++; console.log(`  FAIL: Grace loan_amount expected 85000, got ${_b1GraceLoan}`); }
+  else console.log(`  PASS: Grace requested_loan_amount = 85000 (msg[2] broker correction wins)`);
+  if (_b1GraceValue !== 615000) { _b1GraceFails++; console.log(`  FAIL: Grace market_value expected 615000, got ${_b1GraceValue}`); }
+  else console.log(`  PASS: Grace subject_property_market_value = 615000 (msg[2] broker correction wins)`);
+  if (_b1GracePos !== '2nd') { _b1GraceFails++; console.log(`  FAIL: Grace mortgage_position expected "2nd", got ${JSON.stringify(_b1GracePos)} — F3 QUOTE-STRIP FAILED to prevent msg[3] quoted-Vienna leakage`); }
+  else console.log(`  PASS: Grace mortgage_position = "2nd" (F3 quote-strip prevents msg[3] quoted-Vienna leakage of "1st")`);
+  // Pre-fix simulation for delta comparison: msg[0] only.
+  const _b1PreFixCm = _b1Cf.extractCanonicalFields(_b1GraceInbounds[0].body, [], { emailSubject: _b1GraceInbounds[0].subject });
+  const _b1PreFixLoan = _b1ExtractEmailBodyValue(_b1PreFixCm, 'requested_loan_amount');
+  if (_b1PreFixLoan !== null) { _b1GraceFails++; console.log(`  FAIL: pre-fix simulation expected no loan_amount in msg[0], got ${_b1PreFixLoan}. Diagnosis is wrong.`); }
+  else console.log(`  PASS: pre-fix (msg[0]-only) yields NO loan_amount — confirms B-1 diagnosis empirically`);
+  if (_b1GraceFails > 0) throw new Error(`FAIL [B1-GRACE-FIXTURE]: ${_b1GraceFails} assertions failed. Real-Postmark fixture grounding breach → HOLD per pre-committed matrix.`);
+  console.log(`Group B1-GRACE-FIXTURE: all assertions pass; F3 quote-strip-only correctly resolves Grace's canonical_map.`);
+
+  console.log('\n========== R5-B1-SNAPSHOT-AUTHORITY-PRESERVED — renderDealSnapshot byte-stability ==========');
+  // Same canonical_map input → identical renderDealSnapshot output. The fix
+  // changes WHICH canonical_map values reach the renderer; the renderer pipeline
+  // is unchanged. Pin via deterministic equality on a fixed canonical_map shape.
+  const _b1FixedCm = {
+    subject_property_address: [{ value: '88 harvest hills', source: 'email_body' }],
+    subject_property_postal_code: [],
+    subject_property_market_value: [{ value: 615000, source: 'email_body' }],
+    subject_property_assessment_value: [],
+    requested_loan_amount: [{ value: 85000, source: 'email_body' }],
+    existing_first_mortgage_lender: [],
+    existing_first_mortgage_balance: [],
+    existing_first_mortgage_payout_total: [],
+    primary_borrower_full_name: [{ value: 'Grace Paulson', source: 'CreditBureau.pdf' }],
+    mortgage_position: [{ value: '2nd', source: 'email_subject_or_body' }],
+    requested_loan_term_months: [],
+  };
+  const _b1Snap1 = _b1Engine.renderDealSnapshot(_b1FixedCm, { ownershipType: 'individual', isCommercial: false });
+  const _b1Snap2 = _b1Engine.renderDealSnapshot(_b1FixedCm, { ownershipType: 'individual', isCommercial: false });
+  if (_b1Snap1 !== _b1Snap2) {
+    throw new Error('FAIL [B1-SNAPSHOT-AUTHORITY-PRESERVED]: renderDealSnapshot is non-deterministic on same input. Byte-stability breach.');
+  }
+  // Confirm key field values appear in the rendered Snapshot.
+  if (!_b1Snap1.includes('$85,000') || !_b1Snap1.includes('$615,000') || !_b1Snap1.includes('2nd')) {
+    throw new Error(`FAIL [B1-SNAPSHOT-AUTHORITY-PRESERVED]: rendered Snapshot missing expected values. Output[0..500]: ${_b1Snap1.slice(0, 500)}`);
+  }
+  console.log('  PASS: renderDealSnapshot deterministic on same canonical_map input (byte-stable).');
+  console.log('  PASS: rendered Snapshot includes $85,000, $615,000, 2nd as expected.');
+  console.log('Group B1-SNAPSHOT-AUTHORITY-PRESERVED: rendering pipeline unchanged; fix touches INPUT data only.');
+
+  console.log('\n========== R5-B1-NO-DOWNSTREAM-LEAK — stripVienna_DealSnapshot + prependDealSnapshot ==========');
+  // The webhook.js Snapshot-prepend pipeline strips Vienna-emitted Snapshot then
+  // prepends JS-canonical. Verify both helpers still exist + the call site at
+  // webhook.js:712-713 references them.
+  const _b1WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  if (!/stripVienna_DealSnapshot/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-NO-DOWNSTREAM-LEAK]: stripVienna_DealSnapshot call missing from webhook.js — Snapshot-prepend pipeline broken.');
+  }
+  if (!/prependDealSnapshot/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-NO-DOWNSTREAM-LEAK]: prependDealSnapshot call missing from webhook.js — Snapshot-prepend pipeline broken.');
+  }
+  // Also pin: the new runDiscrepancyDetectionAggregated call site is followed by the
+  // existing strip+prepend (downstream pipeline unchanged).
+  if (!/runDiscrepancyDetectionAggregated[\s\S]{0,2000}stripVienna_DealSnapshot/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-NO-DOWNSTREAM-LEAK]: runDiscrepancyDetectionAggregated must precede stripVienna_DealSnapshot in webhook.js (downstream pipeline order).');
+  }
+  console.log('  PASS: stripVienna_DealSnapshot + prependDealSnapshot pipeline intact.');
+  console.log('  PASS: aggregated detection call precedes Snapshot strip+prepend (downstream pipeline order preserved).');
+  console.log('Group B1-NO-DOWNSTREAM-LEAK: admin Snapshot stays JS-authoritative.');
+
+  console.log('\n========== R5-B1-CROSS-CLUSTER-INTEGRATION — prior-arc holding green ==========');
+  // ADMIN-HANDOFF NOTIFY-ADMIN-ONLY gate is upstream of L693 (admin-controlled
+  // deals skip Snapshot generation via early-return). F-4 denylist gate is
+  // upstream of deal-creation. B-1 wrapper is downstream of both — structural
+  // separation. Verify via source-grep the upstream gates still exist.
+  // (a) ADMIN-HANDOFF gate present.
+  if (!/existingDeal\.admin_controlled\s*===\s*true\s*&&\s*!isAdmin/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-CROSS-CLUSTER-INTEGRATION]: ADMIN-HANDOFF NOTIFY-ADMIN-ONLY gate missing from webhook.js. Upstream separation breach.');
+  }
+  // (b) F-4 denylist (substring check) present.
+  if (!/ignoredSenders\.some/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-CROSS-CLUSTER-INTEGRATION]: F-4 ignoredSenders.some filter missing from webhook.js. Upstream separation breach.');
+  }
+  // (c) R5-A+G executeDraft guard widening present.
+  if (!/_r5IsPrelimReviewDraft|_r5IsClosingDraft/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-CROSS-CLUSTER-INTEGRATION]: R5-A+G executeDraft guard widening missing from webhook.js.');
+  }
+  // (d) R5-B-3 decideReviewDispatch prelim_approved_at gate present.
+  if (!/prelim_approved_at[\s\S]{0,500}completion-handoff/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-CROSS-CLUSTER-INTEGRATION]: R5-B-3 decideReviewDispatch prelim_approved_at gate missing from webhook.js.');
+  }
+  console.log('  PASS: ADMIN-HANDOFF NOTIFY-ADMIN-ONLY gate present (upstream).');
+  console.log('  PASS: F-4 ignoredSenders filter present (upstream).');
+  console.log('  PASS: R5-A+G executeDraft guard widening present.');
+  console.log('  PASS: R5-B-3 decideReviewDispatch prelim_approved_at gate present.');
+  console.log('Group B1-CROSS-CLUSTER-INTEGRATION: full prior arc structurally intact.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin

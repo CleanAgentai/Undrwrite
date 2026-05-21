@@ -579,6 +579,12 @@ const extractBorrowerFromPropertyTax = (doc) => {
 
 // ─── Top-level: extract everything per submission ───
 
+// R5 Cluster B Sub-root 1 (2026-05-21): opts.preExtractedEmailFields
+// supports the aggregating wrapper in discrepancy-engine.js — when provided
+// (object with the email-body field shape), the internal extractFromEmailBody
+// call is bypassed and these values feed the `email_body` tuples directly.
+// The wrapper resolves multi-msg latest-non-empty-wins externally and passes
+// the result here. emailBody can be '' when preExtractedEmailFields is used.
 const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   const emailSubject = opts.emailSubject || '';
   const map = {
@@ -601,8 +607,8 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     map[field].push({ value, source, ...extra });
   };
 
-  // Email body + subject
-  const email = extractFromEmailBody(emailBody, emailSubject);
+  // Email body + subject — bypass extraction when wrapper supplies pre-extracted fields.
+  const email = opts.preExtractedEmailFields || extractFromEmailBody(emailBody, emailSubject);
   push('subject_property_address', email.subject_property_address, 'email_body');
   push('subject_property_postal_code', email.subject_property_postal_code, 'email_body');
   push('subject_property_market_value', email.subject_property_market_value, 'email_body');
