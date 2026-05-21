@@ -3112,12 +3112,23 @@ As of April 23, 2026`;
 
   // ─── Substitution truth-table — Franco-reported variants + PPPP-listed residual ───
   const sweepCases = [
-    // E-a verbatim (Ethan msg[2]): full-phrase substitution to PPPP-allowed.
+    // E-a verbatim (Ethan msg[2]): cascade behavior post-R5-C (2026-05-21).
+    // Pre-R5-C, E-a substituted "I'll be in touch shortly with an update." as
+    // the safe replacement. R5-C-a (Franco's S3 Bug 2 rule) put that exact
+    // string into the offending family — it's now cascade-stripped on the
+    // same enforceNoRoutingLeak pass. Both layers of the leak are now
+    // removed (the original "moving through our review process" AND the
+    // intermediate "I'll be in touch shortly with an update"). Legitimate
+    // context ("Once that's clarified") survives.
     {
-      label: 'E-a verbatim (Ethan msg[2])',
+      label: 'E-a verbatim (Ethan msg[2]) — R5-C cascade',
       input: '<p>Once that\'s clarified, I\'ll get this moving through our review process!</p>',
-      mustContain: ["I'll be in touch shortly with an update."],
-      mustNotContain: ["our review process", "I'll get this moving"],
+      mustContain: ["Once that's clarified"],
+      mustNotContain: [
+        "our review process",
+        "I'll get this moving",
+        "I'll be in touch shortly with an update",  // R5-C-a cascade-strip
+      ],
     },
     // E-b variant (Marcus msg[2]): full-phrase substitution.
     {
@@ -8145,6 +8156,212 @@ Lender:
   if (!/computeDealClassification/.test(_eCronSrc)) throw new Error('FAIL: R5-F-3 partition anchor missing');
   console.log('  PASS: R5-A+G + R5-B-3 + R5-F-4 + ADMIN-HANDOFF + R5-B-1 + R5-B-2 + R5-F-2 + R5-F-3 all source-grep-present');
   console.log('Group E-CROSS-CLUSTER-INTEGRATION: full prior arc holding green.');
+
+  // ════════════════════════════════════════════════════════════════
+  // R5 CLUSTER C — workflow-language E-extension (S3 Bug 2)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R5-C (three new ROUTING_LEAK_PATTERNS:
+  // R5-C-a trailing "I'll be in touch with an update", R5-C-b leading
+  // "(The|Your) (loan-synonym) is being reviewed" + connector, R5-C-c
+  // bounded-subject standalone "is being reviewed" catch).
+  //   C-PATTERNS-MATRIX: truth-table over each new pattern + broadened
+  //     subject set + composed Derek/Lena outputs.
+  //   C-DEREK-FIXTURE: real-Postmark replay of Derek out[2-4] verbatim.
+  //   C-LENA-FIXTURE: real-Postmark replay of Lena out[2] verbatim.
+  //   C-CASCADE-COMPOSITION: cascade pin — R5-C-a appears AFTER existing
+  //     E/C.3 patterns; cascade output of existing-rule replacement is
+  //     caught on the same enforceNoRoutingLeak pass.
+  //   C-OVER-FIRE-PROTECTION: deterministic negatives on external-document
+  //     subjects (appraisal / credit bureau / lender's policies — legitimate
+  //     factual statements that MUST NOT be swept).
+  //   C-CROSS-CLUSTER-INTEGRATION: full prior arc; existing E/C.3 truth-
+  //     tables still pass; enforceNoRoutingLeak call-site count unchanged.
+  const _cAi = require('./src/services/ai');
+  const { enforceNoRoutingLeak: _cSweep, ROUTING_LEAK_PATTERNS: _cPatterns } = _cAi;
+
+  console.log('\n========== R5-C-PATTERNS-MATRIX — new patterns truth-table ==========');
+  // Cases cover R5-C-a / R5-C-b / R5-C-c + composed Derek/Lena outputs.
+  // Each case: input → expected output (after enforceNoRoutingLeak).
+  const _cMatrix = [
+    // ─── R5-C-a (trailing "I'll be in touch with an update") ───
+    ['Hi! Sorted out, I\'ll be in touch with an update.',
+      'Hi! Sorted out.',
+      'R5-C-a: ", I\'ll be in touch with an update." → "."'],
+    ['Once we have that sorted out, and I\'ll be in touch with an update!',
+      'Once we have that sorted out.',
+      'R5-C-a: ", and I\'ll be in touch with an update!" → "."'],
+    ['Sorted! I\'ll be in touch shortly with an update.',
+      'Sorted!.',
+      'R5-C-a: "shortly" tolerance (Lena shape) + "I\'ll" contraction (per Vienna emission convention)'],
+    // ─── R5-C-b (leading "(The|Your) loan-synonym is being reviewed,") ───
+    ['The file is currently being reviewed, and We\'re still waiting on docs.',
+      'We\'re still waiting on docs.',
+      'R5-C-b: "The file is currently being reviewed, and " → "" (Lena leading clause)'],
+    ['Your application is being reviewed. We need more info.',
+      '. We need more info.',
+      'R5-C-b: "Your application is being reviewed" stripped (broadened subject set)'],
+    ['The submission is being reviewed, and we\'ll proceed.',
+      'we\'ll proceed.',
+      'R5-C-b: "The submission" loan-synonym + trailing ", and" connector'],
+    ['Your deal is being reviewed.',
+      '.',
+      'R5-C-b: "Your deal" — no trailing connector; subject+verb stripped'],
+    ['The package is currently being reviewed.',
+      '.',
+      'R5-C-b: "The package" — "currently" optional preserved'],
+    // ─── R5-C-c (standalone "subject is being reviewed" defensive catch) ───
+    ['As mentioned, this is being reviewed!',
+      'As mentioned,',
+      'R5-C-c: bare "this is being reviewed" — bounded subject set'],
+    ['This discrepancy is being reviewed.',
+      '',
+      'R5-C-c: "this discrepancy" — internal-noun shape (per R5-C verdict)'],
+    ['This issue is being reviewed.',
+      '',
+      'R5-C-c: "this issue" — internal-noun shape'],
+    ['This matter is being reviewed.',
+      '',
+      'R5-C-c: "this matter" — internal-noun shape'],
+    // ─── Composed: full Derek/Lena verbatim production strings ───
+    ['Once we have these details sorted out, the file is being reviewed and I\'ll be in touch with an update!',
+      'Once we have these details sorted out.',
+      'R5-C composed: Derek out[2] verbatim → trailing dropped + leading "file is being reviewed and" dropped'],
+    ['The file is currently being reviewed, and I\'ll be in touch shortly with an update.',
+      '.',
+      'R5-C composed: Lena out[2] verbatim → both clauses dropped; ends in "."'],
+  ];
+  let _cMatrixFails = 0;
+  for (const [input, expected, label] of _cMatrix) {
+    const { swept } = _cSweep(input);
+    // Normalize whitespace for comparison (sweep may leave double-spaces; that's cosmetic)
+    const sweptNorm = swept.replace(/\s+/g, ' ').trim();
+    const expectedNorm = expected.replace(/\s+/g, ' ').trim();
+    if (sweptNorm !== expectedNorm) {
+      _cMatrixFails++;
+      console.log(`  FAIL: ${label}`);
+      console.log(`    input:    ${JSON.stringify(input)}`);
+      console.log(`    expected: ${JSON.stringify(expectedNorm)}`);
+      console.log(`    got:      ${JSON.stringify(sweptNorm)}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_cMatrixFails > 0) throw new Error(`FAIL [C-PATTERNS-MATRIX]: ${_cMatrixFails}/${_cMatrix.length} cases failed.`);
+  console.log(`Group C-PATTERNS-MATRIX: ${_cMatrix.length}/${_cMatrix.length} cases pass.`);
+
+  console.log('\n========== R5-C-DEREK-FIXTURE — real-Postmark replay (LOAD-BEARING) ==========');
+  // Verbatim Derek dce308c8 out[2-4] production strings.
+  const _cDerekCases = [
+    ['Once we have these details sorted out, the file is being reviewed and I\'ll be in touch with an update!', 'out[2]'],
+    ['Once we have that sorted out, I\'ll be in touch with an update!', 'out[3]'],
+    ['Once we have this sorted out, I\'ll be in touch with an update!', 'out[4]'],
+  ];
+  let _cDerekFails = 0;
+  for (const [input, label] of _cDerekCases) {
+    const { swept, sweptAny } = _cSweep(input);
+    // Must remove the trailing "I'll be in touch with an update" + leading "the file is being reviewed and"
+    // Result should still contain "Once we have ... sorted out" but NEITHER offending phrase.
+    if (!sweptAny) { _cDerekFails++; console.log(`  FAIL ${label}: sweep was no-op on production-offending text`); continue; }
+    if (/I'?ll\s+be\s+in\s+touch\s+with\s+an\s+update/i.test(swept)) {
+      _cDerekFails++; console.log(`  FAIL ${label}: trailing offending phrase survived sweep. Got: ${JSON.stringify(swept)}`); continue;
+    }
+    if (/(the|your)\s+(file|application|submission|deal|package)\s+is\s+being\s+reviewed/i.test(swept)) {
+      _cDerekFails++; console.log(`  FAIL ${label}: leading "file is being reviewed" survived sweep. Got: ${JSON.stringify(swept)}`); continue;
+    }
+    console.log(`  PASS Derek ${label}: ${JSON.stringify(swept)}`);
+  }
+  if (_cDerekFails > 0) throw new Error(`FAIL [C-DEREK-FIXTURE]: ${_cDerekFails}/${_cDerekCases.length} fixtures failed.`);
+  console.log(`Group C-DEREK-FIXTURE: ${_cDerekCases.length}/${_cDerekCases.length} Derek/Vanessa production strings correctly neutralized.`);
+
+  console.log('\n========== R5-C-LENA-FIXTURE — real-Postmark replay (LOAD-BEARING) ==========');
+  const _cLenaInput = 'The file is currently being reviewed, and I\'ll be in touch shortly with an update.';
+  const { swept: _cLenaSwept, sweptAny: _cLenaAny } = _cSweep(_cLenaInput);
+  let _cLenaFails = 0;
+  if (!_cLenaAny) { _cLenaFails++; console.log(`  FAIL Lena: sweep was no-op on production-offending text`); }
+  if (/I'?ll\s+be\s+in\s+touch\s+(?:shortly\s+)?with\s+an\s+update/i.test(_cLenaSwept)) {
+    _cLenaFails++; console.log(`  FAIL Lena: trailing offending phrase survived. Got: ${JSON.stringify(_cLenaSwept)}`);
+  }
+  if (/(the|your)\s+(file|application|submission|deal|package)\s+is\s+(?:currently\s+)?being\s+reviewed/i.test(_cLenaSwept)) {
+    _cLenaFails++; console.log(`  FAIL Lena: leading "file is being reviewed" survived. Got: ${JSON.stringify(_cLenaSwept)}`);
+  }
+  if (_cLenaFails > 0) throw new Error(`FAIL [C-LENA-FIXTURE]: ${_cLenaFails} assertions failed.`);
+  console.log(`  PASS Lena out[2]: ${JSON.stringify(_cLenaSwept)} (both clauses dropped)`);
+  console.log(`Group C-LENA-FIXTURE: Lena/Park R4-S14 Bug 3 production string correctly neutralized.`);
+
+  console.log('\n========== R5-C-CASCADE-COMPOSITION — single-pass cascade pin ==========');
+  // (a) Source order pin: R5-C-a appears AFTER existing E/C.3 patterns in ROUTING_LEAK_PATTERNS array.
+  // Find indices of E-a's replace string + R5-C-a's match source.
+  const _cAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const _cEaPos = _cAiSrc.indexOf("I'll get this moving through");
+  const _cR5CaPos = _cAiSrc.indexOf("R5-C-a — trailing");
+  if (_cEaPos < 0 || _cR5CaPos < 0 || _cEaPos >= _cR5CaPos) {
+    throw new Error(`FAIL [C-CASCADE-COMPOSITION]: R5-C-a must appear AFTER E-a in ROUTING_LEAK_PATTERNS source order. E-a pos=${_cEaPos}, R5-C-a pos=${_cR5CaPos}.`);
+  }
+  console.log('  PASS: R5-C-a appears AFTER E-a in source order (cascade-position-pinned)');
+  // (b) Behavioral cascade: existing E-a replacement "I'll be in touch shortly with an update." should
+  // become "." after R5-C-a fires.
+  const _cCascadeInput = "I'll get this moving through our review process!";  // E-a input
+  const { swept: _cCascadeSwept } = _cSweep(_cCascadeInput);
+  if (/I'?ll\s+be\s+in\s+touch\s+with\s+an\s+update/i.test(_cCascadeSwept)) {
+    throw new Error(`FAIL [C-CASCADE-COMPOSITION]: E-a output "I'll be in touch shortly with an update." should cascade into R5-C-a sweep on the same pass. Got: ${JSON.stringify(_cCascadeSwept)}`);
+  }
+  console.log(`  PASS: E-a → R5-C-a single-pass cascade. Input ${JSON.stringify(_cCascadeInput)} → ${JSON.stringify(_cCascadeSwept)}`);
+  // (c) Same for E-b/E-c/C3-c/C3-d (their replacement "I'll be in touch shortly." is shorter
+  // — R5-C-a requires "with an update" so it doesn't catch them. That's by design — those
+  // existing replacements are still "in the offending family per Franco's broader rule" but NOT
+  // in Franco's S3 Bug 2 specific phrasing. Logged as residual.)
+  // (d) enforceNoRoutingLeak call-site count unchanged in webhook.js (matches
+  // the existing E_EXPECTED_SWEEP_CALL_COUNT === 3 closed-set assertion). R5-C
+  // adds 3 new ROUTING_LEAK_PATTERNS entries but adds ZERO new invocations.
+  const _cWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _cWebhookSweepCallCount = (_cWebhookSrc.match(/aiService\.enforceNoRoutingLeak\s*\(/g) || []).length;
+  if (_cWebhookSweepCallCount !== 3) {
+    throw new Error(`FAIL [C-CASCADE-COMPOSITION]: aiService.enforceNoRoutingLeak invocations in webhook.js = ${_cWebhookSweepCallCount}; expected exactly 3 (closed-set per E_EXPECTED_SWEEP_CALL_COUNT). R5-C must NOT add new call sites — only extend the pattern array.`);
+  }
+  console.log(`  PASS: aiService.enforceNoRoutingLeak invocations in webhook.js = 3 (closed-set call-site count unchanged; R5-C adds patterns, not call sites)`);
+  console.log('Group C-CASCADE-COMPOSITION: cascade order + behavioral composition + call-site count all pinned.');
+
+  console.log('\n========== R5-C-OVER-FIRE-PROTECTION — deterministic negatives ==========');
+  // External-document subjects MUST NOT be swept. Per R5-C verdict: only loan-file synonyms
+  // ((the|your) file/application/submission/deal/package) and bare "this" + internal-noun ("this
+  // discrepancy / issue / matter") count as Vienna-workflow leaks. External-document subjects
+  // ("the appraisal", "the credit bureau", "the lender's policies") are legitimate factual statements.
+  const _cNegatives = [
+    ['The appraisal is being reviewed.', 'external-document subject (appraisal)'],
+    ['The credit bureau is being reviewed.', 'external-document subject (credit bureau)'],
+    ['The lender\'s policies are being reviewed.', 'external-party subject (lender)'],
+    ['The borrower\'s application form is being reviewed by the lender.', 'external "by the lender" qualifier'],
+    ['I\'ll be in touch shortly to coordinate the next steps.', 'benign "I\'ll be in touch" without "with an update"'],
+    ['Vienna will follow up with an update on Tuesday.', 'benign "with an update" without "I\'ll be in touch"'],
+  ];
+  let _cNegFails = 0;
+  for (const [input, label] of _cNegatives) {
+    const { swept, sweptAny } = _cSweep(input);
+    if (sweptAny) {
+      _cNegFails++;
+      console.log(`  FAIL over-fire on ${label}: input ${JSON.stringify(input)} → ${JSON.stringify(swept)}`);
+    } else {
+      console.log(`  PASS no over-fire: ${label}`);
+    }
+  }
+  if (_cNegFails > 0) throw new Error(`FAIL [C-OVER-FIRE-PROTECTION]: ${_cNegFails}/${_cNegatives.length} negatives over-fired.`);
+  console.log(`Group C-OVER-FIRE-PROTECTION: ${_cNegatives.length}/${_cNegatives.length} external-document/benign cases correctly preserved.`);
+
+  console.log('\n========== R5-C-CROSS-CLUSTER-INTEGRATION — prior arc holding ==========');
+  // Re-verify ALL prior R5 commits + R4 anchors.
+  if (!/_r5IsPrelimReviewDraft|_r5IsClosingDraft/.test(_cWebhookSrc)) throw new Error('FAIL: R5-A+G anchor missing');
+  if (!/prelim_approved_at[\s\S]{0,500}completion-handoff/.test(_cWebhookSrc)) throw new Error('FAIL: R5-B-3 anchor missing');
+  if (!/ignoredSenders\.some/.test(_cWebhookSrc)) throw new Error('FAIL: R5-F-4 anchor missing');
+  if (!/existingDeal\.admin_controlled === true && !isAdmin/.test(_cWebhookSrc)) throw new Error('FAIL: ADMIN-HANDOFF anchor missing');
+  if (!/runDiscrepancyDetectionAggregated/.test(_cWebhookSrc)) throw new Error('FAIL: R5-B-1 anchor missing');
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_cWebhookSrc)) throw new Error('FAIL: R5-B-2 anchor missing');
+  if (!/selectGreetingFirstName/.test(_cWebhookSrc)) throw new Error('FAIL: R5-E refined anchor missing in webhook.js');
+  const _cCronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  if (!/claimDailySummarySlot/.test(_cCronSrc)) throw new Error('FAIL: R5-F-2 anchor missing');
+  if (!/selectGreetingFirstName/.test(_cCronSrc)) throw new Error('FAIL: R5-E refined anchor missing in cron');
+  // Existing E/C.3 truth-table still passes (already verified by other groups in the harness).
+  console.log('  PASS: full prior arc anchors all source-grep-present (A+G + B-3 + F-4 + ADMIN-HANDOFF + B-1 + B-2 + F-2/3 + E refined)');
+  console.log('Group C-CROSS-CLUSTER-INTEGRATION: full prior arc holding green.');
 
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask

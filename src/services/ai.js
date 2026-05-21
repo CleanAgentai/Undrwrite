@@ -917,6 +917,59 @@ const ROUTING_LEAK_PATTERNS = [
   // is a legitimate phrase in many non-leak contexts.
   { match: /\b(?:I'?ll\s+get\s+)?(?:this\s+|it\s+)?forwarded\s+to\s+(?:Franco|the\s+(?:admin|lender|underwriter))\s+for\s+(?:final\s+)?review\b[.!?]?/gi,
     replace: "I'll be in touch shortly." },
+  // ── R5 Cluster C patterns (2026-05-21) ────────────────────────────────
+  // Franco's R6 S3 Bug 2 rule: "Brokers should not be told the file is 'being
+  // reviewed' — Vienna should communicate only what is needed to resolve the
+  // discrepancy, with no reference to any internal workflow or review stage."
+  //
+  // Empirical corpus (real-Postmark grep, 2 fixtures):
+  //   Derek/Vanessa dce308c8 (R5-S3) out[2-4] — three emissions of trailing
+  //     "I'll be in touch with an update" on discrepancy-resolution turns:
+  //     "Once we have these details sorted out, the file is being reviewed
+  //      and I'll be in touch with an update!"
+  //     "Once we have that sorted out, I'll be in touch with an update!"
+  //     "Once we have this sorted out, I'll be in touch with an update!"
+  //   Lena 8486bf8a (R4-S14 Bug 3) out[2] — compound shape:
+  //     "The file is currently being reviewed, and I'll be in touch shortly
+  //      with an update."
+  //
+  // CASCADE-COMPOSITION (load-bearing — pinned in C-CASCADE-COMPOSITION test):
+  // Existing E-a / E-b / E-c / C3-c / C3-d patterns above use "I'll be in
+  // touch shortly." / "I'll be in touch shortly with an update." as their
+  // SAFE REPLACEMENT. Franco's S3 Bug 2 rule put THOSE replacement strings
+  // into the offending family. R5-C-a appears AFTER the existing patterns in
+  // this array; enforceNoRoutingLeak iterates in order, so existing-pattern
+  // output becomes R5-C-a input on the same pass. Single-pass cascade.
+  // Source-grep pin enforces the position.
+  //
+  // R5-C-b — leading "(The|Your) (file|application|submission|deal|package)
+  // is (currently) being reviewed" clause + optional ", (and)" connector.
+  // Covers Lena out[2] leading clause; subject-set broadened per R5-C verdict
+  // (Franco's rule covers all loan-file synonyms).
+  // ORDER-LOAD-BEARING: must run BEFORE R5-C-a. Derek out[2] shape is
+  // "... reviewed and I'll be in touch ...". R5-C-b consumes the trailing
+  // "and " connector here so R5-C-a sees clean ", I'll..." and replaces to
+  // "." without stranding the comma. Reverse order would leave a stranded
+  // ", ." in the output.
+  { match: /\b(?:The|Your)\s+(?:file|application|submission|deal|package)\s+is\s+(?:currently\s+)?being\s+reviewed,?\s*(?:and\s+)?/gi,
+    replace: '' },
+  // R5-C-a — trailing "I'll be in touch (shortly) with an update" clause.
+  // Covers Derek out[2-4] direct hits + cascade output of existing E/C.3.
+  // Optional leading punctuation/conjunction handled (Derek out[3], out[4]
+  // have ", I'll" directly without the leading review-clause).
+  // \b on I'?ll prevents false-match inside "will" (case-insensitive flag
+  // would otherwise match "ill" at offset 1 of "will be in touch...").
+  { match: /,?\s*(?:and\s+)?\bI'?ll\s+be\s+in\s+touch\s+(?:shortly\s+)?with\s+an\s+update\s*[.!?]?/gi,
+    replace: '.' },
+  // R5-C-c — standalone "(subject) is being reviewed" defensive catch.
+  // Bounded subject set per R5-C verdict: (the|your) (file|application|
+  // submission|deal|package) | this (discrepancy|issue|matter)? | this.
+  // EXCLUDED by design (external-document subjects — legitimate factual
+  // statements, NOT Vienna-workflow leaks): "the appraisal is being
+  // reviewed", "the credit bureau is being reviewed", "the lender's policies
+  // are being reviewed", etc.
+  { match: /\b(?:(?:the|your)\s+(?:file|application|submission|deal|package)|this(?:\s+(?:discrepancy|issue|matter))?)\s+is\s+being\s+reviewed\b[.,!?]?/gi,
+    replace: '' },
 ];
 
 const enforceNoRoutingLeak = (html) => {
