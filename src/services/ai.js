@@ -1101,18 +1101,34 @@ module.exports = {
         ? `\n\nThe sender attached ${attachments.length} file(s): ${attachmentNames}\nThe supported attachments have been provided above for you to review.`
         : '\n\nNo attachments were included with this email.';
 
+      // R5-D Surface A (2026-05-21): structured-signal-authoritative.
+      // Pre-R5-D, both branches had inline "UNLESS — IDENTITY CLASH OVERRIDE"
+      // instructions doing parallel name-mismatch detection on Claude's side
+      // — overriding the structured identity_clash signal's "false" verdict.
+      // Production failure (Karen Westbrook f5eee902, R4-S15): identity_clash=
+      // false structured AND email/doc name mismatch present → the prompt's
+      // override branch fired → Vienna's body silently omitted PNW mention +
+      // own-forms acceptance language (form attachments were still physically
+      // sent via getFormAttachments since deferredIntake=false; broker got a
+      // mystery PDF with no context). Removing the override branches lets the
+      // structured signal win — when identity_clash=true, processInitialEmail
+      // routes to generateIdentityClashMinimalAsk at L1006-1015 (bypassing
+      // this code entirely); when identity_clash=false, normal intake template
+      // fires with PNW mention + own-forms acceptance.
       const appFormInstructions = hasOwnApplication
-        ? 'LOAN APPLICATION FORM:\n- The broker has ALREADY submitted their own loan application form. Do NOT ask them to fill out ours. Do NOT mention or reference our blank Loan Application Form in the email — it was NOT attached. Acknowledge that you received their application. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on the attached loan application (a different person, e.g. "Anna Bergstrom" in the email vs "Grace Paulson" on the application), do NOT acknowledge their application as received — the docs may belong to a different borrower\'s file. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only, NOT a normal welcome with acknowledgment.'
-        : 'LOAN APPLICATION FORM:\n- The Loan Application Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our Loan Application Form for the borrower to fill out"). Ask the broker to have the borrower complete and return it. If they already have their own application form filled out, that is acceptable too — they can send theirs instead of using ours. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on any attached doc (a different person), do NOT mention or attach the Loan Application Form template, do NOT ask the borrower to fill it out — the file isn\'t in normal intake. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only.';
+        ? 'LOAN APPLICATION FORM:\n- The broker has ALREADY submitted their own loan application form. Do NOT ask them to fill out ours. Do NOT mention or reference our blank Loan Application Form in the email — it was NOT attached. Acknowledge that you received their application.'
+        : 'LOAN APPLICATION FORM:\n- The Loan Application Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our Loan Application Form for the borrower to fill out"). Ask the broker to have the borrower complete and return it. If they already have their own application form filled out, that is acceptable too — they can send theirs instead of using ours.';
 
       // Group S+W: parallel PNW handling. Pre-fix, the PNW form was always
       // attached (no hasOwnPnw check) AND the prompt didn't require Vienna to
       // mention it explicitly AND there was no "use your own PNW" acceptance line.
       // Post-fix: detect own-PNW via webhook, conditional attachment, conditional
       // prompt instruction with mandatory mention + own-PNW acceptance.
+      // R5-D Surface A (2026-05-21): IDENTITY CLASH OVERRIDE branches removed
+      // (same rationale as appFormInstructions above — structured signal wins).
       const pnwFormInstructions = hasOwnPnw
-        ? 'PNW STATEMENT FORM:\n- The broker has ALREADY submitted their own PNW (Personal Net Worth) statement. Do NOT ask them to fill out ours. Do NOT mention or reference our blank PNW Statement Form in the email — it was NOT attached. Acknowledge that you received their PNW. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on any attached doc (a different person), do NOT acknowledge their PNW as received — the docs may belong to a different borrower\'s file. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only, NOT a normal welcome with acknowledgment.'
-        : 'PNW STATEMENT FORM:\n- The PNW (Personal Net Worth) Statement Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our PNW Statement Form for the borrower to complete"). Ask the broker to have the borrower fill it out and return it. If they already have their own PNW or net worth statement filled out, that is acceptable too — they can send theirs instead of using ours. UNLESS — IDENTITY CLASH OVERRIDE (S15 conflict-site neutralization, Anna Bergstrom 2026-05-18 production bug): if the email body\'s borrower name differs from the borrower name on any attached doc (a different person), do NOT mention or attach the PNW Statement Form template, do NOT ask the borrower to fill it out — the file isn\'t in normal intake. Defer to STEP 0 PRE-CHECK at the top of this prompt and the IDENTITY CLASH MINIMAL-ASK BLOCK above. Your reply is the minimal clarification ask only.';
+        ? 'PNW STATEMENT FORM:\n- The broker has ALREADY submitted their own PNW (Personal Net Worth) statement. Do NOT ask them to fill out ours. Do NOT mention or reference our blank PNW Statement Form in the email — it was NOT attached. Acknowledge that you received their PNW.'
+        : 'PNW STATEMENT FORM:\n- The PNW (Personal Net Worth) Statement Form IS attached. You MUST explicitly mention it by name in the email body (e.g. "I\'ve attached our PNW Statement Form for the borrower to complete"). Ask the broker to have the borrower fill it out and return it. If they already have their own PNW or net worth statement filled out, that is acceptable too — they can send theirs instead of using ours.';
 
       // F2 — Both-Franco collision branch. When the sender's first name from the
       // From-header matches the admin's first name (Franco), the From-header alone

@@ -2028,9 +2028,22 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
 
         if (disposition === 'resolved') {
           console.log('Identity resolved — flipping status to active, clearing identity_clash');
+          // R5-D Surface B (2026-05-21): set was_in_identity_clash=true as a
+          // persistent marker on the deal. Used downstream at the active-branch
+          // routing decision to detect post-clash arc and route subsequent
+          // broker turns through processInitialEmail-equivalent intake template
+          // (instead of generateBrokerResponse) until form-requirements are
+          // fulfilled. Resolves Anna 11196627 R4-S15 Bug 2+3: pre-R5-D, the
+          // post-clash followup turns went through generateBrokerResponse which
+          // has no form-attachment logic + no own-forms-acceptance language,
+          // leaving PNW Statement Form unmentioned/unattached across multiple
+          // turns. identity_clash flips to false (resolution complete);
+          // was_in_identity_clash stays true (arc marker, NEVER reset by
+          // subsequent broker turns).
           const updatedExtracted = {
             ...(existingDeal.extracted_data || {}),
             identity_clash: false,
+            was_in_identity_clash: true,
           };
           // Q2: confirmedBorrowerName falls back to null if extraction unreliable. Only
           // update borrower_name if we have a confirmed value; otherwise keep the
@@ -2303,6 +2316,111 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
 
         const conversationHistory = await dealsService.getMessages(existingDeal.id);
         const documentsOnFile = await dealsService.getDocumentsByDeal(existingDeal.id);
+
+        // ──────────────────────────────────────────────────────────────────
+        // R5-D Surface B (2026-05-21): post-clash arc → intake-template routing.
+        //
+        // When this deal was once in identity-clash (was_in_identity_clash=true,
+        // persisted at the identity-clash resolution point above) AND form-
+        // requirements are still unfulfilled (broker hasn't provided both their
+        // own loan-app and own PNW), re-invoke processInitialEmail on this turn
+        // to generate an intake-template response with PNW Form attachment +
+        // own-forms acceptance language. Bypasses generateBrokerResponse for
+        // these specific turns. Once forms are fulfilled, normal active-branch
+        // flow resumes (or the deal reaches prelim/complete state via other gates).
+        //
+        // SAFE RE-INVOCATION (load-bearing design-decision note): processInitial-
+        // Email has NO DB side effects — all state writes (deal scaffold, document
+        // persistence, saveMessage, form-attachment send) live in this caller at
+        // L1714-1830 (new-deal branch). The function itself is pure modulo the
+        // stateless Claude API call. The remaining concern (JS-side identity-
+        // clash recheck firing again at ai.js:1005-1015) is semantically correct
+        // on re-fire: if docs now match, recheck returns false → normal intake;
+        // if docs are still misattributed, recheck routes to minimal-ask again,
+        // which is the right behavior. Verdict-revised from B-i to B-ii after
+        // empirical inspection of processInitialEmail's body confirmed the
+        // function is side-effect-free; no helper extraction needed.
+        //
+        // R5-E refined interaction: pre-compute selectGreetingFirstName from
+        // the deal's persisted extracted_data (broker_name="Eric Johansson")
+        // and pass as parsedBrokerFirstName opt — overrides the current-turn
+        // C.7 parser fallback (which could return null on broker confirmation
+        // turns with no signature). Anna 11196627 was the R5-E load-bearing
+        // fixture; intake-template path must NOT regress its greeting.
+        const _r5dWasInClash = existingDeal.extracted_data?.was_in_identity_clash === true;
+        const _r5dHasOwnApp = (email.attachments || []).some(a => /application|loan.?app|summary/i.test(a.Name))
+          || documentsOnFile.some(d => /application|loan.?app|summary/i.test(d.file_name || ''));
+        const _r5dHasOwnPnw = (email.attachments || []).some(a => /pnw|personal.?net.?worth|net.?worth/i.test(a.Name))
+          || documentsOnFile.some(d => /pnw|personal.?net.?worth|net.?worth/i.test(d.file_name || ''));
+        const _r5dFormsUnfulfilled = !_r5dHasOwnApp || !_r5dHasOwnPnw;
+        if (_r5dWasInClash && _r5dFormsUnfulfilled) {
+          console.log(`R5-D-B (post-clash intake-template): was_in_identity_clash=true + forms unfulfilled (hasOwnApp=${_r5dHasOwnApp}, hasOwnPnw=${_r5dHasOwnPnw}) — re-invoking processInitialEmail`);
+
+          // R5-E wiring: prefer persisted broker_name → first-name over current-turn parser
+          const _r5dGreetingFromHelper = selectGreetingFirstName({
+            broker_name: existingDeal.extracted_data?.broker_name,
+            sender_name: existingDeal.extracted_data?.sender_name,
+            borrower_name: existingDeal.extracted_data?.borrower_name,
+            sender_type: existingDeal.extracted_data?.sender_type,
+          });
+          const _r5dParsedName = _r5dGreetingFromHelper
+            || aiService.parseBrokerFirstNameFromSignature(email.textBody);
+          const _r5dFromCollision = firstNameMatchesAdmin(email.fromName);
+
+          const _r5dIntakeRes = await aiService.processInitialEmail(
+            email.fromName,
+            email.textBody,
+            email.attachments,
+            savedDocs,
+            _r5dHasOwnApp,
+            _r5dHasOwnPnw,
+            _r5dFromCollision,
+            email.subject,
+            { parsedBrokerFirstName: _r5dParsedName }
+          );
+          let _r5dIntakeEmail = _r5dIntakeRes.welcomeEmail;
+          // R5-C: post-gen routing-leak sweep on broker-facing intake-template output
+          _r5dIntakeEmail = aiService.enforceNoRoutingLeak(_r5dIntakeEmail).swept;
+
+          // Form-attachment decision — same shape as new-deal branch L1796-1806
+          const _r5dDeferredIntake = shouldSkipIntakeFormsForDeferredState(_r5dIntakeRes.dealSummary);
+          const _r5dSkipApp = _r5dDeferredIntake || _r5dHasOwnApp;
+          const _r5dSkipPnw = _r5dDeferredIntake || _r5dHasOwnPnw;
+          const _r5dFormAttachments = emailService.getFormAttachments({
+            skipApplicationForm: _r5dSkipApp,
+            skipPnwForm: _r5dSkipPnw,
+          });
+          console.log(`R5-D-B: attaching ${_r5dFormAttachments.length} form(s) (skipApp=${_r5dSkipApp}, skipPnw=${_r5dSkipPnw})`);
+
+          emailService.sendEmailDelayed(
+            email.from,
+            `Re: ${email.subject}`,
+            _r5dIntakeEmail.replace(/<[^>]*>/g, ''),
+            _r5dIntakeEmail,
+            _r5dFormAttachments,
+            [],
+            async (sendResult) => {
+              await dealsService.saveMessage(existingDeal.id, 'outbound', `Re: ${email.subject}`, _r5dIntakeEmail, sendResult.MessageID);
+              console.log('R5-D-B: intake-template response shipped on post-clash arc');
+            }
+          );
+
+          // Persist updated extracted_data (merge re-extracted intake summary with
+          // the preserved was_in_identity_clash marker). has_application_form /
+          // has_pnw_statement reflect current-turn form-presence.
+          const _r5dMergedSummary = {
+            ...(existingDeal.extracted_data || {}),
+            ...(_r5dIntakeRes.dealSummary || {}),
+            was_in_identity_clash: true,  // marker NEVER reset (R5-D-B invariant)
+          };
+          await dealsService.update(existingDeal.id, {
+            extracted_data: _r5dMergedSummary,
+            has_application_form: _r5dHasOwnApp,
+            has_pnw_statement: _r5dHasOwnPnw,
+          });
+
+          return;  // R5-D-B: skip remaining active-branch processing this turn
+        }
 
         // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
         const summaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);

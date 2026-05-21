@@ -3233,7 +3233,14 @@ As of April 23, 2026`;
   // Per strengthening 1: assert enforceNoRoutingLeak is invoked at EXACTLY N call sites
   // in webhook.js. Any new call site anywhere (including a future admin path) trips
   // this test and forces conscious review. Lock is structural — not allowlist/denylist.
-  const E_EXPECTED_SWEEP_CALL_COUNT = 3;
+  // R5-D Surface B (2026-05-21): bumped from 3 → 4. The new R5-D-B post-clash
+  // intake-template re-invocation site at webhook.js calls enforceNoRoutingLeak
+  // on the intake-template output. New site is Vienna-autonomous (sends to broker
+  // directly via sendEmailDelayed; admin-dictated content never reaches this
+  // path — webhook-routing-level structural protection, same as the other 3
+  // existing sites). Closed-set count updated after confirming the new site is
+  // Vienna-autonomous-only.
+  const E_EXPECTED_SWEEP_CALL_COUNT = 4;
   const _webhookSrcForE = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
   const sweepInvocations = (_webhookSrcForE.match(/aiService\.enforceNoRoutingLeak\s*\(/g) || []).length;
   if (sweepInvocations !== E_EXPECTED_SWEEP_CALL_COUNT) {
@@ -6407,14 +6414,20 @@ Lender:
   }
   console.log(`Group RES4-C3-EXTENDED-LEAK-VARIANTS: ${r4Passed}/${r4Cases.length} passed (4 real-corpus positives + 6 sharpened over-fire negatives + 2 C.3 regression-pins)`);
 
-  // GROUP RES4-CARVE-OUT-PRESERVED — E_EXPECTED_SWEEP_CALL_COUNT still 3.
-  console.log('\n========== GROUP RES4-CARVE-OUT-PRESERVED — E closed-set count==3 unchanged ==========');
+  // GROUP RES4-CARVE-OUT-PRESERVED — R4-RESIDUAL-4 itself added no call sites.
+  // R5-D Surface B (2026-05-21): the closed-set count bumped 3 → 4 with R5-D-B's
+  // new Vienna-autonomous intake-template re-invocation site. R4-RESIDUAL-4's
+  // historical invariant ("RES4 itself didn't add call sites") still holds —
+  // the +1 came from a later commit. Updated assertion to reflect post-R5-D
+  // count; the original RES4-bounded-ask invariant remains verifiable by
+  // counting RES4's own diff (zero new call sites).
+  console.log('\n========== GROUP RES4-CARVE-OUT-PRESERVED — R4-RESIDUAL-4 added zero call sites ==========');
   const r4WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
   const r4SweepInvocations = (r4WebhookSrc.match(/aiService\.enforceNoRoutingLeak\s*\(/g) || []).length;
-  if (r4SweepInvocations !== 3) {
-    throw new Error(`FAIL [RES4-CARVE-OUT]: E_EXPECTED_SWEEP_CALL_COUNT should remain 3 (no new call sites in R4-RESIDUAL-4 — bounded ask). Got ${r4SweepInvocations}.`);
+  if (r4SweepInvocations !== 4) {
+    throw new Error(`FAIL [RES4-CARVE-OUT]: enforceNoRoutingLeak call-site count should be 4 (3 original + 1 from R5-D-B post-clash intake-template). Got ${r4SweepInvocations}. R4-RESIDUAL-4's own bounded-ask invariant (zero new call sites added BY RES4) still holds historically.`);
   }
-  console.log(`  PASS [RES4-CARVE-OUT-PRESERVED]: enforceNoRoutingLeak invoked at EXACTLY 3 call sites (E closed-set unchanged; R4-RESIDUAL-4 extended ROUTING_LEAK_PATTERNS only, not call sites)`);
+  console.log(`  PASS [RES4-CARVE-OUT-PRESERVED]: enforceNoRoutingLeak invoked at EXACTLY 4 call sites (3 original + 1 from R5-D-B; RES4 itself added zero call sites — bounded-ask invariant historically preserved)`);
 
   // ════════════════════════════════════════════════════════════════
   // ADMIN-HANDOFF LINK-SUBMISSION feature (2026-05-20)
@@ -8315,10 +8328,15 @@ Lender:
   // adds 3 new ROUTING_LEAK_PATTERNS entries but adds ZERO new invocations.
   const _cWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
   const _cWebhookSweepCallCount = (_cWebhookSrc.match(/aiService\.enforceNoRoutingLeak\s*\(/g) || []).length;
-  if (_cWebhookSweepCallCount !== 3) {
-    throw new Error(`FAIL [C-CASCADE-COMPOSITION]: aiService.enforceNoRoutingLeak invocations in webhook.js = ${_cWebhookSweepCallCount}; expected exactly 3 (closed-set per E_EXPECTED_SWEEP_CALL_COUNT). R5-C must NOT add new call sites — only extend the pattern array.`);
+  // R5-D Surface B (2026-05-21): expected count bumped from 3 → 4 alongside
+  // E_EXPECTED_SWEEP_CALL_COUNT. R5-D-B post-clash intake-template re-invocation
+  // adds a 4th Vienna-autonomous call site. R5-C's invariant (the cluster adds
+  // PATTERNS, not call sites) still holds for R5-C — the count went 3→4 from
+  // R5-D, not R5-C.
+  if (_cWebhookSweepCallCount !== 4) {
+    throw new Error(`FAIL [C-CASCADE-COMPOSITION]: aiService.enforceNoRoutingLeak invocations in webhook.js = ${_cWebhookSweepCallCount}; expected exactly 4 (closed-set per E_EXPECTED_SWEEP_CALL_COUNT post-R5-D). R5-C must NOT add new call sites — only extend the pattern array.`);
   }
-  console.log(`  PASS: aiService.enforceNoRoutingLeak invocations in webhook.js = 3 (closed-set call-site count unchanged; R5-C adds patterns, not call sites)`);
+  console.log(`  PASS: aiService.enforceNoRoutingLeak invocations in webhook.js = 4 (closed-set call-site count; R5-D-B added the 4th Vienna-autonomous site; R5-C added patterns only)`);
   console.log('Group C-CASCADE-COMPOSITION: cascade order + behavioral composition + call-site count all pinned.');
 
   console.log('\n========== R5-C-OVER-FIRE-PROTECTION — deterministic negatives ==========');
@@ -8362,6 +8380,163 @@ Lender:
   // Existing E/C.3 truth-table still passes (already verified by other groups in the harness).
   console.log('  PASS: full prior arc anchors all source-grep-present (A+G + B-3 + F-4 + ADMIN-HANDOFF + B-1 + B-2 + F-2/3 + E refined)');
   console.log('Group C-CROSS-CLUSTER-INTEGRATION: full prior arc holding green.');
+
+  // ════════════════════════════════════════════════════════════════
+  // R5 CLUSTER D — scenario-15 broker-own-application template (Surfaces A + B)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R5-D combined commit (Karen + Anna fixtures):
+  //   Surface A (prompt-trim, structured-signal-authoritative):
+  //     D-A-PROMPT-TRIM-MATRIX: IDENTITY CLASH OVERRIDE branches absent from
+  //       appFormInstructions + pnwFormInstructions; structured signal wins.
+  //     D-A-KAREN-FIXTURE: source-grep that the trimmed prompt restores
+  //       PNW mention + own-forms acceptance language in the prompt bodies.
+  //     D-A-IDENTITY-CLASH-PATH-PRESERVED: outer JS-side identity-clash check
+  //       at ai.js:1005-1015 + minimal-ask routing still intact.
+  //   Surface B (post-clash routing via processInitialEmail re-invocation):
+  //     D-B-CALL-SITE-MATRIX: processInitialEmail invoked from BOTH original
+  //       new-deal site AND the new post-clash arc site in webhook.js.
+  //     D-B-ANNA-FIXTURE: was_in_identity_clash marker set at resolution +
+  //       post-clash predicate logic correct.
+  //     D-CROSS-CLUSTER-INTEGRATION: full prior arc green; R5-E selectGreeting
+  //       wiring carried through; R5-C enforceNoRoutingLeak still on intake path.
+
+  console.log('\n========== R5-D-A-PROMPT-TRIM-MATRIX — IDENTITY CLASH OVERRIDE branches removed ==========');
+  const _dAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  // (a) The phrase "IDENTITY CLASH OVERRIDE" must NOT appear inside the
+  //     appFormInstructions / pnwFormInstructions string assignments.
+  //     Source-grep for absence within the right scope.
+  const _dAppFormBlock = _dAiSrc.match(/const appFormInstructions = hasOwnApplication[\s\S]+?(?=\n\s+\/\/\s+Group S\+W|const pnwFormInstructions)/);
+  const _dPnwFormBlock = _dAiSrc.match(/const pnwFormInstructions = hasOwnPnw[\s\S]+?(?=\n\s+\/\/\s+F2|const parsedNameBlock)/);
+  if (!_dAppFormBlock || !_dPnwFormBlock) {
+    throw new Error(`FAIL [D-A-PROMPT-TRIM-MATRIX]: could not locate appFormInstructions/pnwFormInstructions blocks for scoped grep. _dAppFormBlock=${!!_dAppFormBlock}, _dPnwFormBlock=${!!_dPnwFormBlock}`);
+  }
+  if (/IDENTITY CLASH OVERRIDE/.test(_dAppFormBlock[0])) {
+    throw new Error('FAIL [D-A-PROMPT-TRIM-MATRIX]: "IDENTITY CLASH OVERRIDE" still present inside appFormInstructions block. R5-D Surface A trim incomplete.');
+  }
+  if (/IDENTITY CLASH OVERRIDE/.test(_dPnwFormBlock[0])) {
+    throw new Error('FAIL [D-A-PROMPT-TRIM-MATRIX]: "IDENTITY CLASH OVERRIDE" still present inside pnwFormInstructions block. R5-D Surface A trim incomplete.');
+  }
+  console.log('  PASS: "IDENTITY CLASH OVERRIDE" branches removed from appFormInstructions');
+  console.log('  PASS: "IDENTITY CLASH OVERRIDE" branches removed from pnwFormInstructions');
+  console.log('Group D-A-PROMPT-TRIM-MATRIX: structured-signal-authoritative; prompt no longer does parallel name-mismatch detection.');
+
+  console.log('\n========== R5-D-A-KAREN-FIXTURE — own-forms + PNW language restored ==========');
+  // The trimmed appFormInstructions (hasOwnApplication=false branch) MUST
+  // contain "If they already have their own application form filled out, that
+  // is acceptable too — they can send theirs instead of using ours." — the
+  // Bug 3 language Franco wants Vienna to use.
+  // The trimmed pnwFormInstructions (hasOwnPnw=false branch) MUST contain the
+  // PNW Form mention + "they can send theirs instead of using ours" language.
+  if (!/If they already have their own application form filled out, that is acceptable too — they can send theirs instead of using ours/.test(_dAppFormBlock[0])) {
+    throw new Error('FAIL [D-A-KAREN-FIXTURE]: appFormInstructions (hasOwnApplication=false branch) missing own-forms-acceptance language ("If they already have their own application form filled out, that is acceptable too — they can send theirs instead of using ours").');
+  }
+  if (!/PNW \(Personal Net Worth\) Statement Form IS attached/.test(_dPnwFormBlock[0])) {
+    throw new Error('FAIL [D-A-KAREN-FIXTURE]: pnwFormInstructions (hasOwnPnw=false branch) missing PNW Form mention.');
+  }
+  if (!/If they already have their own PNW or net worth statement filled out, that is acceptable too/.test(_dPnwFormBlock[0])) {
+    throw new Error('FAIL [D-A-KAREN-FIXTURE]: pnwFormInstructions (hasOwnPnw=false branch) missing own-PNW-acceptance language.');
+  }
+  console.log('  PASS: appFormInstructions hasOwnApplication=false branch contains own-forms-acceptance language');
+  console.log('  PASS: pnwFormInstructions hasOwnPnw=false branch contains PNW Form mention');
+  console.log('  PASS: pnwFormInstructions hasOwnPnw=false branch contains own-PNW-acceptance language');
+  console.log('Group D-A-KAREN-FIXTURE: Karen-shape (identity_clash=false structured + content-level mismatch) now produces PNW+own-forms language correctly.');
+
+  console.log('\n========== R5-D-A-IDENTITY-CLASH-PATH-PRESERVED — minimal-ask routing intact ==========');
+  // Outer JS-side identity-clash check at ai.js still routes to
+  // generateIdentityClashMinimalAsk when structured signal fires.
+  if (!/generateIdentityClashMinimalAsk\(emailBody, _s15BodyName, _s15DocName, senderName, parsedBrokerFirstName\)/.test(_dAiSrc)) {
+    throw new Error('FAIL [D-A-IDENTITY-CLASH-PATH-PRESERVED]: outer identity-clash routing to generateIdentityClashMinimalAsk missing or signature changed.');
+  }
+  if (!/isIdentityClash/.test(_dAiSrc)) {
+    throw new Error('FAIL [D-A-IDENTITY-CLASH-PATH-PRESERVED]: isIdentityClash JS-side helper missing.');
+  }
+  console.log('  PASS: generateIdentityClashMinimalAsk routing intact at ai.js outer check');
+  console.log('  PASS: isIdentityClash JS-side helper present');
+  console.log('Group D-A-IDENTITY-CLASH-PATH-PRESERVED: structured signal still authoritative; clash=true routes to minimal-ask, clash=false routes to normal intake template.');
+
+  console.log('\n========== R5-D-B-CALL-SITE-MATRIX — processInitialEmail invoked from both sites ==========');
+  // processInitialEmail must be invoked from:
+  //   (1) Original new-deal branch in webhook.js
+  //   (2) NEW post-clash arc routing site (R5-D-B re-invocation)
+  // Source-grep for the call-site count: should be exactly 2.
+  const _dWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _dProcessInitialEmailCallCount = (_dWebhookSrc.match(/aiService\.processInitialEmail\s*\(/g) || []).length;
+  if (_dProcessInitialEmailCallCount !== 2) {
+    throw new Error(`FAIL [D-B-CALL-SITE-MATRIX]: aiService.processInitialEmail invocations in webhook.js = ${_dProcessInitialEmailCallCount}; expected exactly 2 (original new-deal site + R5-D-B post-clash re-invocation).`);
+  }
+  if (!/R5-D-B \(post-clash intake-template\)/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-B-CALL-SITE-MATRIX]: R5-D-B post-clash routing log message missing — re-invocation site not present.');
+  }
+  console.log(`  PASS: aiService.processInitialEmail invoked at 2 call sites (new-deal + post-clash re-invocation)`);
+  console.log('  PASS: R5-D-B post-clash routing log present');
+  console.log('Group D-B-CALL-SITE-MATRIX: single source of truth (processInitialEmail) reused via direct re-invocation per B-ii revised verdict.');
+
+  console.log('\n========== R5-D-B-ANNA-FIXTURE — was_in_identity_clash marker + post-clash predicate ==========');
+  // (a) Identity-clash resolution path persists was_in_identity_clash=true.
+  if (!/was_in_identity_clash: true/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-B-ANNA-FIXTURE]: was_in_identity_clash=true marker not persisted at identity-clash resolution path.');
+  }
+  // (b) Post-clash routing checks the marker BEFORE the active-branch
+  //     generateBrokerResponse call. The active-branch call is the SECOND
+  //     generateBrokerResponse invocation in webhook.js (first is the under_review
+  //     review-path at L~2150; active-branch is at L~2384, after the R5-D-B
+  //     check inserted at L~2318 ish). Anchor on the active-branch label
+  //     comment ("CONVERSATIONAL HANDLER") to scope the search.
+  const _dActiveBranchPos = _dWebhookSrc.search(/CONVERSATIONAL HANDLER — respond to broker contextually/);
+  const _dWasInClashCheckPos = _dWebhookSrc.search(/_r5dWasInClash = existingDeal\.extracted_data\?\.was_in_identity_clash === true/);
+  // Find the active-branch generateBrokerResponse — the FIRST occurrence AFTER
+  // the active-branch label.
+  const _dActiveGenBrokerPos = _dActiveBranchPos >= 0
+    ? _dWebhookSrc.indexOf('aiService.generateBrokerResponse(', _dActiveBranchPos)
+    : -1;
+  if (_dActiveBranchPos < 0 || _dWasInClashCheckPos < 0 || _dActiveGenBrokerPos < 0) {
+    throw new Error(`FAIL [D-B-ANNA-FIXTURE]: source-grep anchors missing. activeBranchPos=${_dActiveBranchPos}, checkPos=${_dWasInClashCheckPos}, activeGenBrokerPos=${_dActiveGenBrokerPos}.`);
+  }
+  if (_dWasInClashCheckPos < _dActiveBranchPos || _dWasInClashCheckPos >= _dActiveGenBrokerPos) {
+    throw new Error(`FAIL [D-B-ANNA-FIXTURE]: was_in_identity_clash check must run AFTER active-branch entry AND BEFORE active-branch generateBrokerResponse call. activeBranch=${_dActiveBranchPos}, check=${_dWasInClashCheckPos}, activeGenBroker=${_dActiveGenBrokerPos}.`);
+  }
+  // (c) Forms-unfulfilled predicate: !hasOwnApp || !hasOwnPnw (NOT both).
+  if (!/_r5dFormsUnfulfilled\s*=\s*!_r5dHasOwnApp\s*\|\|\s*!_r5dHasOwnPnw/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-B-ANNA-FIXTURE]: forms-unfulfilled predicate must be OR-of-negatives (!hasOwnApp || !hasOwnPnw). Wrong condition could leak post-clash deals into normal generateBrokerResponse path.');
+  }
+  // (d) Early return after intake-template send to skip remaining active-branch processing.
+  if (!/return;\s*\/\/\s*R5-D-B/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-B-ANNA-FIXTURE]: early-return after R5-D-B intake-template send missing — would double-process the turn.');
+  }
+  console.log('  PASS: was_in_identity_clash=true persisted at identity-clash resolution path');
+  console.log('  PASS: was_in_identity_clash check runs BEFORE generateBrokerResponse');
+  console.log('  PASS: forms-unfulfilled predicate uses OR-of-negatives (!hasOwnApp || !hasOwnPnw)');
+  console.log('  PASS: early-return after intake-template send (skip remaining active-branch processing)');
+  console.log('Group D-B-ANNA-FIXTURE: post-clash arc detection + intake-template re-routing structurally pinned.');
+
+  console.log('\n========== R5-D-CROSS-CLUSTER-INTEGRATION — full prior arc + R5-E + R5-C wiring ==========');
+  // (a) Prior R5 anchors all source-grep-present (sanity).
+  if (!/_r5IsPrelimReviewDraft|_r5IsClosingDraft/.test(_dWebhookSrc)) throw new Error('FAIL: R5-A+G anchor missing');
+  if (!/prelim_approved_at[\s\S]{0,500}completion-handoff/.test(_dWebhookSrc)) throw new Error('FAIL: R5-B-3 anchor missing');
+  if (!/ignoredSenders\.some/.test(_dWebhookSrc)) throw new Error('FAIL: R5-F-4 anchor missing');
+  if (!/existingDeal\.admin_controlled === true && !isAdmin/.test(_dWebhookSrc)) throw new Error('FAIL: ADMIN-HANDOFF anchor missing');
+  if (!/runDiscrepancyDetectionAggregated/.test(_dWebhookSrc)) throw new Error('FAIL: R5-B-1 anchor missing');
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_dWebhookSrc)) throw new Error('FAIL: R5-B-2 anchor missing');
+  if (!/selectGreetingFirstName/.test(_dWebhookSrc)) throw new Error('FAIL: R5-E anchor missing in webhook.js');
+  const _dCronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  if (!/claimDailySummarySlot/.test(_dCronSrc)) throw new Error('FAIL: R5-F-2 anchor missing');
+  console.log('  PASS: prior R5 arc anchors all source-grep-present (A+G + B-3 + F-4 + ADMIN-HANDOFF + B-1 + B-2 + F-2/3 + E + C)');
+  // (b) R5-E wiring on R5-D-B re-invocation site: selectGreetingFirstName precomputes
+  //     greeting from persisted broker_name BEFORE the processInitialEmail call.
+  if (!/_r5dGreetingFromHelper = selectGreetingFirstName/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B intake-template re-invocation must wire selectGreetingFirstName for greeting (Anna 11196627 R5-E load-bearing fixture — Eric greeting must NOT regress on post-clash turn).');
+  }
+  if (!/_r5dParsedName = _r5dGreetingFromHelper\s*\|\|\s*aiService\.parseBrokerFirstNameFromSignature/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B helper-or-C7-fallback chain missing — greeting must prefer persisted broker_name → first-name over current-turn C.7 parser.');
+  }
+  // (c) R5-C wiring on R5-D-B intake-template output: enforceNoRoutingLeak runs on the body.
+  if (!/_r5dIntakeEmail = aiService\.enforceNoRoutingLeak\(_r5dIntakeEmail\)\.swept/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B intake-template output must run through enforceNoRoutingLeak (R5-C post-gen sweep).');
+  }
+  console.log('  PASS: R5-E selectGreetingFirstName wired into R5-D-B re-invocation (Anna fixture greeting preserved)');
+  console.log('  PASS: R5-D-B helper-first → C.7-parser-fallback greeting chain present');
+  console.log('  PASS: R5-C enforceNoRoutingLeak runs on R5-D-B intake-template output');
+  console.log('Group D-CROSS-CLUSTER-INTEGRATION: full prior arc holding + R5-E/R5-C wiring preserved on new R5-D-B path.');
 
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
