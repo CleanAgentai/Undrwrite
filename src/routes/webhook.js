@@ -961,16 +961,58 @@ router.post('/inbound', async (req, res) => {
     }
 
     // Skip system/automated emails and our own outbound emails
+    // ──────────────────────────────────────────────────────────────────────
+    // R5 Cluster F Bug 4 (2026-05-21): denylist expansion + advisory positive
+    // criteria.
+    //
+    // Pre-expansion, the denylist caught Postmark system, generic noreply, and
+    // Anthropic addresses. Production audit surfaced 15 garbage deals from
+    // non-broker inbounds that slipped through: Postmark marketing
+    // (@fyi.postmarkapp.com), internal team (@fsagent.com — Bradley, Porter),
+    // VIMA admin staff (gabriela/brandon/admin@vimarealty.com), and one
+    // ambiguous sender (Christine — handled via cleanup script, not filter).
+    //
+    // CRITICAL CARVE-OUT: franco@vimarealty.com is NOT denylisted. Franco is
+    // the testing proxy on 93/108 production deals — denylisting his address
+    // would break the entire R5 retest harness and break production VIMA broker
+    // workflows that legitimately route through his address. Domain-wide
+    // @vimarealty.com denylist would catch Franco; explicit per-address
+    // denylist for the three known admins keeps Franco unblocked structurally.
     const senderEmail = config.postmark.senderEmail || '';
     const ignoredSenders = [
       'support@postmarkapp.com', 'noreply@', 'no-reply@',
       '@anthropic.com', '@mail.anthropic.com',
+      // R5-F4: Postmark marketing/system (production garbage source)
+      '@fyi.postmarkapp.com',
+      // R5-F4: internal team (Bradley, Porter, internal admin via domain)
+      '@fsagent.com',
+      // R5-F4: VIMA admin staff — explicit per-address (NOT domain-wide,
+      // because franco@vimarealty.com is the testing proxy and MUST pass)
+      'gabriela@vimarealty.com',
+      'brandon@vimarealty.com',
+      'admin@vimarealty.com',
     ];
     if (senderEmail) ignoredSenders.push(senderEmail.toLowerCase());
 
     if (ignoredSenders.some(addr => email.from.toLowerCase().includes(addr))) {
       console.log('Skipping ignored/system email from:', email.from);
       return;
+    }
+
+    // R5 Cluster F Bug 4: advisory positive-criteria check. Logs (does NOT
+    // block) when a sender that PASSED the denylist lacks any broker-submission
+    // signal. Forensic visibility for Franco — surfaces ambiguous-sender
+    // patterns so the denylist can be reactively expanded if a new garbage
+    // source emerges. Non-blocking by design: positive criteria are noisy and
+    // not all legitimate broker submissions match (e.g. brokers replying to
+    // referrals may have no attachments, no Lic.# yet, and a conversational
+    // subject). Future signal-tightening based on production samples.
+    const _f4HasAttachments = (email.attachments?.length || 0) > 0;
+    const _f4HasLicSig = /Lic\.?\s*#/i.test(email.textBody || '');
+    const _f4HasBrokerSubject = /(submission|application|mortgage|loan|inquiry|refinance)/i.test(email.subject || '');
+    const _f4LooksLikeBroker = _f4HasAttachments || _f4HasLicSig || _f4HasBrokerSubject;
+    if (!_f4LooksLikeBroker) {
+      console.log(`R5-F4 advisory: sender ${email.from} passed denylist but lacks broker-submission signal (no attachments, no Lic.# signature, no broker-keyword subject). Not blocking; logging for forensic review.`);
     }
 
     // Thread-based deal matching: check In-Reply-To header first

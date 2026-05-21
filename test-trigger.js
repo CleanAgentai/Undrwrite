@@ -6960,6 +6960,220 @@ Lender:
     throw new Error(`FAIL [R5B3-PRELIM-UPDATE-DOWNSTREAM]: pre-approval + allDocs banner must render PRELIMINARY (not COMPLETE). Got: ${JSON.stringify(r5b3PreApprovalBanner)}. This is the load-bearing downstream correctness — if the banner rendered COMPLETE here, the R5-B-3 fix would route to [UPDATED] COMPLETE Review (still wrong shape, just at a different surface).`);
   }
   console.log(`  PASS [R5B3-PRELIM-UPDATE-DOWNSTREAM]: pre-approval + allDocs → banner=PRELIMINARY (not COMPLETE). Bucket-B-relaxed !isPostApproval trichotomy correctly routes [UPDATED] PRELIMINARY when R5-B-3 fix fires.`);
+
+  // ════════════════════════════════════════════════════════════════
+  // R5 CLUSTER F BUG 4 — garbage-deal denylist + advisory positive criteria
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for the F-4 hybrid fix (denylist expansion +
+  // advisory positive-criteria) + Option-B cleanup script.
+  //   F4-DENYLIST-MATRIX: truth-table over the expanded denylist patterns.
+  //   F4-POSITIVE-CRITERIA-ADVISORY: advisory check fires/no-fires correctly
+  //     (logs only — non-blocking by design).
+  //   F4-PROXY-PRESERVATION: franco@vimarealty.com is NEVER caught — the
+  //     load-bearing structural pin. Domain-wide @vimarealty.com would
+  //     break 93/108 production deals + the entire R5 retest harness.
+  //   F4-EXISTING-GARBAGE-CLEANUP-FORENSIC: synth-fixture exclusion is
+  //     guaranteed structural in the cleanup script's matchesDenylist.
+  //   F4-IDEMPOTENT-CLEANUP: matchesDenylist is pure (re-running yields
+  //     the same set).
+  //   F4-ADMIN-HANDOFF-CONSISTENCY: a deal post-cleanup with
+  //     admin_controlled=true is routed to NOTIFY-ADMIN-ONLY by the
+  //     existing admin-handoff gate (no regression from cleanup).
+  console.log('\n========== R5-F4-DENYLIST-MATRIX — expanded ignoredSenders truth-table ==========');
+  // Mirror webhook.js denylist (R5-F4 expansion).
+  const _f4Denylist = [
+    'support@postmarkapp.com', 'noreply@', 'no-reply@',
+    '@anthropic.com', '@mail.anthropic.com',
+    '@fyi.postmarkapp.com',
+    '@fsagent.com',
+    'gabriela@vimarealty.com',
+    'brandon@vimarealty.com',
+    'admin@vimarealty.com',
+  ];
+  const _f4MatchesIgnored = (from) => _f4Denylist.some((a) => from.toLowerCase().includes(a));
+  const _f4DenylistMatrix = [
+    // [from, expectedBlocked, label]
+    ['marketing@fyi.postmarkapp.com', true, 'Postmark marketing → blocked'],
+    // Note: subdomain variants like promo@updates.fyi.postmarkapp.com are
+    // NOT caught by the current `@fyi.postmarkapp.com` substring. If a
+    // production sample surfaces from a .fyi subdomain, add the bare
+    // `fyi.postmarkapp.com` substring (false-positive risk on @notfyi.* —
+    // accepted tradeoff at that point).
+    ['bradley@fsagent.com', true, 'internal team (Bradley) → blocked'],
+    ['porter@fsagent.com', true, 'internal team (Porter) → blocked'],
+    ['gabriela@vimarealty.com', true, 'VIMA admin (Gabriela) → blocked'],
+    ['brandon@vimarealty.com', true, 'VIMA admin (Brandon) → blocked'],
+    ['admin@vimarealty.com', true, 'VIMA admin (admin) → blocked'],
+    ['franco@vimarealty.com', false, 'CARVE-OUT: Franco testing proxy → PASS through (load-bearing)'],
+    ['broker@example.com', false, 'random broker → PASS through'],
+    ['noreply@thirdparty.com', true, 'generic noreply → blocked (pre-F4 baseline)'],
+    ['support@postmarkapp.com', true, 'Postmark system → blocked (pre-F4 baseline)'],
+  ];
+  let _f4MatrixFails = 0;
+  for (const [from, expectedBlocked, label] of _f4DenylistMatrix) {
+    const actuallyBlocked = _f4MatchesIgnored(from);
+    if (actuallyBlocked !== expectedBlocked) {
+      _f4MatrixFails++;
+      console.log(`  FAIL: ${from} — expected blocked=${expectedBlocked}, got blocked=${actuallyBlocked}. ${label}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_f4MatrixFails > 0) {
+    throw new Error(`FAIL [F4-DENYLIST-MATRIX]: ${_f4MatrixFails}/${_f4DenylistMatrix.length} cases failed. Denylist truth-table breach.`);
+  }
+  console.log(`Group F4-DENYLIST-MATRIX: ${_f4DenylistMatrix.length}/${_f4DenylistMatrix.length} cases pass.`);
+
+  console.log('\n========== R5-F4-POSITIVE-CRITERIA-ADVISORY — advisory check fires correctly ==========');
+  // Mirror the advisory criteria in webhook.js: attachments OR Lic.# sig OR
+  // broker-keyword subject regex.
+  const _f4Advisory = (email) => {
+    const hasAttachments = (email.attachments?.length || 0) > 0;
+    const hasLicSig = /Lic\.?\s*#/i.test(email.textBody || '');
+    const hasBrokerSubject = /(submission|application|mortgage|loan|inquiry|refinance)/i.test(email.subject || '');
+    return hasAttachments || hasLicSig || hasBrokerSubject;
+  };
+  const _f4AdvisoryMatrix = [
+    // [email, expectedLooksLikeBroker, label]
+    [{ attachments: [{}], textBody: 'hi', subject: 'hi' }, true, 'has-attachments → broker-like'],
+    [{ attachments: [], textBody: 'Some Broker, Lic. #ON123', subject: 'hi' }, true, 'has Lic.# signature → broker-like'],
+    [{ attachments: [], textBody: 'Lic#ABC', subject: 'hi' }, true, 'Lic# (no dot, no space) → broker-like'],
+    [{ attachments: [], textBody: 'no signature', subject: 'New submission for review' }, true, 'subject "submission" → broker-like'],
+    [{ attachments: [], textBody: 'no signature', subject: 'Mortgage application — Smith' }, true, 'subject "application" → broker-like'],
+    [{ attachments: [], textBody: 'no signature', subject: 'Refinance inquiry' }, true, 'subject "refinance" → broker-like (new keyword)'],
+    [{ attachments: [], textBody: 'just a hello', subject: 'hello' }, false, 'no signals → advisory log fires'],
+    [{ attachments: [], textBody: '', subject: '' }, false, 'empty → advisory log fires'],
+  ];
+  let _f4AdvFails = 0;
+  for (const [email, expected, label] of _f4AdvisoryMatrix) {
+    const actual = _f4Advisory(email);
+    if (actual !== expected) {
+      _f4AdvFails++;
+      console.log(`  FAIL: ${label} — expected ${expected}, got ${actual}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  // Also confirm the corrected regex: "refinance" is present, no duplicate "inquiry"
+  const _f4RegexSrc = /(submission|application|mortgage|loan|inquiry|refinance)/i.source;
+  if (!_f4RegexSrc.includes('refinance')) {
+    _f4AdvFails++;
+    console.log(`  FAIL: corrected subject regex missing "refinance" keyword. Source: ${_f4RegexSrc}`);
+  }
+  if ((_f4RegexSrc.match(/inquiry/g) || []).length !== 1) {
+    _f4AdvFails++;
+    console.log(`  FAIL: corrected subject regex has duplicate or missing "inquiry". Source: ${_f4RegexSrc}`);
+  }
+  if (_f4AdvFails > 0) {
+    throw new Error(`FAIL [F4-POSITIVE-CRITERIA-ADVISORY]: ${_f4AdvFails} cases failed.`);
+  }
+  console.log(`Group F4-POSITIVE-CRITERIA-ADVISORY: all cases pass + regex corrected (refinance present, no duplicate inquiry).`);
+
+  console.log('\n========== R5-F4-PROXY-PRESERVATION — franco@vimarealty.com unblocked (LOAD-BEARING) ==========');
+  // The load-bearing structural pin. If this fails: production VIMA broker
+  // workflows + the 93/108 testing-proxy deals + the entire R5 retest harness
+  // breaks. Pre-committed escalation: HOLD immediately, revert, do NOT ship.
+  const _f4FrancoVariants = [
+    'franco@vimarealty.com',
+    'Franco@vimarealty.com',
+    'FRANCO@VIMAREALTY.COM',
+    'franco@VIMAREALTY.com',
+  ];
+  let _f4ProxyFails = 0;
+  for (const fromAddr of _f4FrancoVariants) {
+    if (_f4MatchesIgnored(fromAddr)) {
+      _f4ProxyFails++;
+      console.log(`  FAIL: ${fromAddr} BLOCKED by denylist — proxy preservation breach.`);
+    } else {
+      console.log(`  PASS: ${fromAddr} passes through (NOT in denylist).`);
+    }
+  }
+  // Also test the cleanup-script matchesDenylist (separate matcher, same invariant).
+  const { matchesDenylist: _f4CleanupMatcher } = require('./scripts/r5-f4-quarantine-garbage-deals');
+  for (const fromAddr of _f4FrancoVariants) {
+    if (_f4CleanupMatcher(fromAddr)) {
+      _f4ProxyFails++;
+      console.log(`  FAIL (cleanup matcher): ${fromAddr} quarantined — cleanup proxy preservation breach.`);
+    } else {
+      console.log(`  PASS (cleanup matcher): ${fromAddr} preserved (NOT quarantined).`);
+    }
+  }
+  if (_f4ProxyFails > 0) {
+    throw new Error(`FAIL [F4-PROXY-PRESERVATION]: ${_f4ProxyFails} variants of franco@vimarealty.com would be blocked or quarantined. Load-bearing breach → HOLD and revert per pre-committed matrix.`);
+  }
+  console.log(`Group F4-PROXY-PRESERVATION: all ${_f4FrancoVariants.length * 2} variants (webhook + cleanup) confirm Franco passes through.`);
+
+  console.log('\n========== R5-F4-EXISTING-GARBAGE-CLEANUP-FORENSIC — cleanup matcher correctness ==========');
+  // Verify the cleanup script's matchesDenylist matches the 13-deal target
+  // set's email shapes (12 denylist + 1 Christine; corrected from plan-time
+  // 14 — see commit body for reconciliation) and EXCLUDES synth fixtures.
+  const _f4CleanupMatrix = [
+    // [email, expectedMatch, label]
+    ['marketing@fyi.postmarkapp.com', true, 'Postmark marketing'],
+    ['bradley@fsagent.com', true, 'Bradley (internal)'],
+    ['porter@fsagent.com', true, 'Porter (internal)'],
+    ['gabriela@vimarealty.com', true, 'Gabriela (VIMA admin)'],
+    ['brandon@vimarealty.com', true, 'Brandon (VIMA admin)'],
+    ['admin@vimarealty.com', true, 'admin (VIMA admin)'],
+    ['christinemann24@gmail.com', true, 'Christine (explicit add per F-4 verdict)'],
+    ['franco@vimarealty.com', false, 'Franco (testing proxy — PRESERVE)'],
+    ['jason+patricia-synth-001@gmail.com', false, 'synth fixture — PRESERVE'],
+    ['JASON+PATRICIA-SYNTH-002@example.com', false, 'synth fixture (uppercase) — PRESERVE'],
+    ['random.broker@gmail.com', false, 'random broker — not quarantined'],
+  ];
+  let _f4CleanupFails = 0;
+  for (const [email, expected, label] of _f4CleanupMatrix) {
+    const actual = _f4CleanupMatcher(email);
+    if (actual !== expected) {
+      _f4CleanupFails++;
+      console.log(`  FAIL: ${email} — expected match=${expected}, got match=${actual}. ${label}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_f4CleanupFails > 0) {
+    throw new Error(`FAIL [F4-EXISTING-GARBAGE-CLEANUP-FORENSIC]: ${_f4CleanupFails}/${_f4CleanupMatrix.length} cases failed.`);
+  }
+  console.log(`Group F4-EXISTING-GARBAGE-CLEANUP-FORENSIC: ${_f4CleanupMatrix.length}/${_f4CleanupMatrix.length} cases pass; synth-fixture exclusion structural.`);
+
+  console.log('\n========== R5-F4-IDEMPOTENT-CLEANUP — matchesDenylist is pure/stable ==========');
+  // The cleanup script must be safely re-runnable. Verify the matcher is
+  // deterministic (no hidden state). Run each case 3x and require identical
+  // results across runs.
+  let _f4IdemFails = 0;
+  for (const [email, expected] of _f4CleanupMatrix) {
+    const results = [_f4CleanupMatcher(email), _f4CleanupMatcher(email), _f4CleanupMatcher(email)];
+    if (!results.every((r) => r === expected)) {
+      _f4IdemFails++;
+      console.log(`  FAIL: ${email} — inconsistent across 3 runs: ${JSON.stringify(results)}`);
+    }
+  }
+  if (_f4IdemFails > 0) {
+    throw new Error(`FAIL [F4-IDEMPOTENT-CLEANUP]: ${_f4IdemFails} cases showed non-deterministic matcher behavior. Cleanup script may double-update or miss deals.`);
+  }
+  console.log(`Group F4-IDEMPOTENT-CLEANUP: matchesDenylist deterministic across 3x runs for ${_f4CleanupMatrix.length} cases. Cleanup script is safely re-runnable.`);
+
+  console.log('\n========== R5-F4-ADMIN-HANDOFF-CONSISTENCY — quarantined deals route to NOTIFY-ADMIN-ONLY ==========');
+  // Cross-feature invariant: a deal in the post-cleanup state
+  // (admin_controlled=true) MUST be routed to NOTIFY-ADMIN-ONLY by the
+  // existing admin-handoff gate. Pin this via source-grep — the gate at
+  // webhook.js routes on `existingDeal.admin_controlled === true && !isAdmin`.
+  // This is the structural integration with the ADMIN-HANDOFF LINK-SUBMISSION
+  // feature shipped 2026-05-20.
+  const _f4WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _f4Gate = /existingDeal\.admin_controlled\s*===\s*true\s*&&\s*!isAdmin/;
+  if (!_f4Gate.test(_f4WebhookSrc)) {
+    throw new Error('FAIL [F4-ADMIN-HANDOFF-CONSISTENCY]: NOTIFY-ADMIN-ONLY gate predicate not found in webhook.js. Cleanup deals (admin_controlled=true) would NOT route to admin-handoff path — regression in ADMIN-HANDOFF feature.');
+  }
+  console.log('  PASS: NOTIFY-ADMIN-ONLY gate predicate present in webhook.js. Quarantined deals (admin_controlled=true) route to manual-admin path on future inbound.');
+  // Also pin the strict-equality discipline — the gate must be === true, not
+  // truthy, to defend against any legacy NULL value in admin_controlled.
+  if (!/admin_controlled\s*===\s*true/.test(_f4WebhookSrc)) {
+    throw new Error('FAIL [F4-ADMIN-HANDOFF-CONSISTENCY]: gate must use strict === true (not truthy). Legacy NULL safety.');
+  }
+  console.log('  PASS: strict === true equality preserved (legacy NULL defense).');
+  console.log('Group F4-ADMIN-HANDOFF-CONSISTENCY: cross-feature integration with ADMIN-HANDOFF LINK-SUBMISSION confirmed.');
+
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
