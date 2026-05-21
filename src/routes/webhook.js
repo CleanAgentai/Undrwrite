@@ -304,6 +304,57 @@ const buildBrokerThreadInputs = (allMessages = []) => {
 // would be a no-op there, and a no-op clause is confusing dead code. The
 // asymmetry is asserted by a source-string regression test that catches any
 // future attempt to wire computeWillReview into the initial branch.
+// ──────────────────────────────────────────────────────────────────────────
+// R5 Cluster B Sub-root 2 (2026-05-21): discrepancy-resolution gate.
+//
+// Pre-B-2, the prelim trigger fires while a Vienna-detected discrepancy is
+// pending broker confirmation. Two sites manifest the bug:
+//   - Site A initial-submission gate (L1869): no discrepancy/clarification
+//     check at all. Sandra Nathan (ffb4fa0c) + Sandra Jennifer (112b619a) +
+//     Lena (8486bf8a) all premature-fire on msg[02] from this site.
+//   - Site B active-branch via computeWillReview (L2393): QQQQ
+//     summary?.unresolved_discrepancy gate is probabilistic (Vienna-LLM-set
+//     flag, not reliable). Sandra Jennifer was POST-QQQQ — still premature.
+//
+// FIX: shouldHoldPrelimForDiscrepancy — OR-of-three structured predicate
+// mirroring BBBB / JJJJ deterministic-signal pattern:
+//   1. brokerFacingDiscrepancyCount > 0   (PRIMARY structured signal — from
+//                                          canonical_map.discrepancy_set +
+//                                          filterBrokerFacing, deterministic)
+//   2. clarificationPending=true           (Cluster D signal — broker-facing
+//                                          reply asks for clarification;
+//                                          catches doc-vs-doc on non-canonical
+//                                          fields like credit_scores, Lena's
+//                                          case)
+//   3. summary?.unresolved_discrepancy=true  (SECONDARY soft fallback — QQQQ
+//                                          Vienna-flag, residual coverage
+//                                          for novel-shape discrepancies the
+//                                          structured signal missed)
+//
+// HOLD SEMANTICS: when held, deal stays status='active' (no flip to under_
+// review). Vienna's broker-facing reply (which contains the clarification
+// ask) still sends. Next broker turn re-evaluates. By construction, when the
+// broker confirms → next turn's gate releases → prelim fires for the FIRST
+// AND ONLY time → no [UPDATED] PRELIMINARY can fire (Bug 2 falls out as a
+// side-effect of fixing Bug 1).
+//
+// Cross-cluster: B-1's aggregating canonical_map wrapper runs INSIDE
+// sendPreliminaryReviewToAdmin at L702 — downstream of this gate. When B-2
+// holds, sendPreliminaryReviewToAdmin doesn't run; canonical_map freshness
+// is moot. When B-2 releases, the wrapper aggregates by then. No interaction
+// risk. C.1's text-only-noop at decideReviewDispatch is on the under_review
+// path — only reachable AFTER the first prelim fires. If B-2 holds the first
+// prelim, status stays 'active' and decideReviewDispatch isn't called.
+// Belt-and-suspenders if both apply: no double-suppression risk because the
+// gates are on disjoint code paths.
+// ──────────────────────────────────────────────────────────────────────────
+const shouldHoldPrelimForDiscrepancy = ({ brokerFacingDiscrepancyCount, brokerFacingReplyText, summary }) => {
+  const hasStructuredDiscrepancy = (brokerFacingDiscrepancyCount || 0) > 0;
+  const clarificationPending = aiService.welcomeEmailIsAskingClarification(brokerFacingReplyText || '');
+  const viennaFlaggedDiscrepancy = !!summary?.unresolved_discrepancy;
+  return hasStructuredDiscrepancy || clarificationPending || viennaFlaggedDiscrepancy;
+};
+
 const computeWillReview = ({ deal, summary, classifications, identityClashUnresolved }) => {
   const ltv = summary?.ltv_percent;
   const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
@@ -1867,14 +1918,32 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           console.log(`Initial submission escalation gate triggered (Fix 7 + R4-RESIDUAL-1): ${_r1Reason} — entering awaiting_collateral state`);
           await dealsService.update(deal.id, { status: 'awaiting_collateral' });
         } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
-          console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
-          // ownership_type is null on initial submission (only set later by generateBrokerResponse).
-          // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
-          // when null. The remaining (deferred) enhancement is to extract ownership_type directly
-          // in INITIAL_EMAIL_PROMPT's TASK 2 JSON so it's populated on day 1.
-          // Cluster D: pass welcomeEmail so sendPreliminaryReviewToAdmin can detect
-          // a pending broker-facing clarification ask and suppress COMPLETE.
-          await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv, { brokerFacingReplyText: welcomeEmail });
+          // R5-B-2 (2026-05-21): discrepancy-resolution gate at the initial-
+          // submission trigger. Pre-B-2, Sandra Nathan (ffb4fa0c) + Sandra
+          // Jennifer (112b619a) + Lena (8486bf8a) all fired premature
+          // prelim here while Vienna was simultaneously asking the broker
+          // to clarify a figure discrepancy. Hold the trigger until the
+          // discrepancy resolves; broker reply still sends (welcome email
+          // contains the clarification ask). Next broker turn re-evaluates
+          // via the active-branch gate.
+          const _b2HoldInitial = shouldHoldPrelimForDiscrepancy({
+            brokerFacingDiscrepancyCount: _bBrokerFacing.length,
+            brokerFacingReplyText: welcomeEmail,
+            summary: dealSummary,
+          });
+          if (_b2HoldInitial) {
+            const _b2Clar = aiService.welcomeEmailIsAskingClarification(welcomeEmail || '');
+            console.log(`B-2 (initial-submission): prelim held — discrepancy/clarification pending broker confirmation. structuredDiscrepancyCount=${_bBrokerFacing.length}, clarificationPending=${_b2Clar}, qqqq=${!!dealSummary?.unresolved_discrepancy}. Deal stays 'active'; broker reply still sent.`);
+          } else {
+            console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
+            // ownership_type is null on initial submission (only set later by generateBrokerResponse).
+            // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
+            // when null. The remaining (deferred) enhancement is to extract ownership_type directly
+            // in INITIAL_EMAIL_PROMPT's TASK 2 JSON so it's populated on day 1.
+            // Cluster D: pass welcomeEmail so sendPreliminaryReviewToAdmin can detect
+            // a pending broker-facing clarification ask and suppress COMPLETE.
+            await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv, { brokerFacingReplyText: welcomeEmail });
+          }
         }
       } catch (err) {
         // Group FFFF Layer 1: any unhandled error in the new-client INITIAL
@@ -2390,12 +2459,28 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // conversational handler (or completion-handoff when allDocsIn) instead
         // of triggering a spurious second prelim. See helper definition above
         // for INTENTIONAL ASYMMETRY note re: initial branch.
-        const willReview = computeWillReview({
+        const _willReviewBeforeB2 = computeWillReview({
           deal: existingDeal,
           summary: result.updatedSummary,
           classifications: classificationsForGate,
           identityClashUnresolved,
         });
+        // R5-B-2 (2026-05-21): Option II orthogonal gate at the call layer.
+        // computeWillReview's signature + D1-D7+QQQQ truth-table preserved
+        // unchanged; the new structured gate is AND'd in here. When held,
+        // `willReview` resolves to false → conversational broker reply path
+        // fires (broker sees the clarification ask), deal stays 'active',
+        // no prelim emission. Next broker turn re-evaluates.
+        const _b2HoldActive = _willReviewBeforeB2 && shouldHoldPrelimForDiscrepancy({
+          brokerFacingDiscrepancyCount: _bBrokerFacingActive.length,
+          brokerFacingReplyText: result.responseEmail,
+          summary: result.updatedSummary,
+        });
+        if (_b2HoldActive) {
+          const _b2ClarA = aiService.welcomeEmailIsAskingClarification(result.responseEmail || '');
+          console.log(`B-2 (active-branch): prelim held — discrepancy/clarification pending broker confirmation. structuredDiscrepancyCount=${_bBrokerFacingActive.length}, clarificationPending=${_b2ClarA}, qqqq=${!!result.updatedSummary?.unresolved_discrepancy}. Deal stays 'active'; broker reply still sent.`);
+        }
+        const willReview = _willReviewBeforeB2 && !_b2HoldActive;
 
         // Group L: when the FINAL REVIEW HITL is about to fire (all docs in, no LTV gate
         // active, deal currently active), Vienna goes silent on the broker side. Per Franco:
@@ -2573,6 +2658,8 @@ module.exports.__test__ = {
   buildBrokerThreadInputs,
   // Group NNNN: active-branch willReview gate with prelim_approved_at suppression
   computeWillReview,
+  // R5-B-2 (2026-05-21): discrepancy-resolution gate (OR-of-three structured signal)
+  shouldHoldPrelimForDiscrepancy,
   // Group OOOO: pre-approval enumeration of items blocking the willReview gate
   computeStillMissingForReview,
   // Group RRRR: admin decline-reason extraction with mandatory full-text fallback

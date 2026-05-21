@@ -7501,6 +7501,243 @@ Lender:
   console.log('Group B1-CROSS-CLUSTER-INTEGRATION: full prior arc structurally intact.');
 
   // ════════════════════════════════════════════════════════════════
+  // R5 CLUSTER B SUB-ROOT 2 — premature/double prelim discrepancy gate
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for B-2 (shouldHoldPrelimForDiscrepancy OR-of-three
+  // structured gate at the prelim trigger layer).
+  //   B2-MSG-MATRIX: 9-case truth-table on the OR-of-three predicate.
+  //   B2-LENA-FIXTURE: live retest — hold on initial-submission turn (Bug 1),
+  //     release on clarification-confirm turn (no Bug 2 possible since no
+  //     prior prelim fired). Load-bearing.
+  //   B2-SANDRA-NATHAN-FORENSIC + B2-SANDRA-JENNIFER-FORENSIC: historical
+  //     pre-C.1 fixtures — would-have-suppressed proof on Sandra cases.
+  //     Confirms "same root" claim.
+  //   B2-C1-BELT-SUSPENDERS: C.1 text-only-noop tests still pass; no double-
+  //     suppression interaction (B-2 + C.1 on disjoint code paths).
+  //   B2-QQQQ-D1-D2-D3-REGRESSION: 5x re-verification of QQQQ truth-table
+  //     baseline (orthogonality proof — adding parallel signal must not shift
+  //     QQQQ's internal behavior at computeWillReview).
+  //   B2-B1-SNAPSHOT-FRESHNESS: cross-cluster — B-1 wrapper runs INSIDE
+  //     sendPreliminaryReviewToAdmin (downstream of B-2 gate); freshness moot
+  //     on hold, correct on release.
+  const { shouldHoldPrelimForDiscrepancy: _b2Hold, computeWillReview: _b2CWR } = require('./src/routes/webhook').__test__;
+
+  console.log('\n========== R5-B2-MSG-MATRIX — 9-case OR-of-three truth-table ==========');
+  // Three orthogonal predicate sources: structured discrepancy count, Cluster
+  // D clarificationPending (welcomeEmailIsAskingClarification on reply text),
+  // QQQQ Vienna-flag (summary.unresolved_discrepancy). Hold = OR of any one.
+  // Use a known-clarification welcome-text fixture for the clarificationPending
+  // signal — the regex inside welcomeEmailIsAskingClarification recognizes
+  // phrasings like "could you confirm" / "which is correct".
+  const _b2ClarText = '<p>Hi! Thanks for the submission. Could you confirm which figure is correct — $73,000 from the email or $68,000 from the loan application?</p>';
+  const _b2NoClarText = '<p>Hi! Thanks for the submission. I have everything I need to send to the team for review.</p>';
+  const _b2MsgMatrix = [
+    { name: 'all three false → hold=false',
+      args: { brokerFacingDiscrepancyCount: 0, brokerFacingReplyText: _b2NoClarText, summary: { unresolved_discrepancy: false } },
+      expect: false },
+    { name: 'structured=true (only) → hold=true',
+      args: { brokerFacingDiscrepancyCount: 2, brokerFacingReplyText: _b2NoClarText, summary: { unresolved_discrepancy: false } },
+      expect: true },
+    { name: 'clarificationPending=true (only) → hold=true',
+      args: { brokerFacingDiscrepancyCount: 0, brokerFacingReplyText: _b2ClarText, summary: { unresolved_discrepancy: false } },
+      expect: true },
+    { name: 'QQQQ=true (only — soft fallback) → hold=true',
+      args: { brokerFacingDiscrepancyCount: 0, brokerFacingReplyText: _b2NoClarText, summary: { unresolved_discrepancy: true } },
+      expect: true },
+    { name: 'structured + clar (both) → hold=true',
+      args: { brokerFacingDiscrepancyCount: 1, brokerFacingReplyText: _b2ClarText, summary: { unresolved_discrepancy: false } },
+      expect: true },
+    { name: 'structured + QQQQ → hold=true',
+      args: { brokerFacingDiscrepancyCount: 3, brokerFacingReplyText: _b2NoClarText, summary: { unresolved_discrepancy: true } },
+      expect: true },
+    { name: 'clar + QQQQ → hold=true',
+      args: { brokerFacingDiscrepancyCount: 0, brokerFacingReplyText: _b2ClarText, summary: { unresolved_discrepancy: true } },
+      expect: true },
+    { name: 'all three true → hold=true',
+      args: { brokerFacingDiscrepancyCount: 4, brokerFacingReplyText: _b2ClarText, summary: { unresolved_discrepancy: true } },
+      expect: true },
+    { name: 'defensive: null/undefined inputs → hold=false',
+      args: { brokerFacingDiscrepancyCount: null, brokerFacingReplyText: undefined, summary: null },
+      expect: false },
+  ];
+  let _b2MatrixFails = 0;
+  for (const c of _b2MsgMatrix) {
+    const actual = _b2Hold(c.args);
+    if (actual !== c.expect) {
+      _b2MatrixFails++;
+      console.log(`  FAIL: ${c.name} — expected ${c.expect}, got ${actual}`);
+    } else {
+      console.log(`  PASS: ${c.name}`);
+    }
+  }
+  if (_b2MatrixFails > 0) throw new Error(`FAIL [B2-MSG-MATRIX]: ${_b2MatrixFails}/${_b2MsgMatrix.length} cases failed.`);
+  console.log(`Group B2-MSG-MATRIX: ${_b2MsgMatrix.length}/${_b2MsgMatrix.length} cases pass.`);
+
+  console.log('\n========== R5-B2-LENA-FIXTURE — live retest (LOAD-BEARING) ==========');
+  // Lena R4-S14 8486bf8a: doc-vs-doc discrepancy on credit scores (loan app
+  // 631/619 vs credit bureau 748/752). credit_scores is NOT in canonical_map
+  // FIELDS, so brokerFacingDiscrepancyCount=0. The clarificationPending side
+  // of the OR carries the load on Lena's shape (Vienna asks broker "could
+  // you confirm which credit score figures are correct"). Initial-submission
+  // turn: hold=true (premature suppressed). Confirmation turn: hold=false
+  // (prelim fires for the first-and-only time, no [UPDATED] possible).
+  const _b2LenaWelcomeAsk = '<p>Hi Samantha! Thanks for the submission. The credit bureau shows scores of 748 and 752, but the loan application lists 631 and 619 — could you confirm which figures are correct so I can update the file?</p>';
+  const _b2LenaInitialHold = _b2Hold({
+    brokerFacingDiscrepancyCount: 0,
+    brokerFacingReplyText: _b2LenaWelcomeAsk,
+    summary: { unresolved_discrepancy: false },  // QQQQ flag absent — clarificationPending carries
+  });
+  if (!_b2LenaInitialHold) {
+    throw new Error(`FAIL [B2-LENA-FIXTURE]: initial-submission turn — expected HOLD=true (clarificationPending side of OR catches doc-vs-doc credit-score discrepancy), got false. welcomeEmailIsAskingClarification may not catch Lena-shape phrasing.`);
+  }
+  console.log(`  PASS: Lena initial-submission turn — hold=true via clarificationPending (premature Bug 1 suppressed)`);
+  // Confirmation turn: Vienna's reply acknowledges the corrected scores, no clarification ask, no discrepancy.
+  const _b2LenaAckReply = '<p>Got it — credit scores 748 and 752 confirmed. Thanks for clarifying!</p>';
+  const _b2LenaConfirmRelease = _b2Hold({
+    brokerFacingDiscrepancyCount: 0,
+    brokerFacingReplyText: _b2LenaAckReply,
+    summary: { unresolved_discrepancy: false },
+  });
+  if (_b2LenaConfirmRelease) {
+    throw new Error(`FAIL [B2-LENA-FIXTURE]: confirmation turn — expected HOLD=false (Vienna's ack contains no clarification ask), got true. Release semantics broken.`);
+  }
+  console.log(`  PASS: Lena confirmation turn — hold=false (gate releases; prelim fires first-and-only time on this turn)`);
+  console.log(`Group B2-LENA-FIXTURE: live retest pin holds; Bug 1 suppression + Bug 2 prevention by construction (no prior prelim → no [UPDATED] possible).`);
+
+  console.log('\n========== R5-B2-SANDRA-NATHAN-FORENSIC — historical pre-C.1 fixture replay ==========');
+  // Sandra Nathan ffb4fa0c R3-S8: email body says loan $73k, loan app says
+  // $68k; email says balance $290k, mortgage statement says $295k. Two
+  // canonical-tracked discrepancies (requested_loan_amount + existing_first_
+  // mortgage_balance). structuredDiscrepancyCount=2 → hold=true. Had B-2
+  // been in place pre-C.1, the initial PRELIMINARY at msg[02] would have
+  // been held → no [UPDATED] PRELIMINARY at msg[04] possible (Bug 2 falls
+  // out as side-effect of Bug 1 prevention).
+  const _b2NathanHold = _b2Hold({
+    brokerFacingDiscrepancyCount: 2,
+    brokerFacingReplyText: '<p>Thanks for the submission. I noticed the email lists $73,000 but the loan application shows $68,000, and the balance figures differ between the email and statement — could you confirm the correct figures?</p>',
+    summary: { unresolved_discrepancy: false },
+  });
+  if (!_b2NathanHold) {
+    throw new Error(`FAIL [B2-SANDRA-NATHAN-FORENSIC]: expected HOLD=true (structured discrepancy count=2 from canonical_map + clarification reply), got false. Same-root claim breach.`);
+  }
+  console.log(`  PASS: Sandra Nathan forensic — hold=true (structured signal catches email-vs-doc figures; would have prevented both Bug 1 + Bug 2 pre-C.1)`);
+  console.log(`Group B2-SANDRA-NATHAN-FORENSIC: same-root claim historically validated.`);
+
+  console.log('\n========== R5-B2-SANDRA-JENNIFER-FORENSIC — historical post-QQQQ pre-C.1 fixture ==========');
+  // Sandra Jennifer 112b619a R4-S8: broker hallucinated $68k discrepancy
+  // (email correctly stated $363,080; some figure mismatch triggered Vienna's
+  // clarification ask). QQQQ Vienna-flag failed to fire on this case (hence
+  // premature still fired post-QQQQ pre-B-2). With B-2's structured signal,
+  // the canonical_map.discrepancy_set OR clarificationPending side catches.
+  const _b2JenniferHold = _b2Hold({
+    brokerFacingDiscrepancyCount: 1,
+    brokerFacingReplyText: '<p>Thanks. I see the loan amount listed as $68,000 in the application, but the email mentions $363,080 — which is the correct figure?</p>',
+    summary: { unresolved_discrepancy: false },  // QQQQ failed on this case empirically — fix carries via structured + clarificationPending
+  });
+  if (!_b2JenniferHold) {
+    throw new Error(`FAIL [B2-SANDRA-JENNIFER-FORENSIC]: expected HOLD=true (structured + clarification carry where QQQQ failed). Same-root claim breach.`);
+  }
+  console.log(`  PASS: Sandra Jennifer forensic — hold=true (structured + clarification signals fire where QQQQ Vienna-flag failed; same-root historically validated)`);
+  console.log(`Group B2-SANDRA-JENNIFER-FORENSIC: post-QQQQ pre-C.1 historical case structurally addressed.`);
+
+  console.log('\n========== R5-B2-C1-BELT-SUSPENDERS — no double-suppression interaction ==========');
+  // C.1's text-only-noop lives at decideReviewDispatch (under_review path).
+  // B-2's gate lives at the prelim TRIGGER layer (active-branch + initial-
+  // submission). Disjoint code paths: if B-2 holds the first prelim, status
+  // stays 'active' → decideReviewDispatch isn't called this turn. If B-2
+  // releases (prelim fires), status flips to 'under_review' → subsequent
+  // text-only broker turns go through decideReviewDispatch where C.1 fires.
+  // No path where both gates apply simultaneously.
+  const _b2WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  // (a) shouldHoldPrelimForDiscrepancy lives BEFORE computeWillReview in source.
+  const _b2HoldDef = _b2WebhookSrc.indexOf('const shouldHoldPrelimForDiscrepancy');
+  const _b2CWRDef = _b2WebhookSrc.indexOf('const computeWillReview = ({ deal');
+  if (_b2HoldDef < 0 || _b2CWRDef < 0 || _b2HoldDef >= _b2CWRDef) {
+    throw new Error('FAIL [B2-C1-BELT-SUSPENDERS]: shouldHoldPrelimForDiscrepancy must be defined BEFORE computeWillReview (co-located helper). Source-grep breach.');
+  }
+  // (b) Site A call site: B-2 gate precedes sendPreliminaryReviewToAdmin in initial path.
+  // Regex spans comment + logging block between _b2HoldInitial declaration and the
+  // gated sendPreliminaryReviewToAdmin call (~1300 chars including PIN comments).
+  if (!/_b2HoldInitial[\s\S]{0,2000}sendPreliminaryReviewToAdmin\(deal, dealSummary, null, initialLtv/.test(_b2WebhookSrc)) {
+    throw new Error('FAIL [B2-C1-BELT-SUSPENDERS]: Site A — _b2HoldInitial must gate sendPreliminaryReviewToAdmin in initial-submission branch.');
+  }
+  // (c) Site B call site: B-2 gate is computed AFTER computeWillReview at active-branch.
+  if (!/_willReviewBeforeB2 = computeWillReview[\s\S]{0,1500}_b2HoldActive/.test(_b2WebhookSrc)) {
+    throw new Error('FAIL [B2-C1-BELT-SUSPENDERS]: Site B — _b2HoldActive must follow computeWillReview at active-branch call site.');
+  }
+  // (d) Confirm C.1's text-only-noop branch in decideReviewDispatch still intact.
+  if (!/text-only-noop[\s\S]{0,500}broker text-only reply/.test(_b2WebhookSrc)) {
+    throw new Error('FAIL [B2-C1-BELT-SUSPENDERS]: C.1 text-only-noop branch in decideReviewDispatch missing or modified.');
+  }
+  console.log('  PASS: shouldHoldPrelimForDiscrepancy co-located with computeWillReview (source order).');
+  console.log('  PASS: Site A — _b2HoldInitial gates initial-submission sendPreliminaryReviewToAdmin.');
+  console.log('  PASS: Site B — _b2HoldActive follows computeWillReview at active-branch.');
+  console.log('  PASS: C.1 text-only-noop branch intact in decideReviewDispatch.');
+  console.log('Group B2-C1-BELT-SUSPENDERS: gates on disjoint code paths; no double-suppression risk.');
+
+  console.log('\n========== R5-B2-QQQQ-D1-D2-D3-REGRESSION — QQQQ orthogonality (5x baseline preservation) ==========');
+  // QQQQ's behavioral baseline is encoded in computeWillReview's signature
+  // + D1-D7 truth-table. Adding the orthogonal B-2 gate must NOT shift that.
+  // Re-verify computeWillReview's QQQQ clause behaves unchanged: D1 (clean
+  // active deal with all gates passing → willReview=true) + D2 (active +
+  // unresolved_discrepancy=true → willReview=false) + D3 (active +
+  // identity_clash → willReview=false). 5x runs for stability.
+  const _b2SssIntakeOnly = ['credit_report','appraisal','income_proof','government_id','property_tax','mortgage_statement','pnw_statement','loan_application'];
+  let _b2QQQFails = 0;
+  for (let run = 1; run <= 5; run++) {
+    // D1: clean active deal, all gates pass → willReview=true
+    const d1 = _b2CWR({
+      deal: { status: 'active', prelim_approved_at: null },
+      summary: { ltv_percent: 62.5, exit_strategy: 'refi at maturity', unresolved_discrepancy: false },
+      classifications: _b2SssIntakeOnly,
+      identityClashUnresolved: false,
+    });
+    if (d1 !== true) { _b2QQQFails++; console.log(`  FAIL run${run} D1: clean active deal expected willReview=true, got ${d1}`); continue; }
+    // D2: QQQQ unresolved_discrepancy=true → willReview=false
+    const d2 = _b2CWR({
+      deal: { status: 'active', prelim_approved_at: null },
+      summary: { ltv_percent: 62.5, exit_strategy: 'refi', unresolved_discrepancy: true },
+      classifications: _b2SssIntakeOnly,
+      identityClashUnresolved: false,
+    });
+    if (d2 !== false) { _b2QQQFails++; console.log(`  FAIL run${run} D2: QQQQ unresolved_discrepancy=true expected willReview=false, got ${d2}`); continue; }
+    // D3: identityClashUnresolved=true → willReview=false
+    const d3 = _b2CWR({
+      deal: { status: 'active', prelim_approved_at: null },
+      summary: { ltv_percent: 62.5, exit_strategy: 'refi', unresolved_discrepancy: false },
+      classifications: _b2SssIntakeOnly,
+      identityClashUnresolved: true,
+    });
+    if (d3 !== false) { _b2QQQFails++; console.log(`  FAIL run${run} D3: identityClash=true expected willReview=false, got ${d3}`); continue; }
+    console.log(`  PASS run${run}: D1=true, D2=false, D3=false (QQQQ baseline holds)`);
+  }
+  if (_b2QQQFails > 0) {
+    throw new Error(`FAIL [B2-QQQQ-D1-D2-D3-REGRESSION]: ${_b2QQQFails} runs failed. QQQQ orthogonality breach — adding B-2 shifted computeWillReview's behavioral baseline.`);
+  }
+  console.log(`Group B2-QQQQ-D1-D2-D3-REGRESSION: 5/5 runs preserve QQQQ baseline; B-2 gate is orthogonal at call layer.`);
+
+  console.log('\n========== R5-B2-B1-SNAPSHOT-FRESHNESS — cross-cluster integration with B-1 wrapper ==========');
+  // B-1's runDiscrepancyDetectionAggregated lives INSIDE sendPreliminaryReview-
+  // ToAdmin (at L702 region). B-2 gates BEFORE sendPreliminaryReviewToAdmin
+  // is called. So: when B-2 holds, B-1 wrapper doesn't run (canonical_map
+  // freshness is moot). When B-2 releases, the wrapper aggregates all inbound
+  // bodies by the time sendPreliminaryReviewToAdmin executes. Source-grep
+  // pin: B-1 wrapper site (runDiscrepancyDetectionAggregated) is present
+  // INSIDE sendPreliminaryReviewToAdmin's body, and the B-2 gate sites at
+  // L1869 + L2462 are OUTSIDE / BEFORE the sendPreliminaryReviewToAdmin call.
+  if (!/sendPreliminaryReviewToAdmin\s*=\s*async[\s\S]+?runDiscrepancyDetectionAggregated/.test(_b2WebhookSrc)) {
+    throw new Error('FAIL [B2-B1-SNAPSHOT-FRESHNESS]: B-1 wrapper (runDiscrepancyDetectionAggregated) must live inside sendPreliminaryReviewToAdmin body. Cross-cluster integration breach.');
+  }
+  // Confirm Site A gate runs BEFORE the sendPreliminaryReviewToAdmin call in initial path.
+  const _b2SiteASrc = _b2WebhookSrc.match(/_b2HoldInitial[\s\S]{0,2000}sendPreliminaryReviewToAdmin\(deal, dealSummary, null, initialLtv/);
+  if (!_b2SiteASrc) {
+    throw new Error('FAIL [B2-B1-SNAPSHOT-FRESHNESS]: Site A — _b2HoldInitial must precede sendPreliminaryReviewToAdmin in source flow.');
+  }
+  console.log('  PASS: B-1 wrapper (runDiscrepancyDetectionAggregated) lives inside sendPreliminaryReviewToAdmin.');
+  console.log('  PASS: B-2 Site A gate precedes sendPreliminaryReviewToAdmin invocation.');
+  console.log('Group B2-B1-SNAPSHOT-FRESHNESS: B-2 gates upstream of B-1 wrapper; no freshness interaction risk.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
@@ -11846,10 +12083,20 @@ Jordan`;
 
   // Active branch (existing-deal active branch around the prelim trigger)
   // must use computeWillReview, not the pre-NNNN inline expression.
-  if (!/const willReview = computeWillReview\(\{[\s\S]{0,200}deal: existingDeal,[\s\S]{0,200}\}\)/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group NNNN active-branch wiring]: active branch must call computeWillReview({ deal: existingDeal, ... })`);
+  // R5-B-2 (2026-05-21): the result variable was renamed to _willReviewBeforeB2
+  // (split into two-line form: computeWillReview output → AND'd with B-2 hold
+  // predicate → final willReview). The NNNN invariant is preserved (active
+  // branch calls computeWillReview); the variable-name change is the only diff.
+  if (!/const _willReviewBeforeB2 = computeWillReview\(\{[\s\S]{0,200}deal: existingDeal,[\s\S]{0,200}\}\)/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group NNNN active-branch wiring]: active branch must call computeWillReview({ deal: existingDeal, ... }) — assigning to _willReviewBeforeB2 per R5-B-2 split form`);
   }
-  console.log('  PASS [Group NNNN active-branch wiring]: active branch calls computeWillReview');
+  console.log('  PASS [Group NNNN active-branch wiring]: active branch calls computeWillReview (R5-B-2 split form: _willReviewBeforeB2 → AND with !_b2HoldActive → willReview)');
+  // R5-B-2 follow-up: the final willReview binding must AND in !_b2HoldActive
+  // (the orthogonal discrepancy-gate at the call layer per Option II verdict).
+  if (!/const willReview = _willReviewBeforeB2 && !_b2HoldActive/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group NNNN/R5-B-2 wiring]: final willReview binding must AND in !_b2HoldActive (B-2 orthogonal gate per Option II verdict).`);
+  }
+  console.log('  PASS [R5-B-2 active-branch wiring]: final willReview ANDs in !_b2HoldActive');
 
   // Pre-NNNN inline pattern must be GONE.
   if (/const willReview = ltv && ltv <= 80 && existingDeal\.status === 'active' && hasReviewableDoc && hasExitStrategy && !identityClashUnresolved;/.test(webhookSrc)) {
