@@ -4394,6 +4394,12 @@ As of April 23, 2026`;
       setBbbDeal({
         status: 'under_review',
         conditions_sent_at: '2026-05-07T15:00:00.000Z',
+        // R5-B-3 fixture realism: BBB compatibility flow sends conditions
+        // post-prelim-approval. Pre-R5-B-3 the test fixture didn't set
+        // prelim_approved_at (the production bug was that decideReviewDispatch
+        // didn't NEED it to fire completion-handoff). Post-R5-B-3 the gate
+        // is structural — BBB fixtures must model the post-approval state.
+        prelim_approved_at: '2026-05-07T14:50:00.000Z',
         draft_email: null,
       });
       // NNN: stub all 6 refinance-required classifications on file so allDocsInNow=true.
@@ -5189,23 +5195,40 @@ WEBSITE.  unionfinancialcorp.com`;
 
   const nnnCases = [
     {
-      name: '1. under_review + all docs in (refinance) + exit_strategy + no draft → completion-handoff (not BBB)',
-      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      // R5-B-3 INVERSION (Lena Park 8486bf8a / R4-S14 retest):
+      //   PRE-FIX EXPECTATION: 'completion-handoff' — decideReviewDispatch
+      //     returned completion-handoff on any under_review + allDocsInNow +
+      //     !draft_email, regardless of admin approval state.
+      //   POST-FIX EXPECTATION: 'preliminary-update' — broker submitting
+      //     final intake docs on under_review deal with prelim_approved_at=null
+      //     routes to [UPDATED] PRELIMINARY review so admin sees the updated
+      //     state and can approve; close-out happens AFTER approval via
+      //     active-branch's computeCompletionDispatch.
+      //   REASON: parallel-dispatch-path gate gap — decideReviewDispatch was
+      //     missing the prelim_approved_at gate that computeCompletionDispatch
+      //     (active-branch sibling, L435) has always had. Symmetric fix.
+      // Post-approval cases (BBB flow, case 7) explicitly set prelim_approved_at.
+      name: '1. under_review + all docs in (refinance) + exit_strategy + no draft + no prelim_approval → preliminary-update (R5-B-3 INVERSION: pre-approval routes to [UPDATED] PRELIMINARY, not [File Complete])',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null, prelim_approved_at: null },
       summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi at maturity' },
       classifications: refinanceAllDocs,
-      expectAction: 'completion-handoff',
-      expectConditionsFulfilled: false,
+      expectAction: 'preliminary-update',
     },
     {
-      name: '2. under_review + all docs in (purchase) + purchase_contract + exit_strategy → completion-handoff',
-      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      // R5-B-3 INVERSION (same shape, purchase tier):
+      //   PRE-FIX EXPECTATION: 'completion-handoff'
+      //   POST-FIX EXPECTATION: 'preliminary-update'
+      //   REASON: same as case 1 — parallel-dispatch-path gate gap.
+      //     Purchase deals with allDocsInNow + prelim_approved_at=null route
+      //     to [UPDATED] PRELIMINARY, not [File Complete] handoff.
+      name: '2. under_review + all docs in (purchase) + purchase_contract + exit_strategy + no prelim_approval → preliminary-update (R5-B-3 INVERSION: purchase tier)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null, prelim_approved_at: null },
       // Group MMMM: structured is_purchase=true signal (post-MMMM canonical
       // classification — replaces the old /purchas/ regex which matched on
       // either loan_type='purchase' or purpose containing 'purchase').
       summary: { loan_type: 'first mortgage', is_purchase: true, purpose: 'purchase of new home', exit_strategy: 'refi at maturity' },
       classifications: purchaseAllDocs,
-      expectAction: 'completion-handoff',
-      expectConditionsFulfilled: false,
+      expectAction: 'preliminary-update',
     },
     {
       name: '3. under_review + missing income_proof → preliminary-update',
@@ -5254,8 +5277,16 @@ WEBSITE.  unionfinancialcorp.com`;
       expectAction: 'text-only-noop',
     },
     {
-      name: '7. under_review + all docs in + conditions_sent_at set → completion-handoff (BBB compatibility)',
-      deal: { status: 'under_review', draft_email: null, conditions_sent_at: '2026-05-09T12:00:00Z' },
+      // R5-B-3 fixture realism: BBB compatibility flow requires admin to have
+      // sent conditions, which only happens post-prelim-approval. Pre-R5-B-3
+      // the test fixture didn't set prelim_approved_at (test fixture was
+      // implicit/incomplete — the production code's pre-fix bug was that it
+      // didn't NEED prelim_approved_at to fire completion-handoff). Post-R5-B-3
+      // the gate is structural — fixtures must model the realistic BBB state.
+      // Adding prelim_approved_at preserves the completion-handoff expectation
+      // for this post-approval path (case 7 verifies BBB flow stays intact).
+      name: '7. under_review + all docs in + conditions_sent_at SET + prelim_approved_at SET → completion-handoff (BBB compatibility post-approval)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: '2026-05-09T12:00:00Z', prelim_approved_at: '2026-05-09T11:50:00Z' },
       summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
       classifications: refinanceAllDocs,
       expectAction: 'completion-handoff',
@@ -5392,9 +5423,14 @@ WEBSITE.  unionfinancialcorp.com`;
     },
     {
       // Direction (b): no over-suppression. Existing NNN semantics preserved when
-      // docs present.
-      name: 'T4: under_review + allDocsInNow + hasNewDocs=true → completion-handoff (NNN existing semantics preserved)',
-      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null },
+      // docs present. R5-B-3 fixture-realism: completion-handoff requires
+      // prelim_approved_at SET (post-approval path); pre-R5-B-3 fixture didn't
+      // model this (production bug was that the gate didn't check it). Adding
+      // prelim_approved_at preserves the completion-handoff expectation here —
+      // pre-approval case is now T2 in the R5B3-GATE truth table (routes to
+      // preliminary-update).
+      name: 'T4: under_review + allDocsInNow + hasNewDocs=true + prelim_approved_at SET → completion-handoff (post-approval close-out)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null, prelim_approved_at: '2026-05-19T00:00:00Z' },
       summary: { loan_type: 'refinance', purpose: 'debt consolidation', exit_strategy: 'refi' },
       classifications: refinanceAllDocs,
       hasNewDocsThisTurn: true,
@@ -6747,7 +6783,183 @@ Lender:
   }
 
   // ════════════════════════════════════════════════════════════════
-  // GROUP SSS — two-tier required-doc completion gate (S3.2)
+  // R5-B-3 — sendCompletionHandoff pre-approval gate gap (Lena Park 8486bf8a, R4-S14 retest)
+  // ════════════════════════════════════════════════════════════════
+  // Bug: decideReviewDispatch returned 'completion-handoff' on
+  // under_review + allDocsInNow + !draft_email REGARDLESS of
+  // prelim_approved_at, firing [File Complete] handoff pre-admin-approval.
+  // Asymmetric with computeCompletionDispatch (active-branch sibling at
+  // L435) which always gated on prelim_approved_at.
+  // Fix: gate decideReviewDispatch's completion-handoff branch on
+  // prelim_approved_at. Pre-approval → 'preliminary-update' (admin sees
+  // [UPDATED] PRELIMINARY with Bucket-B-relaxed banner). Post-approval →
+  // 'completion-handoff' (existing path, unchanged byte-identically).
+  const { decideReviewDispatch: r5b3Dispatch } = require('./src/routes/webhook').__test__;
+  const r5b3WebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const REFI_ALL_R5B3 = ['government_id','appraisal','property_tax','mortgage_statement','income_proof','credit_report','aml','pep'];
+
+  // ─── GROUP R5B3-DECIDEREVIEWDISPATCH-PRELIM-APPROVED-GATE — 6-case truth table ───
+  console.log('\n========== R5B3-DECIDEREVIEWDISPATCH-PRELIM-APPROVED-GATE — 6-case truth table ==========');
+  const r5b3Cases = [
+    {
+      label: 'T1 under_review + allDocs + !draft + prelim_approved_at SET → completion-handoff (post-approval, unchanged)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null, prelim_approved_at: '2026-05-21T00:00:00Z' },
+      summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+      classifications: REFI_ALL_R5B3,
+      hasNewDocsThisTurn: true,
+      expected: 'completion-handoff',
+    },
+    {
+      label: 'T2 under_review + allDocs + !draft + prelim_approved_at NULL → preliminary-update (R5-B-3 FIX — pre-approval routes to [UPDATED] PRELIMINARY, not [File Complete])',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null, prelim_approved_at: null },
+      summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+      classifications: REFI_ALL_R5B3,
+      hasNewDocsThisTurn: true,
+      expected: 'preliminary-update',
+    },
+    {
+      label: 'T3 under_review + allDocs + draft_email SET (any prelim_approved_at) → noop (admin mid-cycle preserved)',
+      deal: { status: 'under_review', draft_email: '<p>existing draft</p>', conditions_sent_at: null, prelim_approved_at: null },
+      summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+      classifications: REFI_ALL_R5B3,
+      hasNewDocsThisTurn: true,
+      expected: 'noop',
+    },
+    {
+      label: 'T4 under_review + !allDocs + prelim_approved_at SET → preliminary-update (doc gap takes precedence)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null, prelim_approved_at: '2026-05-21T00:00:00Z' },
+      summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+      classifications: REFI_ALL_R5B3.filter(c => c !== 'income_proof'),
+      hasNewDocsThisTurn: true,
+      expected: 'preliminary-update',
+    },
+    {
+      label: 'T5 ltv_escalated + allDocs → escalation-update (R5-B-3 fix DOES NOT touch ltv_escalated branch)',
+      deal: { status: 'ltv_escalated', draft_email: null, conditions_sent_at: null, prelim_approved_at: null },
+      summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+      classifications: REFI_ALL_R5B3,
+      hasNewDocsThisTurn: true,
+      expected: 'escalation-update',
+    },
+    {
+      label: 'T6 under_review + allDocs + !draft + prelim_approved_at NULL + hasNewDocs=FALSE → text-only-noop (C.1 precedence — fires BEFORE R5-B-3 gate per dispatch order)',
+      deal: { status: 'under_review', draft_email: null, conditions_sent_at: null, prelim_approved_at: null },
+      summary: { loan_type: 'refinance', exit_strategy: 'refi' },
+      classifications: REFI_ALL_R5B3,
+      hasNewDocsThisTurn: false,
+      expected: 'text-only-noop',
+    },
+  ];
+  let r5b3Passed = 0;
+  for (const tc of r5b3Cases) {
+    const got = r5b3Dispatch(tc.deal, tc.summary, tc.classifications, tc.hasNewDocsThisTurn);
+    if (got.action !== tc.expected) {
+      throw new Error(`FAIL [R5B3-GATE ${tc.label}]: expected action='${tc.expected}', got '${got.action}'. Full result: ${JSON.stringify(got)}`);
+    }
+    console.log(`  PASS [${tc.label}]: action=${got.action}`);
+    r5b3Passed++;
+  }
+  console.log(`Group R5B3-GATE: ${r5b3Passed}/${r5b3Cases.length} passed`);
+
+  // ─── GROUP R5B3-SYMMETRY-WITH-COMPUTECOMPLETIONDISPATCH — both dispatch helpers gate on prelim_approved_at ───
+  console.log('\n========== R5B3-SYMMETRY-WITH-COMPUTECOMPLETIONDISPATCH — symmetric pre-approval gate ==========');
+  // computeCompletionDispatch (active-branch) ALWAYS gated on prelim_approved_at
+  // (L435: `return deal.prelim_approved_at ? 'completion-handoff' : 'final-review'`).
+  // Post-R5-B-3, decideReviewDispatch (under_review-branch) ALSO gates on
+  // prelim_approved_at. Source-grep both checks.
+  if (!/deal\.prelim_approved_at\s*\?\s*'completion-handoff'\s*:\s*'final-review'/.test(r5b3WebhookSrc)) {
+    throw new Error(`FAIL [R5B3-SYMMETRY / computeCompletionDispatch]: active-branch helper must gate on prelim_approved_at via the canonical \`deal.prelim_approved_at ? 'completion-handoff' : 'final-review'\` pattern.`);
+  }
+  if (!/if \(deal\.prelim_approved_at\) \{\s*return \{ action: 'completion-handoff'/.test(r5b3WebhookSrc)) {
+    throw new Error(`FAIL [R5B3-SYMMETRY / decideReviewDispatch]: under_review-branch must gate completion-handoff on \`if (deal.prelim_approved_at)\` post-R5-B-3. Pre-fix this returned completion-handoff unconditionally.`);
+  }
+  console.log('  PASS [R5B3-SYMMETRY]: both dispatch helpers (computeCompletionDispatch L435 + decideReviewDispatch post-R5-B-3) gate completion-handoff on prelim_approved_at — symmetric across parallel dispatch paths');
+
+  // ─── GROUP R5B3-LENA-FIXTURE — forensic record of pre-fix stuck state (live DB) ───
+  console.log('\n========== R5B3-LENA-FIXTURE — forensic record of Lena 8486bf8a pre-fix bug-state ==========');
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_URL.startsWith('http://localhost')) {
+    console.log('  SKIPPED [R5B3-LENA-FIXTURE]: SUPABASE creds not present or dummy — structural source-grep tests above cover the load-bearing assertions');
+  } else {
+    const { createClient } = require('@supabase/supabase-js');
+    const sbR5b3 = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+    const { data: lena, error: lenaErr } = await sbR5b3.from('deals')
+      .select('id, status, prelim_approved_at, draft_action')
+      .eq('id', '8486bf8a-24da-40d5-9707-eeb3d9bcf6b8')
+      .maybeSingle();
+    if (lenaErr || !lena) {
+      console.log('  SKIPPED [R5B3-LENA-FIXTURE]: deal not found in current DB — ' + (lenaErr?.message || 'no row'));
+    } else {
+      console.log(`  Lena 8486bf8a: status='${lena.status}', prelim_approved_at=${lena.prelim_approved_at}, draft_action='${lena.draft_action}'`);
+      // Pre-fix snapshot: status='under_review' AND prelim_approved_at=null AND
+      // draft_action='approval_completed'. Expected to need updating after
+      // Franco resolves Lena (Option 1 or Option 2 per residual).
+      if (lena.status === 'under_review' && lena.prelim_approved_at === null && lena.draft_action === 'approval_completed') {
+        console.log(`  PASS [R5B3-LENA-FIXTURE]: Lena confirmed in pre-fix bug-state at commit-time (under_review + prelim_approved_at=null + draft_action='approval_completed'). Forensic snapshot — expected to need updating after Franco resolves per residual.`);
+      } else {
+        console.log(`  WARN [R5B3-LENA-FIXTURE]: Lena state differs from predicted pre-fix bug-state. Either she's been resolved (test snapshot now stale — update expected state) OR the bug-state has evolved.`);
+      }
+    }
+  }
+
+  // ─── GROUP R5B3-D-EXTENSION-DOES-NOT-REGRESS — banner trichotomy surface untouched ───
+  console.log('\n========== R5B3-D-EXTENSION-DOES-NOT-REGRESS — banner trichotomy surface unchanged ==========');
+  // R5-B-3 fix lives in decideReviewDispatch (dispatch-action layer); D-extension
+  // lives in computeAdminBanner (banner layer inside sendPreliminaryReviewToAdmin).
+  // Source-grep that computeAdminBanner's trichotomy is byte-unchanged.
+  if (!/const computeAdminBanner = \(\{ clarificationPending, missingDocs, deal \}\) => \{/.test(r5b3WebhookSrc)) {
+    throw new Error(`FAIL [R5B3-D-EXTENSION-DOES-NOT-REGRESS]: computeAdminBanner signature must be unchanged byte-identically.`);
+  }
+  for (const requiredBranch of [
+    /clarificationPending/,
+    /\(missingDocs \|\| \[\]\)\.length > 0/,
+    /isPostApproval = !!deal\?\.prelim_approved_at/,
+  ]) {
+    if (!requiredBranch.test(r5b3WebhookSrc)) {
+      throw new Error(`FAIL [R5B3-D-EXTENSION-DOES-NOT-REGRESS]: D-extension banner trichotomy pattern \`${requiredBranch.source}\` not found. R5-B-3 must NOT touch D-extension.`);
+    }
+  }
+  console.log('  PASS [R5B3-D-EXTENSION-DOES-NOT-REGRESS]: computeAdminBanner trichotomy (clarificationPending → missingDocs → isPostApproval) preserved byte-identically; R5-B-3 fix is on parallel dispatch-action surface');
+
+  // ─── GROUP R5B3-C1-PRECEDENCE-STRUCTURAL (PIN 3) — source-order verification ───
+  console.log('\n========== R5B3-C1-PRECEDENCE-STRUCTURAL (PIN 3) — text-only-noop ordered BEFORE prelim_approved_at gate ==========');
+  // Inside the same `if (deal.status === 'under_review' && allDocsInNow) { if (!deal.draft_email) { ... } }`
+  // branch, C.1's text-only-noop return must precede the R5-B-3 prelim_approved_at check.
+  // If a future refactor reorders, broker text-only replies route to preliminary-update
+  // instead of text-only-noop — reintroducing S8 Bug 2.
+  const r5b3UnderReviewBranchMatch = r5b3WebhookSrc.match(/if \(deal\.status === 'under_review' && allDocsInNow\) \{[\s\S]*?if \(!deal\.draft_email\) \{([\s\S]*?)\}\s*return \{ action: 'noop'/);
+  if (!r5b3UnderReviewBranchMatch) {
+    throw new Error(`FAIL [R5B3-C1-PRECEDENCE-STRUCTURAL]: could not locate under_review + allDocsInNow + !draft_email branch body in webhook.js.`);
+  }
+  const branchBody = r5b3UnderReviewBranchMatch[1];
+  const textOnlyNoopIdx = branchBody.indexOf("action: 'text-only-noop'");
+  const prelimApprovedGateIdx = branchBody.indexOf("if (deal.prelim_approved_at)");
+  if (textOnlyNoopIdx < 0) {
+    throw new Error(`FAIL [R5B3-C1-PRECEDENCE-STRUCTURAL]: C.1 text-only-noop return not found in branch body.`);
+  }
+  if (prelimApprovedGateIdx < 0) {
+    throw new Error(`FAIL [R5B3-C1-PRECEDENCE-STRUCTURAL]: R5-B-3 prelim_approved_at gate not found in branch body.`);
+  }
+  if (textOnlyNoopIdx >= prelimApprovedGateIdx) {
+    throw new Error(`FAIL [R5B3-C1-PRECEDENCE-STRUCTURAL]: C.1 text-only-noop return at offset ${textOnlyNoopIdx} must lexically precede the R5-B-3 prelim_approved_at gate at offset ${prelimApprovedGateIdx}. If reordered, broker text-only replies on under_review + allDocs + !draft + !prelim_approved_at would route to preliminary-update instead of text-only-noop, reintroducing S8 Bug 2.`);
+  }
+  console.log(`  PASS [R5B3-C1-PRECEDENCE-STRUCTURAL]: text-only-noop return (offset ${textOnlyNoopIdx}) lexically precedes R5-B-3 prelim_approved_at gate (offset ${prelimApprovedGateIdx}) — C.1's S8 Bug 2 protection is structurally preserved against future refactor reordering`);
+
+  // ─── GROUP R5B3-PRELIM-UPDATE-DOWNSTREAM-CORRECTNESS — [UPDATED] PRELIMINARY banner correctness ───
+  console.log('\n========== R5B3-PRELIM-UPDATE-DOWNSTREAM-CORRECTNESS — fix routes to PRELIMINARY (not COMPLETE) banner ==========');
+  // When R5-B-3 fix fires (pre-approval allDocs case), dispatch returns
+  // 'preliminary-update' → sendPreliminaryReviewToAdmin{isUpdate:true} → computeAdminBanner.
+  // For !isPostApproval + missingDocs=[] + !clarificationPending → PRELIMINARY banner
+  // (per Bucket-B-relaxed trichotomy). Pin this end-to-end.
+  const { computeAdminBanner: r5b3Banner } = require('./src/routes/webhook').__test__;
+  const r5b3PreApprovalBanner = r5b3Banner({
+    clarificationPending: false,
+    missingDocs: [],
+    deal: { prelim_approved_at: null },
+  });
+  if (r5b3PreApprovalBanner.statusFlag !== 'PRELIMINARY' || r5b3PreApprovalBanner.bannerText !== 'PRELIMINARY REVIEW — AWAITING APPROVAL') {
+    throw new Error(`FAIL [R5B3-PRELIM-UPDATE-DOWNSTREAM]: pre-approval + allDocs banner must render PRELIMINARY (not COMPLETE). Got: ${JSON.stringify(r5b3PreApprovalBanner)}. This is the load-bearing downstream correctness — if the banner rendered COMPLETE here, the R5-B-3 fix would route to [UPDATED] COMPLETE Review (still wrong shape, just at a different surface).`);
+  }
+  console.log(`  PASS [R5B3-PRELIM-UPDATE-DOWNSTREAM]: pre-approval + allDocs → banner=PRELIMINARY (not COMPLETE). Bucket-B-relaxed !isPostApproval trichotomy correctly routes [UPDATED] PRELIMINARY when R5-B-3 fix fires.`);
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.

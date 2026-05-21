@@ -884,10 +884,33 @@ const decideReviewDispatch = (deal, reviewSummary, reviewClassifications, hasNew
       // R4-Bucket-C.1: text-only reply on a complete-file deal → no admin emission.
       // Pre-C.1 this fired completion-handoff regardless of new-docs presence
       // (S7 Bug 3: [File Complete] on a clarification-only reply).
+      // STRUCTURAL ORDER NOTE (R5-B-3 PIN 3): this text-only-noop branch is
+      // intentionally checked BEFORE the R5-B-3 prelim_approved_at gate below.
+      // The order is load-bearing — if a future refactor reorders these
+      // returns such that the prelim_approved_at gate fires first, broker
+      // text-only replies would route to preliminary-update instead of
+      // text-only-noop, reintroducing S8 Bug 2's wrong-shape [UPDATED]
+      // PRELIMINARY on clarification-only replies. The R5B3-C1-PRECEDENCE-
+      // STRUCTURAL test source-greps this ordering.
       if (!hasNewDocsThisTurn) {
         return { action: 'text-only-noop', reason: 'broker text-only reply (no new docs)', allDocsInNow: true, stillMissing };
       }
-      return { action: 'completion-handoff', conditionsFulfilled: !!deal.conditions_sent_at, allDocsInNow: true, stillMissing };
+      // R5-B-3 (Lena Park 8486bf8a, R4-S14 retest): gate completion-handoff
+      // on prelim_approved_at — symmetric with computeCompletionDispatch
+      // L435's active-branch gate. Pre-fix this returned completion-handoff
+      // regardless of admin approval state → broker submitting final intake
+      // docs on under_review deal with prelim_approved_at=null fired
+      // [File Complete] handoff before admin's APPROVED reply ever landed.
+      // Post-fix: post-approval routes to completion-handoff (the close-out);
+      // pre-approval routes to preliminary-update so admin sees the
+      // [UPDATED] PRELIMINARY review (all docs received, clarification
+      // resolved per Bucket-B-relaxed banner trichotomy) and can approve.
+      // After admin's APPROVED reply, active-branch's computeCompletionDispatch
+      // correctly routes to close-out (it always checked prelim_approved_at).
+      if (deal.prelim_approved_at) {
+        return { action: 'completion-handoff', conditionsFulfilled: !!deal.conditions_sent_at, allDocsInNow: true, stillMissing };
+      }
+      return { action: 'preliminary-update', allDocsInNow: true, stillMissing };
     }
     return { action: 'noop', reason: 'admin mid-cycle (draft_email set)', allDocsInNow: true, stillMissing, draftAction: deal.draft_action };
   }
