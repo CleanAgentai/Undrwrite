@@ -28,6 +28,7 @@ const cFields = require('../services/canonical-fields');
 // ADMIN-HANDOFF LINK-SUBMISSION (2026-05-20): pure detection of file-hosting
 // links in inbound broker body. No URL fetching, no link-following.
 const { detectFileHostingLinksInBody } = require('../lib/linkDetector');
+const { selectGreetingFirstName } = require('../lib/greeting');
 
 // Track processed message IDs to prevent duplicate processing
 const processedMessages = new Set();
@@ -2147,6 +2148,16 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           console.log(`B-2b (review path): pre-Claude discrepancy detection fired — ${_bBrokerFacingReview.length} broker-facing entries`);
         }
 
+        // R5-E refined (2026-05-21): JS-side greeting selection. broker_name >
+        // sender_name (broker turns) / borrower_name > sender_name (borrower turns),
+        // anti-collided against admin's first name. Null when no defensible target
+        // exists → prompt instructs Vienna to use generic "Hi there!".
+        const _eReviewGreeting = selectGreetingFirstName({
+          broker_name: reviewSummaryIn?.broker_name,
+          sender_name: reviewSummaryIn?.sender_name,
+          borrower_name: reviewSummaryIn?.borrower_name,
+          sender_type: reviewSummaryIn?.sender_type,
+        });
         const reviewResult = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -2155,7 +2166,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           labeledReviewHistory,
           reviewDocumentsOnFile,
           existingDeal.status,
-          { discrepancyDetected: _bDiscrepancyDetectedReview, canonicalFieldsPrompt: _bCanonicalCtxReview }
+          { discrepancyDetected: _bDiscrepancyDetectedReview, canonicalFieldsPrompt: _bCanonicalCtxReview, greetingFirstName: _eReviewGreeting }
         );
         // Cluster B Commit 2b — post-Claude strip + inject on reply (even though NNN may suppress it from broker;
         // the suppressed text is still passed to sendPreliminaryReviewToAdmin via brokerFacingReplyText for D's gate).
@@ -2349,6 +2360,14 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           console.log(`B-2b (active path): pre-Claude discrepancy detection fired — ${_bBrokerFacingActive.length} broker-facing entries`);
         }
 
+        // R5-E refined (2026-05-21): JS-side greeting selection — same shape as
+        // review-path call site. Computed once per turn from summaryIn fields.
+        const _eActiveGreeting = selectGreetingFirstName({
+          broker_name: summaryIn?.broker_name,
+          sender_name: summaryIn?.sender_name,
+          borrower_name: summaryIn?.borrower_name,
+          sender_type: summaryIn?.sender_type,
+        });
         const result = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -2357,7 +2376,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           labeledActiveHistory,
           documentsOnFile,
           existingDeal.status,
-          { postApprovalAmlPepAsk, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive }
+          { postApprovalAmlPepAsk, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive, greetingFirstName: _eActiveGreeting }
         );
         // Cluster B Commit 2b — post-Claude strip + inject on broker-facing reply.
         if (_bDiscrepancyDetectedActive && result.responseEmail) {

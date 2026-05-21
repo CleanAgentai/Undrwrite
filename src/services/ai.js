@@ -1004,7 +1004,14 @@ module.exports = {
           || extractBorrowerFromEmailSubject(emailSubject)
           || 'the borrower named in your email';
         console.log(`S15-E-followup: identity clash detected JS-side (absence) — broker mentioned "${_s15BodyName}", doc names "${_s15DocName}" (file: ${_s15Clash.docFile}, missingTokens=${JSON.stringify(_s15Clash.missingTokens)}). Routing to generateIdentityClashMinimalAsk.`);
-        const welcomeEmail = await module.exports.generateIdentityClashMinimalAsk(emailBody, _s15BodyName, _s15DocName, senderName);
+        // R5-E refined (2026-05-21): prefer C.7 parser result (parsedBrokerFirstName)
+        // over senderName-derived greeting. On Anna 11196627, parsedBrokerFirstName="Eric"
+        // (from broker signature in body); senderName="Franco Maione" (testing proxy).
+        // Pre-fix the minimal-ask greeted "Hi Franco" (admin proxy); post-fix greets
+        // "Hi Eric" (true broker). Falls back to senderName-derived chain inside the
+        // minimal-ask when parsedBrokerFirstName is null (anchor-shape outside C.7
+        // coverage — safe failure direction, same as pre-R5-E).
+        const welcomeEmail = await module.exports.generateIdentityClashMinimalAsk(emailBody, _s15BodyName, _s15DocName, senderName, parsedBrokerFirstName);
         // Build minimal dealSummary JS-side. borrower_name = email-side name
         // (body extraction first, subject fallback, generic last) — line 236
         // disposition applied deterministically.
@@ -1155,7 +1162,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   },
 
   // Conversational broker response — reads full context and responds naturally
-  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '' } = {}) => {
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '', greetingFirstName = null } = {}) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -1289,6 +1296,19 @@ Production case driving this rule: Kevin Tran 2026-05-16 — exit_strategy was n
 - This applies to the email body greeting only. The deal summary fields stay as-is in the analysis JSON; the collision rule only governs how you address the recipient.`
         : '';
 
+      // R5-E refined (2026-05-21): greeting first-name passed in deterministically
+      // from JS-side selectGreetingFirstName helper at the call site. When
+      // populated, this overrides the SENDER INFO-derived greeting that
+      // historically used sender_name (Postmark From-name, which collides with
+      // admin testing proxy). When null, callers want the generic-greeting
+      // fallback (helper returned null = no defensible target).
+      const greetingFirstNameBlock = greetingFirstName
+        ? `\n\nGREETING TARGET (R5-E refined — load-bearing, JS-deterministic):
+- Address the recipient as "Hi ${greetingFirstName}!" — this name was selected by JS-side priority (broker_name > sender_name for broker turns; anti-collided against admin's first name).
+- This OVERRIDES the SENDER INFO sender_name field below for greeting purposes. DO NOT greet by sender_name if it differs from "${greetingFirstName}".
+- Use "${greetingFirstName}" verbatim — do NOT shorten, abbreviate, or substitute.`
+        : `\n\nGREETING TARGET (R5-E refined): no defensible first-name target available. Use a GENERIC greeting: "Hi there!" or "Hello!" — NO first name. Do NOT default to sender_name in this case.`;
+
       content.push({
         type: 'text',
         text: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. You are having an email conversation about a mortgage deal.
@@ -1297,7 +1317,7 @@ SENDER INFO (from deal summary):
 - Sender type: ${existingSummary?.sender_type || 'unknown'}
 - Sender name: ${existingSummary?.sender_name || 'unknown'}
 - Sender company: ${existingSummary?.sender_company || 'N/A'}
-- Borrower name: ${existingSummary?.borrower_name || 'unknown'}${nameCollisionBlock}
+- Borrower name: ${existingSummary?.borrower_name || 'unknown'}${greetingFirstNameBlock}${nameCollisionBlock}
 
 FILE STATE (deal status: ${dealStatus}):
 - 'active' = the file is still being assembled; admin review has NOT started. Vienna may be requesting more docs, answering questions, or acknowledging materials as they arrive.
@@ -1978,7 +1998,7 @@ Return only the HTML email body. Do not include a subject line.`,
   // Group KKK + LLL (S12.3 + S12.4): warm-but-businesslike tone (no "Hey", no
   // filler greetings) + enumerate outstanding items by name (recipient shouldn't
   // have to scroll back). Both fixes touch the same prompt — batched.
-  generateFollowUpReminder: async (dealSummary, daysSilent, reminderNumber, missingDocs = []) => {
+  generateFollowUpReminder: async (dealSummary, daysSilent, reminderNumber, missingDocs = [], { greetingFirstName = null } = {}) => {
     try {
       // LLL: render outstanding items as a name-by-name list using DOC_DISPLAY_NAMES.
       // Empty array → fallback to generic phrasing (backward compat for callers that
@@ -2001,8 +2021,11 @@ ${itemsList}
 
 DEAL DETAILS:
 Sender type: ${dealSummary?.sender_type || 'broker'}
-Sender name: ${dealSummary?.sender_type === 'borrower' ? (dealSummary?.sender_name || dealSummary?.borrower_name || 'Unknown') : (dealSummary?.sender_name || dealSummary?.broker_name || 'Unknown')} (USE THEIR FIRST NAME ONLY — e.g. if "Jason Mercer", address them as "Jason")
+Sender name: ${dealSummary?.sender_type === 'borrower' ? (dealSummary?.sender_name || dealSummary?.borrower_name || 'Unknown') : (dealSummary?.sender_name || dealSummary?.broker_name || 'Unknown')}
 Borrower: ${dealSummary?.borrower_name || 'Unknown'}
+${greetingFirstName
+  ? `\nGREETING TARGET (R5-E refined — load-bearing, JS-deterministic):\n- Address the recipient as "Hi ${greetingFirstName}!" — selected by JS-side priority (broker_name > sender_name for broker reminders; anti-collided against admin's first name).\n- This OVERRIDES the Sender name field above for greeting purposes.\n- Use "${greetingFirstName}" verbatim — do NOT shorten, abbreviate, or substitute.\n`
+  : `\nGREETING TARGET (R5-E refined): no defensible first-name target available. Use a GENERIC greeting: "Hi there!" or "Hello!" — NO first name. Do NOT default to sender_name in this case.\n`}
 
 TONE — preserve the warm-but-businesslike gradient across reminders:
 - Reminder #1: Warm and friendly check-in — "Hi [first name]! Just wanted to check in on [borrower's] file." Open with a "Hi" greeting (NOT "Hey"). Direct and substantive — no filler greetings.
@@ -2564,9 +2587,18 @@ BROKER'S REPLY:
   // semantics can't be cleanly suppressed by text overrides in the same
   // prompt. Architectural fix matching the existing parse*-function pattern
   // — separate function = separate accumulation context = no leak surface.
-  generateIdentityClashMinimalAsk: async (emailBody, bodyName, docName, brokerSenderName) => {
+  generateIdentityClashMinimalAsk: async (emailBody, bodyName, docName, brokerSenderName, greetingFirstName = null) => {
     try {
-      const firstName = (brokerSenderName || '').split(/\s+/)[0] || brokerSenderName;
+      // R5-E refined (2026-05-21): greetingFirstName preferred over brokerSenderName-
+      // derived first-token. Caller passes selectGreetingFirstName helper result
+      // (broker_name-prioritized + admin-collision-protected). On Anna 11196627
+      // pre-fix, brokerSenderName="Franco Maione" (testing proxy) → firstName="Franco"
+      // → greeting echoed admin's name; post-fix greetingFirstName="Eric" (from C.7
+      // parser) overrides. Fallback to split-first-token chain preserved for any
+      // caller that doesn't pass greetingFirstName.
+      const firstName = greetingFirstName
+        || (brokerSenderName || '').split(/\s+/)[0]
+        || brokerSenderName;
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 256,

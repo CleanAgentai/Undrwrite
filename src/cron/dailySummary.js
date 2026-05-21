@@ -4,6 +4,7 @@ const dealsService = require('../services/deals');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
 const { isPurchaseFromSummary } = require('../lib/dealType');
+const { selectGreetingFirstName } = require('../lib/greeting');
 
 // Group GGGG: REMINDER_TESTING_MODE env var. When set, accelerates the full
 // reminder cadence so Franco can validate all 3 reminders end-to-end within
@@ -135,11 +136,26 @@ const runFollowUpReminders = async () => {
         if (!deal.extracted_data?.exit_strategy) missingDocs.push('exit_strategy');
       }
 
+      // R5-E refined (2026-05-21): JS-side greeting selection. Pre-fix, the
+      // reminder prompt's Sender name line preferred sender_name (Postmark
+      // From-name = "Franco Maione" testing proxy on most production deals)
+      // over broker_name (LLM-extracted, authoritative). Out[3]/out[4] on
+      // Anna 11196627 R4-S15: "Hi Franco!" on both reminders despite the
+      // true broker being Eric Johansson. Helper prefers broker_name (or
+      // borrower_name for borrower-direct deals), anti-collides against
+      // admin's first name.
+      const _eReminderGreeting = selectGreetingFirstName({
+        broker_name: deal.extracted_data?.broker_name,
+        sender_name: deal.extracted_data?.sender_name,
+        borrower_name: deal.extracted_data?.borrower_name || deal.borrower_name,
+        sender_type: deal.extracted_data?.sender_type,
+      });
       const reminderEmail = await aiService.generateFollowUpReminder(
         deal.extracted_data,
         daysSilent,
         newReminderNumber,
-        missingDocs
+        missingDocs,
+        { greetingFirstName: _eReminderGreeting }
       );
 
       // Use the LAST OUTBOUND subject (what the recipient actually has in their inbox)

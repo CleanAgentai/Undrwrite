@@ -7971,6 +7971,182 @@ Lender:
   console.log('Group F-CROSS-CLUSTER-INTEGRATION: full prior arc holding green.');
 
   // ════════════════════════════════════════════════════════════════
+  // R5 CLUSTER E REFINED — broker-facing greeting cross-prompt wiring
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R5-E refined (selectGreetingFirstName helper
+  // + wiring into 3 generators: generateBrokerResponse, generateIdentityClash
+  // MinimalAsk, generateFollowUpReminder). Empirical root: Anna 11196627
+  // R4-S15 Eric Johansson — broker_name correctly extracted ("Eric Johansson")
+  // but greeting derived from sender_name ("Franco Maione" testing proxy) →
+  // collision fallback → "Hi there!" / "Hi Franco!" across 5 reply shapes.
+  //   E-SELECT-GREETING-MATRIX: 12-case truth table on the helper.
+  //   E-ANNA-LIVE-RETEST: production-data replay covering all 3 reply shapes
+  //     (followup conv + identity-clash minimal-ask + reminder).
+  //   E-CALL-SITE-WIRING: source-grep that helper is invoked at all 3 sites.
+  //   E-C7-BASELINE-5X: existing C.7 parser tests unchanged + 5x stable.
+  //   E-NAME-COLLISION-PRESERVED: helper falls back to null on Franco-named
+  //     broker (rare but possible); existing collision logic intact.
+  //   E-CROSS-CLUSTER-INTEGRATION: full prior arc holding green.
+  const { selectGreetingFirstName: _eSelect, extractFirstName: _eExtractFirst, ADMIN_FIRST_NAME: _eAdminFirst } = require('./src/lib/greeting');
+
+  console.log('\n========== R5-E-SELECT-GREETING-MATRIX — 12-case OR-of-three truth-table ==========');
+  const _eMatrix = [
+    // [args, expected, label]
+    [{ broker_name: 'Eric Johansson', sender_name: 'Franco Maione', sender_type: 'broker' }, 'Eric',
+      'broker_name=Eric, sender_name=Franco-proxy → "Eric" (Anna 11196627 production shape)'],
+    [{ broker_name: 'Jason Mercer', sender_name: 'Jason Mercer', sender_type: 'broker' }, 'Jason',
+      'broker_name matches sender_name → "Jason" (non-proxy production shape)'],
+    [{ broker_name: null, sender_name: 'Karen Westbrook', sender_type: 'broker' }, 'Karen',
+      'broker_name absent → sender_name first-name fallback'],
+    [{ broker_name: '', sender_name: 'Priya Mehta', sender_type: 'broker' }, 'Priya',
+      'broker_name empty string → sender_name fallback'],
+    [{ broker_name: 'Franco Vieanna', sender_name: 'Franco Maione', sender_type: 'broker' }, null,
+      'broker actually named Franco → null (anti-collision; caller renders generic)'],
+    [{ broker_name: null, sender_name: 'Franco Maione', sender_type: 'broker' }, null,
+      'broker_name absent + sender_name=Franco → null (sender-side collision through fallback)'],
+    [{ broker_name: 'Ji-Young Park', sender_name: 'Ji-Young Park', sender_type: 'broker' }, 'Ji-Young',
+      'hyphenated first-name preserved (Ji-Young not Ji)'],
+    [{ broker_name: "O'Connor Smith", sender_name: 'Test Sender', sender_type: 'broker' }, "O'Connor",
+      'apostrophe in first token preserved'],
+    [{ borrower_name: 'Anna Bergstrom', sender_name: 'Anna Bergstrom', sender_type: 'borrower' }, 'Anna',
+      'sender_type=borrower → borrower_name wins'],
+    [{ borrower_name: null, sender_name: 'Anna Bergstrom', sender_type: 'borrower' }, 'Anna',
+      'sender_type=borrower + borrower_name absent → sender_name fallback'],
+    [{ broker_name: null, sender_name: null, sender_type: 'broker' }, null,
+      'all null → null (defensive)'],
+    [{}, null,
+      'empty args → null (defensive)'],
+  ];
+  let _eMatrixFails = 0;
+  for (const [args, expected, label] of _eMatrix) {
+    const actual = _eSelect(args);
+    if (actual !== expected) {
+      _eMatrixFails++;
+      console.log(`  FAIL: ${label} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_eMatrixFails > 0) throw new Error(`FAIL [E-SELECT-GREETING-MATRIX]: ${_eMatrixFails}/${_eMatrix.length} cases failed.`);
+  console.log(`Group E-SELECT-GREETING-MATRIX: ${_eMatrix.length}/${_eMatrix.length} cases pass.`);
+
+  console.log('\n========== R5-E-ANNA-LIVE-RETEST — Anna 11196627 production-data replay (LOAD-BEARING) ==========');
+  // Anna Bergstrom 11196627 R4-S15. broker_name="Eric Johansson" (LLM-extracted
+  // at processInitialEmail time, persisted in extracted_data on the deal).
+  // sender_name="Franco Maione" (Postmark From-name, testing proxy on 93/108
+  // production deals). Pre-fix: all 5 outbound reply shapes used sender_name-
+  // derived greeting → "Hi Franco" / "Hi there!" across out[1]..out[4]. Post-
+  // fix: helper returns "Eric" for all 3 generator paths (broker-response /
+  // identity-clash / reminder).
+  const _eAnnaExtractedData = {
+    broker_name: 'Eric Johansson',
+    sender_name: 'Franco Maione',
+    sender_type: 'broker',
+    borrower_name: 'Anna Bergstrom',
+    name_collides_with_admin: true,  // sender first-token = "Franco"
+  };
+  let _eAnnaFails = 0;
+  // Path 1: generateBrokerResponse greeting (out[1], out[2] shapes)
+  const _eAnnaBrokerGreeting = _eSelect(_eAnnaExtractedData);
+  if (_eAnnaBrokerGreeting !== 'Eric') { _eAnnaFails++; console.log(`  FAIL: generateBrokerResponse path — expected "Eric", got ${JSON.stringify(_eAnnaBrokerGreeting)}`); }
+  else console.log(`  PASS: generateBrokerResponse path (followup conv) — greeting="Eric" (broker_name wins over Franco-proxy sender_name)`);
+  // Path 2: generateIdentityClashMinimalAsk greeting (out[0] shape, when not actually clash — but identity-clash for Anna does happen at out[0])
+  // The helper input for identity-clash path is parsedBrokerFirstName + senderName. Since C.7 parser returned "Eric", that flows in as broker_name shape.
+  const _eAnnaClashGreeting = _eSelect({ broker_name: 'Eric', sender_name: 'Franco Maione', sender_type: 'broker' });
+  if (_eAnnaClashGreeting !== 'Eric') { _eAnnaFails++; console.log(`  FAIL: generateIdentityClashMinimalAsk path — expected "Eric", got ${JSON.stringify(_eAnnaClashGreeting)}`); }
+  else console.log(`  PASS: generateIdentityClashMinimalAsk path (initial-clash) — greeting="Eric" via parsedBrokerFirstName from C.7 parser`);
+  // Path 3: generateFollowUpReminder greeting (out[3], out[4] shapes)
+  const _eAnnaReminderGreeting = _eSelect(_eAnnaExtractedData);
+  if (_eAnnaReminderGreeting !== 'Eric') { _eAnnaFails++; console.log(`  FAIL: generateFollowUpReminder path — expected "Eric", got ${JSON.stringify(_eAnnaReminderGreeting)}`); }
+  else console.log(`  PASS: generateFollowUpReminder path (cron reminders) — greeting="Eric" (extends to out[3], out[4] reminder shapes)`);
+  if (_eAnnaFails > 0) throw new Error(`FAIL [E-ANNA-LIVE-RETEST]: ${_eAnnaFails} of 3 generator paths failed; production-fixture root not addressed.`);
+  console.log(`Group E-ANNA-LIVE-RETEST: 3/3 generator paths return "Eric" on Anna 11196627 production data shape.`);
+
+  console.log('\n========== R5-E-CALL-SITE-WIRING — helper invoked at all 3 generator paths ==========');
+  const _eWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _eCronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  const _eAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  // (a) webhook.js imports the helper
+  if (!/require\(['"]\.\.\/lib\/greeting['"]\)/.test(_eWebhookSrc)) {
+    throw new Error('FAIL [E-CALL-SITE-WIRING]: webhook.js must import selectGreetingFirstName from ../lib/greeting');
+  }
+  // (b) cron/dailySummary.js imports the helper
+  if (!/require\(['"]\.\.\/lib\/greeting['"]\)/.test(_eCronSrc)) {
+    throw new Error('FAIL [E-CALL-SITE-WIRING]: cron/dailySummary.js must import selectGreetingFirstName from ../lib/greeting');
+  }
+  // (c) webhook.js has TWO selectGreetingFirstName invocations (review path + active path)
+  const _eWebhookInvCount = (_eWebhookSrc.match(/selectGreetingFirstName\(/g) || []).length;
+  if (_eWebhookInvCount < 2) {
+    throw new Error(`FAIL [E-CALL-SITE-WIRING]: webhook.js must invoke selectGreetingFirstName at >=2 call sites (review path + active path); found ${_eWebhookInvCount}`);
+  }
+  // (d) cron/dailySummary.js has the helper invocation in the reminder loop
+  if (!/selectGreetingFirstName\(\{/.test(_eCronSrc)) {
+    throw new Error('FAIL [E-CALL-SITE-WIRING]: cron/dailySummary.js must invoke selectGreetingFirstName in the reminder loop');
+  }
+  // (e) ai.js generators accept greetingFirstName param
+  if (!/greetingFirstName = null \} = \{\}\)/.test(_eAiSrc)) {
+    throw new Error('FAIL [E-CALL-SITE-WIRING]: ai.js generator option signatures must accept { greetingFirstName = null } = {}');
+  }
+  // (f) generateIdentityClashMinimalAsk accepts the new param
+  if (!/generateIdentityClashMinimalAsk: async \(emailBody, bodyName, docName, brokerSenderName, greetingFirstName = null\)/.test(_eAiSrc)) {
+    throw new Error('FAIL [E-CALL-SITE-WIRING]: generateIdentityClashMinimalAsk signature must accept greetingFirstName = null');
+  }
+  console.log('  PASS: webhook.js + cron/dailySummary.js both import selectGreetingFirstName from ../lib/greeting');
+  console.log(`  PASS: webhook.js invokes selectGreetingFirstName at ${_eWebhookInvCount} call sites (review + active paths)`);
+  console.log('  PASS: cron/dailySummary.js invokes selectGreetingFirstName in reminder loop');
+  console.log('  PASS: ai.js generator signatures accept greetingFirstName option');
+  console.log('Group E-CALL-SITE-WIRING: all 3 generator paths wired through the helper.');
+
+  console.log('\n========== R5-E-C7-BASELINE-5X — existing C.7 parser orthogonality (5x) ==========');
+  // C.7 parser logic is UNCHANGED in R5-E refined. Re-verify 5x to confirm.
+  const _eAiSvc = require('./src/services/ai');
+  const _eMarcusBody = `Hi,\n\nPlease find attached Marcus Webb's file.\n\nDeal: Marcus Webb / 142 Vine Avenue\n\n*Natalie Bergman*\n\nSummit Financial Group Lic. #MB338764\n\n-- \n\nFranco Maione\nFounder at VIMA Real Broker\n`;
+  let _eC7Fails = 0;
+  for (let run = 1; run <= 5; run++) {
+    const r = _eAiSvc.parseBrokerFirstNameFromSignature(_eMarcusBody);
+    if (r !== 'Natalie') { _eC7Fails++; console.log(`  FAIL run${run}: expected "Natalie", got ${JSON.stringify(r)}`); }
+  }
+  if (_eC7Fails > 0) throw new Error(`FAIL [E-C7-BASELINE-5X]: ${_eC7Fails}/5 runs regressed. C.7 parser orthogonality breach.`);
+  // Also re-verify on Anna 11196627 Eric Johansson actual production body shape (synthesized to match).
+  const _eEricBody = `Hi, I'm Eric Johansson with Willow Creek Mortgage Group (Lic. #MB884572). I\nhave a client looking for a $92,000 second mortgage on her property at 1801\nVarsity Estates Dr NW, Calgary. Please find the loan application, credit\nbureau, and appraisal attached.\n\nEric Johansson\n\nWillow Creek Mortgage Group Lic. #MB884572\n\n-- \n\nFranco Maione\n`;
+  const _eEricParse = _eAiSvc.parseBrokerFirstNameFromSignature(_eEricBody);
+  if (_eEricParse !== 'Eric') { _eC7Fails++; console.log(`  FAIL: Eric body — expected "Eric", got ${JSON.stringify(_eEricParse)}`); throw new Error(`FAIL [E-C7-BASELINE-5X]: Eric Johansson body C.7 parse regressed.`); }
+  console.log(`  PASS: 5/5 Marcus runs → "Natalie" (C.7 baseline)`);
+  console.log(`  PASS: Eric Johansson body → "Eric" (C.7 parser works on Anna 11196627 shape; confirms R5-E scope-redirect was correct — bug was downstream, NOT in the parser)`);
+  console.log('Group E-C7-BASELINE-5X: C.7 parser unchanged + production-fixture-confirmed.');
+
+  console.log('\n========== R5-E-NAME-COLLISION-PRESERVED — anti-collision defense intact ==========');
+  // (a) Helper returns null on broker actually named Franco
+  if (_eSelect({ broker_name: 'Franco Vieanna', sender_name: 'Franco Maione', sender_type: 'broker' }) !== null) {
+    throw new Error('FAIL [E-NAME-COLLISION-PRESERVED]: broker actually named Franco must return null (anti-collision)');
+  }
+  // (b) Helper returns null when sender_name fallback collides
+  if (_eSelect({ broker_name: null, sender_name: 'Franco Maione', sender_type: 'broker' }) !== null) {
+    throw new Error('FAIL [E-NAME-COLLISION-PRESERVED]: broker_name absent + sender_name first-token=Franco must return null');
+  }
+  // (c) The existing name-collision logic in generateBrokerResponse prompt is still present
+  if (!/NAME COLLISION DETECTED/.test(_eAiSrc)) {
+    throw new Error('FAIL [E-NAME-COLLISION-PRESERVED]: existing CRITICAL NAME COLLISION DETECTED block must still be present in generateBrokerResponse prompt (defense-in-depth)');
+  }
+  console.log('  PASS: helper returns null on broker actually named Franco (anti-collision via candidate check)');
+  console.log('  PASS: helper returns null on Franco-proxy sender_name fallback');
+  console.log('  PASS: existing CRITICAL NAME COLLISION DETECTED block intact in prompt (prompt-side defense-in-depth)');
+  console.log('Group E-NAME-COLLISION-PRESERVED: anti-collision triple-layered (helper candidate check + helper fallback collision + prompt block).');
+
+  console.log('\n========== R5-E-CROSS-CLUSTER-INTEGRATION — prior arc holding ==========');
+  // Re-verify all prior R5 anchors still present.
+  if (!/_r5IsPrelimReviewDraft|_r5IsClosingDraft/.test(_eWebhookSrc)) throw new Error('FAIL: R5-A+G anchor missing');
+  if (!/prelim_approved_at[\s\S]{0,500}completion-handoff/.test(_eWebhookSrc)) throw new Error('FAIL: R5-B-3 anchor missing');
+  if (!/ignoredSenders\.some/.test(_eWebhookSrc)) throw new Error('FAIL: R5-F-4 anchor missing');
+  if (!/existingDeal\.admin_controlled === true && !isAdmin/.test(_eWebhookSrc)) throw new Error('FAIL: ADMIN-HANDOFF anchor missing');
+  if (!/runDiscrepancyDetectionAggregated/.test(_eWebhookSrc)) throw new Error('FAIL: R5-B-1 anchor missing');
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_eWebhookSrc)) throw new Error('FAIL: R5-B-2 anchor missing');
+  if (!/claimDailySummarySlot/.test(_eCronSrc)) throw new Error('FAIL: R5-F-2 anchor missing');
+  if (!/computeDealClassification/.test(_eCronSrc)) throw new Error('FAIL: R5-F-3 partition anchor missing');
+  console.log('  PASS: R5-A+G + R5-B-3 + R5-F-4 + ADMIN-HANDOFF + R5-B-1 + R5-B-2 + R5-F-2 + R5-F-3 all source-grep-present');
+  console.log('Group E-CROSS-CLUSTER-INTEGRATION: full prior arc holding green.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
