@@ -8539,6 +8539,240 @@ Lender:
   console.log('Group D-CROSS-CLUSTER-INTEGRATION: full prior arc holding + R5-E/R5-C wiring preserved on new R5-D-B path.');
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER η — workflow-language sweep extension (S6 + S7 + S9 corpus)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-η — four new patterns appended to
+  // ROUTING_LEAK_PATTERNS + widened R5-C-a (auxiliary + plural):
+  //   R6-η-a (leading "I'll get this moving through our process")
+  //   R6-η-b (past-tense "I've/We've reviewed the documents" + connector)
+  //   R6-η-c ("we'll have everything needed to move forward/proceed")
+  //   R6-η-d ("to complete the file before funding")
+  //   R5-C-a widened (in touch with an/any update(s) + I'll/will)
+  //
+  //   η-PATTERNS-MATRIX (16+ cases including widening + new patterns)
+  //   η-S6-FIXTURE (Kevin Tran 178d714e out[0]+out[2] verbatim)
+  //   η-S7-FIXTURE (Ethan Broussard 533fbd4f out[2] verbatim)
+  //   η-S9-FIXTURE (James Okafor 004cf263 out[2]+out[4] verbatim)
+  //   η-OVER-FIRE-PROTECTION (deterministic negatives)
+  //   η-CROSS-CLUSTER-INTEGRATION (closed-set count + cascade composition)
+  const _eta = require('./src/services/ai');
+  const { enforceNoRoutingLeak: _etaSweep } = _eta;
+
+  console.log('\n========== R6-η-PATTERNS-MATRIX — new + widened pattern truth-table ==========');
+  const _etaMatrix = [
+    // ── R5-C-a widened (auxiliary + plural variant) ──
+    ['Once that\'s sorted, will be in touch with any updates!',
+      'Once that\'s sorted.',
+      'R5-C-a widened: "will" auxiliary + "any updates" plural (Kevin S6 shape)'],
+    ['Once sorted, I\'ll be in touch with any update.',
+      'Once sorted.',
+      'R5-C-a widened: "any update" (singular variant)'],
+    ['Once sorted, I\'ll be in touch with an update.',
+      'Once sorted.',
+      'R5-C-a regression: "an update" still strips (pre-widening shape)'],
+    // ── R6-η-a leading "I'll get this moving through our process" ──
+    ['Hi! I\'ll get this moving through our process.',
+      'Hi!.',
+      'R6-η-a: "I\'ll" leading + "our process" tail'],
+    ['We\'ll get this moving through the process.',
+      '.',
+      'R6-η-a: "We\'ll" + "the process" variant'],
+    // ── R6-η-b past-tense "reviewed the documents" + connector ──
+    ['I\'ve reviewed all the documents you sent and we\'re ready to start working on this file.',
+      'we\'re ready to start working on this file.',
+      'R6-η-b: strips "I\'ve reviewed all the documents you sent and" — leaves forward-intent clause intact (Q2 verdict)'],
+    ['We have reviewed the documents and are ready to proceed.',
+      'are ready to proceed.',
+      'R6-η-b: "We have reviewed" + connector consumed'],
+    ['I\'ve reviewed the documents received and we\'re going to work on this.',
+      'we\'re going to work on this.',
+      'R6-η-b: "received" suffix tolerance'],
+    // ── R6-η-c "everything needed to move forward / proceed" ──
+    ['Once I have these, we\'ll have everything needed to move forward with the review.',
+      'Once I have these.',
+      'R6-η-c: "move forward with the review" (Ethan/James shape)'],
+    ['Once I get these, we\'ll have everything needed to proceed with the review.',
+      'Once I get these.',
+      'R6-η-c: "proceed with the review" variant'],
+    ['Once received, we\'ll have everything needed to move forward.',
+      'Once received.',
+      'R6-η-c: bare "move forward" without "with the review" tail (Kevin S6 variant)'],
+    // ── R6-η-d "to complete the file before funding" ──
+    ['To complete the file before funding, I\'ll need the AML form.',
+      'I\'ll need the AML form.',
+      'R6-η-d: leading clause + comma consumed'],
+    // ── Composed: full Kevin out[0] verbatim ──
+    // R5-C-a fires first (earlier in array order) on " and will be in touch with any updates!"
+    // → ".", leaving "I'll get this moving through our process.". Then η-a strips the whole
+    // thing (matching with the trailing period) → ".". Single period (not double) — cascade
+    // collapses cleanly via the η-a [.,!?]? terminal punctuation consumption.
+    ['I\'ll get this moving through our process and will be in touch with any updates!',
+      '.',
+      'R6-η composed: Kevin out[0] compound — both halves stripped via cascade (η-a [.,!?]? consumes the period left by R5-C-a strip)'],
+    // ── Composed: Ethan out[2] full sentence ──
+    ['Once we receive these, we\'ll have everything needed to move forward with the review.',
+      'Once we receive these.',
+      'R6-η composed: Ethan out[2] verbatim'],
+    // ── Composed: James out[4] full sentence ──
+    ['To complete the file before funding, I\'ll need the final broker compliance forms.',
+      'I\'ll need the final broker compliance forms.',
+      'R6-η composed: James out[4] verbatim'],
+  ];
+  let _etaMatrixFails = 0;
+  for (const [input, expected, label] of _etaMatrix) {
+    const { swept } = _etaSweep(input);
+    const sweptNorm = swept.replace(/\s+/g, ' ').trim();
+    const expectedNorm = expected.replace(/\s+/g, ' ').trim();
+    if (sweptNorm !== expectedNorm) {
+      _etaMatrixFails++;
+      console.log(`  FAIL: ${label}`);
+      console.log(`    input:    ${JSON.stringify(input)}`);
+      console.log(`    expected: ${JSON.stringify(expectedNorm)}`);
+      console.log(`    got:      ${JSON.stringify(sweptNorm)}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_etaMatrixFails > 0) throw new Error(`FAIL [η-PATTERNS-MATRIX]: ${_etaMatrixFails}/${_etaMatrix.length} cases failed.`);
+  console.log(`Group η-PATTERNS-MATRIX: ${_etaMatrix.length}/${_etaMatrix.length} cases pass.`);
+
+  console.log('\n========== R6-η-S6-FIXTURE — Kevin Tran 178d714e verbatim (LOAD-BEARING) ==========');
+  const _etaS6Cases = [
+    {
+      label: 'out[0] welcome reply (compound — moving through process + in touch with updates)',
+      input: "I'll get this moving through our process and will be in touch with any updates!",
+      mustNotContain: ['get this moving through our process', 'in touch with any updates'],
+    },
+    {
+      label: 'out[2] AML/PEP draft — review-disclosed + everything-needed (no "with the review")',
+      input: "I've reviewed all the documents you sent and we're ready to start working on Kevin's file. To complete our document package, I'll need the following items: AML form (Anti-Money Laundering) PEP form (Politically Exposed Person) Once I have these compliance forms, we'll have everything needed to move forward.",
+      mustNotContain: ["I've reviewed all the documents", "we'll have everything needed to move forward"],
+      mustContain: ["we're ready to start working", "AML form", "PEP form"],
+    },
+  ];
+  let _etaS6Fails = 0;
+  for (const c of _etaS6Cases) {
+    const { swept } = _etaSweep(c.input);
+    for (const needle of (c.mustNotContain || [])) {
+      if (new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(swept)) {
+        _etaS6Fails++; console.log(`  FAIL ${c.label}: leak "${needle}" survived. Got: ${JSON.stringify(swept)}`);
+      }
+    }
+    for (const needle of (c.mustContain || [])) {
+      if (!swept.includes(needle)) {
+        _etaS6Fails++; console.log(`  FAIL ${c.label}: required "${needle}" stripped (over-fire). Got: ${JSON.stringify(swept)}`);
+      }
+    }
+    if (_etaS6Fails === 0) console.log(`  PASS ${c.label}`);
+  }
+  if (_etaS6Fails > 0) throw new Error(`FAIL [η-S6-FIXTURE]: ${_etaS6Fails} assertions failed.`);
+  console.log(`Group η-S6-FIXTURE: Kevin Tran production verbatim correctly neutralized + forward-intent preserved.`);
+
+  console.log('\n========== R6-η-S7-FIXTURE — Ethan Broussard 533fbd4f verbatim (LOAD-BEARING) ==========');
+  const _etaS7Input = "We have reviewed the documents you sent and are ready to start working on this file. To proceed, I'll need the remaining compliance documents: AML form (Anti-Money Laundering) PEP form (Politically Exposed Person) Once we receive these, we'll have everything needed to move forward with the review.";
+  const { swept: _etaS7Swept } = _etaSweep(_etaS7Input);
+  let _etaS7Fails = 0;
+  for (const leak of ['We have reviewed the documents', "we'll have everything needed to move forward with the review", 'move forward with the review']) {
+    if (new RegExp(leak.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(_etaS7Swept)) {
+      _etaS7Fails++; console.log(`  FAIL: leak "${leak}" survived. Got: ${JSON.stringify(_etaS7Swept)}`);
+    }
+  }
+  for (const keep of ['are ready to start working', 'AML form', 'PEP form']) {
+    if (!_etaS7Swept.includes(keep)) {
+      _etaS7Fails++; console.log(`  FAIL: required "${keep}" stripped (over-fire). Got: ${JSON.stringify(_etaS7Swept)}`);
+    }
+  }
+  if (_etaS7Fails > 0) throw new Error(`FAIL [η-S7-FIXTURE]: ${_etaS7Fails} assertions failed.`);
+  console.log(`  PASS: Ethan out[2] verbatim → ${JSON.stringify(_etaS7Swept.slice(0, 200))}`);
+  console.log(`Group η-S7-FIXTURE: Ethan Broussard production verbatim correctly neutralized.`);
+
+  console.log('\n========== R6-η-S9-FIXTURE — James Okafor 004cf263 verbatim (LOAD-BEARING) ==========');
+  const _etaS9Cases = [
+    {
+      label: 'out[2] conditions draft',
+      input: "I've reviewed the documents received and we're ready to start working on this file. To move forward, I'll need the remaining items from your document package: Government-Issued ID Property Tax Assessment Once I have these, we'll have everything needed to proceed with the review.",
+      mustNotContain: ["I've reviewed the documents received", "we'll have everything needed to proceed with the review", "proceed with the review"],
+      mustContain: ["we're ready to start working", 'Government-Issued ID'],
+    },
+    {
+      label: 'out[4] AML/PEP draft',
+      input: "To complete the file before funding, I'll need the final broker compliance forms: AML form (Anti-Money Laundering — broker compliance, required) PEP form (Politically Exposed Person — broker compliance, required) Once I have these, we'll be all set to move forward.",
+      mustNotContain: ['To complete the file before funding'],
+      mustContain: ["I'll need the final broker compliance forms", 'AML form', 'PEP form'],
+    },
+  ];
+  let _etaS9Fails = 0;
+  for (const c of _etaS9Cases) {
+    const { swept } = _etaSweep(c.input);
+    let caseOk = true;
+    for (const leak of (c.mustNotContain || [])) {
+      if (new RegExp(leak.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(swept)) {
+        caseOk = false; _etaS9Fails++; console.log(`  FAIL ${c.label}: leak "${leak}" survived. Got: ${JSON.stringify(swept)}`);
+      }
+    }
+    for (const keep of (c.mustContain || [])) {
+      if (!swept.includes(keep)) {
+        caseOk = false; _etaS9Fails++; console.log(`  FAIL ${c.label}: required "${keep}" stripped (over-fire). Got: ${JSON.stringify(swept)}`);
+      }
+    }
+    if (caseOk) console.log(`  PASS ${c.label}`);
+  }
+  if (_etaS9Fails > 0) throw new Error(`FAIL [η-S9-FIXTURE]: ${_etaS9Fails} assertions failed.`);
+  console.log(`Group η-S9-FIXTURE: James Okafor production verbatim correctly neutralized.`);
+
+  console.log('\n========== R6-η-OVER-FIRE-PROTECTION — deterministic negatives ==========');
+  const _etaNegatives = [
+    ["I'll need the appraisal to move forward with the application", 'legitimate "move forward with the application" — no "everything needed to" prefix'],
+    ["Vienna will review the file before sending", 'legitimate future-tense "will review" — should NOT match (η-b requires past-tense)'],
+    ["to complete the file, I need an appraisal", 'legitimate "to complete the file" without "before funding"'],
+    ["I'll be in touch shortly to coordinate the next steps", 'legitimate "I\'ll be in touch shortly" without "with an/any update"'],
+    ["The broker will be in touch with the lender directly", 'legitimate "be in touch with the lender" — wrong object (not update)'],
+    ["I'll get this moving through the appraisal process", 'legitimate "moving through the appraisal process" — different "process" noun'],
+  ];
+  let _etaNegFails = 0;
+  for (const [input, label] of _etaNegatives) {
+    const { swept, sweptAny } = _etaSweep(input);
+    if (sweptAny) {
+      _etaNegFails++;
+      console.log(`  FAIL over-fire on ${label}: input ${JSON.stringify(input)} → ${JSON.stringify(swept)}`);
+    } else {
+      console.log(`  PASS no over-fire: ${label}`);
+    }
+  }
+  if (_etaNegFails > 0) throw new Error(`FAIL [η-OVER-FIRE-PROTECTION]: ${_etaNegFails}/${_etaNegatives.length} negatives over-fired.`);
+  console.log(`Group η-OVER-FIRE-PROTECTION: ${_etaNegatives.length}/${_etaNegatives.length} legitimate cases preserved.`);
+
+  console.log('\n========== R6-η-CROSS-CLUSTER-INTEGRATION — closed-set count + cascade composition ==========');
+  // Closed-set call-count UNCHANGED (R6-η is pattern-only, no new call sites).
+  const _etaWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _etaSweepCallCount = (_etaWebhookSrc.match(/aiService\.enforceNoRoutingLeak\s*\(/g) || []).length;
+  if (_etaSweepCallCount !== 4) {
+    throw new Error(`FAIL [η-CROSS-CLUSTER]: enforceNoRoutingLeak call sites = ${_etaSweepCallCount}; expected 4 (R6-η adds patterns, not call sites).`);
+  }
+  console.log('  PASS: enforceNoRoutingLeak call-site count unchanged at 4 (R6-η is pattern-only)');
+  // Source-grep that new R6-η patterns appear AFTER R5-C-c.
+  const _etaAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const _etaR5CcPos = _etaAiSrc.indexOf('R5-C-c — standalone');
+  const _etaR6PatternsPos = _etaAiSrc.indexOf('R6 Cluster η patterns');
+  if (_etaR5CcPos < 0 || _etaR6PatternsPos < 0 || _etaR5CcPos >= _etaR6PatternsPos) {
+    throw new Error(`FAIL [η-CROSS-CLUSTER]: R6-η patterns must appear AFTER R5-C-c in source order. R5-C-c pos=${_etaR5CcPos}, R6-η pos=${_etaR6PatternsPos}`);
+  }
+  console.log('  PASS: R6-η patterns appear AFTER R5-C-c in ROUTING_LEAK_PATTERNS source order (cascade-position-pinned)');
+  // Full prior arc anchors all still present.
+  if (!/runDiscrepancyDetectionAggregated/.test(_etaWebhookSrc)) throw new Error('FAIL: R5-B-1 anchor missing');
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_etaWebhookSrc)) throw new Error('FAIL: R5-B-2 anchor missing');
+  if (!/selectGreetingFirstName/.test(_etaWebhookSrc)) throw new Error('FAIL: R5-E anchor missing');
+  if (!/was_in_identity_clash: true/.test(_etaWebhookSrc)) throw new Error('FAIL: R5-D-B anchor missing');
+  // Source-grep R5-C-a widening: now requires (an|any) updates? alternation.
+  // Look for the literal substring in the regex source.
+  if (!_etaAiSrc.includes('with\\s+(?:an|any)\\s+updates?')) {
+    throw new Error('FAIL [η-CROSS-CLUSTER]: R5-C-a widening missing the (an|any) updates? alternation that R6-η-eta needs to catch Kevin S6 shape.');
+  }
+  console.log('  PASS: full prior R5 arc anchors source-grep-present (B-1, B-2, E, D-B)');
+  console.log('  PASS: R5-C-a widening "(an|any) updates?" alternation present');
+  console.log('Group η-CROSS-CLUSTER-INTEGRATION: closed-set call-count preserved + cascade order pinned + prior arc holding.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin

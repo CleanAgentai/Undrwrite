@@ -959,7 +959,11 @@ const ROUTING_LEAK_PATTERNS = [
   // have ", I'll" directly without the leading review-clause).
   // \b on I'?ll prevents false-match inside "will" (case-insensitive flag
   // would otherwise match "ill" at offset 1 of "will be in touch...").
-  { match: /,?\s*(?:and\s+)?\bI'?ll\s+be\s+in\s+touch\s+(?:shortly\s+)?with\s+an\s+update\s*[.!?]?/gi,
+  // R6-η widening (2026-05-21): also catch (a) "will be in touch" (full
+  // auxiliary, e.g. Kevin S6 out[0] "and will be in touch with any updates!"),
+  // and (b) "any update(s)" (plural variant). Anchor on \b(?:I'?ll|will) so
+  // the auxiliary alternation cleanly disambiguates from inside-word matches.
+  { match: /,?\s*(?:and\s+)?\b(?:I'?ll|will)\s+be\s+in\s+touch\s+(?:shortly\s+)?with\s+(?:an|any)\s+updates?\s*[.!?]?/gi,
     replace: '.' },
   // R5-C-c — standalone "(subject) is being reviewed" defensive catch.
   // Bounded subject set per R5-C verdict: (the|your) (file|application|
@@ -969,6 +973,56 @@ const ROUTING_LEAK_PATTERNS = [
   // reviewed", "the credit bureau is being reviewed", "the lender's policies
   // are being reviewed", etc.
   { match: /\b(?:(?:the|your)\s+(?:file|application|submission|deal|package)|this(?:\s+(?:discrepancy|issue|matter))?)\s+is\s+being\s+reviewed\b[.,!?]?/gi,
+    replace: '' },
+  // ── R6 Cluster η patterns (2026-05-21) ────────────────────────────────
+  // Franco's R5 consolidated batch (S6 + S7 + S9): extended workflow-language
+  // leak corpus across broker-facing welcome / conditions / AML-PEP draft
+  // outbounds. Same RES4-shape methodology as R5-C — pattern-only extension,
+  // no new call sites, cascade-composed with R5-C above.
+  //
+  // EMPIRICAL CORPUS (real-Postmark grep, 3 fixtures, see commit body):
+  //   Kevin Tran 178d714e (S6) out[0]: "I'll get this moving through our
+  //     process and will be in touch with any updates!" (compound — R6-η-a
+  //     strips leading; widened R5-C-a strips trailing)
+  //   Kevin out[2]: "I've reviewed all the documents you sent and we're
+  //     ready to start working on..." (R6-η-b strips review-disclosure,
+  //     preserves "we're ready to start working on" per residual b verdict)
+  //   Kevin out[2] + Ethan out[2] + James out[2]: "Once we receive/have
+  //     these, we'll have everything needed to (move forward|proceed)
+  //     (with the review)?" (R6-η-c catches)
+  //   James out[4]: "To complete the file before funding, I'll need..."
+  //     (R6-η-d strips leading clause)
+  //
+  // R6-η-a — leading "I'll/We'll get this moving through (our|the) process"
+  // Distinct from existing E-a which requires "...through (our|the) review
+  // process". R6-η-a catches the new variant without "review".
+  // Leading \s* (whitespace-only, NOT preceding punctuation) consumes the
+  // gap between previous sentence terminator and the leak phrase so the
+  // replacement doesn't strand a space (e.g. "Hi! I'll get this..." → "Hi!."
+  // not "Hi! ."). Punctuation IS preserved — the "!" of "Hi!" stays.
+  { match: /\s*\b(?:I'?ll|We'?ll|We will)\s+get\s+this\s+moving\s+through\s+(?:our|the)\s+process\b[.,!?]?/gi,
+    replace: '.' },
+  // R6-η-b — past-tense internal-review-disclosed family. Strips the leak
+  // phrase + optional ",?\s*and" connector (per Q1 modified verdict —
+  // consume orphan connector, leave downstream "we're ready to start working
+  // on" forward-intent clause intact since that's broker-facing acknowledgment,
+  // not internal-stage disclosure per Q2 scope-lock).
+  { match: /\b(?:I'?ve|I have|We have|We'?ve)\s+reviewed\s+(?:all\s+(?:of\s+)?)?(?:the|your)\s+documents?\b(?:\s+(?:you\s+sent|received|received\s+from\s+you))?[.,!?]?\s*(?:,?\s*and\s+)?/gi,
+    replace: '' },
+  // R6-η-c — "we'll/I'll have everything needed to (move forward|proceed)
+  // (with the review)?" internal-process-pending family. Covers both Ethan/
+  // James "with the review" tail AND Kevin's bare "move forward" without
+  // the suffix.
+  // Leading ,?\s*(?:and\s+)? mirrors R5-C-a's prefix discipline — consumes
+  // the preceding comma+space connector that the verbatim "Once I have these,
+  // we'll have everything needed to..." shape requires (without it the
+  // replacement strands the comma → "Once I have these, .").
+  { match: /,?\s*(?:and\s+)?\b(?:we|I)'?ll\s+have\s+everything\s+(?:we\s+)?need(?:ed)?\s+to\s+(?:move\s+forward|proceed)(?:\s+with\s+(?:the|our)\s+review)?\b[.,!?]?/gi,
+    replace: '.' },
+  // R6-η-d — "to complete the file before funding" internal-funding-step.
+  // Removes the leading clause; the following "I'll need..." continues as
+  // a clean sentence.
+  { match: /\bto\s+complete\s+the\s+file\s+before\s+funding,?\s*/gi,
     replace: '' },
 ];
 
