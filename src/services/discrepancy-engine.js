@@ -527,6 +527,15 @@ const formatCanonicalFieldsForPrompt = (canonicalMap) => {
 // matches Franco's rule on the safe side: when in doubt, do not name a
 // lender. Re-extraction restores classification on fresh canonical_map writes.
 //
+// Classification field semantic (post-R6-α extension, 2026-05-21). The
+// `classification` field on canonical_map tuples started in R6-γ as a doc-
+// classification tag (mortgage_statement / credit_report / pnw_statement)
+// for lender + balance + payout tuples. R6-α extended it to also tag the
+// requested_loan_amount tuples with email_body alongside doc classifications
+// ('loan_application'). The field's semantic generalized: "source-type label for filter precedence."
+// Future field-specific filters (R6-ι if it lands the same shape, etc.) can
+// extend the same mechanism naturally without schema expansion.
+//
 // Behavior change carried in commit. Pre-payout-confirmation, no
 // existing_first_mortgage_lender discrepancies will surface via
 // renderDiscrepancyBullet — the filter strips all non-payout lender tuples
@@ -544,6 +553,71 @@ const filterCanonicalLenderForPayoutOnly = (canonicalMap) => {
     existing_first_mortgage_balance: (canonicalMap.existing_first_mortgage_balance || []).map((t) =>
       isPayoutSource(t) ? t : { ...t, lender_canonical: null }
     ),
+  };
+};
+
+// R6-α (2026-05-21): consumer-side source-hierarchy filter for the
+// requested_loan_amount field.
+//
+// Diagnosis. Derek James Olsen S3 (deal dce308c8-2f25-4aeb-9c2b-2ad5284ae792,
+// 2026-05-21 production corpus). Broker's initial email contained a typo
+// "$452,600" — Vienna extracted that into canonical_map.requested_loan_amount
+// with source='email_body'. Broker's loan_application PDF Page-1 annotation
+// is the actual figure $110,000 — also extracted into canonical_map (R6-β-A,
+// source='LoanApplication_Derek_Olsen.pdf'). Across 3 broker exchanges
+// explicitly correcting to $110,000, Vienna persistently emitted
+// hallucinations claiming "the loan application shows $452,600" — INVERTING
+// the source attribution. The PDF empirically contains $110,000; $452,600
+// appears nowhere in any document. Claude was reading the canonical_map
+// context (which correctly tagged both tuples with their sources) and still
+// inverting which-value-from-which-source in its generated reply, then
+// digging in across re-prompts.
+//
+// Design. Same R6-γ pattern (consumer-side source-hierarchy filter at the
+// prompt-context boundary; canonical_map preserves both tuples for audit).
+// When requested_loan_amount has at least one tuple with classification ===
+// 'loan_application', email_body-sourced tuples are stripped from the
+// consumer-side view. Claude can't mis-attribute what isn't in the prompt.
+//
+// Asymmetric conservative default vs R6-γ — structurally justified.
+//   R6-γ semantic: "STRIP lender UNLESS mortgage_statement confirms."
+//     Absence of classification = absence of confirmation = strip aligns
+//     with the rule's default ("leave blank until confirmed"). Strip-bias.
+//   R6-α semantic: "WHEN both doc-source and email-source conflict, PREFER
+//     doc." Absence of classification means the filter can't tell which
+//     tuple is which source-type. Strip-on-absence would regress BOTH the
+//     loan_application authoritative value AND the email_body value (losing
+//     the authoritative source). Keep-on-absence preserves legacy behavior
+//     until re-extraction stamps classification on the next inbound turn.
+//   Different conservative defaults follow from different filter semantics:
+//   strip-bias (R6-γ) vs preference-bias (R6-α).
+//
+// Behavior change carried in commit. When loan_application is on file AND
+// canonical_map.requested_loan_amount has conflicting email_body tuple
+// (broker email typo'd, doc has true value), renderDiscrepancyBullet will
+// NOT surface a loan_amount discrepancy. Defensible: docs are the canonical
+// source for loan amount (intentional submission). If broker insists their
+// email value is correct and doc has a typo (rare), broker must re-submit
+// the corrected loan_application — same workflow as any doc correction.
+// Future-trigger flag: if Franco surfaces a case where he wanted the
+// email-vs-doc loan_amount discrepancy surfaced earlier, revisit.
+//
+// Composition with R6-γ at consumer sites. Function-composed: each consumer
+// site wraps R6-γ's filter result with R6-α's filter. Both filters are
+// field-scoped (lender vs loan_amount) so they don't interact; composition
+// order doesn't matter mathematically, but standard order is
+// R6-α(R6-γ(map)) for readability (innermost = earliest cluster).
+const filterCanonicalLoanAmountForDocAuthoritative = (canonicalMap) => {
+  if (!canonicalMap) return canonicalMap;
+  const tuples = canonicalMap.requested_loan_amount || [];
+  const hasDocSource = tuples.some(t => t?.classification === 'loan_application');
+  if (!hasDocSource) return canonicalMap; // no doc on file → broker's email is the only signal; preserve.
+  return {
+    ...canonicalMap,
+    // Strip email_body source when loan_application source exists. Other
+    // sources (none currently expected for loan_amount) + legacy tuples
+    // without classification preserved per Q3-(i) verdict.
+    requested_loan_amount: tuples.filter(t => t?.classification !== 'email_body'),
   };
 };
 
@@ -757,6 +831,9 @@ module.exports = {
   shouldEscalateOnAnyLtv,
   formatCanonicalFieldsForPrompt,
   filterCanonicalLenderForPayoutOnly,
+  // R6-α (2026-05-21): consumer-side source-hierarchy filter for
+  // requested_loan_amount (doc-authoritative when loan_application on file).
+  filterCanonicalLoanAmountForDocAuthoritative,
   filterBrokerFacing,
   runDiscrepancyDetection,
   // R5-B-1 (2026-05-21): aggregating Snapshot fix

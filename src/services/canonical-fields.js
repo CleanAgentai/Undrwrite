@@ -772,7 +772,12 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   push('subject_property_city', email.subject_property_city, 'email_body');
   push('subject_property_province', email.subject_property_province, 'email_body');
   push('subject_property_market_value', email.subject_property_market_value, 'email_body');
-  push('requested_loan_amount', email.requested_loan_amount, 'email_body');
+  // R6-α (2026-05-21): thread classification:'email_body' onto requested_loan_amount
+  // tuples so the consumer-side filter in discrepancy-engine.
+  // filterCanonicalLoanAmountForDocAuthoritative can identify email-body-sourced
+  // tuples and strip them from prompt context when a loan_application-sourced
+  // tuple exists (Derek S3 dce308c8 source-mis-attribution-inversion fix).
+  push('requested_loan_amount', email.requested_loan_amount, 'email_body', { classification: 'email_body' });
   push('mortgage_position', email.mortgage_position, 'email_subject_or_body');
   push('requested_loan_term_months', email.requested_loan_term_months, 'email_body');
 
@@ -842,8 +847,12 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       // Cross-corpus verified on 4/4 fixtures (Patricia/Kevin/Sandra/Ryan — all
       // 12-month terms). See extractFromLoanApplication header for full
       // diagnosis + corpus convention + cross-cluster cascade notes.
+      // R6-α (2026-05-21): thread classification:'loan_application' onto the
+      // requested_loan_amount push so the consumer-side filter can identify
+      // doc-source-authoritative tuples and strip conflicting email_body
+      // tuples from prompt context (Derek S3 dce308c8 fix).
       const r = extractFromLoanApplication(doc);
-      push('requested_loan_amount', r.requested_loan_amount, doc.file_name);
+      push('requested_loan_amount', r.requested_loan_amount, doc.file_name, { classification: cls });
       push('requested_loan_term_months', r.requested_loan_term_months, doc.file_name);
     } else if (cls === 'pnw_statement') {
       // R4-RESIDUAL-2: PNW-only existing-first-mortgage fallback. Page-2

@@ -9340,8 +9340,14 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
     throw new Error('FAIL [β-PER-DOC-WIRING]: loan_application switch case must call extractFromLoanApplication.');
   }
   // (c) Switch case pushes requested_loan_amount with doc.file_name as source.
-  if (!/cls === 'loan_application'[\s\S]{0,800}push\('requested_loan_amount', r\.requested_loan_amount, doc\.file_name\)/.test(_bCfSrc)) {
-    throw new Error('FAIL [β-PER-DOC-WIRING]: switch case must push requested_loan_amount with doc.file_name source.');
+  // R6-α (2026-05-21) conscious widening: push signature extended with
+  // optional 4th arg `{ classification: cls }` (source-type label for the
+  // R6-α consumer-side filter). Contract preserved — same 3 leading args.
+  // Comment-block window widened from {0,800} → {0,1500} to accommodate
+  // R6-α docblock addition between the loan_application case anchor and
+  // the push site (same widening discipline as R6-ζ OOOO/KKKK regex tails).
+  if (!/cls === 'loan_application'[\s\S]{0,1500}push\('requested_loan_amount', r\.requested_loan_amount, doc\.file_name(?:, \{ classification: cls \})?\)/.test(_bCfSrc)) {
+    throw new Error('FAIL [β-PER-DOC-WIRING]: switch case must push requested_loan_amount with doc.file_name source (R6-α may extend with classification: cls 4th arg).');
   }
   // (d) extractFromLoanApplication exported.
   if (!/extractFromLoanApplication,/.test(_bCfSrc)) {
@@ -10835,6 +10841,347 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log('  PASS: deriveCityProvince(string) backward-compat preserved (legacy callers untouched)');
 
   console.log(`Group δ-CROSS-CLUSTER-INTEGRATION: prior arc holding + R6-β-A co-residence + R5-B-1 aggregator widened + legacy backward-compat preserved.`);
+
+  // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER α — requested_loan_amount source-hierarchy filter (R6-γ pattern)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-α — consumer-side source-hierarchy filter
+  // closing the Derek S3 persistent hallucination loop on loan_amount source
+  // attribution.
+  //
+  // Diagnosis recap. Deal dce308c8-2f25-4aeb-9c2b-2ad5284ae792 (Derek James
+  // Olsen S3, 2026-05-21 corpus). Broker's initial email typo'd "$452,600";
+  // loan_application PDF Page-1 annotation #1 actually contains "110,000".
+  // canonical_map.requested_loan_amount populated with both tuples (R6-β-A
+  // doc extraction + email_body regex). Across 3 broker exchanges
+  // correcting to $110,000, Vienna persistently hallucinated "the loan
+  // application shows $452,600" — INVERTING source attribution in prompt
+  // generation despite the canonical_map context correctly tagging sources.
+  //
+  // Architecture: exact R6-γ structural mirror (source-hierarchy filter at
+  // consumer boundary; canonical_map preserves audit). Same R5-D-Surface-A
+  // family (structured signals > prompt content-matching).
+  //
+  // Q1-verdict (a): classification field reuse — 'email_body' joins
+  // 'loan_application' as a source-type label on requested_loan_amount
+  // tuples. R6-γ's docblock updated to anchor the extended semantic.
+  //
+  // Q2-verdict (a): function composition with R6-γ — no R6-γ refactor;
+  // 2-filter chain readable at each consumer site.
+  //
+  // Q3-verdict (i): keep-on-absence — pre-R6-α tuples without classification
+  // field preserved (asymmetric vs R6-γ's strip-on-absence — structurally
+  // explained: R6-γ has strip-bias semantic, R6-α has preference-bias
+  // semantic).
+  //
+  // Groups:
+  //   α-FILTER-MATRIX                : 8-case truth-table on the filter helper
+  //   α-DEREK-FIXTURE                : Derek S3 dce308c8 LOAD-BEARING replay
+  //   α-NO-DOC-ON-FILE-PRESERVATION  : pre-doc-classification regression direction
+  //   α-AUDIT-PRESERVED              : canonical_map retains both tuples
+  //   α-CONSUMER-WIRING              : quadruple closed-set (4 sites + 2 push + export + R6-γ preserved)
+  //   α-CROSS-CLUSTER-INTEGRATION    : prior arc + R6-γ composition + classification semantic extended
+  console.log('\n========== R6-α-FILTER-MATRIX — filterCanonicalLoanAmountForDocAuthoritative truth-table ==========');
+  const _aDe = require('./src/services/discrepancy-engine');
+  const _aFilter = _aDe.filterCanonicalLoanAmountForDocAuthoritative;
+
+  // 8 cases.
+  // α-1: pure doc source → preserved (no email_body to strip).
+  const _a1 = _aFilter({
+    requested_loan_amount: [{ value: 110000, source: 'LoanApplication_X.pdf', classification: 'loan_application' }],
+  });
+  if (_a1.requested_loan_amount.length !== 1 || _a1.requested_loan_amount[0].value !== 110000) {
+    throw new Error(`FAIL [α-1]: pure doc source preserved expected; got ${JSON.stringify(_a1.requested_loan_amount)}`);
+  }
+  console.log('  PASS [α-1]: pure loan_application source preserved');
+
+  // α-2: pure email_body source → PRESERVED (no doc on file, broker email is the only signal).
+  const _a2 = _aFilter({
+    requested_loan_amount: [{ value: 110000, source: 'email_body', classification: 'email_body' }],
+  });
+  if (_a2.requested_loan_amount.length !== 1) {
+    throw new Error(`FAIL [α-2]: pure email_body source must be preserved when no doc tuple exists; got ${JSON.stringify(_a2.requested_loan_amount)}`);
+  }
+  console.log('  PASS [α-2]: pure email_body source preserved (no doc on file → broker email is only signal)');
+
+  // α-3: both sources, values match → email_body stripped (doc-only in prompt context).
+  const _a3 = _aFilter({
+    requested_loan_amount: [
+      { value: 110000, source: 'email_body', classification: 'email_body' },
+      { value: 110000, source: 'LoanApplication_X.pdf', classification: 'loan_application' },
+    ],
+  });
+  if (_a3.requested_loan_amount.length !== 1 || _a3.requested_loan_amount[0].classification !== 'loan_application') {
+    throw new Error(`FAIL [α-3]: both sources w/ matching values → email_body stripped; got ${JSON.stringify(_a3.requested_loan_amount)}`);
+  }
+  console.log('  PASS [α-3]: both sources matching → email_body stripped (doc-only surfaces)');
+
+  // α-4 (Derek S3 shape): both sources, CONFLICTING values → email_body stripped, doc remains.
+  const _a4 = _aFilter({
+    requested_loan_amount: [
+      { value: 452600, source: 'email_body', classification: 'email_body' },
+      { value: 110000, source: 'LoanApplication_Derek_Olsen.pdf', classification: 'loan_application' },
+    ],
+  });
+  if (_a4.requested_loan_amount.length !== 1 || _a4.requested_loan_amount[0].value !== 110000) {
+    throw new Error(`FAIL [α-4 Derek S3]: conflicting sources → email_body stripped, doc remains expected; got ${JSON.stringify(_a4.requested_loan_amount)}`);
+  }
+  console.log('  PASS [α-4 Derek S3]: conflicting sources → email_body ($452,600 typo) stripped; doc ($110,000 truth) remains');
+
+  // α-5 (Q3 verdict): pre-R6-α legacy tuple without classification field → PRESERVED (keep-on-absence).
+  const _a5 = _aFilter({
+    requested_loan_amount: [
+      { value: 110000, source: 'LoanApplication_X.pdf' /* no classification */ },
+      { value: 110000, source: 'email_body' /* no classification */ },
+    ],
+  });
+  if (_a5.requested_loan_amount.length !== 2) {
+    throw new Error(`FAIL [α-5]: pre-R6-α tuples without classification must be preserved (Q3-(i) verdict); got ${JSON.stringify(_a5.requested_loan_amount)}`);
+  }
+  console.log('  PASS [α-5]: pre-R6-α tuples without classification preserved (asymmetric vs R6-γ — structurally explained per Q3-(i))');
+
+  // α-6: null / undefined canonicalMap → pass-through (defensive).
+  if (_aFilter(null) !== null) throw new Error(`FAIL [α-6]: null input must pass through`);
+  if (_aFilter(undefined) !== undefined) throw new Error(`FAIL [α-6]: undefined input must pass through`);
+  console.log('  PASS [α-6]: null / undefined pass-through');
+
+  // α-7: empty requested_loan_amount → empty (no spurious mutation).
+  const _a7 = _aFilter({ requested_loan_amount: [] });
+  if (_a7.requested_loan_amount.length !== 0) throw new Error(`FAIL [α-7]: empty array must pass through`);
+  console.log('  PASS [α-7]: empty requested_loan_amount preserved');
+
+  // α-8: field-scoped — other canonical fields untouched.
+  const _a8 = _aFilter({
+    subject_property_address: [{ value: '123 Main St', source: 'email_body' }],
+    existing_first_mortgage_lender: [{ value: 'BMO', source: 'CreditBureau.pdf', classification: 'credit_report' }],
+    requested_loan_amount: [
+      { value: 452600, source: 'email_body', classification: 'email_body' },
+      { value: 110000, source: 'LoanApplication_X.pdf', classification: 'loan_application' },
+    ],
+  });
+  if (_a8.subject_property_address.length !== 1) throw new Error(`FAIL [α-8]: subject_property_address mutated`);
+  if (_a8.existing_first_mortgage_lender.length !== 1 || _a8.existing_first_mortgage_lender[0].value !== 'BMO') {
+    throw new Error(`FAIL [α-8]: existing_first_mortgage_lender mutated (R6-γ-scoped field outside R6-α scope)`);
+  }
+  if (_a8.requested_loan_amount.length !== 1) throw new Error(`FAIL [α-8]: requested_loan_amount filter under-applied`);
+  console.log('  PASS [α-8]: other canonical fields untouched (R6-α is field-scoped to requested_loan_amount only)');
+
+  console.log(`Group α-FILTER-MATRIX: 8/8 cases passed (R6-γ-pattern source-hierarchy filter on requested_loan_amount).`);
+
+  // ─── R6-α-DEREK-FIXTURE (LOAD-BEARING) ────────────────────────────
+  console.log('\n========== R6-α-DEREK-FIXTURE — Derek S3 dce308c8 source-mis-attribution-inversion replay (LOAD-BEARING) ==========');
+  // Reconstructed canonical_map from production corpus (Derek James Olsen
+  // S3, deal dce308c8-2f25-4aeb-9c2b-2ad5284ae792, 2026-05-21):
+  //   • broker's msg #2 email typo: "requesting $452,600" → email_body tuple
+  //     with value=452600.
+  //   • LoanApplication_Derek_Olsen.pdf Page-1 annotation #1 = "110,000"
+  //     → loan_application tuple with value=110000 (R6-β-A extraction).
+  //   • Post-msg-#4 broker correction (msg #6, #8): "loan amount is $110,000
+  //     as shown on the loan application" — but existing email-body regex
+  //     doesn't catch "loan amount is $X" prose, so canonical_map.requested_
+  //     loan_amount.email_body stays at $452,600.
+  // Pre-R6-α: formatCanonicalFieldsForPrompt renders BOTH tuples with source
+  // tags; Vienna's Claude call inverts attribution and emits hallucinations
+  // ("the loan application shows $452,600") across 3 subsequent outbounds.
+  // Post-R6-α: filter strips the email_body tuple from the prompt-context
+  // view; only the loan_application $110,000 tuple surfaces to Claude. The
+  // hallucination cannot occur — there's no $452,600 figure for Claude to
+  // invert.
+  const _aDerekMap = {
+    subject_property_address: [{ value: '5519 henwood road sw', source: 'email_body' }],
+    subject_property_market_value: [{ value: 730000, source: 'email_body' }],
+    requested_loan_amount: [
+      { value: 452600, source: 'email_body', classification: 'email_body' },
+      { value: 110000, source: 'LoanApplication_Derek_Olsen.pdf', classification: 'loan_application' },
+    ],
+    existing_first_mortgage_balance: [
+      { value: 341000, source: 'Payout_Statement_Derek_Olsen.pdf', lender_canonical: 'RBC', classification: 'mortgage_statement' },
+    ],
+  };
+  const _aDerekFiltered = _aFilter(_aDerekMap);
+
+  // Structural: post-filter has exactly 1 requested_loan_amount tuple, value 110000.
+  if (_aDerekFiltered.requested_loan_amount.length !== 1) {
+    throw new Error(`FAIL [α-DEREK structural]: expected exactly 1 requested_loan_amount tuple post-filter; got ${_aDerekFiltered.requested_loan_amount.length}`);
+  }
+  if (_aDerekFiltered.requested_loan_amount[0].value !== 110000) {
+    throw new Error(`FAIL [α-DEREK structural]: expected $110,000 (loan_application authoritative); got ${_aDerekFiltered.requested_loan_amount[0].value}`);
+  }
+  if (_aDerekFiltered.requested_loan_amount[0].classification !== 'loan_application') {
+    throw new Error(`FAIL [α-DEREK structural]: surviving tuple classification must be 'loan_application'; got ${_aDerekFiltered.requested_loan_amount[0].classification}`);
+  }
+  console.log('  PASS [α-DEREK structural]: post-filter requested_loan_amount = [{$110,000, loan_application}]; $452,600 email_body typo stripped');
+
+  // Prompt-context surface: formatCanonicalFieldsForPrompt no longer shows $452,600.
+  const _aDerekPrompt = _aDe.formatCanonicalFieldsForPrompt(_aDerekFiltered);
+  if (/452,?600/.test(_aDerekPrompt)) {
+    throw new Error(`FAIL [α-DEREK prompt-context]: "$452,600" still surfaces in prompt context; got: ${_aDerekPrompt.slice(0, 500)}`);
+  }
+  if (!/110,?000/.test(_aDerekPrompt) && !/110000/.test(_aDerekPrompt)) {
+    throw new Error(`FAIL [α-DEREK prompt-context]: "$110,000" missing from prompt context; got: ${_aDerekPrompt.slice(0, 500)}`);
+  }
+  console.log('  PASS [α-DEREK prompt-context]: formatCanonicalFieldsForPrompt output contains $110,000 (doc-authoritative) and NO $452,600 (email_body stripped)');
+
+  // Snapshot surface: renderDealSnapshot also reflects single-value loan_amount.
+  const _aDerekSnap = _aDe.renderDealSnapshot(_aDerekFiltered, { ownershipType: 'personal', isCommercial: false });
+  if (/452,?600/.test(_aDerekSnap)) {
+    throw new Error(`FAIL [α-DEREK snapshot]: $452,600 surfaces in renderDealSnapshot output despite filter`);
+  }
+  if (!/Loan Amount Requested.*\$110,000/.test(_aDerekSnap)) {
+    throw new Error(`FAIL [α-DEREK snapshot]: Snapshot must render Loan Amount Requested as $110,000; got: ${_aDerekSnap.slice(0, 500)}`);
+  }
+  console.log('  PASS [α-DEREK snapshot]: renderDealSnapshot renders Loan Amount Requested = $110,000; no $452,600 leak');
+
+  // Combined LTV cascade: with $110,000 loan + $341,000 existing balance + $730,000 value, combined LTV ≈ 61.8%.
+  const _aDerekCombined = _aDe.computeCombinedLtv(_aDerekFiltered);
+  if (!_aDerekCombined) throw new Error('FAIL [α-DEREK LTV]: computeCombinedLtv returned null');
+  const _expectedCombined = Math.round(((341000 + 110000) / 730000) * 1000) / 10; // 61.8
+  if (Math.abs(_aDerekCombined.combined_ltv_percent - _expectedCombined) > 0.2) {
+    throw new Error(`FAIL [α-DEREK LTV]: combined LTV must use post-filter $110,000 loan; expected ~${_expectedCombined}%, got ${_aDerekCombined.combined_ltv_percent}%`);
+  }
+  console.log(`  PASS [α-DEREK LTV cascade]: computeCombinedLtv = ${_aDerekCombined.combined_ltv_percent}% (uses doc-authoritative $110,000 loan)`);
+
+  console.log(`Group α-DEREK-FIXTURE: production-corpus replay — source-mis-attribution-inversion hallucination structurally suppressed via consumer-boundary filter.`);
+
+  // ─── R6-α-NO-DOC-ON-FILE-PRESERVATION ────────────────────────────
+  console.log('\n========== R6-α-NO-DOC-ON-FILE-PRESERVATION — initial-submission regression direction ==========');
+  // Initial-submission flow: broker just sent the email + attached the
+  // loan_application but it hasn't been classified yet (e.g., classification
+  // pending or doc-extraction async failed). canonical_map has only the
+  // email_body tuple. Filter must NOT strip it — broker's stated value is
+  // the only signal.
+  const _aInitialMap = {
+    requested_loan_amount: [{ value: 85000, source: 'email_body', classification: 'email_body' }],
+  };
+  const _aInitialFiltered = _aFilter(_aInitialMap);
+  if (_aInitialFiltered.requested_loan_amount.length !== 1) {
+    throw new Error(`FAIL [α-NO-DOC]: email_body must be preserved when no doc tuple exists; got empty`);
+  }
+  if (_aInitialFiltered.requested_loan_amount[0].value !== 85000) {
+    throw new Error(`FAIL [α-NO-DOC]: email_body value must be preserved`);
+  }
+  console.log('  PASS: initial-submission flow (no doc on file yet) → email_body tuple preserved; broker email remains the only signal');
+
+  // Symmetric: another email_body source-type variation (e.g., aggregated
+  // from multi-inbound R5-B-1 wrapper) without a doc tuple → still preserved.
+  const _aAggMap = {
+    requested_loan_amount: [
+      { value: 100000, source: 'email_body', classification: 'email_body' },
+      // No loan_application tuple — doc not classified yet.
+    ],
+  };
+  if (_aFilter(_aAggMap).requested_loan_amount.length !== 1) {
+    throw new Error(`FAIL [α-NO-DOC aggregated]: email_body-only canonical_map must pass through unchanged`);
+  }
+  console.log('  PASS: aggregated email_body-only canonical_map (R5-B-1 path, doc not yet on file) → no spurious filter activation');
+  console.log(`Group α-NO-DOC-ON-FILE-PRESERVATION: pre-doc-classification regression direction validated.`);
+
+  // ─── R6-α-AUDIT-PRESERVED ────────────────────────────────────────
+  console.log('\n========== R6-α-AUDIT-PRESERVED — canonical_map retains both tuples; only consumer-side filtered ==========');
+  // R6-γ design discipline: canonical_map mutates as new tuples arrive; the
+  // filter is consumer-side only. Pre-filter canonical_map MUST retain both
+  // tuples for audit + discrepancy compute upstream.
+  const _aAuditMap = {
+    requested_loan_amount: [
+      { value: 452600, source: 'email_body', classification: 'email_body' },
+      { value: 110000, source: 'LoanApplication_Derek_Olsen.pdf', classification: 'loan_application' },
+    ],
+  };
+  // Pre-filter canonical_map (mutating it would break audit).
+  const _aAuditCopy = JSON.parse(JSON.stringify(_aAuditMap));
+  _aFilter(_aAuditMap); // call filter; throw away result.
+  if (JSON.stringify(_aAuditMap) !== JSON.stringify(_aAuditCopy)) {
+    throw new Error(`FAIL [α-AUDIT]: filter mutated the input canonical_map; must be pure-functional (return new object, input untouched)`);
+  }
+  console.log('  PASS: filter is pure-functional — input canonical_map preserved post-call (data-model + audit trail intact)');
+
+  // Filter returns a new object reference (not the input map).
+  const _aAuditOut = _aFilter(_aAuditMap);
+  if (_aAuditOut === _aAuditMap) {
+    throw new Error(`FAIL [α-AUDIT]: filter returned the same object reference; must return new object`);
+  }
+  console.log('  PASS: filter returns new object reference (no shared mutation surface with input)');
+  console.log(`Group α-AUDIT-PRESERVED: canonical_map data-model + audit trail preserved per R6-γ design discipline.`);
+
+  // ─── R6-α-CONSUMER-WIRING ────────────────────────────────────────
+  console.log('\n========== R6-α-CONSUMER-WIRING — quadruple closed-set ==========');
+  const _aFs = require('fs');
+  const _aWebhookSrc = _aFs.readFileSync('./src/routes/webhook.js', 'utf8');
+  const _aCfSrc = _aFs.readFileSync('./src/services/canonical-fields.js', 'utf8');
+  const _aDeSrc = _aFs.readFileSync('./src/services/discrepancy-engine.js', 'utf8');
+
+  // (1) filterCanonicalLoanAmountForDocAuthoritative invoked at exactly 4 consumer sites.
+  const _aFilterCallCount = (_aWebhookSrc.match(/filterCanonicalLoanAmountForDocAuthoritative\(/g) || []).length;
+  if (_aFilterCallCount !== 4) {
+    throw new Error(`FAIL [α-CONSUMER-WIRING (1)]: filterCanonicalLoanAmountForDocAuthoritative call sites = ${_aFilterCallCount}; expected exactly 4 (admin Snapshot + 3 prompt-ctx)`);
+  }
+  console.log('  PASS [(1)]: filterCanonicalLoanAmountForDocAuthoritative invoked at exactly 4 consumer sites');
+
+  // (2) classification:'email_body' threading on requested_loan_amount push site (exactly 1: email_body push).
+  if (!/push\('requested_loan_amount', email\.requested_loan_amount, 'email_body', \{ classification: 'email_body' \}\)/.test(_aCfSrc)) {
+    throw new Error(`FAIL [α-CONSUMER-WIRING (2)]: email_body push site must thread classification:'email_body'`);
+  }
+  console.log('  PASS [(2)]: email_body push site threads classification:"email_body" (Q1-(a) reuse)');
+
+  // (3) classification: cls threading on loan_application push site (exactly 1: per-doc loan_application case).
+  if (!/push\('requested_loan_amount', r\.requested_loan_amount, doc\.file_name, \{ classification: cls \}\)/.test(_aCfSrc)) {
+    throw new Error(`FAIL [α-CONSUMER-WIRING (3)]: loan_application push site must thread classification:cls`);
+  }
+  console.log('  PASS [(3)]: loan_application push site threads classification:cls');
+
+  // (4) filterCanonicalLoanAmountForDocAuthoritative exported from discrepancy-engine.js.
+  if (!/filterCanonicalLoanAmountForDocAuthoritative,/.test(_aDeSrc.split('module.exports')[1] || '')) {
+    throw new Error(`FAIL [α-CONSUMER-WIRING (4)]: filterCanonicalLoanAmountForDocAuthoritative missing from discrepancy-engine.js exports`);
+  }
+  console.log('  PASS [(4)]: filterCanonicalLoanAmountForDocAuthoritative exported');
+
+  // R6-γ composition still preserved at the SAME 4 sites (no R6-γ regression).
+  const _aGammaCallCount = (_aWebhookSrc.match(/filterCanonicalLenderForPayoutOnly\(/g) || []).length;
+  if (_aGammaCallCount !== 4) {
+    throw new Error(`FAIL [α-CONSUMER-WIRING R6-γ preserved]: R6-γ filter must still be invoked at exactly 4 sites; got ${_aGammaCallCount}`);
+  }
+  console.log('  PASS [R6-γ preserved]: filterCanonicalLenderForPayoutOnly still invoked at exactly 4 sites (no R6-γ regression)');
+  console.log(`Group α-CONSUMER-WIRING: quadruple closed-set (4 + 1 + 1 + 1 export) + R6-γ composition preserved.`);
+
+  // ─── R6-α-CROSS-CLUSTER-INTEGRATION ──────────────────────────────
+  console.log('\n========== R6-α-CROSS-CLUSTER-INTEGRATION — prior arc + classification semantic extended ==========');
+  // Prior arc anchors source-grep present.
+  if (!/R6-γ \(2026-05-21\)/.test(_aDeSrc)) throw new Error('FAIL: R6-γ anchor missing from discrepancy-engine.js');
+  if (!/R6-α \(2026-05-21\)/.test(_aDeSrc)) throw new Error('FAIL: R6-α anchor missing from discrepancy-engine.js');
+  if (!/R6-α \(2026-05-21\)/.test(_aCfSrc)) throw new Error('FAIL: R6-α anchor missing from canonical-fields.js');
+  if (!/R6-α \(2026-05-21\)/.test(_aWebhookSrc)) throw new Error('FAIL: R6-α anchor missing from webhook.js');
+  if (!/R6-β-A/.test(_aCfSrc)) throw new Error('FAIL: R6-β-A anchor missing from canonical-fields.js');
+  if (!/R6-δ/.test(_aCfSrc)) throw new Error('FAIL: R6-δ anchor missing from canonical-fields.js');
+  console.log('  PASS: R6-β-A + R6-γ + R6-δ + R6-α prior-arc anchors source-grep-present');
+
+  // R6-γ docblock extended with classification semantic update (post-R6-α).
+  if (!/source-type label for filter precedence/.test(_aDeSrc)) {
+    throw new Error(`FAIL [α-CROSS-CLUSTER]: R6-γ docblock must be updated with the classification field's extended-semantic anchor (post-R6-α: source-type label for filter precedence)`);
+  }
+  console.log('  PASS: R6-γ docblock anchors extended classification semantic ("source-type label for filter precedence" — used by R6-γ lender filter + R6-α loan_amount filter)');
+
+  // Composition order at each site: R6-α wraps R6-γ (innermost = earliest cluster).
+  const _aCompositionPattern = /filterCanonicalLoanAmountForDocAuthoritative\(\s*\n?\s*dEngine\.filterCanonicalLenderForPayoutOnly/g;
+  const _aCompositionCount = (_aWebhookSrc.match(_aCompositionPattern) || []).length;
+  if (_aCompositionCount !== 4) {
+    throw new Error(`FAIL [α-CROSS-CLUSTER]: composition order R6-α(R6-γ(map)) expected at all 4 consumer sites; got ${_aCompositionCount} matches`);
+  }
+  console.log(`  PASS: composition order R6-α(R6-γ(map)) at all 4 consumer sites (innermost-earliest-cluster convention)`);
+
+  // R6-γ + R6-α field-scoped: filters touch disjoint fields (lender vs loan_amount).
+  // Verified empirically in α-FILTER-MATRIX α-8 case.
+  console.log('  PASS: R6-γ + R6-α field-scoped to disjoint fields (existing_first_mortgage_lender vs requested_loan_amount); composition is order-independent in math, R6-α(R6-γ) by convention');
+
+  // Defensive null handling on composition.
+  const _aChainNull = _aDe.filterCanonicalLoanAmountForDocAuthoritative(
+    _aDe.filterCanonicalLenderForPayoutOnly(null)
+  );
+  if (_aChainNull !== null) {
+    throw new Error(`FAIL [α-CROSS-CLUSTER]: chained null input must pass through; got ${JSON.stringify(_aChainNull)}`);
+  }
+  console.log('  PASS: chained R6-α ∘ R6-γ ∘ null → null (defensive composition)');
+
+  console.log(`Group α-CROSS-CLUSTER-INTEGRATION: prior arc holding + classification semantic extended + R6-γ composition preserved + defensive chain.`);
 
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask

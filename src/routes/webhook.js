@@ -806,8 +806,13 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // R6-γ (2026-05-21): strip lender attribution from non-payout-statement
   // sources before consumer-side rendering. canonical_map remains intact for
   // audit / discrepancy compute upstream.
+  // R6-α (2026-05-21): composed outside R6-γ — strip email_body
+  // requested_loan_amount tuples when loan_application is on file. Derek S3
+  // dce308c8 source-mis-attribution-inversion fix.
   const _bSnapshotHtml = dEngine.renderDealSnapshot(
-    dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map),
+    dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+      dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map)
+    ),
     {
       ownershipType,
       isCommercial: !!_bDetectAdmin.commercial,
@@ -1859,8 +1864,13 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         const _bBrokerFacing = dEngine.filterBrokerFacing(_bDetect.discrepancy_set, { marketDeltaFlagsEnabled: false });
         const _bDiscrepancyDetected = _bBrokerFacing.length > 0;
         // R6-γ (2026-05-21): consumer-side lender source filter — see helper docblock.
+        // R6-α (2026-05-21): composed outside R6-γ — loan_amount doc-authoritative filter.
         const _bCanonicalPromptCtx = (_bDetect.canonical_map && Object.keys(_bDetect.canonical_map).length > 0)
-          ? dEngine.formatCanonicalFieldsForPrompt(dEngine.filterCanonicalLenderForPayoutOnly(_bDetect.canonical_map))
+          ? dEngine.formatCanonicalFieldsForPrompt(
+              dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+                dEngine.filterCanonicalLenderForPayoutOnly(_bDetect.canonical_map)
+              )
+            )
           : '';
         if (_bDiscrepancyDetected) {
           console.log(`B-2b: pre-Claude discrepancy detection fired — ${_bBrokerFacing.length} broker-facing entries (${_bDetect.discrepancy_set.length} total before separability filter). Prompt instructed NO-GENERATE-DISCREPANCY; JS will inject section post-Claude.`);
@@ -2293,8 +2303,13 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         const _bBrokerFacingReview = dEngine.filterBrokerFacing(_bDetectReview.discrepancy_set, { marketDeltaFlagsEnabled: false });
         const _bDiscrepancyDetectedReview = _bBrokerFacingReview.length > 0;
         // R6-γ (2026-05-21): consumer-side lender source filter — see helper docblock.
+        // R6-α (2026-05-21): composed outside R6-γ — loan_amount doc-authoritative filter.
         const _bCanonicalCtxReview = (_bDetectReview.canonical_map && Object.keys(_bDetectReview.canonical_map).length > 0)
-          ? dEngine.formatCanonicalFieldsForPrompt(dEngine.filterCanonicalLenderForPayoutOnly(_bDetectReview.canonical_map))
+          ? dEngine.formatCanonicalFieldsForPrompt(
+              dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+                dEngine.filterCanonicalLenderForPayoutOnly(_bDetectReview.canonical_map)
+              )
+            )
           : '';
         if (_bDiscrepancyDetectedReview) {
           console.log(`B-2b (review path): pre-Claude discrepancy detection fired — ${_bBrokerFacingReview.length} broker-facing entries`);
@@ -2621,8 +2636,13 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         const _bBrokerFacingActive = dEngine.filterBrokerFacing(_bDetectActive.discrepancy_set, { marketDeltaFlagsEnabled: false });
         const _bDiscrepancyDetectedActive = _bBrokerFacingActive.length > 0;
         // R6-γ (2026-05-21): consumer-side lender source filter — see helper docblock.
+        // R6-α (2026-05-21): composed outside R6-γ — loan_amount doc-authoritative filter.
         const _bCanonicalCtxActive = (_bDetectActive.canonical_map && Object.keys(_bDetectActive.canonical_map).length > 0)
-          ? dEngine.formatCanonicalFieldsForPrompt(dEngine.filterCanonicalLenderForPayoutOnly(_bDetectActive.canonical_map))
+          ? dEngine.formatCanonicalFieldsForPrompt(
+              dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+                dEngine.filterCanonicalLenderForPayoutOnly(_bDetectActive.canonical_map)
+              )
+            )
           : '';
         if (_bDiscrepancyDetectedActive) {
           console.log(`B-2b (active path): pre-Claude discrepancy detection fired — ${_bBrokerFacingActive.length} broker-facing entries`);
