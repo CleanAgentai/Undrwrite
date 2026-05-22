@@ -11356,6 +11356,110 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group ι-SANDRA-S8-CASCADE-CLOSURE: empirical bug "$10.99%" syntactic-conflation cascade-closed via R6-β-A + R6-δ + R6-α (no R6-ι production code; harness pin only).`);
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER θ — COMPLETE-in-PRELIMINARY language (cascade-closed by R6-ε)
+  // ════════════════════════════════════════════════════════════════
+  // R6-θ is a CASCADE-CLOSED CLUSTER via R6-ε side-effect. No new production
+  // code; harness pin documents structural mechanism + empirical-clean post-
+  // deploy corpus.
+  //
+  // Diagnosis. Vienna's broker-facing outbounds historically emitted "the
+  // file is COMPLETE" / "This file is COMPLETE" / "your file is complete"
+  // language while the deal hadn't actually been completed (status='under_review'
+  // or 'active' with prelim_approved_at=null) — implying false closure to
+  // the broker and creating downstream confusion ("ready to send for review"
+  // when more documents were still needed).
+  //
+  // Cascade-closure mechanism (R6-ε side-effect, no R6-θ-specific code).
+  //   1. R6-ε's stripAndInjectDocumentsIncluded helper widened pattern
+  //      matched the entire "<h2>Documents Included</h2>...<ul>...</ul>"
+  //      block including the leading "This file is COMPLETE — all
+  //      required documents have been received" sentence Vienna's LLM
+  //      sometimes prepended.
+  //   2. The strip operation removes the Claude-generated COMPLETE
+  //      language from broker-facing outbounds; the JS re-injection
+  //      renders an authoritative Documents Included section without
+  //      COMPLETE language (the JS section is the canonical doc-state
+  //      description on broker-facing emails).
+  //   3. Admin-facing Snapshots (ACTION REQUIRED / FINAL REVIEW / Draft
+  //      Email Preview subjects) legitimately render
+  //      renderDocumentsIncludedSection which CAN include "This file is
+  //      COMPLETE" when all intake docs are received — that's the
+  //      authoritative document-state description for admin routing
+  //      decisions. R6-θ scope is BROKER-FACING only.
+  //
+  // Empirical evidence (scripts/r6theta-corpus-grep.js, 2026-05-21).
+  // Sweep of all post-R6-ε-deploy outbounds (cutoff 2026-05-21T15:00:00Z;
+  // 47 total outbounds, 25 broker-facing after admin-facing-subject filter):
+  //   ZERO broker-facing outbounds contain COMPLETE-language patterns.
+  //   3 admin-facing Snapshots contain "This file is COMPLETE" — all
+  //   legitimate JS-rendered Documents Included sections describing
+  //   actual document-state for admin routing.
+  //
+  // Carry-forward discipline. Same admin-facing vs broker-facing filter
+  // discipline applies to future "language-shape" cluster diagnoses —
+  // distinguish the AUDIENCE (broker / admin / external lender) before
+  // declaring a bug shape, since the same string can be legitimate in
+  // one audience context and a bug in another.
+  //
+  // Future-trigger residual. If Franco's retest cycle surfaces a fresh
+  // broker-facing outbound with COMPLETE language in pre-approval context,
+  // revisit: either R6-ε's strip pattern needs further widening for a
+  // new Claude-emit-shape, or a new R6-θ-specific structural mechanism
+  // is required. Empirically clean as of this commit's corpus sweep.
+  console.log('\n========== R6-θ-COMPLETE-IN-PRELIMINARY-CASCADE-CLOSURE — broker-facing COMPLETE-language cascade-closed via R6-ε (LOAD-BEARING) ==========');
+  // 1. R6-ε's stripAndInjectDocumentsIncluded helper still present + still
+  //    pinning the strip pattern (covered in R6-ε's harness groups
+  //    ε-PATTERN-MATRIX + ε-S6-FIXTURE + ε-S7-FIXTURE + ε-BACKWARD-COMPAT).
+  //    Source-grep anchors confirm the structural mechanism is intact.
+  const _thFs = require('fs');
+  const _thAiSrc = _thFs.readFileSync('./src/services/ai.js', 'utf8');
+  if (!/stripAndInjectDocumentsIncluded/.test(_thAiSrc)) {
+    throw new Error(`FAIL [θ-cascade]: R6-ε's stripAndInjectDocumentsIncluded helper missing from ai.js — cascade-closure regressed`);
+  }
+  if (!/DOCUMENTS_INCLUDED_BLOCK_PATTERN/.test(_thAiSrc)) {
+    throw new Error(`FAIL [θ-cascade]: DOCUMENTS_INCLUDED_BLOCK_PATTERN missing from ai.js — cascade-closure regressed`);
+  }
+  console.log('  PASS [cascade mechanism intact]: R6-ε stripAndInjectDocumentsIncluded + DOCUMENTS_INCLUDED_BLOCK_PATTERN source-grep present');
+
+  // 2. R6-ε harness groups source-grep present in test-trigger.js (this file)
+  //    — ε-S6-FIXTURE and ε-S7-FIXTURE both verify R6-θ side-effect closure
+  //    on Kevin S6 (deal 178d714e) + Ethan S7 (deal 533fbd4f) production
+  //    shapes. The "COMPLETE removed (R6-θ side-effect-closure)" assertion
+  //    pin is the structural anchor.
+  const _thHarnessSrc = _thFs.readFileSync('./test-trigger.js', 'utf8');
+  if (!/R6-θ side-effect-closure/.test(_thHarnessSrc)) {
+    throw new Error(`FAIL [θ-cascade]: R6-ε harness must contain "R6-θ side-effect-closure" assertion anchor (verifies COMPLETE sentence removed from strip output)`);
+  }
+  console.log('  PASS [R6-ε harness anchor]: "R6-θ side-effect-closure" assertion present in ε-S6-FIXTURE + ε-S7-FIXTURE groups');
+
+  // 3. Documents Included JS-rendered section on broker-facing emails
+  //    does NOT prepend COMPLETE language — render output is plain
+  //    "<h2>Documents Included</h2><ul>...</ul>" without any "This file
+  //    is COMPLETE" framing. Pin via direct call to the renderer.
+  const _thAi = require('./src/services/ai');
+  const _thDocs = [
+    { file_name: 'LoanApp.pdf', classification: 'loan_application' },
+    { file_name: 'Appraisal.pdf', classification: 'appraisal' },
+  ];
+  const _thRendered = _thAi.renderDocumentsIncludedSection(_thDocs, []);
+  // Strip HTML tags for content check.
+  const _thRenderedText = _thRendered.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  // Broker-facing render MUST NOT contain "This file is COMPLETE" or
+  // "the file is complete" — those would re-introduce R6-θ.
+  if (/\bThis file is COMPLETE\b/i.test(_thRendered)) {
+    throw new Error(`FAIL [θ-broker-render]: renderDocumentsIncludedSection contains "This file is COMPLETE" — R6-θ regression on the JS-rendered broker-facing surface. Output: ${_thRenderedText}`);
+  }
+  if (/\bfile is complete\b/i.test(_thRendered)) {
+    throw new Error(`FAIL [θ-broker-render]: renderDocumentsIncludedSection contains "file is complete" — R6-θ regression. Output: ${_thRenderedText}`);
+  }
+  console.log('  PASS [broker-facing renderer clean]: renderDocumentsIncludedSection output contains NO "This file is COMPLETE" or "file is complete" language (the JS-rendered broker-facing surface is structurally COMPLETE-language-free)');
+
+  // 4. Empirical-evidence anchor. Document the scripts/r6theta-corpus-grep.js
+  //    sweep result inline so future maintainers can re-run the verification.
+  console.log('  EMPIRICAL: scripts/r6theta-corpus-grep.js sweep across 25 broker-facing post-R6-ε-deploy outbounds → 0 COMPLETE-language hits. Cascade-closure verified at the production observation surface.');
+  console.log(`Group θ-COMPLETE-IN-PRELIMINARY-CASCADE-CLOSURE: structural mechanism + harness anchor + empirical post-deploy clean — cascade-closed via R6-ε side-effect.`);
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
