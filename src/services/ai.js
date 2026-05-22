@@ -2,6 +2,7 @@ const claude = require('../lib/claude');
 const { buildContentBlocks } = require('../lib/pdf');
 const config = require('../config');
 const { isPurchaseFromSummary, intakeRequiredFor, isDocRequirementSatisfied, allIntakeReceived } = require('../lib/dealType');
+const { selectGreetingFirstName } = require('../lib/greeting');
 
 // Retry wrapper for Claude API calls (handles rate limits)
 const callClaude = async (params, maxRetries = 3) => {
@@ -1148,6 +1149,108 @@ const enforceNoRoutingLeak = (html) => {
     out = out.replace(match, replace);
   }
   return { swept: out, sweptAny: out !== before };
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// R8-B (2026-05-22) — JS-side "Perfect"-opener post-gen sweep.
+// ──────────────────────────────────────────────────────────────────────────
+// Empirical corpus (scripts/r8beta-corpus-grep.js): 10 production hits across
+// 9 deals, 3 months (2026-03 → 2026-05). Franco-stated "this bug has appeared
+// across multiple scenarios". Existing prompt has BANNED OPENERS verbatim list
+// in 8+ generator prompts including "Perfect!", "Perfect.", "Perfect," with a
+// FIRST-WORD self-check — yet Claude bypassed for 3 months via two mechanisms:
+//   (1) Greeting-prefix bypass: "Hi Jason! Perfect, ..." — Claude's FIRST-WORD
+//       self-check returns "Hi" (passes); ban only catches Perfect-at-pos-0.
+//   (2) Em-dash variant: "Perfect — ..." — literal ban has Perfect!/./, but
+//       NOT em-dash.
+//
+// FIX (Q1 NARROW + Q2 STRUCTURAL + Q3 REWRITE-WITH-NAME). JS-side post-gen
+// sweep mirrors enforceNoRoutingLeak / stripVienna_DiscrepancyContent /
+// enforceReviewBanner trust profile (JS owns the rule, not Claude). Existing
+// prompt repetitions remain in place as best-effort opportunistic catch;
+// sweep is the deterministic backstop.
+//
+// TWO SHAPES (empirical):
+//   Shape A — greeting-prefixed: "Hi <name>! Perfect[!.,—] ..." (6/10 hits)
+//             Strip "Perfect[!.,—]\s+" in place; greeting prefix survives.
+//   Shape B — bare with name: "Perfect, <Name>! ..." (4/10 hits)
+//             Rewrite to "Hi <Name>! ..." (Q3-(b) verdict — strip-no-rewrite
+//             would leave broker email starting mid-sentence, Franco-noticeable
+//             UX downgrade). Captured name routed through
+//             selectGreetingFirstName for anti-collision (admin proxy Franco
+//             collapses to "Hi there!" via helper null-return).
+//
+// SCOPE LOCK (Q1 NARROW): "Perfect" only. Other BANNED OPENERS family members
+// (Awesome/Amazing/Wonderful/Sounds-good/Got-it/Great-news) NOT empirically
+// observed → defer per strict-superset additive widening discipline
+// (R6-η residual (b) / R6-ζ "Thanks for getting back to me" exclusion /
+// R6-δ Ownership Type defer precedent). Future-trigger if Franco surfaces.
+//
+// CASCADE COMPOSITION: runs AFTER enforceNoRoutingLeak at each broker-facing
+// call site (same precedent as R5-C-CASCADE-COMPOSITION). Single-pass.
+// Idempotent (re-running yields identical output).
+const stripPerfectOpener = (html) => {
+  if (!html || typeof html !== 'string') return { swept: html, sweptAny: false };
+  // Locate first <p>...</p> block (case-insensitive). The opener bug lives
+  // exclusively in the first paragraph by construction (it's the opener).
+  // Operating ONLY on the first <p> is the over-fire bound — sentence-internal
+  // "Perfect" mentions in later paragraphs (e.g., "the appraisal value is
+  // perfect for this LTV range") are structurally out of scope.
+  const pMatch = html.match(/<p>([\s\S]*?)<\/p>/i);
+  if (!pMatch) return { swept: html, sweptAny: false };
+  const inner = pMatch[1].trim();
+
+  // ─── Shape A — greeting-prefixed: "Hi <name>! Perfect[!.,—] <continuation>"
+  // Greeting forms: "Hi <name>!", "Hi there!", "Hello!", "Hello <name>!",
+  // "Hey <name>!". Captured into group (1); continuation into group (2).
+  // Perfect-token: literal "Perfect" + at-least-one punctuation/whitespace
+  // separator from [!,.\-–—…\s] family.
+  const shapeA = inner.match(/^(Hi\b[^!,.\n]{0,40}[!,.]|Hello\b[^!,.\n]{0,40}[!,.]?|Hey\b[^!,.\n]{0,40}[!,.])\s+Perfect[\s!,.\-–—…]+(.*)$/is);
+  if (shapeA) {
+    const greetingPrefix = shapeA[1];
+    const continuation = shapeA[2];
+    // Capitalize first letter of continuation if it's a lowercase letter.
+    const recapitalized = continuation.replace(/^([a-z])/, (m, c) => c.toUpperCase());
+    const newInner = `${greetingPrefix} ${recapitalized}`;
+    const newHtml = html.replace(pMatch[0], `<p>${newInner}</p>`);
+    return { swept: newHtml, sweptAny: true };
+  }
+
+  // ─── Shape B1 — bare with capitalized name: "Perfect, <Name>! <continuation>"
+  // Captures the name; routes through selectGreetingFirstName for admin-
+  // collision check. When captured name = "Franco" (admin proxy), helper
+  // returns null → fallback to "Hi there!".
+  const shapeB1 = inner.match(/^Perfect\s*,\s*([A-Z][a-zA-Z\-']*)\s*!\s*(.*)$/is);
+  if (shapeB1) {
+    const capturedName = shapeB1[1];
+    const continuation = shapeB1[2];
+    // Anti-collision composition (per orchestrator-tier verdict note):
+    // pipe captured name through selectGreetingFirstName via the sender_name
+    // slot; helper's anti-collision rejects Franco-as-first-name → null.
+    const greetName = selectGreetingFirstName({ sender_name: capturedName, sender_type: 'broker' });
+    const greeting = greetName ? `Hi ${greetName}!` : 'Hi there!';
+    const recapitalized = continuation.replace(/^([a-z])/, (m, c) => c.toUpperCase());
+    const newInner = `${greeting} ${recapitalized}`;
+    const newHtml = html.replace(pMatch[0], `<p>${newInner}</p>`);
+    return { swept: newHtml, sweptAny: true };
+  }
+
+  // ─── Shape B2 — bare with non-name continuation: "Perfect, thanks <X>!"
+  // or any other "Perfect[!.,—]" + non-name-first-word. Strip "Perfect" +
+  // its punctuation; do NOT prepend a greeting (the continuation already
+  // begins with a non-greeting token like "thanks <Name>!" which is itself
+  // a valid opener shape — rewriting would over-fire).
+  // Production fixture: "Perfect, thanks Franco! Looking forward..."
+  // → "Thanks Franco! Looking forward..." (capitalize "thanks" → "Thanks").
+  const shapeB2 = inner.match(/^Perfect\s*[!,.\-–—…\s]+(.*)$/is);
+  if (shapeB2) {
+    const continuation = shapeB2[1];
+    const recapitalized = continuation.replace(/^([a-z])/, (m, c) => c.toUpperCase());
+    const newHtml = html.replace(pMatch[0], `<p>${recapitalized}</p>`);
+    return { swept: newHtml, sweptAny: true };
+  }
+
+  return { swept: html, sweptAny: false };
 };
 
 // JS-enforced banner substitution. Strips Claude's FILE STATUS paragraph
@@ -3560,6 +3663,8 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // Cluster E — broker-facing routing-leak post-gen sweep.
   enforceNoRoutingLeak,
   ROUTING_LEAK_PATTERNS,
+  // R8-B (2026-05-22) — JS-side "Perfect"-opener post-gen sweep.
+  stripPerfectOpener,
   // R4-Bucket-C.6 — Documents Included JS render + strip+inject (Grace T4 fix)
   renderDocumentsIncludedSection,
   stripAndInjectDocumentsIncluded,

@@ -1989,6 +1989,17 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
           welcomeEmail = _eSweep.swept;
           if (_eSweep.sweptAny) console.log(`E: routing-leak sweep substituted phrasing in welcomeEmail`);
         }
+        // R8-B (2026-05-22): post-gen "Perfect"-opener sweep. Runs AFTER
+        // enforceNoRoutingLeak (R5-C-CASCADE-COMPOSITION precedent — single
+        // pass, additive). Empirical corpus: 10 production hits across 9
+        // deals / 3 months despite 8+ prompt ban repetitions (Nadia S15
+        // anchor — see scripts/r8beta-corpus-grep.js). Q3-(b) REWRITE-WITH-
+        // NAME verdict for Shape B; strip-in-place for Shape A.
+        {
+          const _r8bSweep = aiService.stripPerfectOpener(welcomeEmail);
+          welcomeEmail = _r8bSweep.swept;
+          if (_r8bSweep.sweptAny) console.log(`R8-B: "Perfect"-opener sweep neutralized opener in welcomeEmail`);
+        }
         // Bug B Layer A: rescue sender_name/broker_name from the Postmark From-header
         // when Claude's extraction is null/Unknown/Franco-collision. F2 adds the
         // both-Franco branch — sets name_collides_with_admin: true on the summary
@@ -2415,6 +2426,12 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           reviewResult.responseEmail = _eSweep.swept;
           if (_eSweep.sweptAny) console.log(`E: routing-leak sweep substituted phrasing in review-path responseEmail`);
         }
+        // R8-B: "Perfect"-opener sweep on review-path reply (cascade-composes AFTER E).
+        if (reviewResult.responseEmail) {
+          const _r8bSweep = aiService.stripPerfectOpener(reviewResult.responseEmail);
+          reviewResult.responseEmail = _r8bSweep.swept;
+          if (_r8bSweep.sweptAny) console.log(`R8-B: "Perfect"-opener sweep neutralized opener in review-path responseEmail`);
+        }
         // Normalize the freshly-updated summary on the way back, before persisting.
         reviewResult.updatedSummary = normalizeSenderName(reviewResult.updatedSummary, email.fromName);
 
@@ -2607,6 +2624,8 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           let _r5dIntakeEmail = _r5dIntakeRes.welcomeEmail;
           // R5-C: post-gen routing-leak sweep on broker-facing intake-template output
           _r5dIntakeEmail = aiService.enforceNoRoutingLeak(_r5dIntakeEmail).swept;
+          // R8-B: "Perfect"-opener sweep on R5-D-B intake-template output.
+          _r5dIntakeEmail = aiService.stripPerfectOpener(_r5dIntakeEmail).swept;
 
           // Form-attachment decision — same shape as new-deal branch L1796-1806
           const _r5dDeferredIntake = shouldSkipIntakeFormsForDeferredState(_r5dIntakeRes.dealSummary);
@@ -2749,6 +2768,12 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           const _eSweep = aiService.enforceNoRoutingLeak(result.responseEmail);
           result.responseEmail = _eSweep.swept;
           if (_eSweep.sweptAny) console.log(`E: routing-leak sweep substituted phrasing in active-path responseEmail`);
+        }
+        // R8-B: "Perfect"-opener sweep on active-path reply (cascade-composes AFTER E).
+        if (result.responseEmail) {
+          const _r8bSweep = aiService.stripPerfectOpener(result.responseEmail);
+          result.responseEmail = _r8bSweep.swept;
+          if (_r8bSweep.sweptAny) console.log(`R8-B: "Perfect"-opener sweep neutralized opener in active-path responseEmail`);
         }
         // Normalize the freshly-updated summary on the way back, before persisting.
         result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);

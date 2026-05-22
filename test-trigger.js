@@ -12427,6 +12427,364 @@ Franco Maione`;
   console.log('Group R8-A-CROSS-CLUSTER-INTEGRATION: R5-E + C.7 + R6-ζ + R6-κ + R7-A/B/C + R5-D-B all preserved post-R8-A.');
 
   // ════════════════════════════════════════════════════════════════
+  // R8 CLUSTER B — "Perfect"-opener post-gen sweep (Franco "multiple scenarios")
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R8-B. Empirical corpus
+  // (scripts/r8beta-corpus-grep.js): 10 production hits across 9 deals,
+  // 3 months (2026-03 → 2026-05). Franco-stated framing: "this bug has
+  // appeared across multiple scenarios". Existing prompt has BANNED OPENERS
+  // verbatim list in 8+ generator prompts with FIRST-WORD self-check; Claude
+  // bypassed for 3 months via (1) greeting-prefix bypass and (2) em-dash
+  // variant. Structural JS-side post-gen sweep is the deterministic fix.
+  //
+  // Verdicts:
+  //   Q1 (a) NARROW: "Perfect" only. Defer Awesome/Amazing/Wonderful/etc
+  //     family per strict-superset additive widening discipline (no empirical).
+  //   Q2 (a) STRUCTURAL: JS-side post-gen sweep. Three months of empirical
+  //     failure across 8+ verbatim prompt repetitions is the kill-shot for
+  //     prompt-only enforcement. Sweep is primary; prompt repetitions remain
+  //     as best-effort opportunistic catch.
+  //   Q3 (b) REWRITE-WITH-NAME (orchestrator-tier OVERRIDE of my (a) strip-no-
+  //     rewrite recommendation): Shape B "Perfect, <Name>!" → "Hi <Name>! ...".
+  //     Captured name routed through selectGreetingFirstName anti-collision
+  //     (admin proxy Franco → null → "Hi there!" fallback). UX correction:
+  //     bare "Perfect, Jason! I've received..." → "Hi Jason! I've received..."
+  //     rather than leaving the email starting mid-sentence.
+  //
+  //   R8-B-PATTERN-MATRIX: closed-set truth table over both shapes + over-
+  //     fire negatives. Shape A strip-in-place (6 cases) + Shape B1 rewrite-
+  //     with-name (3 cases) + Shape B2 strip-no-rewrite (1 case) + 5 negatives.
+  //   R8-B-NADIA-FIXTURE (LOAD-BEARING): Nadia S15 msg #3 verbatim production
+  //     replay — "Hi there! Perfect — thank you for the clarification!" →
+  //     "Hi there! Thank you for the clarification!" (R8 master kickoff anchor).
+  //   R8-B-MULTI-DEAL-CORPUS (LOAD-BEARING): all 10 production hits verbatim
+  //     replay; each opener neutralized to clean post-sweep output.
+  //   R8-B-CALL-SITE-WIRING: closed-set count + per-site assertions for
+  //     stripPerfectOpener at 4 broker-facing post-gen sites in webhook.js
+  //     (alongside enforceNoRoutingLeak at each — cascade composition).
+  //   R8-B-OVER-FIRE-PROTECTION: deterministic negatives — sentence-internal
+  //     "Perfect" (adjective usage "perfect for this LTV"), second-paragraph
+  //     "Perfect timing", clean-no-Perfect openers, empty/null inputs.
+  //   R8-B-CROSS-CLUSTER-INTEGRATION: full prior arc preserved (R5-E + C.7
+  //     + R6-ζ + R6-η + R5-C cascade-composition + R8-A wiring) + helper
+  //     exported.
+  const _r8bAi = require('./src/services/ai');
+  const _r8bAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const _r8bWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const { stripPerfectOpener: _r8bStrip } = _r8bAi;
+
+  console.log('\n========== R8-B-PATTERN-MATRIX — Shape A strip-in-place + Shape B rewrite truth table ==========');
+  const _r8bMatrix = [
+    // ─── Shape A (greeting-prefixed, strip-in-place; 6 cases) ───
+    {
+      label: 'Shape-A-1: "Hi there! Perfect — thank you for the clarification!" (Nadia S15 anchor)',
+      input: '<p>Hi there! Perfect — thank you for the clarification! Continuation.</p>',
+      mustContain: '<p>Hi there! Thank you for the clarification!',
+      mustNotContain: 'Perfect',
+    },
+    {
+      label: 'Shape-A-2: "Hi Jason! Perfect, thank you for clarifying" (Lena Park)',
+      input: '<p>Hi Jason! Perfect, thank you for clarifying the credit scores.</p>',
+      mustContain: '<p>Hi Jason! Thank you for clarifying',
+      mustNotContain: 'Perfect',
+    },
+    {
+      label: 'Shape-A-3: "Hi Jason! Perfect — thanks for confirming" (Derek Olsen em-dash)',
+      input: '<p>Hi Jason! Perfect — thanks for confirming the approval!</p>',
+      mustContain: '<p>Hi Jason! Thanks for confirming the approval!',
+      mustNotContain: 'Perfect',
+    },
+    {
+      label: 'Shape-A-4: "Hi Jason! Perfect, thanks for that clarification" (Grace Paulson)',
+      input: '<p>Hi Jason! Perfect, thanks for that clarification! Continuation.</p>',
+      mustContain: '<p>Hi Jason! Thanks for that clarification!',
+      mustNotContain: 'Perfect',
+    },
+    {
+      label: 'Shape-A-5: "Hi Jason! Perfect! Thank you for sending" (Mateen d9d4b218)',
+      input: '<p>Hi Jason! Perfect! Thank you for sending over the T4s.</p>',
+      mustContain: '<p>Hi Jason! Thank you for sending over',
+      mustNotContain: 'Perfect',
+    },
+    {
+      label: 'Shape-A-6: "Hi Franco! Perfect, thank you for the detailed information" (Joe and Lori Smith)',
+      input: '<p>Hi Franco! Perfect, thank you for the detailed information.</p>',
+      mustContain: '<p>Hi Franco! Thank you for the detailed information',
+      mustNotContain: 'Perfect',
+    },
+
+    // ─── Shape B1 (bare with capitalized name, rewrite-with-name; 3 cases) ───
+    {
+      label: 'Shape-B1-1: "Perfect, Franco! Thank you for submitting" — admin-collision → "Hi there!" fallback',
+      input: '<p>Perfect, Franco! Thank you for submitting all the documentation.</p>',
+      mustContain: '<p>Hi there! Thank you for submitting',
+      mustNotContain: 'Hi Franco',  // anti-collision must kick in
+    },
+    {
+      label: 'Shape-B1-2: "Perfect, Jason! I\'ve received the driver\'s licenses" — clean rewrite (Mateen 5fbc221d)',
+      input: '<p>Perfect, Jason! I\'ve received the driver\'s licenses for both Mateen and Kochay.</p>',
+      mustContain: '<p>Hi Jason! I\'ve received the driver\'s licenses',
+      mustNotContain: 'Perfect',
+    },
+    {
+      label: 'Shape-B1-3: "Perfect, Jason! Thanks for sending the correct appraisal" — clean rewrite (Mateen 5fbc221d alt)',
+      input: '<p>Perfect, Jason! Thanks for sending the correct appraisal — I\'ve received it.</p>',
+      mustContain: '<p>Hi Jason! Thanks for sending the correct appraisal',
+      mustNotContain: 'Perfect',
+    },
+
+    // ─── Shape B2 (bare with non-name continuation, strip-no-rewrite; 1 case) ───
+    {
+      label: 'Shape-B2-1: "Perfect, thanks Franco! Looking forward" — strip-no-rewrite (Norris Yu)',
+      input: '<p>Perfect, thanks Franco! Looking forward to receiving those items tomorrow.</p>',
+      mustContain: '<p>Thanks Franco! Looking forward',
+      mustNotContain: 'Perfect',
+    },
+  ];
+  let _r8bMatrixFails = 0;
+  for (const tc of _r8bMatrix) {
+    const result = _r8bStrip(tc.input);
+    const out = result.swept;
+    let pass = true;
+    let reason = '';
+    if (!out.includes(tc.mustContain)) { pass = false; reason = `missing "${tc.mustContain}"`; }
+    if (tc.mustNotContain && out.includes(tc.mustNotContain)) {
+      pass = false; reason += (reason ? '; ' : '') + `contains forbidden "${tc.mustNotContain}"`;
+    }
+    if (!result.sweptAny) {
+      pass = false; reason += (reason ? '; ' : '') + 'sweptAny=false (sweep did not fire)';
+    }
+    if (!pass) {
+      _r8bMatrixFails++;
+      console.log(`  FAIL [${tc.label}]: ${reason}`);
+      console.log(`    OUTPUT: ${out}`);
+    } else {
+      console.log(`  PASS [${tc.label}]`);
+    }
+  }
+  if (_r8bMatrixFails > 0) throw new Error(`FAIL [R8-B-PATTERN-MATRIX]: ${_r8bMatrixFails}/${_r8bMatrix.length} cases failed.`);
+  console.log(`Group R8-B-PATTERN-MATRIX: ${_r8bMatrix.length}/${_r8bMatrix.length} cases pass (6 Shape-A + 3 Shape-B1 + 1 Shape-B2).`);
+
+  console.log('\n========== R8-B-NADIA-FIXTURE — Nadia S15 msg #3 verbatim production replay (LOAD-BEARING) ==========');
+  // Nadia S15 (deal 0dbd9547) msg #3 — R8 master-kickoff anchor. Verbatim
+  // production body shape:
+  //   "Hi there! Perfect — thank you for the clarification! I've received
+  //    Anna Bergstrom's documents: the loan application, credit bureau, and
+  //    appraisal. ..."
+  // Post-R8-B sweep: "Perfect — " stripped in place; "thank" capitalized to
+  // "Thank"; greeting "Hi there!" preserved; body content unchanged.
+  const _r8bNadiaVerbatim = `<p>Hi there! Perfect — thank you for the clarification! I've received Anna Bergstrom's documents: the loan application, credit bureau, and appraisal.</p><p>I'll be in touch shortly with an update.</p><p>Vienna<br>Private Mortgage Link</p>`;
+  const _r8bNadiaResult = _r8bStrip(_r8bNadiaVerbatim);
+  if (!_r8bNadiaResult.sweptAny) {
+    throw new Error('FAIL [R8-B-NADIA-FIXTURE]: sweep did not fire on Nadia verbatim shape.');
+  }
+  if (!_r8bNadiaResult.swept.startsWith('<p>Hi there! Thank you for the clarification!')) {
+    throw new Error(`FAIL [R8-B-NADIA-FIXTURE]: expected to start with "<p>Hi there! Thank you for the clarification!", got "${_r8bNadiaResult.swept.slice(0, 80)}"`);
+  }
+  if (/Perfect/i.test(_r8bNadiaResult.swept.slice(0, 100))) {
+    throw new Error(`FAIL [R8-B-NADIA-FIXTURE]: "Perfect" still present in first 100 chars: "${_r8bNadiaResult.swept.slice(0, 100)}"`);
+  }
+  // Body content preserved (Anna Bergstrom + document list unchanged).
+  if (!/Anna Bergstrom's documents: the loan application, credit bureau, and appraisal/.test(_r8bNadiaResult.swept)) {
+    throw new Error(`FAIL [R8-B-NADIA-FIXTURE]: body content not preserved`);
+  }
+  // Closing signature preserved.
+  if (!/Vienna<br>Private Mortgage Link/.test(_r8bNadiaResult.swept)) {
+    throw new Error(`FAIL [R8-B-NADIA-FIXTURE]: closing signature not preserved`);
+  }
+  console.log('  PASS [strip]: "Hi there! Perfect — thank you" → "Hi there! Thank you"');
+  console.log('  PASS [body preservation]: Anna Bergstrom doc list + closing signature preserved');
+  console.log('Group R8-B-NADIA-FIXTURE: R8 master-kickoff production anchor neutralized; body + closing preserved.');
+
+  console.log('\n========== R8-B-MULTI-DEAL-CORPUS — 10 production hits verbatim replay (LOAD-BEARING) ==========');
+  // Verbatim openers from scripts/r8beta-corpus-grep.js. Each replay verifies:
+  //   (a) sweep fires (sweptAny=true)
+  //   (b) "Perfect" token absent from first 80 chars of swept output
+  //   (c) capitalization preserved on continuation
+  const _r8bCorpus = [
+    { deal: '0dbd9547 Nadia S15', input: `<p>Hi there! Perfect — thank you for the clarification! I've received Anna Bergstrom's documents.</p>` },
+    { deal: '1e9841a4 Lena Park', input: `<p>Hi Jason! Perfect, thank you for clarifying the credit scores — 748/752 is much better than what I initially thought!</p>` },
+    { deal: 'a4ae6cda Derek Olsen', input: `<p>Hi Jason! Perfect — thanks for confirming the approval! I've received all the documentation we discussed.</p>` },
+    { deal: '7b7a324c Grace Paulson', input: `<p>Hi Jason! Perfect, thanks for that clarification! You're absolutely right — we'll use the $290,150 principal balance.</p>` },
+    { deal: 'd9d4b218 Mateen / Jason', input: `<p>Hi Jason! Perfect! Thank you for sending over the T4s, appraisal, payout statement, and property tax assessment.</p>` },
+    { deal: 'cd376914 Mateen / Franco', input: `<p>Perfect, Franco! Thank you for submitting all the documentation. I've reviewed everything you've sent.</p>` },
+    { deal: '5fbc221d Mateen / Jason', input: `<p>Perfect, Jason! I've received the driver's licenses for both Mateen and Kochay, plus their Personal Net Worth Statement.</p>` },
+    { deal: '5fbc221d Mateen / Jason alt', input: `<p>Perfect, Jason! Thanks for sending the correct appraisal — I've received the appraisal for 874 Rideau Cres NW.</p>` },
+    { deal: '74cb5cc2 Norris Yu', input: `<p>Perfect, thanks Franco! Looking forward to receiving those items tomorrow.</p>` },
+    { deal: '9459b6d0 Joe and Lori Smith', input: `<p>Hi Franco! Perfect, thank you for the detailed information and the completed forms!</p>` },
+  ];
+  let _r8bCorpusFails = 0;
+  for (const tc of _r8bCorpus) {
+    const result = _r8bStrip(tc.input);
+    const firstParaText = (result.swept.match(/<p>([\s\S]*?)<\/p>/i) || [, ''])[1];
+    let pass = result.sweptAny && !/Perfect/i.test(firstParaText);
+    if (!pass) {
+      _r8bCorpusFails++;
+      console.log(`  FAIL [${tc.deal}]: sweptAny=${result.sweptAny}, first-para="${firstParaText.slice(0, 100)}"`);
+    } else {
+      console.log(`  PASS [${tc.deal}]: → "${firstParaText.slice(0, 80)}..."`);
+    }
+  }
+  if (_r8bCorpusFails > 0) throw new Error(`FAIL [R8-B-MULTI-DEAL-CORPUS]: ${_r8bCorpusFails}/${_r8bCorpus.length} production hits not neutralized.`);
+  console.log(`Group R8-B-MULTI-DEAL-CORPUS: ${_r8bCorpus.length}/${_r8bCorpus.length} production hits neutralized (Franco's "multiple scenarios" framing structurally closed).`);
+
+  console.log('\n========== R8-B-CALL-SITE-WIRING — 5-clause closed-set + per-site assertions ==========');
+  // (1) stripPerfectOpener exported from ai.js
+  if (!/^\s*stripPerfectOpener,/m.test(_r8bAiSrc)) {
+    throw new Error('FAIL [R8β-CW (1)]: stripPerfectOpener must be exported from src/services/ai.js');
+  }
+  console.log('  PASS [(1)]: stripPerfectOpener exported from ai.js');
+  // (2) Helper imports selectGreetingFirstName for Shape-B1 anti-collision composition.
+  if (!/require\(['"]\.\.\/lib\/greeting['"]\)/.test(_r8bAiSrc)) {
+    throw new Error('FAIL [R8β-CW (2)]: ai.js must import selectGreetingFirstName from ../lib/greeting (Shape-B1 anti-collision composition)');
+  }
+  console.log('  PASS [(2)]: ai.js imports selectGreetingFirstName from ../lib/greeting (anti-collision composition)');
+  // (3) Webhook.js invokes stripPerfectOpener at exactly 4 broker-facing call sites
+  //     (alongside enforceNoRoutingLeak at each — cascade composition).
+  const _r8bInvocCount = (_r8bWebhookSrc.match(/aiService\.stripPerfectOpener\(/g) || []).length;
+  if (_r8bInvocCount !== 4) {
+    throw new Error(`FAIL [R8β-CW (3)]: stripPerfectOpener invocations in webhook.js = ${_r8bInvocCount}; expected exactly 4 (initial-submission welcomeEmail + review-path responseEmail + R5-D-B intake-template + active-path responseEmail).`);
+  }
+  console.log(`  PASS [(3)]: stripPerfectOpener invoked at exactly 4 broker-facing post-gen call sites in webhook.js`);
+  // (4) Cascade composition — each stripPerfectOpener call site MUST be preceded
+  //     (lexically) by an enforceNoRoutingLeak call in close proximity.
+  //     R5-C-CASCADE-COMPOSITION precedent: AFTER enforceNoRoutingLeak in source
+  //     order. Heuristic check: for each stripPerfectOpener call, scan backward
+  //     ≤ 800 chars and confirm an enforceNoRoutingLeak call exists.
+  const _r8bStripMatches = [..._r8bWebhookSrc.matchAll(/aiService\.stripPerfectOpener\(/g)];
+  let _r8bCascadeFails = 0;
+  for (const m of _r8bStripMatches) {
+    const lookbackStart = Math.max(0, m.index - 800);
+    const lookback = _r8bWebhookSrc.slice(lookbackStart, m.index);
+    if (!/aiService\.enforceNoRoutingLeak\(/.test(lookback)) {
+      _r8bCascadeFails++;
+      console.log(`  CASCADE FAIL at index ${m.index}: no enforceNoRoutingLeak in preceding 800 chars`);
+    }
+  }
+  if (_r8bCascadeFails > 0) {
+    throw new Error(`FAIL [R8β-CW (4)]: ${_r8bCascadeFails}/${_r8bStripMatches.length} stripPerfectOpener call sites missing preceding enforceNoRoutingLeak (cascade composition broken).`);
+  }
+  console.log(`  PASS [(4) cascade]: all 4 stripPerfectOpener calls preceded by enforceNoRoutingLeak (R5-C-CASCADE-COMPOSITION precedent)`);
+  // (5) Per-site annotation anchor — each stripPerfectOpener call MUST have an
+  //     R8-B comment in the 600 chars preceding it (per-call-site annotation
+  //     discipline; cycle-tracking anchor for future maintainers). Widened
+  //     to 600 chars because the initial-submission site carries the full
+  //     R8-B docblock (~400 chars of empirical-grounding context); the other
+  //     3 sites use single-line comments well within 200.
+  let _r8bAnnotFails = 0;
+  for (const m of _r8bStripMatches) {
+    const lookbackStart = Math.max(0, m.index - 600);
+    const lookback = _r8bWebhookSrc.slice(lookbackStart, m.index);
+    if (!/\/\/\s*R8-B\b/.test(lookback)) {
+      _r8bAnnotFails++;
+      console.log(`  ANNOT FAIL at index ${m.index}: no "// R8-B" comment in preceding 600 chars`);
+    }
+  }
+  if (_r8bAnnotFails > 0) {
+    throw new Error(`FAIL [R8β-CW (5) annotation]: ${_r8bAnnotFails}/${_r8bStripMatches.length} stripPerfectOpener call sites missing R8-B comment annotation.`);
+  }
+  console.log(`  PASS [(5) annotation]: all 4 R8-B sweep call sites carry "// R8-B" comment annotation within 600 chars`);
+  console.log(`Group R8-B-CALL-SITE-WIRING: 5-clause closed-set (helper export + greeting import + 4 invocations + cascade position + annotation anchors).`);
+
+  console.log('\n========== R8-B-OVER-FIRE-PROTECTION — deterministic negatives ==========');
+  // Legitimate "Perfect" usage MUST NOT be swept. Same shape as R5-C-OVER-FIRE-
+  // PROTECTION (external-document subjects preserved) + R6-η preserved-
+  // legitimate-language anchor.
+  const _r8bNegatives = [
+    {
+      label: 'mid-body adjective: "perfect for this LTV range"',
+      input: '<p>Hi Jason! The appraisal value of $695,000 is perfect for this LTV range.</p>',
+      mustEqualInput: true,
+    },
+    {
+      label: 'mid-body adjective: "Perfect" capitalized but inside sentence',
+      input: '<p>Hi Jason! Thanks for sending those. Perfect timing — we have everything we need.</p>',
+      mustEqualInput: true,
+    },
+    {
+      label: 'second-paragraph "Perfect" (out of scope — sweep operates on first <p> only)',
+      input: '<p>Hi Jason! Thanks for sending those over.</p><p>Perfect timing on these — we have everything we need.</p>',
+      mustEqualInput: true,
+    },
+    {
+      label: 'clean greeting (no Perfect opener)',
+      input: '<p>Hi Jason! Thanks for the quick reply. We\'ll review and get back to you.</p>',
+      mustEqualInput: true,
+    },
+    {
+      label: 'identity-clash minimal-ask shape (no Perfect)',
+      input: '<p>Hi Jason, I noticed your email mentions Anna but the docs are for Grace. Could you confirm which is correct?</p>',
+      mustEqualInput: true,
+    },
+    {
+      label: 'empty string input',
+      input: '',
+      mustEqualInput: true,
+    },
+    {
+      label: 'null input',
+      input: null,
+      mustEqualInput: true,
+    },
+    {
+      label: 'non-string input',
+      input: 42,
+      mustEqualInput: true,
+    },
+  ];
+  let _r8bNegFails = 0;
+  for (const tc of _r8bNegatives) {
+    const result = _r8bStrip(tc.input);
+    if (tc.mustEqualInput && (result.swept !== tc.input || result.sweptAny !== false)) {
+      _r8bNegFails++;
+      console.log(`  FAIL [${tc.label}]: swept=${JSON.stringify(result.swept)?.slice(0, 100)}, sweptAny=${result.sweptAny}`);
+    } else {
+      console.log(`  PASS [${tc.label}]: no over-fire (sweptAny=false, output==input)`);
+    }
+  }
+  if (_r8bNegFails > 0) throw new Error(`FAIL [R8-B-OVER-FIRE-PROTECTION]: ${_r8bNegFails}/${_r8bNegatives.length} negatives failed.`);
+  console.log(`Group R8-B-OVER-FIRE-PROTECTION: ${_r8bNegatives.length}/${_r8bNegatives.length} legitimate-usage cases preserved (no over-fire).`);
+
+  console.log('\n========== R8-B-CROSS-CLUSTER-INTEGRATION — prior arc + cascade composition + R8-A preserved ==========');
+  // (a) R8-A anchors preserved.
+  if (!/_r8aDocReqGreeting|_r8aRejectionGreeting/.test(_r8bWebhookSrc)) {
+    throw new Error('FAIL: R8-A wiring anchors missing from webhook.js');
+  }
+  console.log('  PASS [R8-A]: R8-A admin-reply branch wiring anchors preserved');
+  // (b) R5-C cascade-composition precedent (the pattern R8-B follows).
+  if (!/enforceNoRoutingLeak\(welcomeEmail\)/.test(_r8bWebhookSrc) || !/enforceNoRoutingLeak\(reviewResult\.responseEmail\)/.test(_r8bWebhookSrc)) {
+    throw new Error('FAIL: enforceNoRoutingLeak cascade-precursor missing from broker-facing call sites');
+  }
+  console.log('  PASS [R5-C cascade]: enforceNoRoutingLeak still present at broker-facing call sites (R8-B sweep is additive cascade composition, not replacement)');
+  // (c) R6-ζ orthogonality — forbidden-non-sequitur-openers block preserved.
+  if (!/FORBIDDEN NON-SEQUITUR OPENERS \(Group R6-ζ/.test(_r8bAiSrc)) {
+    throw new Error('FAIL: R6-ζ block missing — R8-B should be orthogonal, not replace');
+  }
+  console.log('  PASS [R6-ζ orthogonality]: forbidden-non-sequitur-openers block preserved (R8-B + R6-ζ are orthogonal — R6-ζ gates on broker-replied-since-Vienna-outbound signal; R8-B unconditionally strips "Perfect")');
+  // (d) R5-E anchors preserved.
+  if (!/selectGreetingFirstName/.test(_r8bWebhookSrc) || !/selectGreetingFirstName/.test(_r8bAiSrc)) {
+    throw new Error('FAIL: R5-E selectGreetingFirstName anchor missing');
+  }
+  console.log('  PASS [R5-E]: selectGreetingFirstName helper still consumed by webhook.js AND ai.js (R8-B Shape-B1 anti-collision composition)');
+  // (e) R4-Bucket-C.7 parser preserved.
+  if (!/parseBrokerFirstNameFromSignature/.test(_r8bAiSrc)) {
+    throw new Error('FAIL: R4-Bucket-C.7 parser missing');
+  }
+  console.log('  PASS [R4-Bucket-C.7]: parseBrokerFirstNameFromSignature still present (R8-A widening preserved)');
+  // (f) R8-B helper has the load-bearing docblock anchors.
+  if (!/Empirical corpus.*10 production hits/s.test(_r8bAiSrc)) {
+    throw new Error('FAIL: stripPerfectOpener docblock missing corpus-grounding anchor (10 production hits across 9 deals)');
+  }
+  if (!/CASCADE COMPOSITION/.test(_r8bAiSrc)) {
+    throw new Error('FAIL: stripPerfectOpener docblock missing CASCADE COMPOSITION anchor');
+  }
+  if (!/SCOPE LOCK \(Q1 NARROW\)/.test(_r8bAiSrc)) {
+    throw new Error('FAIL: stripPerfectOpener docblock missing SCOPE LOCK Q1 NARROW anchor');
+  }
+  console.log('  PASS [docblock anchors]: stripPerfectOpener carries Empirical corpus + CASCADE COMPOSITION + SCOPE LOCK Q1 NARROW anchors');
+  console.log('Group R8-B-CROSS-CLUSTER-INTEGRATION: R8-A + R5-E + C.7 parser + R6-ζ + R5-C cascade + docblock anchors all preserved post-R8-B.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
