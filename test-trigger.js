@@ -11775,6 +11775,299 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group R7α-CROSS-CLUSTER-INTEGRATION: prior arc holding + R6-κ stamp preserved + computeAdminBanner gate intact + dispatcher/banner layering correct.`);
 
   // ════════════════════════════════════════════════════════════════
+  // R7 CLUSTERS B + C — Reminder threading + specificity (Franco S12-Bug-1/2)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for batched R7-B + R7-C. Shared code path
+  // (src/cron/dailySummary.js + src/lib/adminReply.js + src/services/ai.js
+  // generateFollowUpReminder) made batching the right cycle.
+  //
+  // Production fixtures:
+  //   • James Okafor S9 (deal 004cf263-7a41-4779-9f0b-79a28b24b91c) /
+  //     Fatima Al-Rashid (Prairie Mortgage Partners): 3 reminders, all
+  //     subject "Re: [File Complete] James Kwame Okafor — Ready to Close",
+  //     all body "the items we previously requested" with zero specific
+  //     doc names.
+  //   • Ethan Broussard S7 (deal 533fbd4f-bcac-4def-afa1-be8f9467e017) /
+  //     Preethi Subramaniam (Ridgeline Mortgage Services): same shape,
+  //     subject "Re: [File Complete] Ethan James Broussard — Ready to
+  //     Close" × 3, generic body × 3.
+  // Both deals post-[File Complete] (all docs in; admin hadn't approved).
+  // Reminders went to BROKER who had submitted everything — wrong
+  // audience + thread-disconnect + generic phrasing.
+  //
+  // Code-path root causes:
+  //   • R7-B threading: src/cron/dailySummary.js reminderBaseSubject
+  //     derived from lastOut?.subject (admin-facing [File Complete]) +
+  //     In-Reply-To/References chain included admin-facing MessageIDs.
+  //   • R7-C specificity: src/cron/dailySummary.js missingDocs was empty
+  //     by construction post-[File Complete] (all required docs received);
+  //     ai.js generateFollowUpReminder fallback at the empty-itemsList
+  //     case emitted the generic "items we previously requested" phrase.
+  //
+  // Q1-verdict (a): consume EXISTING isAdminFacingSubject from
+  // src/lib/adminReply.js (Group LLLL / S15.3+; not a new promotion —
+  // already in production). Module docblock clarified with
+  // direction-of-flow distinction (isAdminReplySubject = admin → Vienna;
+  // isAdminFacingSubject = any admin-direction thread participation).
+  //
+  // Q2-verdict (a): FIRST broker-INBOUND subject as threading anchor —
+  // most stable; broker's email client definitively has it cached.
+  //
+  // Q3-verdict (a): SUPPRESS broker-facing reminder when missingDocs
+  // empty — broker has nothing actionable; admin is the bottleneck.
+  // reminder_count still increments (claimReminderSlot fired already)
+  // for diagnostic visibility; remindersLog captures suppressed:true.
+  //
+  // Groups:
+  //   R7β-IS-ADMIN-FACING-SUBJECT  : helper truth-table (subject patterns)
+  //   R7β-SUBJECT-DERIVATION       : cron uses broker-inbound subject
+  //   R7β-THREADING-HEADERS        : In-Reply-To/References filtered
+  //   R7γ-SUPPRESS-WHEN-NO-ITEMS   : missingDocs empty → no email
+  //   R7βγ-CONSUMER-WIRING         : closed-set on helper + cron consumer
+  //   R7βγ-CROSS-CLUSTER-INTEGRATION : R6-λ + R5-E + Group LLL pins
+  console.log('\n========== R7β-IS-ADMIN-FACING-SUBJECT — helper truth-table ==========');
+  const { isAdminFacingSubject: _r7bIsAdminFacing, isAdminReplySubject: _r7bIsAdminReply } = require('./src/lib/adminReply');
+
+  // Subject-pattern truth-table — admin-facing direction-of-flow
+  // classification regardless of Re: depth.
+  const _r7bSubjectCases = [
+    // ADMIN-FACING outbounds (Vienna → admin originals + draft previews)
+    ['ACTION REQUIRED: PRELIMINARY Review — James Okafor — 62.8% LTV', true, 'Vienna→admin PRELIMINARY Snapshot'],
+    ['FINAL REVIEW: All Documents Received — Lena Park', true, 'Vienna→admin FINAL REVIEW (legacy dead-code per R7-A; still admin-facing)'],
+    ['[File Complete] James Kwame Okafor — Ready to Close', true, 'Vienna→admin [File Complete] notification (R6-λ pattern)'],
+    ['[Conditions Fulfilled] James Okafor — File Complete', true, 'Vienna→admin conditions handoff (Group BBB)'],
+    ['[UPDATED] ACTION REQUIRED: PRELIMINARY Review — James Okafor — 62.8% LTV', true, 'Vienna→admin UPDATED Snapshot (NNN refresh)'],
+    // ADMIN-FACING inbounds (admin → Vienna replies — inherit Re: prefix)
+    ['Re: ACTION REQUIRED: PRELIMINARY Review — James Okafor — 62.8% LTV', true, 'Admin "approved" reply to Vienna PRELIMINARY'],
+    ['Re: [File Complete] James Kwame Okafor — Ready to Close', true, 'Admin reply to [File Complete] OR Vienna draft preview (R6-λ pattern)'],
+    ['Re: Re: ACTION REQUIRED: PRELIMINARY Review — Ethan Broussard — 59.8% LTV', true, 'Admin "send" on Vienna draft preview (double Re:)'],
+    // BROKER-FACING (subject not matching admin patterns)
+    ['New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton', false, 'Broker initial submission'],
+    ['New Submission — Ethan Broussard — Private Second Mortgage — Calgary', false, 'Broker initial submission (alt phrasing)'],
+    ['Re: New Private Mortgage Application — James Okafor', false, 'Vienna→broker reply or broker→Vienna reply'],
+    ['Re: Re: New Submission — Ethan Broussard — Private Second Mortgage — Calgary', false, 'Multi-Re-depth broker thread'],
+    ['Second Mortgage — Derek Olsen', false, 'Broker submission (alt phrasing)'],
+    // Edge cases
+    [null, false, 'null subject — defensive default'],
+    [undefined, false, 'undefined subject — defensive default'],
+    ['', false, 'empty string subject — defensive default'],
+    ['Daily Summary — 2026-05-22', true, 'Vienna Daily Summary email (admin-facing, no Re: variant)'],
+  ];
+  let _r7bFails = 0;
+  for (const [subj, expected, label] of _r7bSubjectCases) {
+    const got = _r7bIsAdminFacing(subj);
+    if (got !== expected) {
+      _r7bFails++;
+      console.log(`  FAIL [${label}]: subject "${subj}" → got ${got}, expected ${expected}`);
+    } else {
+      console.log(`  PASS [${label}]: → ${got}`);
+    }
+  }
+  if (_r7bFails > 0) throw new Error(`FAIL [R7β-IS-ADMIN-FACING-SUBJECT]: ${_r7bFails}/${_r7bSubjectCases.length} cases failed.`);
+  console.log(`Group R7β-IS-ADMIN-FACING-SUBJECT: ${_r7bSubjectCases.length}/${_r7bSubjectCases.length} cases passed (helper directionality + edge cases).`);
+
+  // ─── R7β-SUBJECT-DERIVATION ──────────────────────────────────────
+  console.log('\n========== R7β-SUBJECT-DERIVATION — cron reminderBaseSubject from broker-inbound ==========');
+  // Simulate the cron's subject-derivation logic on the James S9 timeline.
+  // Pre-R7-B: derived from lastOut?.subject → "Re: [File Complete] ...".
+  // Post-R7-B: derived from firstBrokerInbound.subject → "New Private
+  // Mortgage Application — James Okafor — ...".
+  const _r7bJamesMessages = [
+    { direction: 'inbound',  subject: 'New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton' },
+    { direction: 'outbound', subject: 'Re: New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton' },
+    { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — James Emeka Okafor — 62.8% LTV' },
+    { direction: 'inbound',  subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — James Emeka Okafor — 62.8% LTV' },
+    { direction: 'outbound', subject: 'Re: Re: ACTION REQUIRED: PRELIMINARY Review — James Emeka Okafor — 62.8% LTV' },
+    { direction: 'inbound',  subject: 'Re: Re: ACTION REQUIRED: PRELIMINARY Review — James Emeka Okafor — 62.8% LTV' },
+    { direction: 'outbound', subject: 'Re: New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton' },
+    { direction: 'inbound',  subject: 'Re: New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton' },
+    { direction: 'outbound', subject: 'Re: Re: New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton' },
+    { direction: 'inbound',  subject: 'Re: Re: New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton' },
+    { direction: 'outbound', subject: '[File Complete] James Kwame Okafor — Ready to Close' },
+    { direction: 'outbound', subject: 'Re: [File Complete] James Kwame Okafor — Ready to Close' },
+  ];
+  const _r7bBrokerFacing = _r7bJamesMessages.filter(m => !_r7bIsAdminFacing(m.subject));
+  const _r7bFirstBrokerInbound = _r7bBrokerFacing.find(m => m.direction === 'inbound');
+  if (!_r7bFirstBrokerInbound) {
+    throw new Error(`FAIL [R7β-SUBJECT-DERIVATION]: firstBrokerInbound missing on James S9 timeline`);
+  }
+  const _r7bExpectedBaseSubject = 'New Private Mortgage Application — James Okafor — 2281 Rabbit Hill Road NW, Edmonton';
+  if (_r7bFirstBrokerInbound.subject !== _r7bExpectedBaseSubject) {
+    throw new Error(`FAIL [R7β-SUBJECT-DERIVATION]: firstBrokerInbound subject incorrect; got "${_r7bFirstBrokerInbound.subject}", expected "${_r7bExpectedBaseSubject}"`);
+  }
+  console.log(`  PASS [James S9 first-broker-inbound]: "${_r7bFirstBrokerInbound.subject}" (NOT "Re: [File Complete] ..." admin-facing)`);
+
+  // Confirm SAME shape on Ethan S7 timeline.
+  const _r7bEthanMessages = [
+    { direction: 'inbound',  subject: 'New Submission — Ethan Broussard — Private Second Mortgage — Calgary' },
+    { direction: 'outbound', subject: 'Re: New Submission — Ethan Broussard — Private Second Mortgage — Calgary' },
+    { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Ethan James Broussard — 59.8% LTV' },
+    { direction: 'inbound',  subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Ethan James Broussard — 59.8% LTV' },
+    { direction: 'outbound', subject: '[File Complete] Ethan James Broussard — Ready to Close' },
+    { direction: 'outbound', subject: 'Re: [File Complete] Ethan James Broussard — Ready to Close' },
+  ];
+  const _r7bEthanFirstBroker = _r7bEthanMessages.filter(m => !_r7bIsAdminFacing(m.subject)).find(m => m.direction === 'inbound');
+  if (_r7bEthanFirstBroker?.subject !== 'New Submission — Ethan Broussard — Private Second Mortgage — Calgary') {
+    throw new Error(`FAIL [R7β-SUBJECT-DERIVATION Ethan]: got "${_r7bEthanFirstBroker?.subject}"`);
+  }
+  console.log(`  PASS [Ethan S7 first-broker-inbound]: "${_r7bEthanFirstBroker.subject}"`);
+
+  // Compute final reminderSubject + verify no admin-facing leak.
+  const _r7bComputeSubject = (firstInb, lastInb, borrower) => {
+    const base = firstInb?.subject || lastInb?.subject || borrower || 'Your Loan Inquiry';
+    return base.startsWith('Re:') ? base : `Re: ${base}`;
+  };
+  const _r7bJamesReminderSubject = _r7bComputeSubject(_r7bFirstBrokerInbound, null, 'James Okafor');
+  if (/\[File Complete\]/.test(_r7bJamesReminderSubject)) {
+    throw new Error(`FAIL [R7β-SUBJECT-DERIVATION smoking-gun]: reminderSubject contains "[File Complete]" — Franco S12-Bug-1 regression. Got: ${_r7bJamesReminderSubject}`);
+  }
+  if (!_r7bJamesReminderSubject.startsWith('Re: New Private Mortgage Application')) {
+    throw new Error(`FAIL [R7β-SUBJECT-DERIVATION]: reminderSubject must thread to broker original submission; got: ${_r7bJamesReminderSubject}`);
+  }
+  console.log(`  PASS [SMOKING-GUN]: reminderSubject = "${_r7bJamesReminderSubject}" — NO "[File Complete]" admin-facing leak`);
+  console.log(`Group R7β-SUBJECT-DERIVATION: cron threading anchor uses broker-inbound subject; admin-facing subjects filtered out.`);
+
+  // ─── R7β-THREADING-HEADERS ───────────────────────────────────────
+  console.log('\n========== R7β-THREADING-HEADERS — In-Reply-To/References filtered to broker-facing outbounds ==========');
+  // Threading-IDs filter: brokerFacingMessages.filter(direction='outbound' &&
+  // external_message_id present) → only Vienna's broker-facing outbound
+  // MessageIDs go into In-Reply-To + References chain.
+  const _r7bJamesWithMids = [
+    { direction: 'inbound',  subject: 'New Private Mortgage Application — James Okafor', external_message_id: null /* broker mid not stored */ },
+    { direction: 'outbound', subject: 'Re: New Private Mortgage Application — James Okafor', external_message_id: 'mid-broker-welcome-1' },
+    { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — James Emeka Okafor — 62.8% LTV', external_message_id: 'mid-admin-snapshot-1' },
+    { direction: 'inbound',  subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — James Emeka Okafor — 62.8% LTV', external_message_id: null },
+    { direction: 'outbound', subject: 'Re: Re: ACTION REQUIRED: PRELIMINARY Review — James Emeka Okafor — 62.8% LTV', external_message_id: 'mid-admin-preview-1' },
+    { direction: 'outbound', subject: 'Re: New Private Mortgage Application — James Okafor', external_message_id: 'mid-broker-reply-1' },
+    { direction: 'outbound', subject: '[File Complete] James Kwame Okafor — Ready to Close', external_message_id: 'mid-admin-filecomplete-1' },
+    { direction: 'outbound', subject: 'Re: [File Complete] James Kwame Okafor — Ready to Close', external_message_id: 'mid-admin-closingpreview-1' },
+  ];
+  const _r7bBrokerFacingOutbounds = _r7bJamesWithMids.filter(m => !_r7bIsAdminFacing(m.subject) && m.direction === 'outbound' && m.external_message_id);
+  const _r7bIds = _r7bBrokerFacingOutbounds.map(m => m.external_message_id);
+  // Expected: only the two broker-facing outbound MIDs (welcome + broker-reply).
+  if (_r7bIds.length !== 2) {
+    throw new Error(`FAIL [R7β-THREADING-HEADERS]: broker-facing outbound MIDs = ${_r7bIds.length}; expected exactly 2 (welcome + broker-reply on the James S9 mock)`);
+  }
+  if (_r7bIds.some(id => /admin|filecomplete|snapshot|preview/.test(id))) {
+    throw new Error(`FAIL [R7β-THREADING-HEADERS]: admin-facing MID leaked into References chain. Got: ${_r7bIds.join(', ')}`);
+  }
+  if (!_r7bIds.includes('mid-broker-welcome-1') || !_r7bIds.includes('mid-broker-reply-1')) {
+    throw new Error(`FAIL [R7β-THREADING-HEADERS]: broker-facing MIDs missing from chain. Got: ${_r7bIds.join(', ')}`);
+  }
+  console.log(`  PASS [broker-facing chain]: ${_r7bIds.length} MIDs in References; admin-facing IDs excluded ("mid-admin-snapshot-1", "mid-admin-preview-1", "mid-admin-filecomplete-1", "mid-admin-closingpreview-1" all filtered)`);
+  console.log('  PASS [SMOKING-GUN]: no admin-facing MID in chain; broker-facing outbounds only');
+
+  // In-Reply-To = last broker-facing outbound MID.
+  const _r7bLastBrokerOutboundMid = _r7bBrokerFacingOutbounds[_r7bBrokerFacingOutbounds.length - 1].external_message_id;
+  if (_r7bLastBrokerOutboundMid !== 'mid-broker-reply-1') {
+    throw new Error(`FAIL [R7β-THREADING-HEADERS In-Reply-To]: last broker-facing outbound MID should be 'mid-broker-reply-1'; got '${_r7bLastBrokerOutboundMid}'`);
+  }
+  console.log(`  PASS [In-Reply-To]: last broker-facing outbound MID = '${_r7bLastBrokerOutboundMid}' (NOT 'mid-admin-closingpreview-1' which would leak admin thread to broker)`);
+  console.log(`Group R7β-THREADING-HEADERS: In-Reply-To + References filtered to broker-facing outbounds only.`);
+
+  // ─── R7γ-SUPPRESS-WHEN-NO-ITEMS ──────────────────────────────────
+  console.log('\n========== R7γ-SUPPRESS-WHEN-NO-ITEMS — missingDocs empty → no email dispatched ==========');
+  // Source-grep verifies the cron has the guard.
+  const _r7Fs2 = require('fs');
+  const _r7CronSrc = _r7Fs2.readFileSync('./src/cron/dailySummary.js', 'utf8');
+  // (1) Cron has the suppress-when-empty guard.
+  if (!/if \(missingDocs\.length === 0\) \{[\s\S]{0,1500}suppressed: true/.test(_r7CronSrc)) {
+    throw new Error(`FAIL [R7γ-SUPPRESS-WHEN-NO-ITEMS]: cron missing the suppress-when-empty guard with suppressed:true diagnostic flag`);
+  }
+  console.log('  PASS: cron has suppress-when-empty guard with suppressed:true diagnostic flag');
+
+  // (2) Guard fires before LLM call (saves cost on suppressed reminders).
+  // Check ordering — guard appears AFTER missingDocs computation but BEFORE
+  // generateFollowUpReminder call.
+  const _r7CronMissingDocsIdx = _r7CronSrc.indexOf('missingDocs.push');
+  const _r7CronGuardIdx = _r7CronSrc.indexOf('if (missingDocs.length === 0)');
+  const _r7CronLlmCallIdx = _r7CronSrc.indexOf('aiService.generateFollowUpReminder');
+  if (_r7CronGuardIdx < _r7CronMissingDocsIdx || _r7CronGuardIdx > _r7CronLlmCallIdx) {
+    throw new Error(`FAIL [R7γ-SUPPRESS-WHEN-NO-ITEMS ordering]: guard must fire AFTER missingDocs computation + BEFORE generateFollowUpReminder LLM call. missingDocs.push@${_r7CronMissingDocsIdx}; guard@${_r7CronGuardIdx}; llmCall@${_r7CronLlmCallIdx}`);
+  }
+  console.log('  PASS [ordering]: guard fires AFTER missingDocs computation + BEFORE LLM call (saves API cost on suppressed reminders)');
+
+  // (3) Continue statement inside the guard (skips current iteration).
+  if (!/if \(missingDocs\.length === 0\) \{[\s\S]{0,1500}continue;/.test(_r7CronSrc)) {
+    throw new Error(`FAIL [R7γ-SUPPRESS-WHEN-NO-ITEMS]: guard must end with continue; to skip the rest of the iteration`);
+  }
+  console.log('  PASS [continue]: guard properly skips to next deal iteration');
+
+  // (4) reminder_count NOT manually incremented in the guard (claimReminderSlot
+  // already fired upstream).
+  if (/if \(missingDocs\.length === 0\) \{[\s\S]{0,1500}reminder_count:/.test(_r7CronSrc)) {
+    throw new Error(`FAIL [R7γ-SUPPRESS-WHEN-NO-ITEMS]: guard must NOT manually increment reminder_count — claimReminderSlot already did it upstream`);
+  }
+  console.log('  PASS [counter-discipline]: guard does NOT manually increment reminder_count (claimReminderSlot upstream is authoritative)');
+  console.log(`Group R7γ-SUPPRESS-WHEN-NO-ITEMS: cron suppresses broker-facing reminder when missingDocs empty; counter discipline preserved.`);
+
+  // ─── R7βγ-CONSUMER-WIRING ────────────────────────────────────────
+  console.log('\n========== R7βγ-CONSUMER-WIRING — 4-clause closed-set ==========');
+  // (1) isAdminFacingSubject exported from src/lib/adminReply.js.
+  const _r7AdminReplySrc = _r7Fs2.readFileSync('./src/lib/adminReply.js', 'utf8');
+  if (!/module\.exports = \{[\s\S]{0,300}isAdminFacingSubject/.test(_r7AdminReplySrc)) {
+    throw new Error(`FAIL [R7βγ-CW (1)]: isAdminFacingSubject must be exported from src/lib/adminReply.js`);
+  }
+  console.log('  PASS [(1)]: isAdminFacingSubject exported from src/lib/adminReply.js (alongside isAdminReplySubject)');
+
+  // (2) Cron imports isAdminFacingSubject from lib/adminReply.
+  if (!/require\(['"]\.\.\/lib\/adminReply['"]\)/.test(_r7CronSrc)
+      || !/isAdminFacingSubject/.test(_r7CronSrc)) {
+    throw new Error(`FAIL [R7βγ-CW (2)]: cron must import isAdminFacingSubject from ../lib/adminReply`);
+  }
+  console.log('  PASS [(2)]: cron imports isAdminFacingSubject from ../lib/adminReply');
+
+  // (3) Cron uses isAdminFacingSubject in threading filter (broker-facing
+  // chain construction). Exactly 1 invocation expected (single filter call
+  // applied to messages array).
+  const _r7CronAdminFacingInvocs = (_r7CronSrc.match(/isAdminFacingSubject\(/g) || []).length;
+  if (_r7CronAdminFacingInvocs !== 1) {
+    throw new Error(`FAIL [R7βγ-CW (3)]: isAdminFacingSubject invocations in cron = ${_r7CronAdminFacingInvocs}; expected exactly 1 (single brokerFacingMessages filter)`);
+  }
+  console.log('  PASS [(3)]: cron invokes isAdminFacingSubject exactly 1 time (single brokerFacingMessages filter call)');
+
+  // (4) Module docblock distinguishes the two helpers explicitly.
+  if (!/TWO HELPERS, DIFFERENT AUDIENCE DIRECTIONS/.test(_r7AdminReplySrc)) {
+    throw new Error(`FAIL [R7βγ-CW (4)]: src/lib/adminReply.js module docblock must include "TWO HELPERS, DIFFERENT AUDIENCE DIRECTIONS" anchor distinguishing isAdminReplySubject vs isAdminFacingSubject`);
+  }
+  console.log('  PASS [(4)]: module docblock anchors "TWO HELPERS, DIFFERENT AUDIENCE DIRECTIONS" distinction (per Q1 verdict — direction-of-flow distinction explicit for future maintainers)');
+  console.log(`Group R7βγ-CONSUMER-WIRING: 4-clause closed-set (helper export + cron import + invocation count + docblock anchor).`);
+
+  // ─── R7βγ-CROSS-CLUSTER-INTEGRATION ──────────────────────────────
+  console.log('\n========== R7βγ-CROSS-CLUSTER-INTEGRATION — R6-λ + R5-E + Group LLL anchors ==========');
+  // R6-λ threading pattern (In-Reply-To/References for sendCompletionHandoff)
+  // — R7-B reuses the same architectural pattern.
+  if (!/In-Reply-To/.test(_r7CronSrc) || !/References/.test(_r7CronSrc)) {
+    throw new Error(`FAIL [R7βγ-CC R6-λ]: cron must still use In-Reply-To + References headers for threading (R6-λ pattern carried forward)`);
+  }
+  console.log('  PASS [R6-λ pattern]: In-Reply-To + References headers used in cron (architectural parallel to sendCompletionHandoff)');
+
+  // R5-E greeting (selectGreetingFirstName) still consumed in cron.
+  if (!/selectGreetingFirstName/.test(_r7CronSrc)) {
+    throw new Error(`FAIL [R7βγ-CC R5-E]: cron must still consume selectGreetingFirstName (broker-name greeting helper)`);
+  }
+  console.log('  PASS [R5-E greeting]: selectGreetingFirstName consumption preserved');
+
+  // Group LLL missingDocs aggregation downstream consumer pin.
+  if (!/Group LLL.*S12\.4/.test(_r7CronSrc) || !/missingDocs/.test(_r7CronSrc)) {
+    throw new Error(`FAIL [R7βγ-CC Group LLL]: missingDocs aggregation (Group LLL S12.4) must still feed generateFollowUpReminder`);
+  }
+  console.log('  PASS [Group LLL]: missingDocs aggregation preserved (now consumed by both LLM enumeration AND R7-C suppression guard)');
+
+  // R7-B + R7-C anchors source-grep present in cron.
+  if (!/R7-B \(2026-05-22\)/.test(_r7CronSrc)) throw new Error('FAIL: R7-B anchor missing from cron');
+  if (!/R7-C \(2026-05-22\)/.test(_r7CronSrc)) throw new Error('FAIL: R7-C anchor missing from cron');
+  console.log('  PASS: R7-B + R7-C anchors source-grep-present in cron');
+
+  // existing isAdminReplySubject still exported (no regression on R6-ζ consumer).
+  if (!/isAdminReplySubject/.test(_r7AdminReplySrc)) {
+    throw new Error(`FAIL [R7βγ-CC R6-ζ]: isAdminReplySubject must still be exported (R6-ζ brokerRepliedSinceLastViennaOutbound walk consumer)`);
+  }
+  console.log('  PASS [isAdminReplySubject preserved]: existing helper still exported (R6-ζ consumer in webhook.js brokerRepliedSinceLastViennaOutbound walk preserved)');
+
+  console.log(`Group R7βγ-CROSS-CLUSTER-INTEGRATION: R6-λ + R5-E + Group LLL + R6-ζ all preserved; R7-B/C anchors present.`);
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin

@@ -5,6 +5,12 @@ const emailService = require('../services/email');
 const aiService = require('../services/ai');
 const { isPurchaseFromSummary } = require('../lib/dealType');
 const { selectGreetingFirstName } = require('../lib/greeting');
+// R7-B (2026-05-22): admin-facing subject filter for reminder threading.
+// Franco S12-Bug-1 fix — broker's email client only has broker-facing
+// outbounds cached; admin-facing emails ([File Complete], ACTION REQUIRED,
+// etc.) must be excluded from In-Reply-To/References chains to keep
+// reminders threaded in the broker's view of the conversation.
+const { isAdminFacingSubject } = require('../lib/adminReply');
 
 // Group GGGG: REMINDER_TESTING_MODE env var. When set, accelerates the full
 // reminder cadence so Franco can validate all 3 reminders end-to-end within
@@ -136,6 +142,43 @@ const runFollowUpReminders = async () => {
         if (!deal.extracted_data?.exit_strategy) missingDocs.push('exit_strategy');
       }
 
+      // R7-C (2026-05-22): Franco S12-Bug-2 fix — suppress broker-facing
+      // reminder when missingDocs is empty. Franco's rule: "Each reminder
+      // should explicitly list the specific documents still needed." When
+      // no documents are still needed (broker submitted everything; deal
+      // is stuck on admin approval), no semantic basis for the reminder
+      // applies. Broker has nothing actionable; bottleneck is admin.
+      //
+      // Production fixtures: James Okafor S9 (004cf263) + Ethan Broussard
+      // S7 (533fbd4f) — both submitted full pkg, [File Complete] fired,
+      // admin didn't reply, cron sent 3 generic "items we previously
+      // requested" reminders to BROKER (who had submitted everything).
+      // Broker confusion + thread-disconnection (R7-B).
+      //
+      // Post-R7-C: reminder_count still increments (claimReminderSlot
+      // already fired above) for diagnostic visibility — operational
+      // record that the deal hit the reminder cadence. remindersLog
+      // captures suppressed:true so daily summary surfaces the suppressed
+      // reminder count. No email dispatched; broker not pinged for
+      // already-submitted documents.
+      //
+      // Defended residual: "waiting on internal review" reword via
+      // separate template — wider scope, deferred. Admin-side reminder
+      // for stuck deals (the actual bottleneck) — separate cluster.
+      if (missingDocs.length === 0) {
+        console.log(`R7-C: Deal ${deal.id} (${deal.borrower_name}) — missingDocs empty (all intake satisfied; deal stuck on admin approval), suppressing broker-facing reminder. reminder_count incremented for diagnostic.`);
+        remindersSent++;
+        remindersLog.push({
+          borrower: deal.borrower_name,
+          email: deal.email,
+          daysSilent: Math.round(daysSilent),
+          reminderNumber: newReminderNumber,
+          suppressed: true,
+          suppressedReason: 'R7-C: missingDocs empty — admin approval bottleneck, not broker',
+        });
+        continue;
+      }
+
       // R5-E refined (2026-05-21): JS-side greeting selection. Pre-fix, the
       // reminder prompt's Sender name line preferred sender_name (Postmark
       // From-name = "Franco Maione" testing proxy on most production deals)
@@ -158,31 +201,62 @@ const runFollowUpReminders = async () => {
         { greetingFirstName: _eReminderGreeting }
       );
 
-      // Use the LAST OUTBOUND subject (what the recipient actually has in their inbox)
-      // as the basis for the reminder — NOT the last inbound subject. For referrals, the
-      // last inbound is Franco's email to Vienna, which the referred person never saw —
-      // using that subject breaks thread continuity in their inbox.
+      // R7-B (2026-05-22): Franco S12-Bug-1 fix. Pre-R7-B, reminderBaseSubject
+      // derived from lastOut?.subject — but lastOut could be an ADMIN-FACING
+      // outbound ("[File Complete] ... — Ready to Close", "ACTION REQUIRED:
+      // ...") that broker's email client never cached. Result: reminders
+      // appeared as disconnected new threads to broker. Production fixtures
+      // (James S9 004cf263 + Ethan S7 533fbd4f): all 3 reminders subject
+      // "Re: [File Complete] ..." — broker never received [File Complete]
+      // (admin-only); reminder thread broken.
+      //
+      // Fix: derive reminderBaseSubject from FIRST broker-INBOUND subject
+      // (most stable threading anchor — that's the message broker
+      // definitively sent and their client has cached). isAdminFacingSubject
+      // filters admin-direction messages out of the threading chain so
+      // admin-facing outbounds don't leak.
+      //
+      // Threading headers (In-Reply-To + References) filtered to broker-
+      // facing OUTBOUNDS only (Vienna's broker-direction messages — those
+      // are the MessageIDs broker's client cached). Admin-facing outbounds
+      // and admin-reply inbounds are excluded.
+      //
+      // Edge case (referral deals): if no broker-inbound exists (Franco
+      // referred the deal but referee hasn't replied), firstBrokerInbound
+      // is undefined → falls back to lastInbound.subject (preserves
+      // pre-R7-B referral handling). Documented residual; revisit if
+      // Franco surfaces referral-specific R7-B regression.
+      const allMessages = await dealsService.getMessages(deal.id);
+      const brokerFacingMessages = allMessages.filter(m => !isAdminFacingSubject(m.subject));
+      const firstBrokerInbound = brokerFacingMessages.find(m => m.direction === 'inbound');
       const reminderBaseSubject =
-        lastOut?.subject ||
+        firstBrokerInbound?.subject ||
         lastInbound.subject ||
         deal.extracted_data?.borrower_name ||
         'Your Loan Inquiry';
       const reminderSubject = reminderBaseSubject.startsWith('Re:') ? reminderBaseSubject : `Re: ${reminderBaseSubject}`;
 
-      // Thread with the last outbound message so the reminder appears in the same conversation.
-      // Set BOTH In-Reply-To (for Apple Mail / strict clients) AND References (full chain for Gmail / Outlook).
-      // Postmark sets outbound Message-IDs as <uuid@mtasv.net> — verified from actual email source.
-      // We store just the UUID in external_message_id, so we must append the @mtasv.net suffix
-      // when constructing threading headers so they match what recipient clients actually cached.
+      // Thread with broker-facing outbound chain so the reminder appears in
+      // the same conversation in broker's inbox. Set BOTH In-Reply-To (for
+      // Apple Mail / strict clients) AND References (full chain for Gmail /
+      // Outlook). Postmark sets outbound Message-IDs as <uuid@mtasv.net> —
+      // verified from actual email source. We store just the UUID in
+      // external_message_id, so we must append the @mtasv.net suffix when
+      // constructing threading headers so they match what recipient clients
+      // actually cached.
+      //
+      // R7-B (2026-05-22): broker-facing-outbound filter. Admin-facing
+      // outbounds ([File Complete] notifications, ACTION REQUIRED Snapshots,
+      // FINAL REVIEW dispatches, draft previews) excluded — broker's email
+      // client never cached those MessageIDs, so referencing them silently
+      // breaks threading.
       const formatMessageId = (id) => (id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
-      const lastOutboundId = await dealsService.getLastOutboundMessageId(deal.id);
-      const allMessageIds = await dealsService.getAllMessageIdsForThread(deal.id);
+      const brokerFacingOutbounds = brokerFacingMessages.filter(m => m.direction === 'outbound' && m.external_message_id);
       const reminderHeaders = [];
-      if (lastOutboundId) {
-        reminderHeaders.push({ Name: 'In-Reply-To', Value: formatMessageId(lastOutboundId) });
-      }
-      if (allMessageIds.length > 0) {
-        const referencesValue = allMessageIds.map(formatMessageId).join(' ');
+      if (brokerFacingOutbounds.length > 0) {
+        const lastBrokerOutboundMid = brokerFacingOutbounds[brokerFacingOutbounds.length - 1].external_message_id;
+        reminderHeaders.push({ Name: 'In-Reply-To', Value: formatMessageId(lastBrokerOutboundMid) });
+        const referencesValue = brokerFacingOutbounds.map(m => formatMessageId(m.external_message_id)).join(' ');
         reminderHeaders.push({ Name: 'References', Value: referencesValue });
       }
 
