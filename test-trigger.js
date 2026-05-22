@@ -11184,6 +11184,178 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group α-CROSS-CLUSTER-INTEGRATION: prior arc holding + classification semantic extended + R6-γ composition preserved + defensive chain.`);
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER ι — Sandra S8 cascade-closure verification (harness-only)
+  // ════════════════════════════════════════════════════════════════
+  // R6-ι is a CASCADE-CLOSED CLUSTER. No production code change; harness pin
+  // only. The empirical bug shape was closed as an emergent property of prior
+  // cluster work (R6-β-A + R6-δ + R6-α composing).
+  //
+  // Diagnosis. Sandra Fletcher S8 (deal 84feed85-81f6-43ba-8b07-1eb9379ea8dd,
+  // 2026-05-21 corpus). Vienna's welcome reply emitted the literal:
+  //   "your email mentions a $68,000 loan request, but the application
+  //    shows $10.99%. Could you confirm the correct loan amount?"
+  // The "$10.99%" string is a SYNTACTIC IMPOSSIBILITY (currency + percent
+  // sigils combined). Claude conflated two ADJACENT Page-1 annotations from
+  // the loan_application PDF text:
+  //   [Page 1 annotation] $68,000   (loan amount)
+  //   [Page 1 annotation] 10.99%    (interest rate)
+  // into a fabricated discrepancy claim. Broker correction in next inbound:
+  //   "The 10.99% you're seeing is the interest rate field, not the loan
+  //    amount."
+  //
+  // Bug-shape distinction from R6-α. This is FIELD-CONFUSION (adjacent
+  // annotations conflated across DIFFERENT field types), not source-mis-
+  // attribution-inversion (R6-α's shape, where correct fields are read but
+  // source labels are flipped). Structurally distinct:
+  //   R6-α: canonical_map has 2 conflicting tuples on same field; Claude
+  //         reads both and inverts which-source-has-which-value.
+  //   R6-ι: canonical_map EMPTY on the field; Claude falls back to raw PDF
+  //         text scan and merges $-field with %-field across types.
+  //
+  // Root condition. The Sandra S8 admin Snapshot (msg #3 in the production
+  // corpus) shows "Loan Amount Requested: TBD" — empirical proof that
+  // canonical_map.requested_loan_amount was EMPTY at message-generation
+  // time. With no authoritative value in canonical_map, Vienna's prompt-
+  // context contained only the raw PDF text + email body; Claude
+  // confabulated by scanning both and emitting nonsensical syntax.
+  //
+  // Cascade-closure mechanism (pre-existing prior cluster work, no R6-ι
+  // production code):
+  //   1. R6-β-A extractFromLoanApplication catches Sandra's Page-1
+  //      annotation #1 `$68,000` → canonical_map.requested_loan_amount
+  //      gets {value: 68000, source: 'LoanApplication_Sandra_Fletcher.pdf',
+  //      classification: 'loan_application'}.
+  //   2. R6-δ email-body widening catches broker's "Requested Loan: $68,000"
+  //      prose → canonical_map gets {value: 68000, source: 'email_body',
+  //      classification: 'email_body'}.
+  //   3. R6-α filter at consumer boundary strips email_body when
+  //      loan_application present → prompt context surfaces single-value
+  //      $68,000 from doc source.
+  //   4. discrepancy compute returns null on requested_loan_amount (single
+  //      canonical value, no conflict). Vienna's prompt has clean context;
+  //      no fallback to raw PDF text scan; no confabulation precondition.
+  //
+  // 13th R5/R6 artifact-grounding redirect. Empirical investigation revealed
+  // prior-cluster cascade had already closed the symptom — no R6-ι-specific
+  // production change required. Methodology pays off in compound: R6-β-A's
+  // extractor + R6-δ's widening + R6-α's filter collectively addressed a
+  // bug surface that wasn't explicitly targeted by any of them individually.
+  // Cascade-closure as emergent property of disciplined prior cluster work.
+  //
+  // Harness-only pin. Single LOAD-BEARING verification group that pins the
+  // end-to-end cascade-closure on Sandra S8 production shape — including the
+  // smoking-gun assertion that the literal "$10.99%" string is absent from
+  // the prompt-context output post-cascade.
+  //
+  // Future-trigger residual. If Franco's retest shows recurrence of any $X%
+  // or similar syntactic-impossibility shape on a fresh Sandra-shape deal,
+  // revisit and consider a defensive prompt rule (Q1-(b) option, deferred).
+  console.log('\n========== R6-ι-SANDRA-S8-CASCADE-CLOSURE — field-confusion hallucination cascade-closed (LOAD-BEARING) ==========');
+  // Sandra S8 production shape — broker body with "Requested Loan: $68,000"
+  // (R6-δ shape) + loan_application PDF with adjacent Page-1 annotations
+  // including $68,000 (R6-β-A shape) and 10.99% (the interest-rate field
+  // that triggered Claude's confabulation pre-cascade).
+  const _iCf = require('./src/services/canonical-fields');
+  const _iDe = require('./src/services/discrepancy-engine');
+
+  const _iSandraBody = `Hi Vienna, I'm Colin Whitmore with Bayside Lending Inc. Please find attached a second mortgage application for my client Sandra Fletcher. *Property:* 412 Windermere Close SW, Edmonton, AB T6W 0R1 *Appraised Value:* $580,000 (Margaret Okonkwo AACI P.App, April 27, 2026) *Requested Loan:* $68,000 — debt consolidation and home repairs *Position:* 2nd mortgage (existing RBC 1st at $295,000, 4.59%, matures March 2028) *Combined LTV:* ~62.6% *Exit Strategy:* Refinance with RBC at first mortgage renewal in March 2028`;
+  const _iSandraDocs = [{
+    file_name: 'LoanApplication_Sandra_Fletcher.pdf',
+    classification: 'loan_application',
+    extracted_data: {
+      text: `LOAN APPLICATION FORM
+[Page 1 annotation] $68,000
+[Page 1 annotation] 10.99%
+[Page 1 annotation] 12 months
+[Page 1 annotation] Consolidate high-interest debt and fund home repairs
+[Page 1 annotation] Second Mortgage
+[Page 1 annotation] Sandra
+[Page 1 annotation] Fletcher`,
+    },
+  }];
+
+  // 1. Extract canonical_map end-to-end (R6-β-A + R6-δ both fire).
+  const _iMap = _iCf.extractCanonicalFields(_iSandraBody, _iSandraDocs, {});
+  const _iLoanTuples = _iMap.requested_loan_amount || [];
+  if (_iLoanTuples.length !== 2) {
+    throw new Error(`FAIL [ι-cascade extraction]: expected 2 requested_loan_amount tuples (R6-β-A doc + R6-δ email_body); got ${_iLoanTuples.length}: ${JSON.stringify(_iLoanTuples)}`);
+  }
+  const _iEmailTuple = _iLoanTuples.find(t => t.classification === 'email_body');
+  const _iDocTuple = _iLoanTuples.find(t => t.classification === 'loan_application');
+  if (!_iEmailTuple || _iEmailTuple.value !== 68000) {
+    throw new Error(`FAIL [ι-cascade R6-δ]: email_body tuple expected with value 68000 (R6-δ widening); got ${JSON.stringify(_iEmailTuple)}`);
+  }
+  if (!_iDocTuple || _iDocTuple.value !== 68000) {
+    throw new Error(`FAIL [ι-cascade R6-β-A]: loan_application tuple expected with value 68000 (R6-β-A Page-1 annotation extraction); got ${JSON.stringify(_iDocTuple)}`);
+  }
+  console.log('  PASS [cascade pre-filter]: canonical_map.requested_loan_amount populated with [{68000, email_body}, {68000, loan_application}] via R6-β-A + R6-δ both firing');
+
+  // 2. R6-α filter at consumer boundary — strips email_body, keeps loan_application.
+  const _iFiltered = _iDe.filterCanonicalLoanAmountForDocAuthoritative(_iMap);
+  if (_iFiltered.requested_loan_amount.length !== 1) {
+    throw new Error(`FAIL [ι-cascade R6-α]: post-filter expected 1 tuple (loan_application authoritative); got ${_iFiltered.requested_loan_amount.length}`);
+  }
+  if (_iFiltered.requested_loan_amount[0].classification !== 'loan_application') {
+    throw new Error(`FAIL [ι-cascade R6-α]: post-filter surviving tuple classification should be 'loan_application'; got ${_iFiltered.requested_loan_amount[0].classification}`);
+  }
+  console.log('  PASS [R6-α filter]: post-filter requested_loan_amount = [{68000, loan_application}]; email_body tuple stripped at consumer boundary');
+
+  // 3. SMOKING-GUN ASSERTION — "$10.99%" literal absent from prompt context.
+  // This is the load-bearing anchor — the exact production-bug literal that
+  // appeared in Vienna's outbound msg #1 must NOT appear in the post-cascade
+  // formatCanonicalFieldsForPrompt output.
+  const _iPromptCtx = _iDe.formatCanonicalFieldsForPrompt(_iFiltered);
+  if (/\$10\.99%|\$\s*10\.99\s*%/.test(_iPromptCtx)) {
+    throw new Error(`FAIL [ι-SMOKING-GUN]: "$10.99%" literal STILL appears in prompt context — cascade-closure regressed. Output:\n${_iPromptCtx.slice(0, 500)}`);
+  }
+  // Also assert the rate value 10.99 doesn't appear as a loan_amount tuple
+  // (defense-in-depth — even without the % sigil, "10.99" shouldn't be in
+  // requested_loan_amount's prompt-context surface).
+  if (/requested_loan_amount[\s\S]{0,200}10\.99/i.test(_iPromptCtx)) {
+    throw new Error(`FAIL [ι-rate-leak]: 10.99 figure appears in requested_loan_amount prompt-context section — field-confusion source not closed.`);
+  }
+  // And positive assertion: $68,000 IS present.
+  if (!/68,?000|68000/.test(_iPromptCtx)) {
+    throw new Error(`FAIL [ι-positive]: $68,000 missing from prompt context after cascade — extraction regressed.`);
+  }
+  console.log('  PASS [SMOKING-GUN]: "$10.99%" literal ABSENT from formatCanonicalFieldsForPrompt output (cascade-closure verified at the exact production-bug surface)');
+  console.log('  PASS [rate-leak]: 10.99 figure does NOT appear in requested_loan_amount prompt-context section');
+  console.log('  PASS [positive]: $68,000 present in prompt context post-cascade');
+
+  // 4. renderDealSnapshot — Loan Amount Requested row shows $68,000 (not TBD).
+  const _iSnap = _iDe.renderDealSnapshot(_iFiltered, { ownershipType: 'personal', isCommercial: false });
+  if (/Loan Amount Requested.*TBD/.test(_iSnap)) {
+    throw new Error(`FAIL [ι-Snapshot]: Loan Amount Requested still TBD — cascade-closure regressed at Snapshot rendering surface`);
+  }
+  if (!/Loan Amount Requested:\s*<\/strong>\s*\$68,000/.test(_iSnap) && !/Loan Amount Requested.*\$68,000/.test(_iSnap)) {
+    throw new Error(`FAIL [ι-Snapshot]: Snapshot must render Loan Amount Requested = $68,000; got: ${_iSnap.slice(0, 600)}`);
+  }
+  if (/\$10\.99%|\$\s*10\.99\s*%/.test(_iSnap)) {
+    throw new Error(`FAIL [ι-Snapshot SMOKING-GUN]: "$10.99%" appears in renderDealSnapshot output — production-bug surface regressed`);
+  }
+  console.log('  PASS [Snapshot]: renderDealSnapshot shows Loan Amount Requested = $68,000 (not TBD); "$10.99%" absent at admin-visible surface');
+
+  // 5. Discrepancy compute returns null on requested_loan_amount (single
+  // canonical value post-filter).
+  const _iDiscrepancySet = _iDe.computeDiscrepancySet(_iFiltered);
+  const _iLoanDiscrepancy = (_iDiscrepancySet || []).find(e => e.field === 'requested_loan_amount');
+  if (_iLoanDiscrepancy) {
+    throw new Error(`FAIL [ι-discrepancy]: post-cascade no discrepancy expected on requested_loan_amount (single canonical value); got ${JSON.stringify(_iLoanDiscrepancy)}`);
+  }
+  console.log('  PASS [discrepancy-compute]: post-cascade no discrepancy on requested_loan_amount (single canonical value; no conflict to surface; no fallback-to-raw-PDF-scan precondition)');
+
+  // 6. Cross-cluster cascade-closure anchors — R6-β-A + R6-δ + R6-α all
+  // present and composable.
+  const _iFs = require('fs');
+  const _iCfSrc = _iFs.readFileSync('./src/services/canonical-fields.js', 'utf8');
+  const _iDeSrc = _iFs.readFileSync('./src/services/discrepancy-engine.js', 'utf8');
+  if (!/extractFromLoanApplication/.test(_iCfSrc)) throw new Error('FAIL [ι-cross-cluster]: R6-β-A extractFromLoanApplication missing');
+  if (!/Requested\\s\+Loan\(\?:\\s\+Amount\)\?/.test(_iCfSrc)) throw new Error('FAIL [ι-cross-cluster]: R6-δ "Requested Loan" alternation missing');
+  if (!/filterCanonicalLoanAmountForDocAuthoritative/.test(_iDeSrc)) throw new Error('FAIL [ι-cross-cluster]: R6-α filter missing');
+  console.log('  PASS [cross-cluster]: R6-β-A extractor + R6-δ regex widening + R6-α filter all source-grep-present and compose correctly');
+  console.log(`Group ι-SANDRA-S8-CASCADE-CLOSURE: empirical bug "$10.99%" syntactic-conflation cascade-closed via R6-β-A + R6-δ + R6-α (no R6-ι production code; harness pin only).`);
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
