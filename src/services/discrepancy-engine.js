@@ -475,6 +475,52 @@ const formatCanonicalFieldsForPrompt = (canonicalMap) => {
   return lines.length === 0 ? '(no canonical fields extracted)' : lines.join('\n');
 };
 
+// R6-γ (2026-05-21): consumer-side source filter for existing-first-mortgage
+// lender attribution.
+//
+// Diagnosis. Marcus/Ryan c56c2a0f and Patricia/Aisha 6507de12 production
+// admin reviews surfaced lender attributions ("BMO" / "TD") for the existing
+// first mortgage that Franco had no authoritative source for. Initial framing
+// was "lender hallucination," but empirical pull showed BMO and TD ARE in the
+// submitted documents — most authoritatively in the credit_bureau. The bug
+// is the WORKFLOW rule: per Franco, existing-first-mortgage lender naming
+// requires payout-statement confirmation; credit_bureau and pnw_statement
+// signals are evidence but NOT authoritative attribution.
+//
+// Design. Extractors continue to populate canonical_map.existing_first_mortgage_lender
+// + balance + payout authoritatively from all three sources (mortgage_statement,
+// credit_report, pnw_statement) — the data model + audit trail remain intact.
+// This filter applies at the consumer boundary only (Snapshot rendering +
+// prompt-context formatting) and strips lender attribution from any tuple
+// whose source classification is NOT mortgage_statement. Balance tuples are
+// retained (the value is still load-bearing for combined-LTV math etc.) but
+// have their lender_canonical nulled.
+//
+// Conservative default. Tuples written before R6-γ (no classification field)
+// default to non-payout — they get their lender attribution stripped. This
+// matches Franco's rule on the safe side: when in doubt, do not name a
+// lender. Re-extraction restores classification on fresh canonical_map writes.
+//
+// Behavior change carried in commit. Pre-payout-confirmation, no
+// existing_first_mortgage_lender discrepancies will surface via
+// renderDiscrepancyBullet — the filter strips all non-payout lender tuples
+// before the discrepancy set sees them. Post-payout-confirmation, the
+// mortgage_statement-sourced tuple is authoritative and discrepancies against
+// it can surface. Defensible: matches Franco's "needs confirmation" rule.
+// Future-trigger flag: if Franco surfaces a case where he wanted to see the
+// lender discrepancy earlier (pre-confirmation), revisit.
+const filterCanonicalLenderForPayoutOnly = (canonicalMap) => {
+  if (!canonicalMap) return canonicalMap;
+  const isPayoutSource = (t) => t?.classification === 'mortgage_statement';
+  return {
+    ...canonicalMap,
+    existing_first_mortgage_lender: (canonicalMap.existing_first_mortgage_lender || []).filter(isPayoutSource),
+    existing_first_mortgage_balance: (canonicalMap.existing_first_mortgage_balance || []).map((t) =>
+      isPayoutSource(t) ? t : { ...t, lender_canonical: null }
+    ),
+  };
+};
+
 // Top-level wrapper — orchestrates commercial-detection short-circuit + extraction
 // + discrepancy computation. Used by the FP measurement runner. NOT YET wired into
 // production webhook/ai.js — that lands in Commit 2 after Commit 1's empirical
@@ -677,6 +723,7 @@ module.exports = {
   COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
   shouldEscalateOnAnyLtv,
   formatCanonicalFieldsForPrompt,
+  filterCanonicalLenderForPayoutOnly,
   filterBrokerFacing,
   runDiscrepancyDetection,
   // R5-B-1 (2026-05-21): aggregating Snapshot fix

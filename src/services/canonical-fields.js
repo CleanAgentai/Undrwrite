@@ -693,13 +693,20 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       const r = extractFromMortgageStatement(doc);
       push('subject_property_address', r.subject_property_address, doc.file_name);
       push('subject_property_postal_code', r.subject_property_postal_code, doc.file_name);
-      push('existing_first_mortgage_lender', r.existing_first_mortgage_lender, doc.file_name);
-      // Partition balance + payout by lender.
+      push('existing_first_mortgage_lender', r.existing_first_mortgage_lender, doc.file_name, { classification: cls });
+      // Partition balance + payout by lender. R6-γ (2026-05-21): thread
+      // classification onto balance/payout tuples so the consumer-side filter
+      // in discrepancy-engine.filterCanonicalLenderForPayoutOnly can identify
+      // payout-statement-sourced tuples and preserve their lender_canonical
+      // attribution; non-payout sources (credit_report, pnw_statement) keep
+      // the balance value but have lender_canonical nulled at the consumer
+      // boundary. See discrepancy-engine helper docblock for rationale.
       if (r.existing_first_mortgage_balance != null) {
         map.existing_first_mortgage_balance.push({
           value: r.existing_first_mortgage_balance,
           source: doc.file_name,
           lender_canonical: r.existing_first_mortgage_lender,
+          classification: cls,
         });
       }
       if (r.existing_first_mortgage_payout_total != null) {
@@ -707,6 +714,7 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
           value: r.existing_first_mortgage_payout_total,
           source: doc.file_name,
           lender_canonical: r.existing_first_mortgage_lender,
+          classification: cls,
         });
       }
     } else if (cls === 'property_tax') {
@@ -723,12 +731,13 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       push('subject_property_market_value', r.subject_property_market_value, doc.file_name);
     } else if (cls === 'credit_report') {
       const r = extractFromCreditBureau(doc);
-      push('existing_first_mortgage_lender', r.existing_first_mortgage_lender, doc.file_name);
+      push('existing_first_mortgage_lender', r.existing_first_mortgage_lender, doc.file_name, { classification: cls });
       if (r.existing_first_mortgage_balance != null) {
         map.existing_first_mortgage_balance.push({
           value: r.existing_first_mortgage_balance,
           source: doc.file_name,
           lender_canonical: r.existing_first_mortgage_lender,
+          classification: cls,
         });
       }
       push('primary_borrower_full_name', r.primary_borrower_full_name, doc.file_name);
@@ -753,12 +762,13 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       // first-mortgage anchor (Linda Okafor preservation — first-mortgage
       // purchase has no existing-mortgage annotation).
       const r = extractFromPnwStatement(doc);
-      push('existing_first_mortgage_lender', r.existing_first_mortgage_lender, doc.file_name);
+      push('existing_first_mortgage_lender', r.existing_first_mortgage_lender, doc.file_name, { classification: cls });
       if (r.existing_first_mortgage_balance != null) {
         map.existing_first_mortgage_balance.push({
           value: r.existing_first_mortgage_balance,
           source: doc.file_name,
           lender_canonical: r.existing_first_mortgage_lender,
+          classification: cls,
         });
       }
     }
