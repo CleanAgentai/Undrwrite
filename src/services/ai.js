@@ -229,7 +229,7 @@ Use this exact JSON structure (use null for unknown fields, do not guess):
   "sender_license": "string or null — broker license number if found in signature",
   "sender_phone": "string or null — phone number from signature if present",
   "borrower_name": "string — the actual borrower (may be the sender if borrower, or their client if broker)",
-  "broker_name": "string or null — the broker who is sending this email. Derive from context (who introduces themselves, who is writing on behalf of a client, who is the sender). Set to null if the sender is the borrower themselves. CRITICAL: 'Franco' is the LENDER we work for, not the broker. Even if the email starts with 'Hi Franco' or 'Hello Franco' (because the broker is writing TO Franco), do NOT use 'Franco' as the broker_name. The broker is the SENDER, not the recipient.",
+  "broker_name": "string or null — the broker who is sending this email. Derive from context (who introduces themselves, who is writing on behalf of a client, who is the sender). Set to null if the sender is the borrower themselves. CRITICAL: 'Franco' is the LENDER we work for, not the broker. Even if the email starts with 'Hi Franco' or 'Hello Franco' (because the broker is writing TO Franco), do NOT use 'Franco' as the broker_name. The broker is the SENDER, not the recipient. R8-A (2026-05-22) hardening — PREFER BODY SELF-IDENTIFICATION OVER SIGNATURE FOOTER: when the broker writes 'I'm X with Y firm', 'My name is X', 'This is X writing', etc. in the email body, that body-stated name is the AUTHORITATIVE broker identity. Signature footers can contain a DIFFERENT person (e.g., Franco's admin proxy footer after an inline ' -- ' separator: 'Lic. #MB440996 -- Franco Maione Founder at VIMA Real Broker' — the 'Franco Maione' part is the admin footer, NOT the broker). When body has explicit self-identification ('I'm Nadia Petrov with Eastview Mortgage Group') + signature footer references Franco, the BODY wins. Body self-identification > signature footer > From-header fallback. Production fixture: Nadia Petrov S15 (deal 0dbd9547) — body says 'I'm Nadia Petrov', signature footer has '-- Franco Maione' after inline separator; broker_name should be 'Nadia Petrov', NOT 'Franco Maione'.",
   "broker_company": "string or null — derived from context (the brokerage the sender represents)",
   "property_address": "string or null",
   "property_type": "string or null",
@@ -819,26 +819,99 @@ const parseBrokerFirstNameFromSignature = (emailBody) => {
   //    Kills the proxy-shadow root cause: Franco's admin footer below the
   //    `-- ` separator never reaches the name extractor.
   const sigDelim = emailBody.search(/\n--\s*\n/);
-  const beforeFooter = sigDelim >= 0 ? emailBody.slice(0, sigDelim) : emailBody;
+  let beforeFooter = sigDelim >= 0 ? emailBody.slice(0, sigDelim) : emailBody;
+  // R8-A (2026-05-22): inline-separator hardening. Production fixture
+  // Nadia Petrov S15 (deal 0dbd9547) had her broker sig + Franco's footer
+  // collapsed onto a SINGLE LINE:
+  //   `Nadia Petrov | Eastview Mortgage Group | Lic. #MB440996 -- Franco Maione Founder at VIMA Real Broker`
+  // The RFC delimiter regex `\n--\s*\n` requires `--` to be on its own line
+  // — fails on this shape. Result pre-R8-A: parser couldn't strip Franco's
+  // footer; the `Lic. #` regex either failed entirely (no preceding name
+  // line) OR picked Franco's name from the inline footer portion.
+  //
+  // Hardening: ALSO split lines at inline ` -- ` (space-dash-dash-space,
+  // mid-line) and keep only the LEFT side. Defensive: inline `--`
+  // unambiguously starts a footer in broker-submission corpus (we have
+  // not observed legitimate inline `--` usage in broker content). Inline
+  // hyphenation typically uses single `-` or em-dash `—`, not space-`--`-
+  // space.
+  //
+  // Validates against Nadia shape (closes parser-side gap) + preserves
+  // RFC-standard shape on Eric Johansson Round-4 fixture (parser already
+  // worked there via the `\n-- \n` delim).
+  beforeFooter = beforeFooter.split('\n').map(line => {
+    const inlineSep = line.indexOf(' -- ');
+    return inlineSep >= 0 ? line.slice(0, inlineSep) : line;
+  }).join('\n');
   // 2) Anchor on `Lic. #` (strongest broker-signature marker in the corpus).
   //    Look backwards from the license line to find the name line.
   //    Captures *Name*, **Name**, or bare-line Name forms.
-  const licMatch = beforeFooter.match(/([^\n]+)\n+[^\n]*Lic\.\s*#/i);
-  if (!licMatch) return null;
-  // 3) Clean asterisks/markdown bold markers from the name line.
-  const nameLine = licMatch[1].replace(/^\s*\*+/, '').replace(/\*+\s*$/, '').trim();
-  // 4) Validate: first token must be a simple Title-Case first-name shape.
-  //    Filters company tokens (multi-word starting with capital), license-
-  //    number patterns, and generic titles.
-  const tokens = nameLine.split(/\s+/);
-  if (tokens.length === 0 || tokens.length > 5) return null;
-  const firstToken = tokens[0];
-  if (!/^[A-Z][a-z]+$/.test(firstToken)) return null;
-  if (/^(Mr|Mrs|Ms|Dr|Sir|Madam|Mortgage|Broker|Senior|Junior|Lender|Underwriter|Manager|Officer)$/i.test(firstToken)) return null;
-  // 5) Never extract admin's own first name (defense-in-depth — collision
-  //    cases should fall back to generic rather than echo admin name).
-  if (firstToken.toLowerCase() === 'franco') return null;
-  return firstToken;
+  //
+  // R8-A: TWO candidate patterns, validate each in order, first valid wins:
+  //   (a) Preceding-line + Lic.-line shape (Eric R4 / Marcus / Steven /
+  //       Alex shape — RFC-standard sig with name on separate line above
+  //       Lic.).
+  //   (b) Same-line `<name> | <firm> | Lic. #` shape (Nadia R5 shape —
+  //       pipe-delimited single-line sig); prefer LAST occurrence (canonical
+  //       sig is at end of body; intro prose may reference Lic. # earlier).
+  //
+  // Validate-each-candidate-then-fallback: pre-R8-A returned null when (a)
+  // captured garbage (e.g., Nadia's Line 1 prose "Hi, I'm Nadia Petrov with
+  // Eastview Mortgage Group," — 8 tokens, fails 5-cap). Now: (a) is tried;
+  // if its capture fails validation (token count, Title-Case check, etc.),
+  // we FALL THROUGH to (b)'s last-Lic. capture rather than returning null.
+  const validateCapture = (rawCapture) => {
+    if (!rawCapture) return null;
+    let nameLine = rawCapture.replace(/^\s*\*+/, '').replace(/\*+\s*$/, '').trim();
+    // R8-A: strip pipe-delimited firm/license portions. Nadia shape gives
+    // "Nadia Petrov | Eastview Mortgage Group |" after asterisk-strip;
+    // pipe-split + take leading portion → "Nadia Petrov" → 2 tokens.
+    nameLine = nameLine.split('|')[0].trim();
+    const tokens = nameLine.split(/\s+/);
+    if (tokens.length === 0 || tokens.length > 5) return null;
+    const firstToken = tokens[0];
+    if (!/^[A-Z][a-z]+$/.test(firstToken)) return null;
+    if (/^(Mr|Mrs|Ms|Dr|Sir|Madam|Mortgage|Broker|Senior|Junior|Lender|Underwriter|Manager|Officer)$/i.test(firstToken)) return null;
+    // R8-A: greeting-word filter. Defensive reject for capture lines that
+    // are actually email body openers ("Hi Vienna, ..."), not signature
+    // names. Pre-R8-A this could leak through when precedingMatch grabbed
+    // the email's opening line (Lic.# on Line N, no name above; opener on
+    // Line 1) — "Hi" passes Title-Case + token-count + title-prefix +
+    // not-franco. No legitimate first-name in the broker corpus matches
+    // these greeting words.
+    if (/^(Hi|Hello|Hey|Dear|Greetings)$/i.test(firstToken)) return null;
+    // Never extract admin's own first name (defense-in-depth — collision
+    // cases should fall back to generic rather than echo admin name).
+    if (firstToken.toLowerCase() === 'franco') return null;
+    return firstToken;
+  };
+
+  // (a) Preceding-line shape — try first.
+  const precedingMatch = beforeFooter.match(/([^\n]+)\n+[^\n]*Lic\.\s*#/i);
+  if (precedingMatch) {
+    const result = validateCapture(precedingMatch[1]);
+    if (result) return result;
+  }
+
+  // (b) Same-line fallback — prefer LAST Lic.-occurrence capture.
+  // R8-A: REQUIRE a pipe `|` in the raw capture before validating. The
+  // Nadia inline-sep shape is pipe-delimited single-line sig
+  // ("<Name> | <Firm> | Lic. #..."). Without this guard, a same-line
+  // firm-only shape ("Summit Financial Group Lic. #MB338764") would match
+  // and validateCapture would accept "Summit" as a valid first-name
+  // (passes Title-Case + token-count + not-a-title). Pre-R8-A this shape
+  // returned null via fall-through-to-null (N3 in C7-SIGNATURE-PARSER
+  // matrix); the pipe guard preserves that behavior while still allowing
+  // the Nadia shape through.
+  const sameLineMatches = [...beforeFooter.matchAll(/(?:^|\n)([^\n]+?)\s+Lic\.\s*#/gi)];
+  // Iterate from last to first (canonical sig is at body end).
+  for (let i = sameLineMatches.length - 1; i >= 0; i--) {
+    if (!sameLineMatches[i][1].includes('|')) continue;
+    const result = validateCapture(sameLineMatches[i][1]);
+    if (result) return result;
+  }
+
+  return null;
 };
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1181,7 +1254,21 @@ module.exports = {
     //     play, prompt uses this name deterministically as the greeting target —
     //     resolves the S4 Marcus "Hi there!" generic-fallback bug where Franco's
     //     proxy footer shadowed Natalie's signature.
-    const { discrepancyDetected = false, canonicalFieldsPrompt = '', parsedBrokerFirstName = null } = opts;
+    // R8-A (2026-05-22): greetingFirstName opt added — R5-E thesis applied
+    // to processInitialEmail entry path (was previously only wired at
+    // generateBrokerResponse / cron / R5-D-B re-invocation). Caller passes
+    // selectGreetingFirstName result; resolver chain is helper-first,
+    // parser-fallback (Q2-(b) parallel-signal verdict). When helper returns
+    // null (e.g., fresh deal with no prior broker_name extraction at this
+    // entry point), parsedBrokerFirstName takes over — preserves R4-Bucket-C.7
+    // / R5-E behavior for the Eric Johansson Round-4 fixture.
+    const { discrepancyDetected = false, canonicalFieldsPrompt = '', parsedBrokerFirstName = null, greetingFirstName = null } = opts;
+    // R8-A effective greeting: helper-first per Q2-(b), parser-fallback when
+    // helper returns null. For Nadia Petrov S15 (after R8-A parser hardening
+    // closes parsedBrokerFirstName=null gap), parser now returns "Nadia" →
+    // effectiveGreetingFirstName = "Nadia". For Eric Johansson Round-4,
+    // parser returns "Eric" → same.
+    const effectiveGreetingFirstName = greetingFirstName || parsedBrokerFirstName;
     try {
       // ─── S15-E-followup: absence-based JS-side identity clash pre-detection (Anna Bergstrom 2026-05-18 real-Postmark) ───
       // Detect deterministically BEFORE the Claude call. Inversion of the
@@ -1217,7 +1304,10 @@ module.exports = {
         // "Hi Eric" (true broker). Falls back to senderName-derived chain inside the
         // minimal-ask when parsedBrokerFirstName is null (anchor-shape outside C.7
         // coverage — safe failure direction, same as pre-R5-E).
-        const welcomeEmail = await module.exports.generateIdentityClashMinimalAsk(emailBody, _s15BodyName, _s15DocName, senderName, parsedBrokerFirstName);
+        // R8-A (2026-05-22): pass effectiveGreetingFirstName (helper-first
+        // per Q2-(b), parser-fallback). Closes Nadia Petrov S15 + Eric
+        // Johansson R4 identity-clash greeting both via the same chain.
+        const welcomeEmail = await module.exports.generateIdentityClashMinimalAsk(emailBody, _s15BodyName, _s15DocName, senderName, effectiveGreetingFirstName);
         // Build minimal dealSummary JS-side. borrower_name = email-side name
         // (body extraction first, subject fallback, generic last) — line 236
         // disposition applied deterministically.
@@ -1298,8 +1388,15 @@ module.exports = {
       // explicit-hardened F2 anti-pattern ("never Hi Franco"). Together: (i)
       // deterministic parser eliminates the proxy-shadow root cause; (ii)
       // JJJ implicit→explicit-CRITICAL prompt hardening is defense-in-depth.
-      const parsedNameBlock = parsedBrokerFirstName
-        ? `\n- JS-PARSED BROKER FIRST NAME (DETERMINISTIC, USE THIS): the signature parser extracted "${parsedBrokerFirstName}" from the email body BEFORE the RFC sig delimiter (admin proxy footer was stripped). Greet by this name: "Hi ${parsedBrokerFirstName}!" — this OVERRIDES the inspection step below and is the authoritative greeting for this turn.`
+      // R8-A (2026-05-22): use effectiveGreetingFirstName (helper-first per
+      // Q2-(b), parser-fallback). The block label says "JS-RESOLVED" rather
+      // than "JS-PARSED" since the value may now come from
+      // selectGreetingFirstName (helper) OR parseBrokerFirstNameFromSignature
+      // (parser fallback). Functionally identical to pre-R8-A when helper
+      // returns null (parser path preserved); takes precedence when helper
+      // succeeds (R5-D-B re-invocation with extracted broker_name available).
+      const parsedNameBlock = effectiveGreetingFirstName
+        ? `\n- JS-RESOLVED BROKER FIRST NAME (DETERMINISTIC, USE THIS): the JS-side resolver returned "${effectiveGreetingFirstName}" (selectGreetingFirstName helper or parseBrokerFirstNameFromSignature parser fallback, whichever produced a non-null result; admin-collision-protected). Greet by this name: "Hi ${effectiveGreetingFirstName}!" — this OVERRIDES the inspection step below and is the authoritative greeting for this turn.`
         : '';
       const nameCollisionInstructions = nameCollidesWithAdmin
         ? `\n\nCRITICAL — NAME COLLISION DETECTED (READ BEFORE GREETING):
@@ -1825,8 +1922,14 @@ ${canonicalFieldsPrompt}` : ''}
   },
 
   // Generate rejection email to broker (LTV > 95%)
-  generateRejectionEmail: async (dealSummary, adminDeclineReason = null) => {
+  generateRejectionEmail: async (dealSummary, adminDeclineReason = null, { greetingFirstName = null } = {}) => {
     try {
+      // R8-A (2026-05-22): R5-E greeting wiring extended to rejection emails.
+      // Same pattern as generateBrokerResponse / generateDocumentRequestEmail
+      // / generateFollowUpReminder — JS-deterministic override block.
+      const r8aGreetingBlock = greetingFirstName
+        ? `\n\nGREETING TARGET (R5-E refined — load-bearing, JS-deterministic, R8-A wiring extension):\n- Address the recipient as "Hi ${greetingFirstName}!" — selected by JS-side selectGreetingFirstName helper (broker_name > sender_name; anti-collided against admin's first name).\n- This OVERRIDES the broker_name / sender_name extraction below for greeting purposes. DO NOT greet by sender_name if it differs from "${greetingFirstName}".\n- Use "${greetingFirstName}" verbatim — do NOT shorten, abbreviate, or substitute.`
+        : `\n\nGREETING TARGET (R5-E refined): no defensible first-name target available (helper returned null — likely admin-collision case). Use a GENERIC greeting: "Hi there!" or "Hello!" — NO first name. Do NOT default to sender_name in this case.`;
       // Group RRRR (S8.3): when admin provided an explicit decline reason,
       // inject a conditional block instructing Vienna to include it in the
       // broker-facing email. This is the EXPLICIT EXCEPTION to the general
@@ -1900,6 +2003,7 @@ CRITICAL — TONE & BREVITY (rejection context):
 
 CRITICAL — DO NOT NAME UNSTATED LENDERS: never reference a specific bank, credit union, or lender by name (e.g. "TD Bank", "RBC", "Royal Bank", "Scotiabank", "BMO", "Bank of Montreal", "CIBC", "National Bank", "Tangerine", "Manulife", "Equitable", "Haventree", "MCAP", "ATB") unless the broker EXPLICITLY stated that institution in their correspondence. Don't speculate about which other lender might fit ("you might try TD") — that's not Vienna's call to make.
 
+${r8aGreetingBlock}
 Return only the HTML email body. Do not include a subject line. Sign off as:
 Vienna
 Private Mortgage Link`,
@@ -2029,13 +2133,23 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
 
   // Generate Stage 3 document request email — different checklist for personal vs corporate,
   // and different items for purchase vs refinance
-  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true, isPostApproval = false } = {}) => {
+  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true, isPostApproval = false, greetingFirstName = null } = {}) => {
     try {
       // R6-ζ (2026-05-21): forbidden-non-sequitur-openers block — see
       // buildForbiddenOpenersBlock docblock at module scope. Admin-approval
       // branch (webhook.js generateDocumentRequestEmail call sites) is the
       // primary leak path — Kevin S6 178d714e + Ethan S7 533fbd4f corpus.
       const forbiddenOpenersBlock = buildForbiddenOpenersBlock(brokerRepliedSinceLastViennaOutbound);
+      // R8-A (2026-05-22): R5-E greeting wiring extended to this generator.
+      // Pre-R8-A this prompt relied on Claude extracting first-name from
+      // dealSummary.broker_name / sender_name in-prompt (probabilistic;
+      // Eric Johansson R4 cron-reminder shape showed Claude defaulting to
+      // sender_name="Franco" when both fields available). R8-A adds the
+      // R5-E JS-deterministic greeting override block alongside the
+      // existing prompt directive.
+      const r8aGreetingBlock = greetingFirstName
+        ? `\n\nGREETING TARGET (R5-E refined — load-bearing, JS-deterministic, R8-A wiring extension):\n- Address the recipient as "Hi ${greetingFirstName}!" — selected by JS-side selectGreetingFirstName helper (broker_name > sender_name; anti-collided against admin's first name).\n- This OVERRIDES the broker_name / sender_name extraction below for greeting purposes. DO NOT greet by sender_name if it differs from "${greetingFirstName}".\n- Use "${greetingFirstName}" verbatim — do NOT shorten, abbreviate, or substitute.`
+        : `\n\nGREETING TARGET (R5-E refined): no defensible first-name target available (helper returned null — likely admin-collision case). Use a GENERIC greeting: "Hi there!" or "Hello!" — NO first name. Do NOT default to sender_name in this case.`;
       const receivedClassifications = existingDocs.map(d => d.classification).filter(Boolean);
       // Group MMMM: canonical purchase/refinance signal via dealType.js
       // (single-source-of-truth — no more duplicated /purchas/ regex).
@@ -2174,7 +2288,7 @@ CRITICAL — APPROVAL LANGUAGE & INTERNAL ROUTING:
 - FORBIDDEN APPROVAL PHRASES (do not write any of these in your email): "approved", "approval", "passed review", "looks good", "everything is in order", "thanks for confirming the approval", "for final assessment", "going to underwriting", "final approval and terms", "for final review by our team", "thanks for the quick confirmation", "thanks for the prompt confirmation", "thanks for the speedy confirmation", "thanks for the swift confirmation", "appreciate the quick confirmation", "appreciate the prompt confirmation", or ANY variant matching "thanks for the [adjective] confirmation/confirm" or "appreciate the [adjective] confirmation/confirm" when the broker did not actually confirm something specific (Group XXX, S5.2).
 - FORBIDDEN INTERNAL ROUTING REFERENCES (in your email to the broker): never name "Franco", never reference "the lender rep", "our team", "the underwriters", "internal review", any "review process" phrasing ("the review process", "our review process", "patience with the review", "patience with our review process", "the underwriting process"), any "passing along" phrasing ("passing it along", "passing this along", "passing everything along", "passing the file along", "passing along to..."), "forwarding to", "I'll get this over to", or any specific internal department or person. The broker should know only that the file has been received and is being reviewed.
 - ALLOWED phrasing for next-step communication: "the file is being reviewed", "we're starting on the file", "thanks for sending those through", "I'll be in touch shortly with an update".
-${forbiddenOpenersBlock}
+${forbiddenOpenersBlock}${r8aGreetingBlock}
 Return only the HTML email body. Do not include a subject line.`,
         }],
       });

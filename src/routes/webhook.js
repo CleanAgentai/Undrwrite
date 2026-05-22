@@ -1514,6 +1514,19 @@ ${draftEmail}
           const _kAmlOnFile = existingDocs.some(d => d.classification === 'aml');
           const _kPepOnFile = existingDocs.some(d => d.classification === 'pep');
           const _kAmlPepAsked = !_kAmlOnFile || !_kPepOnFile;
+          // R8-A (2026-05-22): JS-deterministic greeting target. Selected from
+          // existingDeal.extracted_data (persisted broker_name from initial
+          // extraction). Mirrors R5-E refined wiring at the active-branch
+          // generateBrokerResponse site (L2351, L2682). Eric Johansson R4 +
+          // Nadia Petrov S15 production fixtures are LOAD-BEARING for this
+          // wiring — both deals' admin-approval branches previously emitted
+          // "Hi there!" / "Hi Franco!" greetings.
+          const _r8aDocReqGreeting = selectGreetingFirstName({
+            broker_name: existingDeal.extracted_data?.broker_name,
+            sender_name: existingDeal.extracted_data?.sender_name,
+            borrower_name: existingDeal.extracted_data?.borrower_name,
+            sender_type: existingDeal.extracted_data?.sender_type,
+          });
           const docRequestEmail = await aiService.generateDocumentRequestEmail(
             existingDeal.extracted_data,
             existingDeal.ownership_type,
@@ -1521,7 +1534,7 @@ ${draftEmail}
             existingDeal.has_pnw_statement,
             existingDocs,
             dealMessages,
-            { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim, isPostApproval: true }
+            { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim, isPostApproval: true, greetingFirstName: _r8aDocReqGreeting }
           );
           await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
           // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at
@@ -1540,7 +1553,15 @@ ${draftEmail}
           // — if the strip regex misses, full message passes through.
           // Never let a regex miss cause a silent reason omission.
           const adminDeclineReason = extractDeclineReason(message);
-          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason);
+          // R8-A (2026-05-22): JS-deterministic greeting target for rejection
+          // emails. Symmetric with the doc-request wiring above.
+          const _r8aRejectionGreeting = selectGreetingFirstName({
+            broker_name: existingDeal.extracted_data?.broker_name,
+            sender_name: existingDeal.extracted_data?.sender_name,
+            borrower_name: existingDeal.extracted_data?.borrower_name,
+            sender_type: existingDeal.extracted_data?.sender_type,
+          });
+          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason, { greetingFirstName: _r8aRejectionGreeting });
           await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes — generating draft response');
@@ -1600,6 +1621,13 @@ ${draftEmail}
             const _kAmlOnFilePartial = existingDocs.some(d => d.classification === 'aml');
             const _kPepOnFilePartial = existingDocs.some(d => d.classification === 'pep');
             const _kAmlPepAskedPartial = !_kAmlOnFilePartial || !_kPepOnFilePartial;
+            // R8-A (2026-05-22): symmetric to ltv_escalated→approved branch above.
+            const _r8aDocReqGreetingPartial = selectGreetingFirstName({
+              broker_name: existingDeal.extracted_data?.broker_name,
+              sender_name: existingDeal.extracted_data?.sender_name,
+              borrower_name: existingDeal.extracted_data?.borrower_name,
+              sender_type: existingDeal.extracted_data?.sender_type,
+            });
             const docRequestEmail = await aiService.generateDocumentRequestEmail(
               existingDeal.extracted_data,
               existingDeal.ownership_type,
@@ -1607,7 +1635,7 @@ ${draftEmail}
               existingDeal.has_pnw_statement,
               existingDocs,
               dealMessages,
-              { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial, isPostApproval: true }
+              { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial, isPostApproval: true, greetingFirstName: _r8aDocReqGreetingPartial }
             );
             await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
             // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at.
@@ -1623,7 +1651,14 @@ ${draftEmail}
           // Group RRRR (S8.3): propagate admin's stated decline reason
           // (under_review path, symmetric with the upper draft_email path).
           const adminDeclineReason = extractDeclineReason(message);
-          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason);
+          // R8-A (2026-05-22): symmetric to ltv_escalated→rejected branch above.
+          const _r8aRejectionGreetingUR = selectGreetingFirstName({
+            broker_name: existingDeal.extracted_data?.broker_name,
+            sender_name: existingDeal.extracted_data?.sender_name,
+            borrower_name: existingDeal.extracted_data?.borrower_name,
+            sender_type: existingDeal.extracted_data?.sender_type,
+          });
+          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason, { greetingFirstName: _r8aRejectionGreetingUR });
           await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes for under_review deal — generating draft');
@@ -2542,15 +2577,20 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         if (_r5dWasInClash && _r5dFormsUnfulfilled) {
           console.log(`R5-D-B (post-clash intake-template): was_in_identity_clash=true + forms unfulfilled (hasOwnApp=${_r5dHasOwnApp}, hasOwnPnw=${_r5dHasOwnPnw}) — re-invoking processInitialEmail`);
 
-          // R5-E wiring: prefer persisted broker_name → first-name over current-turn parser
+          // R5-E wiring (now R8-A parallel-signal restructure): helper passes
+          // through `greetingFirstName` opt; parser passes through
+          // `parsedBrokerFirstName` opt. processInitialEmail's
+          // effectiveGreetingFirstName resolver chain (helper-first,
+          // parser-fallback) handles the combination — functionally identical
+          // to the pre-R8-A merged-at-caller pattern, but architecturally
+          // clean (consumer-site resolution, Q2-(b) verdict).
           const _r5dGreetingFromHelper = selectGreetingFirstName({
             broker_name: existingDeal.extracted_data?.broker_name,
             sender_name: existingDeal.extracted_data?.sender_name,
             borrower_name: existingDeal.extracted_data?.borrower_name,
             sender_type: existingDeal.extracted_data?.sender_type,
           });
-          const _r5dParsedName = _r5dGreetingFromHelper
-            || aiService.parseBrokerFirstNameFromSignature(email.textBody);
+          const _r5dParsedFromSig = aiService.parseBrokerFirstNameFromSignature(email.textBody);
           const _r5dFromCollision = firstNameMatchesAdmin(email.fromName);
 
           const _r5dIntakeRes = await aiService.processInitialEmail(
@@ -2562,7 +2602,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
             _r5dHasOwnPnw,
             _r5dFromCollision,
             email.subject,
-            { parsedBrokerFirstName: _r5dParsedName }
+            { greetingFirstName: _r5dGreetingFromHelper, parsedBrokerFirstName: _r5dParsedFromSig }
           );
           let _r5dIntakeEmail = _r5dIntakeRes.welcomeEmail;
           // R5-C: post-gen routing-leak sweep on broker-facing intake-template output

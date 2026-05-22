@@ -8452,8 +8452,12 @@ Lender:
   console.log('\n========== R5-D-A-IDENTITY-CLASH-PATH-PRESERVED — minimal-ask routing intact ==========');
   // Outer JS-side identity-clash check at ai.js still routes to
   // generateIdentityClashMinimalAsk when structured signal fires.
-  if (!/generateIdentityClashMinimalAsk\(emailBody, _s15BodyName, _s15DocName, senderName, parsedBrokerFirstName\)/.test(_dAiSrc)) {
-    throw new Error('FAIL [D-A-IDENTITY-CLASH-PATH-PRESERVED]: outer identity-clash routing to generateIdentityClashMinimalAsk missing or signature changed.');
+  // R8-A (2026-05-22): last positional arg renamed from `parsedBrokerFirstName`
+  // to `effectiveGreetingFirstName` (helper-first || parser-fallback resolver).
+  // Functionally identical semantic — helper or parser source, whichever
+  // produces non-null first.
+  if (!/generateIdentityClashMinimalAsk\(emailBody, _s15BodyName, _s15DocName, senderName, effectiveGreetingFirstName\)/.test(_dAiSrc)) {
+    throw new Error('FAIL [D-A-IDENTITY-CLASH-PATH-PRESERVED]: outer identity-clash routing to generateIdentityClashMinimalAsk missing or signature changed (post-R8-A expects effectiveGreetingFirstName as last positional arg).');
   }
   if (!/isIdentityClash/.test(_dAiSrc)) {
     throw new Error('FAIL [D-A-IDENTITY-CLASH-PATH-PRESERVED]: isIdentityClash JS-side helper missing.');
@@ -8531,18 +8535,28 @@ Lender:
   console.log('  PASS: prior R5 arc anchors all source-grep-present (A+G + B-3 + F-4 + ADMIN-HANDOFF + B-1 + B-2 + F-2/3 + E + C)');
   // (b) R5-E wiring on R5-D-B re-invocation site: selectGreetingFirstName precomputes
   //     greeting from persisted broker_name BEFORE the processInitialEmail call.
+  //
+  // R8-A (2026-05-22) restructure: helper-or-parser chain moved to consumer-
+  // site resolution (processInitialEmail's effectiveGreetingFirstName =
+  // greetingFirstName || parsedBrokerFirstName). Caller now passes BOTH
+  // signals as separate opts (greetingFirstName + parsedBrokerFirstName).
+  // Functionally identical to pre-R8-A merged-at-caller; architecturally
+  // cleaner (Q2-(b) parallel-signal verdict).
   if (!/_r5dGreetingFromHelper = selectGreetingFirstName/.test(_dWebhookSrc)) {
     throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B intake-template re-invocation must wire selectGreetingFirstName for greeting (Anna 11196627 R5-E load-bearing fixture — Eric greeting must NOT regress on post-clash turn).');
   }
-  if (!/_r5dParsedName = _r5dGreetingFromHelper\s*\|\|\s*aiService\.parseBrokerFirstNameFromSignature/.test(_dWebhookSrc)) {
-    throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B helper-or-C7-fallback chain missing — greeting must prefer persisted broker_name → first-name over current-turn C.7 parser.');
+  if (!/_r5dParsedFromSig = aiService\.parseBrokerFirstNameFromSignature/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B parser signal missing — under R8-A parallel-signal restructure, parser must compute _r5dParsedFromSig independently of helper.');
+  }
+  if (!/greetingFirstName: _r5dGreetingFromHelper, parsedBrokerFirstName: _r5dParsedFromSig/.test(_dWebhookSrc)) {
+    throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B opts must thread both signals { greetingFirstName: _r5dGreetingFromHelper, parsedBrokerFirstName: _r5dParsedFromSig } under R8-A parallel-signal restructure — consumer-side (processInitialEmail) resolves helper-first || parser-fallback.');
   }
   // (c) R5-C wiring on R5-D-B intake-template output: enforceNoRoutingLeak runs on the body.
   if (!/_r5dIntakeEmail = aiService\.enforceNoRoutingLeak\(_r5dIntakeEmail\)\.swept/.test(_dWebhookSrc)) {
     throw new Error('FAIL [D-CROSS-CLUSTER]: R5-D-B intake-template output must run through enforceNoRoutingLeak (R5-C post-gen sweep).');
   }
   console.log('  PASS: R5-E selectGreetingFirstName wired into R5-D-B re-invocation (Anna fixture greeting preserved)');
-  console.log('  PASS: R5-D-B helper-first → C.7-parser-fallback greeting chain present');
+  console.log('  PASS: R5-D-B parallel-signal — helper + parser threaded as separate opts (R8-A consumer-side resolver)');
   console.log('  PASS: R5-C enforceNoRoutingLeak runs on R5-D-B intake-template output');
   console.log('Group D-CROSS-CLUSTER-INTEGRATION: full prior arc holding + R5-E/R5-C wiring preserved on new R5-D-B path.');
 
@@ -12068,6 +12082,351 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group R7βγ-CROSS-CLUSTER-INTEGRATION: R6-λ + R5-E + Group LLL + R6-ζ all preserved; R7-B/C anchors present.`);
 
   // ════════════════════════════════════════════════════════════════
+  // R8 CLUSTER A — Broker greeting wiring + parser inline-separator hardening
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R8-A. Franco S15 retest surfaced two related
+  // bug shapes (Q1 verdict: batched into one cluster):
+  //
+  //   • Eric Johansson R4 (deal 11196627-4e3b-499a-98b8-3bee73f3cd66):
+  //     broker_name correctly extracted ("Eric Johansson") but downstream
+  //     generators (generateDocumentRequestEmail / generateRejectionEmail /
+  //     processInitialEmail) didn't accept R5-E's selectGreetingFirstName
+  //     greeting target on the admin-approval / admin-reject / R5-D-B
+  //     re-invocation branches. Pre-R8-A: relied on probabilistic
+  //     in-prompt broker_name reading; Eric's reminder/doc-request shapes
+  //     emitted "Hi Franco!" / "Hi there!".
+  //
+  //   • Nadia Petrov S15 (deal 0dbd9547-437c-4c0e-ae92-bf2d4c0798e8):
+  //     parseBrokerFirstNameFromSignature failed on her sig shape —
+  //     "Nadia Petrov | Eastview Mortgage Group | Lic. #MB440996 -- Franco
+  //     Maione Founder at VIMA Real Broker" — single line, pipe-delimited,
+  //     inline ` -- ` separator. Pre-R8-A: RFC-strip regex (`\n--\s*\n`)
+  //     required `--` on its own line — fails on inline. Result: parser
+  //     returned null, downstream extraction picked Franco's name from the
+  //     same line.
+  //
+  // Q2 verdict (b): PARALLEL SIGNAL — pass selectGreetingFirstName result
+  // through `greetingFirstName` opt + parseBrokerFirstNameFromSignature
+  // through `parsedBrokerFirstName` opt; consumer-side
+  // (processInitialEmail) resolves chain as
+  // `effectiveGreetingFirstName = greetingFirstName || parsedBrokerFirstName`.
+  // Architectural symmetry with R5-E refined wiring (helper-first,
+  // parser-fallback).
+  //
+  // Q3 verdict (c): COMBINED — exact-count closed-set assertion on
+  // webhook.js selectGreetingFirstName invocations (7 expected post-R8-A) +
+  // per-site assertions for each of the 4 new admin-reply branches.
+  //
+  //   R8-A-PARSER-HARDENING-MATRIX: closed-set truth table — inline-sep +
+  //     pipe-strip new positives; RFC-standard positives preserved (C7 P1-P3
+  //     unaffected by R8-A widening); over-fire negatives preserved
+  //     (firm-only-on-Lic-line shape — N3-style — still rejects).
+  //   R8-A-NADIA-FIXTURE: Nadia Petrov LOAD-BEARING. Real-Postmark S15
+  //     body shape replay. Parser returns "Nadia"; helper returns "Nadia"
+  //     when broker_name persisted via extraction.
+  //   R8-A-ERIC-FIXTURE: Eric Johansson LOAD-BEARING. Real R4 cron-reminder
+  //     shape replay. Helper returns "Eric" from broker_name="Eric Johansson"
+  //     persisted on the deal; parser returns "Eric" from RFC-standard sig.
+  //   R8-A-CALL-SITE-WIRING: 7-clause closed-set + per-site assertions on
+  //     5 new R8-A wiring sites (4 admin-reply + R5-D-B split) plus
+  //     generator-signature acceptance of greetingFirstName opt.
+  //   R8-A-EFFECTIVE-GREETING-RESOLVER: helper-first || parser-fallback
+  //     resolver chain present in processInitialEmail; r8aGreetingBlock
+  //     interpolated into both generateDocumentRequestEmail +
+  //     generateRejectionEmail prompts.
+  //   R8-A-CROSS-CLUSTER-INTEGRATION: full prior arc anchors present
+  //     (R5-E + C.7 parser + R6-ζ + R6-κ + R7-A/B/C).
+  const _r8aAi = require('./src/services/ai');
+  const _r8aAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const _r8aWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const { selectGreetingFirstName: _r8aSelect } = require('./src/lib/greeting');
+
+  console.log('\n========== R8-A-PARSER-HARDENING-MATRIX — inline-sep + pipe-strip truth table ==========');
+  const _r8aParserCases = [
+    // ─── NEW R8-A POSITIVES — inline-separator + pipe-delimited shapes ───
+    {
+      label: 'R8α-P1 Nadia Petrov S15 verbatim (inline ` -- ` + pipe-delimited sig)',
+      input: `Hi, I'm Nadia Petrov with Eastview Mortgage Group, Lic. #MB440996. I have a client looking for a $92,000 second mortgage on her property in Calgary NW.
+
+Nadia Petrov | Eastview Mortgage Group | Lic. #MB440996 -- Franco Maione Founder at VIMA Real Broker Mobile (780) 975-3339`,
+      expected: 'Nadia',
+    },
+    {
+      label: 'R8α-P2 inline ` -- ` separator + RFC-standard preceding-line sig',
+      input: `Hi.
+
+Sophia Lin
+Crestwood Mortgage Lic. #MB778832 -- Franco Maione Founder at VIMA`,
+      expected: 'Sophia',
+    },
+    // ─── R8-A NEGATIVES — pipe-guard preserves N3-style over-fire protection ───
+    {
+      label: 'R8α-N1 firm-only-on-Lic-line shape (Summit Financial Group Lic. #...) → null (pipe-guard preserves N3 baseline)',
+      input: `Hi, application attached.
+
+Summit Financial Group Lic. #MB338764
+
+--
+Footer`,
+      expected: null,
+    },
+    {
+      label: 'R8α-N2 inline ` -- ` + Franco-direct on left side → null (anti-collision via validateCapture)',
+      input: `Hi Vienna, please find attached.
+
+Franco Maione | VIMA Real Broker | Lic. #MB000000 -- Franco Maione`,
+      expected: null,
+    },
+    {
+      label: 'R8α-N3 inline ` -- ` + no name before Lic.# (only firm pipe-prefix) → null',
+      input: `Hi.
+
+| Eastview Mortgage Group | Lic. #MB440996 -- Franco Maione`,
+      expected: null,
+    },
+    // ─── PRESERVED R4-Bucket-C.7 BASELINE — RFC-standard sig still parses ───
+    {
+      label: 'R8α-B1 RFC-standard Eric Johansson (preserves Anna 11196627 R4 path)',
+      input: `Hi, I'm Eric Johansson with Northpoint Mortgage Partners (Lic. #MB994652).
+
+Eric Johansson
+Lic. #MB994652
+--
+Franco Maione
+Founder at VIMA Real Broker`,
+      expected: 'Eric',
+    },
+    {
+      label: 'R8α-B2 RFC-standard Marcus (preserves C7 P1 baseline)',
+      input: `Hi.
+
+*Natalie Bergman*
+
+Summit Financial Group Lic. #MB338764
+
+--
+Franco Maione`,
+      expected: 'Natalie',
+    },
+  ];
+  let _r8aParserFails = 0;
+  for (const tc of _r8aParserCases) {
+    const got = _r8aAi.parseBrokerFirstNameFromSignature(tc.input);
+    if (got !== tc.expected) {
+      _r8aParserFails++;
+      console.log(`  FAIL [${tc.label}]: expected ${JSON.stringify(tc.expected)}, got ${JSON.stringify(got)}`);
+    } else {
+      console.log(`  PASS [${tc.label}]: ${tc.expected === null ? 'null (over-fire blocked)' : `extracted "${got}"`}`);
+    }
+  }
+  if (_r8aParserFails > 0) throw new Error(`FAIL [R8-A-PARSER-HARDENING-MATRIX]: ${_r8aParserFails}/${_r8aParserCases.length} cases failed.`);
+  console.log(`Group R8-A-PARSER-HARDENING-MATRIX: ${_r8aParserCases.length}/${_r8aParserCases.length} cases pass (2 new R8-A positives + 3 over-fire negatives + 2 preserved RFC baselines).`);
+
+  console.log('\n========== R8-A-NADIA-FIXTURE — Nadia Petrov S15 production replay (LOAD-BEARING) ==========');
+  // Nadia Petrov S15 (deal 0dbd9547). Real-Postmark body shape captured
+  // via scripts/r8alpha-corpus-grep.js. Parser-side fix is the critical
+  // load-bearing component — without R8-A inline-sep + pipe-strip, parser
+  // returns null and downstream broker_name extraction picks Franco's name
+  // from the post-`-- ` portion of the same line.
+  const _r8aNadiaBody = `Hi, I'm Nadia Petrov with Eastview Mortgage Group, Lic. #MB440996. I have a client looking for a $92,000 second mortgage on her property in Calgary NW. Borrower is Anna Bergstrom. LTV approximately 38%.
+
+Loan application, credit bureau, and appraisal attached.
+
+Nadia Petrov | Eastview Mortgage Group | Lic. #MB440996 -- Franco Maione Founder at VIMA Real Broker Mobile (780) 975-3339`;
+  // (a) Parser returns "Nadia" (R8-A inline-sep + pipe-strip hardening).
+  const _r8aNadiaParsed = _r8aAi.parseBrokerFirstNameFromSignature(_r8aNadiaBody);
+  if (_r8aNadiaParsed !== 'Nadia') {
+    throw new Error(`FAIL [R8-A-NADIA-FIXTURE / parser]: expected "Nadia", got ${JSON.stringify(_r8aNadiaParsed)}. R8-A parser hardening unwired — Franco's S15 retest will regress.`);
+  }
+  console.log('  PASS [parser]: Nadia Petrov body → "Nadia" (inline ` -- ` strip + pipe-delimited single-line sig handled)');
+  // (b) Helper with broker_name correctly extracted (post-R8-A prompt
+  // hardening: Claude prefers body self-identification "I'm Nadia Petrov
+  // with Eastview..." over inline-footer Franco). Helper returns "Nadia".
+  const _r8aNadiaHelperGreeting = _r8aSelect({
+    broker_name: 'Nadia Petrov',
+    sender_name: 'Franco Maione',  // Franco-proxy testing shape
+    sender_type: 'broker',
+  });
+  if (_r8aNadiaHelperGreeting !== 'Nadia') {
+    throw new Error(`FAIL [R8-A-NADIA-FIXTURE / helper]: expected "Nadia", got ${JSON.stringify(_r8aNadiaHelperGreeting)}. selectGreetingFirstName must prefer broker_name="Nadia Petrov" over Franco-proxy sender_name.`);
+  }
+  console.log('  PASS [helper]: selectGreetingFirstName({ broker_name: "Nadia Petrov", sender_name: "Franco Maione" }) → "Nadia" (helper anti-collides against proxy)');
+  // (c) Anti-collision still fires on Franco-named broker (Nadia not Franco).
+  const _r8aNadiaAntiCollision = _r8aSelect({
+    broker_name: 'Franco Maione',
+    sender_name: 'Franco Maione',
+    sender_type: 'broker',
+  });
+  if (_r8aNadiaAntiCollision !== null) {
+    throw new Error(`FAIL [R8-A-NADIA-FIXTURE / anti-collision]: when broker_name=Franco, must return null (anti-collision defense intact)`);
+  }
+  console.log('  PASS [anti-collision]: broker_name=Franco still yields null (R5-E anti-collision preserved)');
+  console.log('Group R8-A-NADIA-FIXTURE: Nadia Petrov S15 production-fixture root closed (parser-side + helper-side both green; anti-collision preserved).');
+
+  console.log('\n========== R8-A-ERIC-FIXTURE — Eric Johansson R4 production replay (LOAD-BEARING) ==========');
+  // Eric Johansson R4 (deal 11196627). broker_name correctly extracted on
+  // initial submission (RFC-standard sig). The R4 bug is downstream wiring:
+  // generateDocumentRequestEmail (admin-approval branch) + generateRejectionEmail
+  // (admin-reject branch) didn't receive greetingFirstName, so Vienna's
+  // prompt fell back to in-prompt broker_name reading and emitted "Hi Franco!"
+  // / "Hi there!" on out[2-5].
+  const _r8aEricExtractedData = {
+    broker_name: 'Eric Johansson',
+    sender_name: 'Franco Maione',
+    sender_type: 'broker',
+    borrower_name: 'Anna Bergstrom',
+    name_collides_with_admin: true,
+  };
+  // (a) Helper resolves to "Eric" via broker_name (preferred over Franco-proxy sender_name).
+  const _r8aEricHelper = _r8aSelect(_r8aEricExtractedData);
+  if (_r8aEricHelper !== 'Eric') {
+    throw new Error(`FAIL [R8-A-ERIC-FIXTURE / helper]: expected "Eric", got ${JSON.stringify(_r8aEricHelper)}`);
+  }
+  console.log('  PASS [helper]: Anna 11196627 extracted_data shape → helper returns "Eric" (broker_name wins over Franco proxy)');
+  // (b) RFC-standard Eric sig still parses (orthogonality with R8-A widening).
+  const _r8aEricBody = `Hi, I'm Eric Johansson with Northpoint Mortgage Partners (Lic. #MB994652).
+
+Eric Johansson
+Lic. #MB994652
+--
+Franco Maione`;
+  const _r8aEricParsed = _r8aAi.parseBrokerFirstNameFromSignature(_r8aEricBody);
+  if (_r8aEricParsed !== 'Eric') {
+    throw new Error(`FAIL [R8-A-ERIC-FIXTURE / parser orthogonality]: RFC-standard sig regression; expected "Eric", got ${JSON.stringify(_r8aEricParsed)}`);
+  }
+  console.log('  PASS [parser orthogonality]: Eric Johansson RFC-standard sig still parses → "Eric" (R8-A widening preserves R4-Bucket-C.7 baseline)');
+  // (c) effectiveGreetingFirstName resolver chain works: greetingFirstName wins, parser is fallback.
+  // We can't unit-test the inner resolver directly without invoking the LLM, so we source-grep
+  // the resolver chain assignment.
+  if (!/effectiveGreetingFirstName = greetingFirstName \|\| parsedBrokerFirstName/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8-A-ERIC-FIXTURE / resolver chain]: processInitialEmail must compute effectiveGreetingFirstName = greetingFirstName || parsedBrokerFirstName (Q2-(b) parallel-signal resolver).`);
+  }
+  console.log('  PASS [resolver chain]: processInitialEmail computes effectiveGreetingFirstName = greetingFirstName || parsedBrokerFirstName (Q2-(b) verdict)');
+  console.log('Group R8-A-ERIC-FIXTURE: Eric Johansson R4 wiring root closed (helper + parser orthogonality + parallel-signal resolver all green).');
+
+  console.log('\n========== R8-A-CALL-SITE-WIRING — 7-clause closed-set + per-site assertions ==========');
+  // (1) generateRejectionEmail signature accepts { greetingFirstName = null } = {}.
+  if (!/generateRejectionEmail: async \(dealSummary, adminDeclineReason = null, \{ greetingFirstName = null \} = \{\}\)/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8α-CW (1)]: generateRejectionEmail signature must accept { greetingFirstName = null } = {} as 3rd arg.`);
+  }
+  console.log('  PASS [(1)]: generateRejectionEmail signature accepts greetingFirstName opt');
+  // (2) generateDocumentRequestEmail signature accepts greetingFirstName (alongside existing R6-ζ + R6-κ opts).
+  if (!/generateDocumentRequestEmail:[\s\S]{0,400}greetingFirstName = null \} = \{\}\)/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8α-CW (2)]: generateDocumentRequestEmail signature must accept greetingFirstName in opts.`);
+  }
+  console.log('  PASS [(2)]: generateDocumentRequestEmail signature accepts greetingFirstName opt');
+  // (3) processInitialEmail accepts greetingFirstName in opts destructure.
+  if (!/processInitialEmail:[\s\S]{0,2000}greetingFirstName = null \} = opts/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8α-CW (3)]: processInitialEmail must destructure greetingFirstName from opts.`);
+  }
+  console.log('  PASS [(3)]: processInitialEmail destructures greetingFirstName from opts (Q2-(b) parallel signal)');
+  // (4) webhook.js selectGreetingFirstName invocation count = exactly 7
+  //     (3 pre-R8-A: review path + R5-D-B + active path) + (4 new R8-A:
+  //     ltv_escalated→approved doc-req + ltv_escalated→rejected +
+  //     under_review→approved doc-req + under_review→rejected).
+  const _r8aSelectInvocs = (_r8aWebhookSrc.match(/selectGreetingFirstName\(/g) || []).length;
+  if (_r8aSelectInvocs !== 7) {
+    throw new Error(`FAIL [R8α-CW (4)]: webhook.js selectGreetingFirstName invocations = ${_r8aSelectInvocs}; expected exactly 7 (3 pre-R8-A R5-E sites + 4 new R8-A admin-reply sites). Drift suggests new call site without R8-A wrapper OR a removed site.`);
+  }
+  console.log(`  PASS [(4)]: webhook.js invokes selectGreetingFirstName at exactly 7 sites (3 R5-E + 4 R8-A admin-reply branches)`);
+  // (5) Per-site: 4 admin-reply branches use the R8-A naming pattern.
+  // _r8aDocReqGreeting (ltv_escalated→approved), _r8aRejectionGreeting (ltv_escalated→rejected),
+  // _r8aDocReqGreetingPartial (under_review→approved), _r8aRejectionGreetingUR (under_review→rejected).
+  const _r8aPerSiteAnchors = [
+    '_r8aDocReqGreeting',
+    '_r8aRejectionGreeting',
+    '_r8aDocReqGreetingPartial',
+    '_r8aRejectionGreetingUR',
+  ];
+  for (const anchor of _r8aPerSiteAnchors) {
+    if (!new RegExp(`\\b${anchor}\\b`).test(_r8aWebhookSrc)) {
+      throw new Error(`FAIL [R8α-CW (5) per-site]: webhook.js missing R8-A naming anchor "${anchor}" — admin-reply branch not wired.`);
+    }
+  }
+  console.log(`  PASS [(5) per-site]: all 4 R8-A admin-reply naming anchors present (${_r8aPerSiteAnchors.join(', ')})`);
+  // (6) generateDocumentRequestEmail call-site count = exactly 2 (pre-R8-A R6-κ pin preserved).
+  const _r8aDocReqCallCount = (_r8aWebhookSrc.match(/aiService\.generateDocumentRequestEmail\(/g) || []).length;
+  if (_r8aDocReqCallCount !== 2) {
+    throw new Error(`FAIL [R8α-CW (6)]: generateDocumentRequestEmail call sites = ${_r8aDocReqCallCount}; expected exactly 2 (R6-κ pin invariant — ltv_escalated→approved + under_review→approved branches only).`);
+  }
+  console.log(`  PASS [(6)]: generateDocumentRequestEmail invoked at exactly 2 sites (R6-κ pin preserved through R8-A wiring)`);
+  // (7) generateRejectionEmail call-site count = exactly 2.
+  const _r8aRejectionCallCount = (_r8aWebhookSrc.match(/aiService\.generateRejectionEmail\(/g) || []).length;
+  if (_r8aRejectionCallCount !== 2) {
+    throw new Error(`FAIL [R8α-CW (7)]: generateRejectionEmail call sites = ${_r8aRejectionCallCount}; expected exactly 2 (ltv_escalated→rejected + under_review→rejected branches).`);
+  }
+  console.log(`  PASS [(7)]: generateRejectionEmail invoked at exactly 2 sites (ltv_escalated→rejected + under_review→rejected)`);
+  console.log(`Group R8-A-CALL-SITE-WIRING: 7-clause closed-set (3 signature acceptance + selectGreetingFirstName count + per-site naming + 2 generator call-site counts).`);
+
+  console.log('\n========== R8-A-EFFECTIVE-GREETING-RESOLVER — resolver chain + prompt interpolation ==========');
+  // (a) effectiveGreetingFirstName resolver chain present in processInitialEmail (helper-first || parser-fallback).
+  if (!/effectiveGreetingFirstName = greetingFirstName \|\| parsedBrokerFirstName/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8-A-EFFECTIVE-GREETING-RESOLVER (a)]: missing effectiveGreetingFirstName resolver chain in processInitialEmail`);
+  }
+  console.log('  PASS (a): processInitialEmail resolver chain present (Q2-(b) parallel signal: helper-first, parser-fallback)');
+  // (b) parsedNameBlock uses effectiveGreetingFirstName (NOT raw parsedBrokerFirstName).
+  if (!/const parsedNameBlock = effectiveGreetingFirstName/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8-A-EFFECTIVE-GREETING-RESOLVER (b)]: parsedNameBlock must use effectiveGreetingFirstName (helper-aware)`);
+  }
+  console.log('  PASS (b): parsedNameBlock uses effectiveGreetingFirstName (R8-A label "JS-RESOLVED")');
+  // (c) parsedNameBlock label updated to JS-RESOLVED.
+  if (!/JS-RESOLVED BROKER FIRST NAME/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8-A-EFFECTIVE-GREETING-RESOLVER (c)]: parsedNameBlock label must be "JS-RESOLVED BROKER FIRST NAME" (helper-or-parser)`);
+  }
+  console.log('  PASS (c): parsedNameBlock label "JS-RESOLVED" reflects helper-OR-parser source');
+  // (d) identity-clash minimal-ask wiring uses effectiveGreetingFirstName.
+  if (!/generateIdentityClashMinimalAsk\(emailBody, _s15BodyName, _s15DocName, senderName, effectiveGreetingFirstName\)/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8-A-EFFECTIVE-GREETING-RESOLVER (d)]: identity-clash minimal-ask must pass effectiveGreetingFirstName (R5-D-B post-clash arc preserves R8-A resolution)`);
+  }
+  console.log('  PASS (d): generateIdentityClashMinimalAsk call site passes effectiveGreetingFirstName (R5-D-B preserves R8-A resolution)');
+  // (e) r8aGreetingBlock interpolated into generateRejectionEmail prompt.
+  // The block-variable's value is checked by ensuring its key marker appears.
+  if (!/GREETING TARGET \(R5-E refined — load-bearing, JS-deterministic, R8-A wiring extension\)/.test(_r8aAiSrc)) {
+    throw new Error(`FAIL [R8-A-EFFECTIVE-GREETING-RESOLVER (e)]: R8-A r8aGreetingBlock marker must be present in ai.js (interpolated into both doc-request + rejection prompts)`);
+  }
+  // Count occurrences — should be present in BOTH generateDocumentRequestEmail + generateRejectionEmail.
+  const _r8aGreetingBlockMarkerCount = (_r8aAiSrc.match(/GREETING TARGET \(R5-E refined — load-bearing, JS-deterministic, R8-A wiring extension\)/g) || []).length;
+  if (_r8aGreetingBlockMarkerCount < 2) {
+    throw new Error(`FAIL [R8-A-EFFECTIVE-GREETING-RESOLVER (e) count]: R8-A r8aGreetingBlock marker count = ${_r8aGreetingBlockMarkerCount}; expected >= 2 (interpolated in both generateDocumentRequestEmail + generateRejectionEmail prompts).`);
+  }
+  console.log(`  PASS (e): R8-A greeting-target block marker present ${_r8aGreetingBlockMarkerCount}x in ai.js (interpolated into doc-request + rejection prompts)`);
+  console.log('Group R8-A-EFFECTIVE-GREETING-RESOLVER: parallel-signal resolver + helper-aware parsedNameBlock + 2-generator prompt interpolation all wired.');
+
+  console.log('\n========== R8-A-CROSS-CLUSTER-INTEGRATION — prior arc + R5-E + C.7 + R6 + R7 anchors ==========');
+  // R5-E refined anchors preserved.
+  if (!/selectGreetingFirstName/.test(_r8aWebhookSrc)) throw new Error('FAIL: R5-E anchor missing from webhook.js');
+  if (!/require\(['"]\.\.\/lib\/greeting['"]\)/.test(_r8aWebhookSrc)) throw new Error('FAIL: R5-E import missing from webhook.js');
+  console.log('  PASS [R5-E]: selectGreetingFirstName helper + import preserved');
+  // R4-Bucket-C.7 parser preserved.
+  if (!/parseBrokerFirstNameFromSignature/.test(_r8aAiSrc)) throw new Error('FAIL: C.7 parser missing from ai.js');
+  if (!/parseBrokerFirstNameFromSignature/.test(_r8aWebhookSrc)) throw new Error('FAIL: C.7 parser invocation missing from webhook.js');
+  console.log('  PASS [R4-Bucket-C.7]: parseBrokerFirstNameFromSignature + webhook invocation preserved (R8-A widens, does not replace)');
+  // R6-ζ forbidden-non-sequitur-openers block preserved.
+  if (!/FORBIDDEN NON-SEQUITUR OPENERS \(Group R6-ζ/.test(_r8aAiSrc)) throw new Error('FAIL: R6-ζ block missing');
+  console.log('  PASS [R6-ζ]: forbidden-non-sequitur-openers block preserved');
+  // R6-κ post-approval consolidation preserved (isPostApproval signal still threads through).
+  if (!/isPostApproval: true, greetingFirstName/.test(_r8aWebhookSrc)) {
+    throw new Error('FAIL: R6-κ isPostApproval flag must thread alongside R8-A greetingFirstName at admin-approval call sites');
+  }
+  console.log('  PASS [R6-κ]: isPostApproval signal threads alongside R8-A greetingFirstName (no opt-bag clobber)');
+  // R7-A dispatcher fix preserved.
+  if (!/R7-A \(2026-05-22\)/.test(_r8aWebhookSrc)) throw new Error('FAIL: R7-A anchor missing');
+  // R7-B + R7-C cron threading preserved (anchors live in cron, not webhook).
+  const _r8aCronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  if (!/R7-B \(2026-05-22\)/.test(_r8aCronSrc)) throw new Error('FAIL: R7-B anchor missing from cron');
+  if (!/R7-C \(2026-05-22\)/.test(_r8aCronSrc)) throw new Error('FAIL: R7-C anchor missing from cron');
+  console.log('  PASS [R7-A/B/C]: dispatcher + cron threading + reminder-specificity anchors all preserved');
+  // R5-D-B post-clash arc still wired (helper + parser passed separately under R8-A parallel-signal restructure).
+  if (!/_r5dGreetingFromHelper/.test(_r8aWebhookSrc) || !/_r5dParsedFromSig/.test(_r8aWebhookSrc)) {
+    throw new Error('FAIL: R5-D-B post-clash arc must pass both _r5dGreetingFromHelper (helper) and _r5dParsedFromSig (parser) under R8-A parallel-signal restructure');
+  }
+  if (!/greetingFirstName: _r5dGreetingFromHelper, parsedBrokerFirstName: _r5dParsedFromSig/.test(_r8aWebhookSrc)) {
+    throw new Error('FAIL: R5-D-B opts must thread { greetingFirstName: _r5dGreetingFromHelper, parsedBrokerFirstName: _r5dParsedFromSig } (parallel signal, consumer-side resolution)');
+  }
+  console.log('  PASS [R5-D-B parallel-signal restructure]: helper + parser threaded as separate opts; consumer (processInitialEmail) resolves the chain');
+  console.log('Group R8-A-CROSS-CLUSTER-INTEGRATION: R5-E + C.7 + R6-ζ + R6-κ + R7-A/B/C + R5-D-B all preserved post-R8-A.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
@@ -14708,11 +15067,16 @@ Crown Mortgage Group Lic. #MB556291`;
   }
   console.log(`  PASS [Group RRRR both call sites extract]: extractDeclineReason called at ${extractCalls} sites`);
 
-  const rejectionCallsWithReason = (webhookSrc.match(/generateRejectionEmail\(existingDeal\.extracted_data, adminDeclineReason\)/g) || []).length;
+  // R8-A (2026-05-22): call signature widened to allow optional 3rd opts arg
+  // ({ greetingFirstName }). The adminDeclineReason 2nd arg invariant is preserved
+  // — only the trailing opts varies. Regex permits both shapes:
+  //   pre-R8-A: generateRejectionEmail(extracted_data, adminDeclineReason)
+  //   post-R8-A: generateRejectionEmail(extracted_data, adminDeclineReason, { greetingFirstName: ... })
+  const rejectionCallsWithReason = (webhookSrc.match(/generateRejectionEmail\(existingDeal\.extracted_data, adminDeclineReason(?:,\s*\{[^}]*\})?\)/g) || []).length;
   if (rejectionCallsWithReason < 2) {
-    throw new Error(`FAIL [Group RRRR both call sites pass]: generateRejectionEmail(extracted_data, adminDeclineReason) must be called at BOTH rejection call sites. Got ${rejectionCallsWithReason} occurrence(s).`);
+    throw new Error(`FAIL [Group RRRR both call sites pass]: generateRejectionEmail(extracted_data, adminDeclineReason[, opts]) must be called at BOTH rejection call sites. Got ${rejectionCallsWithReason} occurrence(s).`);
   }
-  console.log(`  PASS [Group RRRR both call sites pass]: adminDeclineReason passed at ${rejectionCallsWithReason} sites`);
+  console.log(`  PASS [Group RRRR both call sites pass]: adminDeclineReason passed at ${rejectionCallsWithReason} sites (R8-A: optional opts arg permitted)`);
 
   // Pre-RRRR bug shape (calling generateRejectionEmail with only extracted_data) must be GONE
   if (/generateRejectionEmail\(existingDeal\.extracted_data\)(?!\s*,)/.test(webhookSrc)) {
@@ -14723,11 +15087,12 @@ Crown Mortgage Group Lic. #MB556291`;
   // ─── Source-string regressions on ai.js prompt ────────────────────
   console.log('\n---------- Group RRRR / Source-string regression on ai.js prompt ----------');
 
-  // Signature accepts adminDeclineReason
-  if (!/generateRejectionEmail: async \(dealSummary, adminDeclineReason = null\) =>/.test(aiSource)) {
-    throw new Error(`FAIL [Group RRRR signature]: generateRejectionEmail signature must be (dealSummary, adminDeclineReason = null)`);
+  // Signature accepts adminDeclineReason. R8-A (2026-05-22) added optional
+  // 3rd opts arg `{ greetingFirstName = null } = {}`. Regex permits both.
+  if (!/generateRejectionEmail: async \(dealSummary, adminDeclineReason = null(?:, \{ greetingFirstName = null \} = \{\})?\) =>/.test(aiSource)) {
+    throw new Error(`FAIL [Group RRRR signature]: generateRejectionEmail signature must be (dealSummary, adminDeclineReason = null[, { greetingFirstName = null } = {}])`);
   }
-  console.log('  PASS [Group RRRR signature]: generateRejectionEmail accepts adminDeclineReason');
+  console.log('  PASS [Group RRRR signature]: generateRejectionEmail accepts adminDeclineReason (+ R8-A optional greetingFirstName opt)');
 
   // Conditional declineReasonBlock present
   if (!/const declineReasonBlock = adminDeclineReason\s*\?\s*`/.test(aiSource)) {
