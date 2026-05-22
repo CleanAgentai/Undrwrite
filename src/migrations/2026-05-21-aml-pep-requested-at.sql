@@ -1,0 +1,56 @@
+-- Group R6-κ (2026-05-21): persist "AML/PEP was requested at admin-approval
+-- time" signal so the post-approval conversational follow-up (Group KKKK)
+-- can detect the consolidated request already fired and suppress its own
+-- redundant ask.
+--
+-- Production failure (deal 004cf263-7a41-4779-9f0b-79a28b24b91c — James
+-- Okafor S9 fixture, 2026-05-21 broker corpus): admin replied plain
+-- "approved" with no explicit conditions text. Pre-R6-κ generateDocumentRequestEmail
+-- gate at ai.js:2065 filtered AML/PEP out of the post-approval doc request
+-- (complianceDocs gated on intakeComplete && reqSenderIsBroker — intake
+-- was incomplete because gov-ID + tax-assessment hadn't arrived yet).
+-- Broker received "send gov ID + tax assessment" as one email, submitted
+-- those, then received "send AML + PEP" as a SECOND email. Broker reply
+-- verbatim: "I'm not sure why you wouldn't have asked for these also in
+-- your last email."
+--
+-- R6-κ fix (Q1=(b) verdict): consolidate intake-completion + AML/PEP into
+-- ONE doc request when both categories are missing at admin-approval time.
+-- JJJ's "intake first, compliance later" rule still applies pre-approval
+-- (initial-submission flow) — see isPostApproval gate addition. The gate
+-- semantic narrows to "JJJ intent applies pre-approval only; post-approval
+-- consolidates."
+--
+-- aml_pep_requested_at semantic. Stamped by webhook.js admin-approval
+-- branches (active→approved at L2541 + under_review→approved at L1542)
+-- when the consolidated doc request actually included AML/PEP (i.e., when
+-- !amlOnFile || !pepOnFile at admin-approval time — Q1 stamp-condition
+-- verdict). KKKK gate at webhook.js:2553 then suppresses its postApprovalAmlPepAsk
+-- escalation when this flag is set — avoids the redundant ask Q3 raised.
+--
+-- First-stamp-wins, never reset (mirrors prelim_approved_at + conditions_sent_at
+-- precedents). If admin approves multiple times (rare; idempotent
+-- prelim_approved_at semantic), only the first AML/PEP-ask-firing approval
+-- stamps; subsequent approvals see the existing stamp and don't overwrite.
+--
+-- Behavior post-migration:
+--   - aml_pep_requested_at NULL  → KKKK's postApprovalAmlPepAsk fires its
+--                                  conditional escalation when post-approval
+--                                  intake-completes with AML/PEP missing
+--                                  (pre-R6-κ behavior; defense-in-depth for
+--                                  any path that doesn't stamp).
+--   - aml_pep_requested_at SET   → KKKK suppressed; no redundant ask.
+--
+-- Deferred scope (defended residual, Q2=(a) verdict): admin 'conditions'
+-- intent path (generateAdminResponseEmail at webhook.js:1495) does NOT
+-- stamp aml_pep_requested_at. Empirically clean on comparison fixtures
+-- 1fe855a5 + c63720a5 — both went through 'conditions' intent with
+-- AML/PEP on file post-broker-submission, no KKKK escalation observed.
+-- Content-grep on admin's conditions text (alternative b/c) rejected per
+-- standing pattern (R5-D Surface A / R6-γ filter / R6-ζ helper — structured
+-- signals authoritative > prompt content-matching). Revisit if Franco
+-- surfaces a case where KKKK fires redundant ask on conditions-intent arc.
+--
+-- Idempotent via IF NOT EXISTS. Safe to re-apply.
+
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS aml_pep_requested_at TIMESTAMPTZ;

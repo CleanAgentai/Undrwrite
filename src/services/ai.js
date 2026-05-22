@@ -2029,7 +2029,7 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
 
   // Generate Stage 3 document request email — different checklist for personal vs corporate,
   // and different items for purchase vs refinance
-  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true } = {}) => {
+  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true, isPostApproval = false } = {}) => {
     try {
       // R6-ζ (2026-05-21): forbidden-non-sequitur-openers block — see
       // buildForbiddenOpenersBlock docblock at module scope. Admin-approval
@@ -2061,8 +2061,24 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
       // The follow-up flow (broker fills intake over multiple turns, intake
       // completes, AML/PEP still missing) is handled by generateBrokerResponse's
       // conversational reply on the active-branch post-approval turn.
+      //
+      // R6-κ (2026-05-21): JJJ's intake-first gate semantic narrowed to
+      // PRE-approval phase only. Post-approval (admin has stamped
+      // prelim_approved_at), intake-completion items + AML/PEP are
+      // consolidated into ONE doc request when both categories are still
+      // missing. Empirical fix: deal 004cf263-7a41-4779-9f0b-79a28b24b91c
+      // (James Okafor S9) — admin replied plain "approved", broker received
+      // intake-only ask then AML/PEP ask as a SECOND email and replied
+      // "I'm not sure why you wouldn't have asked for these also in your
+      // last email." JJJ's "intake first, compliance later" was deliberate
+      // for INITIAL-SUBMISSION (no overwhelm on a brand-new broker); post-
+      // approval is a structurally different phase — broker has been
+      // validated, intake is well underway, no overwhelm risk.
+      // isPostApproval is JS-derived from !!deal.prelim_approved_at at the
+      // consumer site; default false preserves pre-approval JJJ semantic
+      // for legacy callers (initial-submission path, strict-superset widening).
       const intakeComplete = allIntakeReceived(receivedClassifications, reqIsPurchase);
-      const complianceDocs = (reqSenderIsBroker && intakeComplete)
+      const complianceDocs = (reqSenderIsBroker && (intakeComplete || isPostApproval))
         ? `\n- AML form (Anti-Money Laundering — broker compliance, required)\n- PEP form (Politically Exposed Person — broker compliance, required)`
         : '';
 

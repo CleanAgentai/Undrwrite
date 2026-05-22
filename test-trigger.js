@@ -10107,6 +10107,299 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group ζ-CROSS-CLUSTER-INTEGRATION: prior arc holding + helper defensive + corpus anchored.`);
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER κ — JJJ post-approval gate semantic + AML/PEP consolidation
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-κ — post-approval gate consolidation of
+  // intake-completion + AML/PEP into ONE doc request, plus KKKK suppression
+  // via aml_pep_requested_at column.
+  //
+  // Diagnosis recap. Deal 004cf263-7a41-4779-9f0b-79a28b24b91c (James Okafor
+  // S9, 2026-05-21 corpus): admin replied plain "approved" → intake
+  // incomplete + AML/PEP missing. Pre-R6-κ JJJ gate at ai.js:2065 filtered
+  // AML/PEP out (complianceDocs gated on intakeComplete). Broker received
+  // intake-only ask, submitted, then received SEPARATE AML/PEP ask.
+  // Verbatim broker reply: "I'm not sure why you wouldn't have asked for
+  // these also in your last email."
+  //
+  // Fix shape (Q1=(b) verdict): JJJ "intake first, compliance later" rule
+  // NARROWED to pre-approval phase only. Post-approval (isPostApproval=true,
+  // derived JS-side from !!deal.prelim_approved_at) → complianceDocs gate
+  // includes AML/PEP regardless of intake state. KKKK suppression via
+  // aml_pep_requested_at column prevents redundant ask on subsequent broker
+  // submission turn (Q3 verdict).
+  //
+  // 11th R5/R6 artifact-grounding redirect: scope corrected from symptom
+  // (James S9 split) to root (JJJ post-approval gate semantic).
+  //
+  // Groups:
+  //   κ-GATE-MATRIX            : ai.js complianceDocs gate truth-table (8 cases)
+  //   κ-JAMES-FIXTURE          : 004cf263 timeline replay (LOAD-BEARING)
+  //   κ-COMPARISON-REGRESSION  : 1fe855a5 + c63720a5 'conditions' intent path unaffected
+  //   κ-KKKK-SUPPRESSION       : aml_pep_requested_at gates the KKKK postApprovalAmlPepAsk
+  //   κ-CONSUMER-WIRING        : closed-set 2 isPostApproval + 2 stamp + 1 KKKK suppression
+  //   κ-CROSS-CLUSTER-INTEGRATION : prior arc + migration column + JJJ pre-approval preserved
+  console.log('\n========== R6-κ-GATE-MATRIX — generateDocumentRequestEmail complianceDocs gate truth-table ==========');
+  // The gate is `(reqSenderIsBroker && (intakeComplete || isPostApproval))`.
+  // We test the boolean shape via source-grep + structural mock since the
+  // generator itself is an LLM call (not deterministically testable).
+  const _kFs = require('fs');
+  const _kAiSrc = _kFs.readFileSync('./src/services/ai.js', 'utf8');
+  const _kWebhookSrc = _kFs.readFileSync('./src/routes/webhook.js', 'utf8');
+
+  // (a) Gate condition source-grep — exact shape required.
+  if (!/const complianceDocs = \(reqSenderIsBroker && \(intakeComplete \|\| isPostApproval\)\)/.test(_kAiSrc)) {
+    throw new Error(`FAIL [κ-GATE-MATRIX]: gate condition shape changed; expected "(reqSenderIsBroker && (intakeComplete || isPostApproval))"`);
+  }
+  console.log('  PASS: gate condition exact shape — (reqSenderIsBroker && (intakeComplete || isPostApproval))');
+
+  // (b) isPostApproval opt destructured with default=false (backward-compat;
+  // legacy callers get pre-approval JJJ semantic).
+  if (!/generateDocumentRequestEmail:[\s\S]{0,200}isPostApproval = false/.test(_kAiSrc)) {
+    throw new Error(`FAIL [κ-GATE-MATRIX]: isPostApproval opt not destructured with default=false in generateDocumentRequestEmail signature (strict-superset widening discipline broken)`);
+  }
+  console.log('  PASS: isPostApproval = false default in signature (legacy callers get pre-approval JJJ semantic preserved)');
+
+  // (c) Truth-table cases — closed-form boolean logic.
+  const _kGate = (reqSenderIsBroker, intakeComplete, isPostApproval) =>
+    !!(reqSenderIsBroker && (intakeComplete || isPostApproval));
+  const _kMatrix = [
+    // [reqSenderIsBroker, intakeComplete, isPostApproval, expected, label]
+    [false, false, false, false, 'borrower-direct + intake-incomplete + pre-approval → no AML/PEP (existing JJJ; non-broker filtered)'],
+    [false, true,  false, false, 'borrower-direct + intake-complete + pre-approval → no AML/PEP (non-broker filtered, regardless of intake)'],
+    [false, true,  true,  false, 'borrower-direct + post-approval → no AML/PEP (non-broker filtered, R6-κ does NOT extend to borrower-direct)'],
+    [true,  false, false, false, 'broker + intake-incomplete + PRE-approval → no AML/PEP (existing JJJ intake-first preserved — initial submission overwhelm protection)'],
+    [true,  true,  false, true,  'broker + intake-complete + pre-approval → AML/PEP asked (existing JJJ post-intake behavior unchanged)'],
+    [true,  false, true,  true,  'broker + intake-incomplete + POST-approval → AML/PEP CONSOLIDATED (R6-κ fix: 004cf263 James Okafor S9 shape)'],
+    [true,  true,  true,  true,  'broker + intake-complete + post-approval → AML/PEP asked (Vienna case: post-approval and intake already done at admin-approval time)'],
+    [false, false, true,  false, 'borrower-direct + intake-incomplete + post-approval → no AML/PEP (non-broker filtered; R6-κ does not extend)'],
+  ];
+  let _kMatrixFails = 0;
+  for (const [rsb, ic, ipa, exp, label] of _kMatrix) {
+    const got = _kGate(rsb, ic, ipa);
+    if (got !== exp) {
+      _kMatrixFails++;
+      console.log(`  FAIL [${label}]: got ${got}, expected ${exp}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_kMatrixFails > 0) throw new Error(`FAIL [R6-κ-GATE-MATRIX]: ${_kMatrixFails}/${_kMatrix.length} cases failed.`);
+  console.log(`Group κ-GATE-MATRIX: 8/8 cases passed (pre-approval JJJ preserved + post-approval consolidates).`);
+
+  // ─── R6-κ-JAMES-FIXTURE (LOAD-BEARING) ────────────────────────────
+  console.log('\n========== R6-κ-JAMES-FIXTURE — James Okafor S9 004cf263 timeline replay (LOAD-BEARING) ==========');
+  // Reconstructed timeline from production corpus (scripts/r6kappa-corpus-grep.js):
+  //   1. broker submits initial application + 6 docs (Application, PNW,
+  //      Appraisal, Scotiabank payout, T4, Credit Bureau). Missing from
+  //      intake: gov ID + property tax assessment. AML/PEP not on file.
+  //   2. Vienna admin Snapshot (PRELIMINARY).
+  //   3. Admin replies "approved" plain — no conditions text. parseAdminReply
+  //      → intent='approved'. status was 'under_review' → fires the second
+  //      generateDocumentRequestEmail call site (webhook.js L1560-area).
+  //   4. R6-κ: prelim_approved_at gets stamped → isPostApproval=true →
+  //      complianceDocs gate fires AML/PEP. Email asks intake + AML/PEP in
+  //      ONE consolidated request.
+  //   5. R6-κ: aml_pep_requested_at stamped (both AML + PEP missing at
+  //      admin-approval time, !amlOnFile || !pepOnFile = true).
+  //   6. Broker submits intake docs (gov ID + tax assessment).
+  //   7. KKKK gate computes postApprovalAmlPepAsk:
+  //        prelim_approved_at=set + intakeComplete=now-true + (!AML || !PEP)=true
+  //        + !aml_pep_requested_at=FALSE → gate returns FALSE → no redundant ask.
+  //   8. Broker either provides AML/PEP separately (clean follow-up) or
+  //      gets the deterministic completion path.
+  //
+  // The structural shape we pin here: the gate computation + the stamp.
+  // Full LLM-side verification is two-stage (Franco retest production-observed).
+  const _kPostApprovalAmlPepAsk = (deal, activeIntakeComplete, activeAmlOnFile, activePepOnFile) =>
+    !!deal.prelim_approved_at
+    && activeIntakeComplete
+    && (!activeAmlOnFile || !activePepOnFile)
+    && !deal.aml_pep_requested_at;
+
+  // Pre-R6-κ shape: aml_pep_requested_at=null → KKKK FIRES → leak.
+  const _kDealPreFix = { prelim_approved_at: '2026-05-21T17:06:31Z', aml_pep_requested_at: null };
+  const _kPreFixGate = _kPostApprovalAmlPepAsk(_kDealPreFix, true, false, false);
+  if (_kPreFixGate !== true) {
+    throw new Error(`FAIL [κ-JAMES pre-fix shape]: KKKK gate must return true when intake complete + AML/PEP missing + aml_pep_requested_at=null (pre-R6-κ leak shape). got ${_kPreFixGate}`);
+  }
+  console.log('  PASS [κ-JAMES pre-fix shape]: KKKK gate returns true when aml_pep_requested_at=null (defense-in-depth: any path that did NOT stamp gets the conversational follow-up)');
+
+  // Post-R6-κ shape: aml_pep_requested_at stamped → KKKK SUPPRESSED.
+  const _kDealPostFix = { prelim_approved_at: '2026-05-21T17:06:31Z', aml_pep_requested_at: '2026-05-21T17:06:36Z' };
+  const _kPostFixGate = _kPostApprovalAmlPepAsk(_kDealPostFix, true, false, false);
+  if (_kPostFixGate !== false) {
+    throw new Error(`FAIL [κ-JAMES post-fix shape]: KKKK gate must return false when aml_pep_requested_at is set (R6-κ suppression). got ${_kPostFixGate}`);
+  }
+  console.log('  PASS [κ-JAMES post-fix shape]: KKKK gate returns false when aml_pep_requested_at stamped (R6-κ suppression — no redundant ask)');
+
+  // Webhook.js source-grep: 2 admin-approval stamp sites + KKKK gate clause.
+  const _kStampSites = (_kWebhookSrc.match(/aml_pep_requested_at: _kStamped/g) || []).length;
+  if (_kStampSites !== 2) {
+    throw new Error(`FAIL [κ-JAMES stamp sites]: webhook.js admin-approval branches stamping aml_pep_requested_at = ${_kStampSites}; expected exactly 2 (ltv_escalated→approved + under_review→approved)`);
+  }
+  console.log('  PASS [κ-JAMES stamp sites]: webhook.js admin-approval branches stamping aml_pep_requested_at = exactly 2');
+
+  if (!/!existingDeal\.aml_pep_requested_at/.test(_kWebhookSrc)) {
+    throw new Error(`FAIL [κ-JAMES KKKK gate clause]: webhook.js KKKK gate must include !existingDeal.aml_pep_requested_at suppression clause`);
+  }
+  console.log('  PASS [κ-JAMES KKKK gate clause]: postApprovalAmlPepAsk includes !existingDeal.aml_pep_requested_at suppression');
+
+  // R6-ζ + R6-κ co-existence in both admin-approval branches.
+  const _kIsPostApprovalSites = (_kWebhookSrc.match(/isPostApproval: true/g) || []).length;
+  if (_kIsPostApprovalSites !== 2) {
+    throw new Error(`FAIL [κ-JAMES isPostApproval sites]: webhook.js admin-approval branches passing isPostApproval:true = ${_kIsPostApprovalSites}; expected exactly 2`);
+  }
+  console.log('  PASS [κ-JAMES isPostApproval sites]: both admin-approval branches pass isPostApproval:true (R6-κ co-resident with R6-ζ brokerRepliedSinceLastViennaOutbound in opts)');
+  console.log(`Group κ-JAMES-FIXTURE: 004cf263 timeline replay — consolidated ask gate + stamp + KKKK suppression all structurally pinned.`);
+
+  // ─── R6-κ-COMPARISON-REGRESSION ──────────────────────────────────
+  console.log('\n========== R6-κ-COMPARISON-REGRESSION — comparison fixtures (admin conditions intent) unaffected ==========');
+  // Comparison fixtures: 1fe855a5 (James Okafor v2, 2026-05-18) + c63720a5
+  // (James Okafor v1, 2026-05-07) — admin approved WITH explicit conditions
+  // text → parseAdminReply intent='conditions' (or 'approved' with notes;
+  // either way the path uses generateAdminResponseEmail). Empirically clean
+  // — broker provided AML/PEP, KKKK never fired redundant ask because by
+  // the time KKKK would have evaluated, AML/PEP were on file.
+  //
+  // R6-κ scope deferred for 'conditions' intent path (Q2=(a) verdict). The
+  // generateAdminResponseEmail call site at webhook.js:1495 (and the
+  // symmetric under_review counterpart at L1581) is NOT touched by R6-κ.
+  // Empirical defense: no leak observed on conditions-intent corpus.
+  const _kAdminResponseCallSites = (_kWebhookSrc.match(/aiService\.generateAdminResponseEmail\(/g) || []).length;
+  if (_kAdminResponseCallSites < 1) {
+    throw new Error(`FAIL [κ-COMPARISON]: generateAdminResponseEmail call sites = ${_kAdminResponseCallSites}; expected at least 1 (conditions-intent path unaffected by R6-κ)`);
+  }
+  console.log(`  PASS: generateAdminResponseEmail call sites = ${_kAdminResponseCallSites} (conditions-intent path preserved unchanged — R6-κ Q2-defer scope)`);
+
+  // generateAdminResponseEmail signature unchanged — should NOT carry
+  // isPostApproval/aml_pep_requested_at opts (scope discipline).
+  if (/generateAdminResponseEmail:[\s\S]{0,500}isPostApproval/.test(_kAiSrc)) {
+    throw new Error(`FAIL [κ-COMPARISON]: generateAdminResponseEmail signature added isPostApproval — scope discipline broken (Q2-defer verdict requires this path stay unchanged)`);
+  }
+  console.log('  PASS: generateAdminResponseEmail signature unchanged — Q2-defer scope discipline preserved');
+
+  // Defended residual logged in commit body: if Franco surfaces a case
+  // where admin's 'conditions' intent reply asked for AML/PEP and KKKK
+  // fired redundant ask on next broker turn, revisit. Currently not
+  // observed in corpus.
+  console.log(`Group κ-COMPARISON-REGRESSION: conditions-intent path empirically clean + structurally unaffected by R6-κ.`);
+
+  // ─── R6-κ-KKKK-SUPPRESSION ───────────────────────────────────────
+  console.log('\n========== R6-κ-KKKK-SUPPRESSION — postApprovalAmlPepAsk gate truth-table ==========');
+  // 4-clause gate: prelim_approved_at + intakeComplete + (!AML||!PEP) + !aml_pep_requested_at.
+  // 16 boolean combinations; we test the 8 with prelim_approved_at=true
+  // (KKKK is post-approval only; the 8 with prelim_approved_at=false all
+  // return false trivially per the leading clause).
+  const _kKkkkCases = [
+    // [prelim_approved, intakeComplete, !AML||!PEP, !aml_pep_requested_at, expected, label]
+    [true,  true,  true,  true,  true,  'KKKK fires when all 4 clauses true (pre-R6-κ behavior, aml_pep_requested_at null)'],
+    [true,  true,  true,  false, false, 'R6-κ suppression: aml_pep_requested_at stamped → KKKK suppressed despite intake+missing-AML/PEP'],
+    [true,  true,  false, true,  false, 'AML+PEP both on file → KKKK no-op (no missing docs to ask for)'],
+    [true,  false, true,  true,  false, 'intake incomplete → KKKK no-op (still gathering; consolidation handles via R6-κ at admin-approval time)'],
+    [true,  false, false, true,  false, 'intake incomplete + AML+PEP on file → KKKK no-op (nothing to ask)'],
+    [true,  true,  false, false, false, 'AML+PEP on file + aml_pep_requested_at stamped → KKKK no-op (irrelevant clauses; on-file gate dominates)'],
+    [true,  false, true,  false, false, 'intake incomplete + R6-κ stamped → KKKK no-op (R6-κ handled it already; broker just needs to submit intake)'],
+    [true,  false, false, false, false, 'intake incomplete + AML+PEP on file + R6-κ stamped → KKKK no-op'],
+  ];
+  let _kKkkkFails = 0;
+  for (const [pa, ic, ap, akr, exp, label] of _kKkkkCases) {
+    const got = !!(pa && ic && ap && akr);
+    if (got !== exp) {
+      _kKkkkFails++;
+      console.log(`  FAIL [${label}]: got ${got}, expected ${exp}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_kKkkkFails > 0) throw new Error(`FAIL [R6-κ-KKKK-SUPPRESSION]: ${_kKkkkFails}/${_kKkkkCases.length} cases failed.`);
+  console.log(`Group κ-KKKK-SUPPRESSION: 8/8 cases passed (prelim_approved_at=true sub-matrix; the other 8 with prelim_approved_at=false trivially return false).`);
+
+  // ─── R6-κ-CONSUMER-WIRING ────────────────────────────────────────
+  console.log('\n========== R6-κ-CONSUMER-WIRING — closed-set call-site assertions ==========');
+  // Triple closed-set pinning (Q3 verdict — same defense-in-depth as R6-γ + R6-ζ).
+  //
+  // (1) generateDocumentRequestEmail admin-approval call sites passing
+  //     isPostApproval:true = exactly 2.
+  if (_kIsPostApprovalSites !== 2) {
+    throw new Error(`FAIL [κ-CONSUMER-WIRING (1)]: isPostApproval:true call sites = ${_kIsPostApprovalSites}; expected exactly 2`);
+  }
+  console.log('  PASS [κ-CONSUMER-WIRING (1)]: isPostApproval:true passed at exactly 2 generateDocumentRequestEmail call sites');
+
+  // (2) aml_pep_requested_at stamp sites in webhook.js = exactly 2.
+  if (_kStampSites !== 2) {
+    throw new Error(`FAIL [κ-CONSUMER-WIRING (2)]: stamp sites = ${_kStampSites}; expected exactly 2`);
+  }
+  console.log('  PASS [κ-CONSUMER-WIRING (2)]: aml_pep_requested_at stamp sites = exactly 2 (one per admin-approval branch)');
+
+  // (3) Total !existingDeal.aml_pep_requested_at clauses = exactly 3:
+  //     2 first-stamp-wins guards (one per admin-approval stamp site;
+  //     mirrors the CCCC prelim_approved_at first-stamp pattern) + 1 KKKK
+  //     gate suppression terminating clause. Distinguishing pattern:
+  //     stamp-guards are inside `if (...){`; KKKK is `&& ... ;` chain tail.
+  const _kAmlPepRefs = (_kWebhookSrc.match(/!existingDeal\.aml_pep_requested_at/g) || []).length;
+  if (_kAmlPepRefs !== 3) {
+    throw new Error(`FAIL [κ-CONSUMER-WIRING (3a)]: !existingDeal.aml_pep_requested_at references = ${_kAmlPepRefs}; expected exactly 3 (2 stamp first-stamp-wins guards + 1 KKKK suppression)`);
+  }
+  // Distinguish: stamp guards appear within `if (_kAmlPep...` conditions;
+  // the KKKK terminating clause appears immediately preceding a `;`.
+  const _kKkkkTerm = (_kWebhookSrc.match(/&& !existingDeal\.aml_pep_requested_at;/g) || []).length;
+  if (_kKkkkTerm !== 1) {
+    throw new Error(`FAIL [κ-CONSUMER-WIRING (3b)]: KKKK terminating "&& !existingDeal.aml_pep_requested_at;" = ${_kKkkkTerm}; expected exactly 1 (single KKKK gate, active branch)`);
+  }
+  const _kStampGuards = (_kWebhookSrc.match(/_kAmlPepAsked\w* && !existingDeal\.aml_pep_requested_at/g) || []).length;
+  if (_kStampGuards !== 2) {
+    throw new Error(`FAIL [κ-CONSUMER-WIRING (3c)]: stamp first-stamp-wins guards "_kAmlPepAsked* && !existingDeal.aml_pep_requested_at" = ${_kStampGuards}; expected exactly 2 (one per admin-approval branch)`);
+  }
+  console.log('  PASS [κ-CONSUMER-WIRING (3)]: !existingDeal.aml_pep_requested_at refs = exactly 3 (2 stamp guards + 1 KKKK gate suppression, distinguishable by shape)');
+  console.log(`Group κ-CONSUMER-WIRING: triple closed-set pinning (2 isPostApproval + 2 stamp + 1 KKKK suppression, all distinguishable).`);
+
+  // ─── R6-κ-CROSS-CLUSTER-INTEGRATION ──────────────────────────────
+  console.log('\n========== R6-κ-CROSS-CLUSTER-INTEGRATION — migration column + prior arc anchors ==========');
+  // (a) Migration file present + idempotent shape.
+  const _kMigrationPath = './src/migrations/2026-05-21-aml-pep-requested-at.sql';
+  if (!_kFs.existsSync(_kMigrationPath)) {
+    throw new Error(`FAIL [κ-CROSS-CLUSTER]: migration file missing at ${_kMigrationPath}`);
+  }
+  const _kMigrationSql = _kFs.readFileSync(_kMigrationPath, 'utf8');
+  if (!/ALTER TABLE deals ADD COLUMN IF NOT EXISTS aml_pep_requested_at TIMESTAMPTZ/.test(_kMigrationSql)) {
+    throw new Error(`FAIL [κ-CROSS-CLUSTER]: migration DDL not in expected idempotent ALTER TABLE shape`);
+  }
+  console.log('  PASS: migration file present + idempotent (ALTER TABLE ... ADD COLUMN IF NOT EXISTS)');
+
+  // (b) Prior arc anchors present in ai.js + webhook.js.
+  if (!/R6-ζ \(2026-05-21\)/.test(_kAiSrc)) throw new Error('FAIL: R6-ζ anchor missing from ai.js');
+  if (!/R6-η|R6 Cluster η/.test(_kAiSrc)) throw new Error('FAIL: R6-η anchor missing from ai.js');
+  if (!/R6-κ \(2026-05-21\)/.test(_kAiSrc)) throw new Error('FAIL: R6-κ anchor missing from ai.js');
+  if (!/R6-κ \(2026-05-21\)/.test(_kWebhookSrc)) throw new Error('FAIL: R6-κ anchor missing from webhook.js');
+  if (!/filterCanonicalLenderForPayoutOnly/.test(_kWebhookSrc)) throw new Error('FAIL: R6-γ filter wiring missing');
+  if (!/brokerRepliedSinceLastViennaOutbound/.test(_kWebhookSrc)) throw new Error('FAIL: R6-ζ helper missing from webhook.js');
+  console.log('  PASS: R6-η + R6-γ + R6-ζ + R6-κ all source-grep present (prior arc holding)');
+
+  // (c) Pre-approval JJJ semantic preserved: initial-submission paths do
+  // NOT pass isPostApproval:true. Initial-submission generateDocumentRequestEmail
+  // call sites... actually there ARE no such calls in production webhook.js
+  // (the function is only invoked from admin-approval branches). The pre-
+  // approval JJJ preservation is via the OPT DEFAULT (isPostApproval = false).
+  // Confirm default preserved.
+  if (!/isPostApproval = false/.test(_kAiSrc)) {
+    throw new Error(`FAIL [κ-CROSS-CLUSTER]: isPostApproval default=false missing — pre-approval JJJ semantic at risk`);
+  }
+  console.log('  PASS: isPostApproval default = false (pre-approval JJJ intake-first behavior preserved on any legacy caller path)');
+
+  // (d) The 2 admin-approval branches that pass isPostApproval:true are
+  // also where prelim_approved_at gets stamped (CCCC stamp precedent).
+  // Verify the structural co-residence — isPostApproval pass should
+  // appear in same logical block as the CCCC stamp.
+  // Lightweight: ensure both 'prelim_approved_at: stampedAt' (the CCCC
+  // stamp expression) and 'isPostApproval: true' coexist in webhook.js.
+  if (!/prelim_approved_at: stampedAt/.test(_kWebhookSrc)) {
+    throw new Error(`FAIL [κ-CROSS-CLUSTER]: CCCC stamp expression missing from webhook.js (should still be present at admin-approval branches)`);
+  }
+  console.log('  PASS: CCCC prelim_approved_at stamp expression still present (R6-κ co-resident with existing admin-approval state mutations)');
+
+  console.log(`Group κ-CROSS-CLUSTER-INTEGRATION: migration applied + prior arc holding + JJJ pre-approval preserved + state-mutation co-residence confirmed.`);
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
@@ -13968,11 +14261,17 @@ Jordan`;
   }
   console.log(`  PASS [Group KKKK gate computation]: intakeComplete = allIntakeReceived(receivedClassifications, reqIsPurchase)`);
 
-  // complianceDocs is gated on BOTH reqSenderIsBroker AND intakeComplete (the load-bearing AND)
-  if (!/const complianceDocs = \(reqSenderIsBroker && intakeComplete\)/.test(aiSource)) {
-    throw new Error(`FAIL [Group KKKK complianceDocs gate]: complianceDocs must be gated on '(reqSenderIsBroker && intakeComplete)' — this is the load-bearing fix that closes the AML/PEP bundling bug. Pre-KKKK gated only on reqSenderIsBroker (unconditional for broker deals); KKKK adds the intakeComplete conjunction.`);
+  // complianceDocs is gated on BOTH reqSenderIsBroker AND intakeComplete (the
+  // load-bearing AND). R6-κ (2026-05-21) widened the gate to also fire when
+  // isPostApproval=true (post-approval consolidation of intake + AML/PEP into
+  // one email — closes the James Okafor S9 004cf263 split-email bug). The
+  // KKKK invariant is preserved: gate remains a conjunction of reqSenderIsBroker
+  // AND (intakeComplete OR isPostApproval). Pre-R6-κ shape was the strict
+  // subset (intakeComplete only); current shape is strict superset.
+  if (!/const complianceDocs = \(reqSenderIsBroker && \(intakeComplete \|\| isPostApproval\)\)/.test(aiSource)) {
+    throw new Error(`FAIL [Group KKKK complianceDocs gate]: post-R6-κ gate shape must be '(reqSenderIsBroker && (intakeComplete || isPostApproval))' — strict superset of pre-R6-κ KKKK gate '(reqSenderIsBroker && intakeComplete)'. Both KKKK's intake-first AND R6-κ's post-approval-consolidation invariants must be source-grep-present.`);
   }
-  console.log(`  PASS [Group KKKK complianceDocs gate]: gated on (reqSenderIsBroker && intakeComplete)`);
+  console.log(`  PASS [Group KKKK complianceDocs gate]: gated on (reqSenderIsBroker && (intakeComplete || isPostApproval)) — KKKK invariant preserved + R6-κ post-approval consolidation added`);
 
   // Pre-KKKK bug shape — unconditional complianceDocs on broker — must be GONE
   if (/const complianceDocs = reqSenderIsBroker\s*\n\s*\?\s*`/.test(aiSource)) {

@@ -1471,6 +1471,15 @@ ${draftEmail}
           // since Vienna's last outbound by construction. Signal computed
           // uniformly to preserve the structural pattern.
           const _zRepliedPrelim = brokerRepliedSinceLastViennaOutbound(dealMessages);
+          // R6-κ (2026-05-21): post-approval gate. isPostApproval=true here
+          // by construction (admin just stamped prelim_approved_at above —
+          // or it was already stamped from a prior approval cycle). Drives
+          // ai.js complianceDocs consolidation: intake + AML/PEP asked in
+          // ONE email when both categories missing. Stamp aml_pep_requested_at
+          // below if AML or PEP wasn't already on file (Q1 stamp-condition).
+          const _kAmlOnFile = existingDocs.some(d => d.classification === 'aml');
+          const _kPepOnFile = existingDocs.some(d => d.classification === 'pep');
+          const _kAmlPepAsked = !_kAmlOnFile || !_kPepOnFile;
           const docRequestEmail = await aiService.generateDocumentRequestEmail(
             existingDeal.extracted_data,
             existingDeal.ownership_type,
@@ -1478,9 +1487,18 @@ ${draftEmail}
             existingDeal.has_pnw_statement,
             existingDocs,
             dealMessages,
-            { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim }
+            { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim, isPostApproval: true }
           );
           await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
+          // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at
+          // precedents. Stamp only when AML/PEP was actually included in the
+          // consolidated request (Q1 verdict — semantic alignment).
+          if (_kAmlPepAsked && !existingDeal.aml_pep_requested_at) {
+            const _kStampedAt = new Date().toISOString();
+            await dealsService.update(existingDeal.id, { aml_pep_requested_at: _kStampedAt });
+            existingDeal.aml_pep_requested_at = _kStampedAt;
+            console.log(`R6-κ: aml_pep_requested_at stamped (ltv_escalated→approved branch; ${!_kAmlOnFile ? 'AML' : ''}${!_kAmlOnFile && !_kPepOnFile ? '+' : ''}${!_kPepOnFile ? 'PEP' : ''} included in consolidated request)`);
+          }
         } else if (intent === 'rejected') {
           console.log('Deal rejected by admin — generating draft rejection');
           // Group RRRR (S8.3): propagate admin's stated decline reason to the
@@ -1539,6 +1557,15 @@ ${draftEmail}
             console.log('Preliminary approval by admin — generating draft doc request for remaining items');
             // R6-ζ (2026-05-21): admin-approval branch → signal=false by construction.
             const _zRepliedPrelimPartial = brokerRepliedSinceLastViennaOutbound(dealMessages);
+            // R6-κ (2026-05-21): post-approval gate. James S9 (004cf263)
+            // empirical fixture hit this branch — admin "approved" plain,
+            // intake + AML/PEP both missing, pre-R6-κ split into two emails.
+            // isPostApproval=true here drives ai.js complianceDocs
+            // consolidation; stamp aml_pep_requested_at when AML/PEP was
+            // actually included (Q1 stamp-condition: !amlOnFile || !pepOnFile).
+            const _kAmlOnFilePartial = existingDocs.some(d => d.classification === 'aml');
+            const _kPepOnFilePartial = existingDocs.some(d => d.classification === 'pep');
+            const _kAmlPepAskedPartial = !_kAmlOnFilePartial || !_kPepOnFilePartial;
             const docRequestEmail = await aiService.generateDocumentRequestEmail(
               existingDeal.extracted_data,
               existingDeal.ownership_type,
@@ -1546,9 +1573,16 @@ ${draftEmail}
               existingDeal.has_pnw_statement,
               existingDocs,
               dealMessages,
-              { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial }
+              { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial, isPostApproval: true }
             );
             await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
+            // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at.
+            if (_kAmlPepAskedPartial && !existingDeal.aml_pep_requested_at) {
+              const _kStampedAtPartial = new Date().toISOString();
+              await dealsService.update(existingDeal.id, { aml_pep_requested_at: _kStampedAtPartial });
+              existingDeal.aml_pep_requested_at = _kStampedAtPartial;
+              console.log(`R6-κ: aml_pep_requested_at stamped (under_review→approved branch; ${!_kAmlOnFilePartial ? 'AML' : ''}${!_kAmlOnFilePartial && !_kPepOnFilePartial ? '+' : ''}${!_kPepOnFilePartial ? 'PEP' : ''} included in consolidated request)`);
+            }
           }
         } else if (intent === 'rejected') {
           console.log('Deal rejected by admin — generating draft rejection');
@@ -2550,9 +2584,16 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         const activeIntakeComplete = allIntakeReceived(activeDocsClassifications, activeIsPurchase);
         const activeAmlOnFile = activeDocsClassifications.includes('aml');
         const activePepOnFile = activeDocsClassifications.includes('pep');
+        // R6-κ (2026-05-21): suppress redundant ask when R6-κ already
+        // consolidated AML/PEP into the admin-approval-time doc request.
+        // aml_pep_requested_at stamped by both admin-approval branches at
+        // L1496 + L1582; null otherwise → KKKK fires normally for any path
+        // that did not go through R6-κ's consolidation (defense-in-depth,
+        // includes the deferred 'conditions' intent path per Q2 verdict).
         const postApprovalAmlPepAsk = !!existingDeal.prelim_approved_at
           && activeIntakeComplete
-          && (!activeAmlOnFile || !activePepOnFile);
+          && (!activeAmlOnFile || !activePepOnFile)
+          && !existingDeal.aml_pep_requested_at;
 
         // Group OOOO (S6.1): pre-approval enumeration of items blocking the
         // willReview gate. JS-computed signal → generateBrokerResponse's
