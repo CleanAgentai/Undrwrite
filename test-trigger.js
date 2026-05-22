@@ -9136,6 +9136,295 @@ Lender:
   console.log('Group λ-JAMES-FIXTURE-LIVE-RETEST: deferred-post-deploy verification logged for Franco retest cycle.');
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER β-A — extractFromLoanApplication canonical-fields extractor
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-β-A (Page-1 annotation extractor for
+  // loan_application classification).
+  //   β-EXTRACTOR-MATRIX: 6-case truth-table on extractFromLoanApplication
+  //   β-RYAN-FIXTURE: real-Postmark replay (c56c2a0f) — load-bearing
+  //   β-LTV-CASCADE: combined-LTV → shouldEscalateOnAnyLtv path fires
+  //     when all three canonical-fields populated
+  //   β-PER-DOC-WIRING: loan_application case added to extractCanonicalFields
+  //     per-doc switch + extractor exported
+  //   β-CROSS-FIXTURE-CONVENTION: 3 additional production loan_app fixtures
+  //     extract correctly (Sandra/Ethan/Kevin)
+  //   β-CROSS-CLUSTER-INTEGRATION: full prior arc + R5-B-1 aggregating
+  //     wrapper composes with new extractor (Deal Snapshot cascade closure)
+  const _bCf = require('./src/services/canonical-fields');
+  const { extractFromLoanApplication: _bExtract } = _bCf;
+  const _bEngine = require('./src/services/discrepancy-engine');
+
+  console.log('\n========== R6-β-EXTRACTOR-MATRIX — extractFromLoanApplication truth-table ==========');
+  const _bMatrix = [
+    {
+      label: 'Ryan c56c2a0f shape: first Page-1 annotation $68,000',
+      text: 'LOAN APPLICATION FORM\nstatic stuff\n=== Form fields and annotations (extracted via pdf-lib) ===\n[Page 1 annotation] $68,000\n[Page 1 annotation] 10.99%\n[Page 1 annotation] 12 months\n',
+      expect: { requested_loan_amount: 68000 },
+    },
+    {
+      label: 'Derek dce308c8 shape: bare digits without leading $',
+      text: '=== annotations ===\n[Page 1 annotation] 110,000\n[Page 1 annotation] Business working capital\n',
+      expect: { requested_loan_amount: 110000 },
+    },
+    {
+      label: 'Empty text → null',
+      text: '',
+      expect: { requested_loan_amount: null },
+    },
+    {
+      label: 'No Page-1 annotations → null',
+      text: 'LOAN APPLICATION FORM\nstatic text only\n',
+      expect: { requested_loan_amount: null },
+    },
+    {
+      label: 'First Page-1 annotation is text, second is money → extracts money (permissive per Q1 verdict)',
+      text: '=== annotations ===\n[Page 1 annotation] Broker Name Field\n[Page 1 annotation] $68,000\n',
+      expect: { requested_loan_amount: 68000 },
+    },
+    {
+      label: 'Sanity bound: $500 below floor → null (rejects mis-extraction)',
+      text: '=== annotations ===\n[Page 1 annotation] $500\n',
+      expect: { requested_loan_amount: null },
+    },
+    {
+      label: 'Sanity bound: $5,000 at floor → 5000 (passes)',
+      text: '=== annotations ===\n[Page 1 annotation] $5,000\n',
+      expect: { requested_loan_amount: 5000 },
+    },
+    {
+      label: 'Sanity bound: $2,000,000 at ceiling → 2000000 (passes)',
+      text: '=== annotations ===\n[Page 1 annotation] $2,000,000\n',
+      expect: { requested_loan_amount: 2000000 },
+    },
+    {
+      label: 'Sanity bound: $5,000,000 above ceiling → null (rejects mis-extraction)',
+      text: '=== annotations ===\n[Page 1 annotation] $5,000,000\n',
+      expect: { requested_loan_amount: null },
+    },
+  ];
+  let _bMatrixFails = 0;
+  for (const c of _bMatrix) {
+    const r = _bExtract({ text: c.text });
+    if (r.requested_loan_amount !== c.expect.requested_loan_amount) {
+      _bMatrixFails++;
+      console.log(`  FAIL: ${c.label}`);
+      console.log(`    expected: ${JSON.stringify(c.expect.requested_loan_amount)}`);
+      console.log(`    got:      ${JSON.stringify(r.requested_loan_amount)}`);
+    } else {
+      console.log(`  PASS: ${c.label}`);
+    }
+  }
+  if (_bMatrixFails > 0) throw new Error(`FAIL [R6-β-EXTRACTOR-MATRIX]: ${_bMatrixFails}/${_bMatrix.length} cases failed.`);
+  console.log(`Group β-EXTRACTOR-MATRIX: ${_bMatrix.length}/${_bMatrix.length} cases pass.`);
+
+  console.log('\n========== R6-β-RYAN-FIXTURE — real-Postmark replay (LOAD-BEARING) ==========');
+  // Synthesized minimal PDF text shape from Ryan Callahan c56c2a0f's actual
+  // loan application annotation block (verbatim grep — lines 261-276).
+  const _bRyanText = `LOAN APPLICATION FORM
+Loan Details
+Requested loan amount: $
+Use of funds:
+
+=== Form fields and annotations (extracted via pdf-lib) ===
+[Page 1 annotation] $68,000
+[Page 1 annotation] 10.99%
+[Page 1 annotation] 12 months
+[Page 1 annotation] Debt consolidation and home improvements
+[Page 1 annotation] Second Mortgage
+[Page 1 annotation] Ryan
+[Page 1 annotation] Callahan
+[Page 1 annotation] $97,500
+[Page 2 annotation] BMO — First Mortgage
+[Page 2 annotation] $545,000`;
+  const _bRyanExtract = _bExtract({ text: _bRyanText });
+  if (_bRyanExtract.requested_loan_amount !== 68000) {
+    throw new Error(`FAIL [β-RYAN-FIXTURE]: expected loan_amount=68000, got ${_bRyanExtract.requested_loan_amount}`);
+  }
+  // Now run through extractCanonicalFields end-to-end.
+  const _bRyanCm = _bCf.extractCanonicalFields(
+    "Hi Vienna, I'm Marcus Fitzpatrick. Ryan's property appraised at $545,000.",
+    [
+      { file_name: 'LoanApplication_Ryan_Callahan.pdf', classification: 'loan_application', text: _bRyanText },
+    ],
+    {}
+  );
+  const _bRyanLoanTuples = (_bRyanCm.requested_loan_amount || []).filter(t => t.source.includes('Ryan_Callahan'));
+  if (_bRyanLoanTuples.length !== 1 || _bRyanLoanTuples[0].value !== 68000) {
+    throw new Error(`FAIL [β-RYAN-FIXTURE]: extractCanonicalFields didn't produce doc-source tuple. Got: ${JSON.stringify(_bRyanCm.requested_loan_amount)}`);
+  }
+  console.log(`  PASS: extractFromLoanApplication on Ryan text → 68000`);
+  console.log(`  PASS: extractCanonicalFields produces requested_loan_amount=[{value:68000, source:'LoanApplication_Ryan_Callahan.pdf'}] (canonical_map doc-side tuple)`);
+  console.log(`Group β-RYAN-FIXTURE: production-shape extraction end-to-end pinned.`);
+
+  console.log('\n========== R6-β-LTV-CASCADE — combined-LTV → shouldEscalateOnAnyLtv path ==========');
+  // Uses ACTUAL Marcus/Ryan c56c2a0f production email body (informal
+  // "Appraised at $545,000" phrasing) verbatim from pg-pooler grep — NOT
+  // synthesized "Property Value: $X" format. End-to-end Marcus/Ryan
+  // closure depends on BOTH R6-β-A pieces: extractFromLoanApplication
+  // (new doc-side extractor) AND the email-body regex widening
+  // (Appraised\s+(?:Value|at) alternation) catching "Appraised at".
+  //
+  // Cascade dependencies:
+  //   - email body has "Appraised at $545,000" → subject_property_market_value
+  //     (R6-β-A email-body widening)
+  //   - loan_application PDF has $68,000 → requested_loan_amount (R6-β-A
+  //     new doc-side extractor)
+  //   - PNW PDF has BMO — First Mortgage / $385,000 →
+  //     existing_first_mortgage_balance (R4-RESIDUAL-2 — existing)
+  // Combined LTV = (68000 + 385000) / 545000 = ~83.1% > 80 threshold →
+  // escalation fires.
+  const _bRyanPnwText = `PERSONAL NET WORTH STATEMENT
+=== annotations ===
+[Page 2 annotation] BMO — First Mortgage (2847 Whitemud Dr NW)
+[Page 2 annotation] $385,000`;
+  const _bRyanProductionEmailBody = `Hi Vienna,
+
+I'm Marcus Fitzpatrick with Bluepoint Mortgage Partners (Lic. #MB562034).
+I'd like to submit a second mortgage application for my client Ryan
+Callahan on his Edmonton property at 2847 Whitemud Drive NW. Appraised at
+$545,000. He's looking to consolidate some debt and fund home improvements.
+
+Please find attached:
+   - Completed Loan Application
+   - Personal Net Worth Statement
+   - Appraisal (Edmonton Appraisal Group, April 27, 2026)
+   - Credit Bureau
+   - 2025 T4
+
+Let me know what else you need!
+
+Marcus Fitzpatrick
+Bluepoint Mortgage Partners Lic. #MB562034`;
+  const _bRyanEndToEndCm = _bCf.extractCanonicalFields(
+    _bRyanProductionEmailBody,
+    [
+      { file_name: 'LoanApplication_Ryan_Callahan.pdf', classification: 'loan_application', text: _bRyanText },
+      { file_name: 'PNW_Statement_Ryan_Callahan.pdf', classification: 'pnw_statement', text: _bRyanPnwText },
+    ],
+    {}
+  );
+  // R6-β-A email-body widening pin: subject_property_market_value extracted from
+  // "Appraised at $545,000" prose (not formal "Property Value: $X" label).
+  const _bValTuples = _bRyanEndToEndCm.subject_property_market_value || [];
+  if (_bValTuples.length === 0 || !_bValTuples.some(t => t.value === 545000)) {
+    throw new Error(`FAIL [β-LTV-CASCADE]: email-body widening missing — "Appraised at $545,000" should populate subject_property_market_value. Got: ${JSON.stringify(_bValTuples)}`);
+  }
+  // computeCombinedLtv returns an OBJECT { combined_ltv_percent, components }
+  // per discrepancy-engine.js:298 — extract the percent field for numeric checks.
+  const _bCombinedLtvResult = _bEngine.computeCombinedLtv(_bRyanEndToEndCm);
+  const _bCombinedLtv = _bCombinedLtvResult ? _bCombinedLtvResult.combined_ltv_percent : null;
+  if (_bCombinedLtv == null || _bCombinedLtv < 80 || _bCombinedLtv > 90) {
+    throw new Error(`FAIL [β-LTV-CASCADE]: computeCombinedLtv returned ${JSON.stringify(_bCombinedLtvResult)}; expected combined_ltv_percent ~83.1% (combined > 80 threshold). canonical_map: ${JSON.stringify({loan: _bRyanEndToEndCm.requested_loan_amount, bal: _bRyanEndToEndCm.existing_first_mortgage_balance, val: _bRyanEndToEndCm.subject_property_market_value})}`);
+  }
+  const _bShouldEscalate = _bEngine.shouldEscalateOnAnyLtv({
+    standaloneLtv: null,  // Marcus submission didn't include standalone-LTV figure in email body
+    combinedLtv: _bCombinedLtv,
+    standaloneThreshold: 80,
+    combinedThreshold: _bEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
+  });
+  if (!_bShouldEscalate) {
+    throw new Error(`FAIL [β-LTV-CASCADE]: shouldEscalateOnAnyLtv returned false despite combined LTV ${_bCombinedLtv}% > threshold ${_bEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT}%`);
+  }
+  console.log(`  PASS: end-to-end canonical-map → computeCombinedLtv = ${_bCombinedLtv.toFixed(1)}% (loan 68k + balance 385k / value 545k)`);
+  console.log(`  PASS: shouldEscalateOnAnyLtv(combined=${_bCombinedLtv.toFixed(1)}%) = true (>80% threshold)`);
+  console.log(`Group β-LTV-CASCADE: extraction → LTV-gate firing path end-to-end pinned. Vienna's msg[1] now correctly escalates on Marcus/Ryan-shape initial submissions.`);
+
+  console.log('\n========== R6-β-PER-DOC-WIRING — extractCanonicalFields switch case + export ==========');
+  const _bCfSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/canonical-fields.js'), 'utf8');
+  // (a) Per-doc switch contains loan_application case.
+  if (!/} else if \(cls === 'loan_application'\)/.test(_bCfSrc)) {
+    throw new Error('FAIL [β-PER-DOC-WIRING]: extractCanonicalFields per-doc switch missing loan_application case.');
+  }
+  // (b) Switch case calls extractFromLoanApplication.
+  if (!/cls === 'loan_application'[\s\S]{0,800}extractFromLoanApplication/.test(_bCfSrc)) {
+    throw new Error('FAIL [β-PER-DOC-WIRING]: loan_application switch case must call extractFromLoanApplication.');
+  }
+  // (c) Switch case pushes requested_loan_amount with doc.file_name as source.
+  if (!/cls === 'loan_application'[\s\S]{0,800}push\('requested_loan_amount', r\.requested_loan_amount, doc\.file_name\)/.test(_bCfSrc)) {
+    throw new Error('FAIL [β-PER-DOC-WIRING]: switch case must push requested_loan_amount with doc.file_name source.');
+  }
+  // (d) extractFromLoanApplication exported.
+  if (!/extractFromLoanApplication,/.test(_bCfSrc)) {
+    throw new Error('FAIL [β-PER-DOC-WIRING]: extractFromLoanApplication must be exported.');
+  }
+  console.log('  PASS: per-doc switch has loan_application case calling extractFromLoanApplication');
+  console.log('  PASS: switch case pushes requested_loan_amount with doc.file_name as source');
+  console.log('  PASS: extractFromLoanApplication exported from canonical-fields.js');
+  console.log('Group β-PER-DOC-WIRING: wiring structurally pinned.');
+
+  console.log('\n========== R6-β-CROSS-FIXTURE-CONVENTION — loan_application + email-body regex variants ==========');
+  // (a) loan_application convention across 3 additional production fixtures.
+  const _bCrossFixtures = [
+    { label: 'Sandra Fletcher (Bayside Lending, S8)', text: '[Page 1 annotation] $68,000\n[Page 1 annotation] 10.99%\n', expect: 68000 },
+    { label: 'Ethan Broussard (Ridgeline, S7)', text: '[Page 1 annotation] $74,000\n[Page 1 annotation] 10.75%\n', expect: 74000 },
+    { label: 'Kevin Tran (Sterling, S6)', text: '[Page 1 annotation] $72,000\n[Page 1 annotation] 10.75%\n', expect: 72000 },
+  ];
+  let _bCrossFails = 0;
+  for (const { label, text, expect } of _bCrossFixtures) {
+    const r = _bExtract({ text });
+    if (r.requested_loan_amount !== expect) {
+      _bCrossFails++;
+      console.log(`  FAIL: ${label} — expected ${expect}, got ${r.requested_loan_amount}`);
+    } else {
+      console.log(`  PASS: ${label} → ${r.requested_loan_amount}`);
+    }
+  }
+  // (b) Email-body Appraised-at-widening: positive + over-fire-negative cases.
+  // Uses extractCanonicalFields entry point (calls extractFromEmailBody internally).
+  const _bEmailBodyCases = [
+    // Positive — formal label (existing regex, regression-protected)
+    { label: 'formal "Property Value: $545,000"', body: 'Property Value: $545,000', expect: 545000 },
+    { label: 'formal "Appraised Value: $545,000"', body: 'Appraised Value: $545,000', expect: 545000 },
+    { label: 'formal "Purchase Price: $545,000"', body: 'Purchase Price: $545,000', expect: 545000 },
+    // Positive — NEW informal phrasing (R6-β-A widening)
+    { label: 'informal "Appraised at $545,000" (Marcus/Ryan shape)', body: 'Property at 2847 Whitemud Drive NW. Appraised at $545,000.', expect: 545000 },
+    { label: 'informal "appraised at $700,000" (lowercase)', body: 'condo unit appraised at $700,000', expect: 700000 },
+    // Negative — over-fire protection: "appraised at" with no following $-amount
+    { label: 'NEGATIVE: "appraised at the local market rate" (no digits)', body: 'The property is appraised at the local market rate for the area.', expect: null },
+    { label: 'NEGATIVE: "Appraised at fair market" (no digits)', body: 'Appraised at fair market value', expect: null },
+  ];
+  let _bEbFails = 0;
+  for (const { label, body, expect } of _bEmailBodyCases) {
+    const cm = _bCf.extractCanonicalFields(body, [], {});
+    const tuples = cm.subject_property_market_value || [];
+    const actual = tuples.length > 0 ? tuples[0].value : null;
+    if (actual !== expect) {
+      _bEbFails++;
+      console.log(`  FAIL: ${label} — expected ${expect}, got ${actual}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+  }
+  if (_bCrossFails + _bEbFails > 0) throw new Error(`FAIL [β-CROSS-FIXTURE-CONVENTION]: ${_bCrossFails} loan_application + ${_bEbFails} email-body cases failed.`);
+  console.log(`Group β-CROSS-FIXTURE-CONVENTION: loan_application convention + email-body regex variants (formal + informal + over-fire negatives) validated.`);
+
+  console.log('\n========== R6-β-CROSS-CLUSTER-INTEGRATION — prior arc + R5-B-1 aggregating wrapper composes ==========');
+  const _bWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  if (!/_r5IsPrelimReviewDraft|_r5IsClosingDraft/.test(_bWebhookSrc)) throw new Error('FAIL: R5-A+G anchor missing');
+  if (!/prelim_approved_at[\s\S]{0,500}completion-handoff/.test(_bWebhookSrc)) throw new Error('FAIL: R5-B-3 anchor missing');
+  if (!/ignoredSenders\.some/.test(_bWebhookSrc)) throw new Error('FAIL: R5-F-4 anchor missing');
+  if (!/runDiscrepancyDetectionAggregated/.test(_bWebhookSrc)) throw new Error('FAIL: R5-B-1 anchor missing');
+  if (!/shouldHoldPrelimForDiscrepancy/.test(_bWebhookSrc)) throw new Error('FAIL: R5-B-2 anchor missing');
+  if (!/selectGreetingFirstName/.test(_bWebhookSrc)) throw new Error('FAIL: R5-E anchor missing');
+  if (!/was_in_identity_clash: true/.test(_bWebhookSrc)) throw new Error('FAIL: R5-D-B anchor missing');
+  // R5-B-1 wrapper uses extractCanonicalFields under the hood; with R6-β-A's
+  // new loan_application handler, multi-msg aggregated canonical_map also gets
+  // doc-side loan_amount tuples populated. Cascade-closure of R6-δ Deal
+  // Snapshot loan_amount TBD manifestation on S5/S6/S8 fixtures.
+  const _bAggCm = _bEngine.extractCanonicalFieldsAggregated(
+    [{ body: 'Hi Vienna — Ryan submission. Appraised $545,000.', subject: 'Submission' }],
+    [{ file_name: 'LoanApplication_Ryan_Callahan.pdf', classification: 'loan_application', text: _bRyanText }],
+    { emailSubject: 'Submission' }
+  );
+  const _bAggLoanTuples = _bAggCm.requested_loan_amount || [];
+  if (_bAggLoanTuples.length === 0 || !_bAggLoanTuples.some(t => t.value === 68000)) {
+    throw new Error(`FAIL [β-CROSS-CLUSTER]: R5-B-1 aggregating wrapper doesn't pick up R6-β-A doc-side loan tuple. Got: ${JSON.stringify(_bAggLoanTuples)}`);
+  }
+  console.log('  PASS: full prior R5+R6 arc anchors source-grep-present');
+  console.log('  PASS: R5-B-1 runDiscrepancyDetectionAggregated picks up R6-β-A doc-side loan_amount tuple (Deal Snapshot cascade closure on R6-δ partial scope)');
+  console.log('Group β-CROSS-CLUSTER-INTEGRATION: prior arc holding + R6-δ partial closure validated via aggregated canonical_map path.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin

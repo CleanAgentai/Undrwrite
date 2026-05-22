@@ -320,8 +320,16 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   // Loan amount: `*Mortgage Amount Requested:* $X` or similar
   const loanM = emailBody.match(/\*?\s*(?:Mortgage\s+Amount\s+Requested|Loan\s+Amount\s+Requested|Mortgage\s+Amount|Loan\s+Amount)\s*:?\s*\*?\s*\$?\s*([\d,]+)/i);
   if (loanM) out.requested_loan_amount = normalizeMoney(loanM[1]);
-  // Appraised value (broker-stated): `*Appraised Value:* $X`
-  const apprM = emailBody.match(/\*?\s*(?:Appraised\s+Value|Property\s+Value|Purchase\s+Price)\s*:?\s*\*?\s*\$?\s*([\d,]+)/i);
+  // Appraised value (broker-stated): `*Appraised Value:* $X` (formal-template
+  // shape) OR `Appraised at $X` (informal prose, Marcus/Ryan c56c2a0f R6-β-A
+  // empirical addition — "Appraised at $545,000" without the "Value:" label).
+  // R6-β-A widening discipline: same shape as R5-C-a widening in R6-η and
+  // DOCUMENTS_INCLUDED_BLOCK_PATTERN widening in R6-ε — strict superset of
+  // the previous regex via alternation (formal "Value" branch unchanged;
+  // new "at" branch catches informal phrasing). Cascade-closes R6-δ
+  // property_value TBD on informal-phrasing fixtures + enables R6-β LTV
+  // CASCADE end-to-end on Marcus/Ryan.
+  const apprM = emailBody.match(/\*?\s*(?:Appraised\s+(?:Value|at)|Property\s+Value|Purchase\s+Price)\s*:?\s*\*?\s*\$?\s*([\d,]+)/i);
   if (apprM) out.subject_property_market_value = normalizeMoney(apprM[1]);
   return out;
 };
@@ -553,6 +561,68 @@ const extractFromPnwStatement = (doc) => {
   return out;
 };
 
+// ─── Loan application — requested_loan_amount from Page-1 form annotation (R6-β-A) ───
+//
+// Franco's R5 S4 Bug 1 (Marcus Fitzpatrick / Ryan Callahan c56c2a0f) — Vienna
+// failed to escalate LTV>80% at initial submission because canonical_map
+// didn't have requested_loan_amount. Email-body extraction (the only path
+// pre-R6-β-A) returned empty because the broker's email body said only "a
+// second mortgage application... Appraised at $545,000" — no loan figure.
+// The loan application PDF page-1 annotation has "$68,000" but no per-doc
+// extractor handled the loan_application classification. _r1InitialCombined
+// Ltv returned null → escalation gate never fired → Vienna welcomed the
+// broker conversationally + asked for missing docs (msg[1]) → Franco saw
+// this as a "wrong workflow ordering" bug. Actual root: extraction gap.
+//
+// Real-corpus convention (7-fixture verification: Ryan/Sandra/Ethan/Kevin/
+// Patricia/James/Derek): the FIRST `[Page 1 annotation]` in the PML loan
+// application template is the requested loan amount. 6 of 7 fixtures have
+// `$<amount>` with leading `$` (e.g. `$68,000`); 1 of 7 (Derek dce308c8)
+// has bare `110,000` without `$`. The regex allows optional leading `$`.
+//
+// Sanity bound: $5,000-$2,000,000 per verdict. Conservative around the
+// observed corpus range ($68k-$415k). Catches obvious wrong-field
+// extractions (year "2026", percentage "10.99", etc.) without constraining
+// legitimate Franco-business loan amounts. If a future deal legitimately
+// hits outside this range, narrow at that fixture moment per standing
+// playbook (don't anticipate edge cases).
+//
+// Cross-cluster cascade closure: this extractor populates canonical_map.
+// requested_loan_amount from doc-side, which:
+//   (1) Closes R6-β primary symptom (LTV ordering on Marcus/Ryan-shape
+//       initial submissions — combined-LTV gate fires when all three
+//       canonical fields populate from email + loan_app + PNW)
+//   (2) Closes R6-δ partial scope (loan_amount TBD in Deal Snapshot per
+//       S5/S6/S8 fixtures — Snapshot reads from canonical_map). R6-δ
+//       residual scope unchanged: City/Province / Loan Term / LTV TBD
+//       remain, separate cycle.
+// R5-D composition: this extractor fires on the standard PML loan app
+// template. If a broker submits their OWN form (not PML's template),
+// extractor likely returns null → R5-D Surface B's post-clash routing
+// through processInitialEmail handles the own-form acknowledgment +
+// PNW template attachment. Two clusters compose cleanly; no interaction.
+const extractFromLoanApplication = (doc) => {
+  const text = doc?.text || doc?.extracted_data?.text || '';
+  const out = { requested_loan_amount: null };
+  if (!text) return out;
+  // First Page-1 annotation matching money shape (optional `$`, digits with
+  // commas, optional decimal). The `m` flag makes `$` match line-end so we
+  // anchor on the FULL annotation line (no spurious text trailing). Anchor
+  // on first match in the doc — Page-1 annotations come before Page-2+ in
+  // PDF text-extraction order.
+  const annM = text.match(/\[Page\s+1\s+annotation\]\s*\$?\s*([\d,]+(?:\.\d{2})?)\s*$/m);
+  if (annM) {
+    const amount = normalizeMoney(annM[1]);
+    // Sanity bound per R6-β-A verdict: $5,000-$2,000,000. Catches obvious
+    // wrong-field extractions (years, percentages, IDs); conservative
+    // around observed corpus range ($68k-$415k).
+    if (amount != null && amount >= 5000 && amount <= 2000000) {
+      out.requested_loan_amount = amount;
+    }
+  }
+  return out;
+};
+
 // ─── AML / PEP forms — Full Legal Name only (borrower address out of scope) ───
 
 const extractFromAmlPep = (doc) => {
@@ -665,6 +735,15 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     } else if (cls === 'aml' || cls === 'pep') {
       const r = extractFromAmlPep(doc);
       push('primary_borrower_full_name', r.primary_borrower_full_name, doc.file_name);
+    } else if (cls === 'loan_application') {
+      // R6-β-A (2026-05-21): Page-1 annotation extraction of requested_loan_amount.
+      // Closes the extraction gap that caused Marcus/Ryan c56c2a0f's initial LTV
+      // escalation to never fire (Franco's S4 Bug 1, mis-framed as workflow ordering).
+      // Also cascades to close loan_amount TBD in Deal Snapshot on S5/S6/S8 fixtures
+      // (R6-δ partial closure). See extractFromLoanApplication header for full
+      // diagnosis + corpus convention + cross-cluster cascade notes.
+      const r = extractFromLoanApplication(doc);
+      push('requested_loan_amount', r.requested_loan_amount, doc.file_name);
     } else if (cls === 'pnw_statement') {
       // R4-RESIDUAL-2: PNW-only existing-first-mortgage fallback. Page-2
       // annotation anchor `<Lender> — First Mortgage` + immediately-following
@@ -717,6 +796,7 @@ module.exports = {
   extractFromCreditBureau,
   extractFromAmlPep,
   extractFromPnwStatement,
+  extractFromLoanApplication,
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,
   tokenizeNameForCompare,
