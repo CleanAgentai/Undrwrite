@@ -1107,6 +1107,64 @@ const enforceReviewBanner = (leadSummaryHtml, bannerText) => {
   return out;
 };
 
+// R6-ζ (2026-05-21): forbidden-non-sequitur-openers prompt block.
+//
+// Shared by generateDocumentRequestEmail + generateBrokerResponse — both are
+// reachable from admin-approval-triggered paths where the broker has NOT
+// replied since Vienna's last outbound. In that case Claude has been observed
+// to open with "Thanks for the quick response!" / "Thanks for the
+// confirmation." / "Thanks for confirming the [exit strategy|approval]" — a
+// structural non-sequitur (no reply existed to thank).
+//
+// Diagnosis. Production corpus (Kevin Tran S6 178d714e, Ethan Broussard S7
+// 533fbd4f, Ethan alt 95a47779, James Okafor c63720a5, Derek Olsen a4ae6cda):
+// every leak fired on an outbound where the previous turn was Vienna's own
+// admin-handoff dispatch and the broker did NOT reply between it and this
+// outbound. The triggering "inbound" was an admin APPROVED reply, not a
+// broker message — but Claude inferred a broker reply existed and opened
+// with thanks-for-reply phrasing.
+//
+// Design. R5-D-Surface-A pattern. JS at the consumer site computes a
+// structured signal (brokerRepliedSinceLastViennaOutbound) by walking the
+// conversation history, then passes it as an opts key. When false, this
+// block is injected into the prompt forbidding the corpus-confirmed
+// non-sequitur opener family. When true, the block is empty — Claude's
+// existing legitimate "Appreciate the quick reply!" / "Thanks for sending
+// those" openers remain permitted.
+//
+// Corpus discipline. The 5 anchor phrases below are the empirically-
+// observed shapes across 5 production deals. Adjacent-but-not-observed
+// variants (e.g. "Thanks for getting back to me") deliberately NOT included
+// — same no-over-spec discipline as R6-η residual (b). Add when Franco
+// surfaces them in production.
+//
+// Permitted shapes (NOT blocked): "Thanks for sending those through" /
+// "Thanks for getting these together" — these acknowledge a broker ACTION
+// (doc submission) that actually happened, not a reply that did not happen.
+// Distinct shape, different semantic.
+//
+// Architectural note. Existing prompt rule (Group XXX / S5.2) already
+// forbids "thanks for the [adj] confirmation" via content-based listing —
+// but Vienna kept emitting it in production. Content-match-in-prompt is
+// insufficient; the structured-signal gate is the authoritative layer.
+const buildForbiddenOpenersBlock = (brokerRepliedSinceLastViennaOutbound) => {
+  if (brokerRepliedSinceLastViennaOutbound) return '';
+  return `
+
+FORBIDDEN NON-SEQUITUR OPENERS (Group R6-ζ — LOAD-BEARING, JS-signal-gated): the broker has NOT sent a reply since Vienna's last outbound on this deal. This turn is triggered by an admin internal action (APPROVED reply or scheduled dispatch), NOT by a broker message. Opening your email with any "thanks for [the/your] [adj] reply / response / confirmation / confirming [the X]" phrasing is a STRUCTURAL NON-SEQUITUR — no such reply exists to thank. Do NOT open with any of the following or close paraphrases:
+- "Thanks for the quick response"
+- "Thanks for the confirmation"
+- "Thanks for confirming the [exit strategy / approval / details / ...]"
+- "Thanks for confirming approval, [Name]"
+- "Perfect — thanks for confirming [...]"
+- "Appreciate the quick reply" / "Appreciate the quick response" / "Appreciate the quick confirmation" (the "appreciate" family is also blocked under this signal)
+- ANY variant of "thanks for the [adjective] (reply | response | confirmation | confirming)" — adj-fillers like quick / prompt / swift / speedy / fast do NOT make the opener valid; the reply itself does not exist
+
+PERMITTED in this state (these acknowledge an actual broker ACTION on a prior turn, not a reply that did not happen): "Thanks for sending those through", "Thanks for getting these together", or simply jumping directly into the substance without a thanks-for-X opener at all.
+
+This block OVERRIDES the prompt's BANNED OPENERS / legitimate-acknowledgement examples elsewhere ("Appreciate the quick reply!" is only permitted when the broker actually just replied — which is NOT the case on this turn).`;
+};
+
 module.exports = {
   // Single Claude call for initial emails — returns both welcome email and deal summary
   processInitialEmail: async (senderName, emailBody, attachments = [], savedDocs = [], hasOwnApplication = false, hasOwnPnw = false, nameCollidesWithAdmin = false, emailSubject = '', opts = {}) => {
@@ -1326,9 +1384,13 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   },
 
   // Conversational broker response — reads full context and responds naturally
-  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '', greetingFirstName = null } = {}) => {
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '', greetingFirstName = null, brokerRepliedSinceLastViennaOutbound = true } = {}) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
+
+      // R6-ζ (2026-05-21): forbidden-non-sequitur-openers block — see
+      // buildForbiddenOpenersBlock docblock at module scope.
+      const forbiddenOpenersBlock = buildForbiddenOpenersBlock(brokerRepliedSinceLastViennaOutbound);
 
       // Group KKKK escalation (S1.1/S2.1/S5.1): when JS detects post-approval +
       // intake-complete + AML/PEP missing, inject an explicit block instructing
@@ -1501,7 +1563,7 @@ You have TWO tasks. Return both using the exact format at the bottom.
 
 === TASK 1: RESPOND TO THE SENDER ===
 
-Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.${postApprovalAmlPepBlock}${stillMissingBlock}
+Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.${postApprovalAmlPepBlock}${stillMissingBlock}${forbiddenOpenersBlock}
 
 PRIORITY ORDER — handle these in order:
 1. ANSWER any questions the sender asked — this is your #1 job. Never ignore a question.
@@ -1967,8 +2029,13 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
 
   // Generate Stage 3 document request email — different checklist for personal vs corporate,
   // and different items for purchase vs refinance
-  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = []) => {
+  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true } = {}) => {
     try {
+      // R6-ζ (2026-05-21): forbidden-non-sequitur-openers block — see
+      // buildForbiddenOpenersBlock docblock at module scope. Admin-approval
+      // branch (webhook.js generateDocumentRequestEmail call sites) is the
+      // primary leak path — Kevin S6 178d714e + Ethan S7 533fbd4f corpus.
+      const forbiddenOpenersBlock = buildForbiddenOpenersBlock(brokerRepliedSinceLastViennaOutbound);
       const receivedClassifications = existingDocs.map(d => d.classification).filter(Boolean);
       // Group MMMM: canonical purchase/refinance signal via dealType.js
       // (single-source-of-truth — no more duplicated /purchas/ regex).
@@ -2091,7 +2158,7 @@ CRITICAL — APPROVAL LANGUAGE & INTERNAL ROUTING:
 - FORBIDDEN APPROVAL PHRASES (do not write any of these in your email): "approved", "approval", "passed review", "looks good", "everything is in order", "thanks for confirming the approval", "for final assessment", "going to underwriting", "final approval and terms", "for final review by our team", "thanks for the quick confirmation", "thanks for the prompt confirmation", "thanks for the speedy confirmation", "thanks for the swift confirmation", "appreciate the quick confirmation", "appreciate the prompt confirmation", or ANY variant matching "thanks for the [adjective] confirmation/confirm" or "appreciate the [adjective] confirmation/confirm" when the broker did not actually confirm something specific (Group XXX, S5.2).
 - FORBIDDEN INTERNAL ROUTING REFERENCES (in your email to the broker): never name "Franco", never reference "the lender rep", "our team", "the underwriters", "internal review", any "review process" phrasing ("the review process", "our review process", "patience with the review", "patience with our review process", "the underwriting process"), any "passing along" phrasing ("passing it along", "passing this along", "passing everything along", "passing the file along", "passing along to..."), "forwarding to", "I'll get this over to", or any specific internal department or person. The broker should know only that the file has been received and is being reviewed.
 - ALLOWED phrasing for next-step communication: "the file is being reviewed", "we're starting on the file", "thanks for sending those through", "I'll be in touch shortly with an update".
-
+${forbiddenOpenersBlock}
 Return only the HTML email body. Do not include a subject line.`,
         }],
       });
@@ -3369,4 +3436,8 @@ ${JSON.stringify(summaryData, null, 2)}`,
   DOCUMENTS_INCLUDED_BLOCK_PATTERN,
   // R4-Bucket-C.7 — broker-signature first-name parser (Marcus collision fix)
   parseBrokerFirstNameFromSignature,
+  // R6-ζ (2026-05-21) — shared forbidden-non-sequitur-openers prompt block
+  // (both generateDocumentRequestEmail + generateBrokerResponse call this
+  // helper; closed-set assertion in harness pins invocation count = 2).
+  buildForbiddenOpenersBlock,
 };

@@ -9803,6 +9803,310 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group γ-CROSS-CLUSTER-INTEGRATION: classification round-trip + prior arc holding + contract anchored.`);
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER ζ — non-sequitur thanks-for-reply openers on admin-triggered outbounds
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-ζ — structured-signal-gated prompt block
+  // forbidding non-sequitur openers. Same R5-D-Surface-A pattern (JS signal
+  // authoritative → prompt-block injection).
+  //
+  // Diagnosis recap. Production corpus (Kevin Tran S6 178d714e + Ethan
+  // Broussard S7 533fbd4f, plus adjacent variants on Ethan alt 95a47779,
+  // James Okafor c63720a5, Derek Olsen a4ae6cda):
+  //   • "Thanks for the quick response!" — Kevin S6 post-approval AML/PEP draft
+  //   • "Thanks for the confirmation." — Ethan S7 post-approval AML/PEP draft
+  //   • "Thanks for confirming the exit strategy." — Ethan alt
+  //   • "Thanks for confirming those details." — James Okafor
+  //   • "Perfect — thanks for confirming the approval!" — Derek Olsen
+  //   • "Thanks for confirming approval, Jason!" — Derek Olsen
+  // All fired on outbounds where the broker had NOT replied since Vienna's
+  // most recent outbound — the trigger was an admin APPROVED reply (or
+  // similar admin internal action), not a broker message. The opener
+  // presumes a broker reply that did not happen.
+  //
+  // Architectural redirect (10th R5/R6 artifact-grounding redirect). Initial
+  // framing was "AML/PEP drafts only via generateBrokerResponse" — corpus
+  // grep showed the primary leak path is generateDocumentRequestEmail
+  // (admin-approval branch L1424 + L1489 in webhook.js); generateBrokerResponse
+  // is the secondary path. Scope expanded to both generators, 4 consumer
+  // sites total.
+  //
+  // Groups:
+  //   ζ-SIGNAL-MATRIX           : truth-table on brokerRepliedSinceLastViennaOutbound
+  //   ζ-KEVIN-FIXTURE           : Kevin S6 178d714e admin-handoff timeline replay
+  //   ζ-ETHAN-FIXTURE           : Ethan S7 533fbd4f admin-handoff timeline replay
+  //   ζ-PERMIT-LEGITIMATE       : broker-submission turn → signal=true → block empty
+  //   ζ-CONSUMER-WIRING         : closed-set call-site assertions (2 + 2 + 2)
+  //   ζ-CROSS-CLUSTER-INTEGRATION : prior arc + cascade-position anchors
+  console.log('\n========== R6-ζ-SIGNAL-MATRIX — brokerRepliedSinceLastViennaOutbound truth-table ==========');
+  const {
+    brokerRepliedSinceLastViennaOutbound: _zHelper,
+  } = require('./src/routes/webhook').__test__ || require('./src/routes/webhook');
+  // The helper is exported on the module's __test__ surface if defined; otherwise
+  // top-level. Tolerate both.
+  // 8 cases:
+  const _zCases = [
+    {
+      label: 'ζ-1: empty history → false (conservative)',
+      msgs: [],
+      expect: false,
+    },
+    {
+      label: 'ζ-2: only outbound (initial Vienna send, no inbound yet) → false',
+      msgs: [{ direction: 'outbound', subject: 'Hi from Vienna' }],
+      expect: false,
+    },
+    {
+      label: 'ζ-3: latest is broker-inbound → true',
+      msgs: [
+        { direction: 'outbound', subject: 'Re: Submission' },
+        { direction: 'inbound', subject: 'Re: Submission — docs attached' },
+      ],
+      expect: true,
+    },
+    {
+      label: 'ζ-4: latest is Vienna outbound (post-admin-handoff, no broker reply) → false [Kevin/Ethan shape]',
+      msgs: [
+        { direction: 'inbound', subject: 'New Submission' },
+        { direction: 'outbound', subject: 'Re: New Submission' },
+        { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — ... — 58.8% LTV' },
+      ],
+      expect: false,
+    },
+    {
+      label: 'ζ-5: admin reply is most recent inbound (admin approval triggered turn) → false (admin skipped, finds prior Vienna outbound)',
+      msgs: [
+        { direction: 'inbound', subject: 'New Submission' },
+        { direction: 'outbound', subject: 'Re: New Submission' },
+        { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Kevin Tran — 58.8% LTV' },
+        { direction: 'inbound', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Tran — 58.8% LTV' },
+      ],
+      expect: false,
+    },
+    {
+      label: 'ζ-6: admin-inbound then broker reply → true (broker reply more recent than admin)',
+      msgs: [
+        { direction: 'outbound', subject: 'Re: New Submission' },
+        { direction: 'inbound', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Tran' },
+        { direction: 'outbound', subject: 'Re: Kevin Tran' }, // Vienna's reply after admin approval
+        { direction: 'inbound', subject: 'Re: Kevin Tran — here are the AML/PEP docs' }, // broker's reply
+      ],
+      expect: true,
+    },
+    {
+      label: 'ζ-7: multiple admin inbounds, no broker inbound between Vienna outbound and walk → false',
+      msgs: [
+        { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — X' },
+        { direction: 'inbound', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — X' },
+        { direction: 'inbound', subject: 'Re: [UPDATED] ACTION REQUIRED: PRELIMINARY Review — X' },
+      ],
+      expect: false,
+    },
+    {
+      label: 'ζ-8: interleaved broker → Vienna → broker → Vienna → admin (Q1-verdict edge case) → false',
+      msgs: [
+        { direction: 'inbound', subject: 'Initial submission' },
+        { direction: 'outbound', subject: 'Re: Initial submission' },
+        { direction: 'inbound', subject: 'Re: Initial submission — clarification on LTV' },
+        { direction: 'outbound', subject: 'Re: Re: Initial submission' },
+        { direction: 'inbound', subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — X' },
+      ],
+      expect: false,
+    },
+  ];
+  let _zMatrixFails = 0;
+  for (const c of _zCases) {
+    const got = _zHelper(c.msgs);
+    if (got !== c.expect) {
+      _zMatrixFails++;
+      console.log(`  FAIL [${c.label}]: got ${got}, expected ${c.expect}`);
+    } else {
+      console.log(`  PASS [${c.label}]`);
+    }
+  }
+  if (_zMatrixFails > 0) throw new Error(`FAIL [R6-ζ-SIGNAL-MATRIX]: ${_zMatrixFails}/${_zCases.length} cases failed.`);
+  console.log(`Group ζ-SIGNAL-MATRIX: ${_zCases.length}/${_zCases.length} cases passed.`);
+
+  // ─── R6-ζ-KEVIN-FIXTURE (LOAD-BEARING) ────────────────────────────
+  console.log('\n========== R6-ζ-KEVIN-FIXTURE — Kevin Tran S6 178d714e admin-handoff timeline (LOAD-BEARING) ==========');
+  // Reconstructed timeline from Supabase corpus pull (scripts/r6zeta-corpus-grep.js):
+  //   1. broker submits initial deal → inbound 'New Submission — Kevin Tran'
+  //   2. Vienna processes → outbound 'Re: New Submission' (welcome + summary)
+  //   3. Vienna dispatches admin → outbound 'ACTION REQUIRED: PRELIMINARY Review — Kevin Minh Tran — 58.8% LTV'
+  //   4. Admin (Franco) approves → inbound 'Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Minh Tran — 58.8% LTV'
+  //   5. Vienna generates AML/PEP doc-request draft → THIS IS THE LEAK SURFACE
+  //      Production-corpus body opened with: "Hi Brendan, Thanks for the quick response! I've reviewed all the documents..."
+  // At step 5, dealMessages contains 1..4. brokerRepliedSinceLastViennaOutbound(dealMessages):
+  //   - walk reverse: msg 4 (admin-inbound, isAdminReplySubject=true → skip)
+  //   - msg 3 (outbound) → return false. Signal=false ✓
+  const _zKevinTimeline = [
+    { direction: 'inbound',  subject: 'New Submission — Kevin Tran — Private Second Mortgage — Calgary' },
+    { direction: 'outbound', subject: 'Re: New Submission — Kevin Tran — Private Second Mortgage — Calgary' },
+    { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Kevin Minh Tran — 58.8% LTV' },
+    { direction: 'inbound',  subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Kevin Minh Tran — 58.8% LTV' },
+  ];
+  if (_zHelper(_zKevinTimeline) !== false) {
+    throw new Error(`FAIL [ζ-KEVIN-FIXTURE]: signal must be false at the AML/PEP-draft generation point — got ${_zHelper(_zKevinTimeline)}`);
+  }
+  console.log('  PASS [ζ-KEVIN structural]: brokerRepliedSinceLastViennaOutbound = false at the leak point (admin approved without broker reply since admin handoff)');
+
+  // Verify the prompt-block-builder fires when signal=false.
+  const _zAi = require('./src/services/ai');
+  const _zBlockOnFalse = _zAi.buildForbiddenOpenersBlock(false);
+  if (!_zBlockOnFalse || _zBlockOnFalse.length === 0) {
+    throw new Error(`FAIL [ζ-KEVIN block]: buildForbiddenOpenersBlock(false) must return non-empty content`);
+  }
+  // Block must explicitly ban the Kevin S6 leak shape.
+  if (!/Thanks for the quick response/.test(_zBlockOnFalse)) {
+    throw new Error(`FAIL [ζ-KEVIN block]: block must explicitly ban "Thanks for the quick response" (Kevin S6 production opener)`);
+  }
+  if (!/Thanks for the confirmation/.test(_zBlockOnFalse)) {
+    throw new Error(`FAIL [ζ-KEVIN block]: block must explicitly ban "Thanks for the confirmation" (Ethan S7 production opener)`);
+  }
+  if (!/Thanks for confirming/.test(_zBlockOnFalse)) {
+    throw new Error(`FAIL [ζ-KEVIN block]: block must explicitly ban "Thanks for confirming" family (Ethan alt / James / Derek corpus)`);
+  }
+  if (!/Appreciate the quick (reply|response|confirmation)/i.test(_zBlockOnFalse)) {
+    throw new Error(`FAIL [ζ-KEVIN block]: block must also ban "Appreciate the quick (reply|response|confirmation)" — the appreciate family per corpus discipline`);
+  }
+  // Permitted shapes preserved.
+  if (!/Thanks for sending those through/.test(_zBlockOnFalse)) {
+    throw new Error(`FAIL [ζ-KEVIN block]: block must explicitly PERMIT "Thanks for sending those through" (broker-action acknowledgment, different shape)`);
+  }
+  console.log('  PASS [ζ-KEVIN block]: forbidden-openers block fires + bans all 5 corpus anchor phrases + appreciate-family + preserves permitted broker-action ack');
+
+  // Signal=true → block empty (no over-fire when broker DID reply).
+  const _zBlockOnTrue = _zAi.buildForbiddenOpenersBlock(true);
+  if (_zBlockOnTrue !== '') {
+    throw new Error(`FAIL [ζ-KEVIN block-true]: buildForbiddenOpenersBlock(true) must return '' (no block when broker replied) — got: ${_zBlockOnTrue.slice(0,200)}`);
+  }
+  console.log('  PASS [ζ-KEVIN block-true]: signal=true → block empty (no over-fire on legitimate broker-reply turns)');
+
+  console.log(`Group ζ-KEVIN-FIXTURE: timeline replay → signal=false correctly fires the forbidden-openers block.`);
+
+  // ─── R6-ζ-ETHAN-FIXTURE (LOAD-BEARING) ────────────────────────────
+  console.log('\n========== R6-ζ-ETHAN-FIXTURE — Ethan Broussard S7 533fbd4f admin-handoff timeline (LOAD-BEARING) ==========');
+  // Same shape as Kevin — admin-approval-triggered AML/PEP draft.
+  // Production body opened: "Hi Preethi, Thanks for the confirmation. We have reviewed the documents..."
+  const _zEthanTimeline = [
+    { direction: 'inbound',  subject: 'New Submission — Ethan Broussard — Private Second Mortgage — Calgary' },
+    { direction: 'outbound', subject: 'Re: New Submission — Ethan Broussard — Private Second Mortgage — Calgary' },
+    { direction: 'outbound', subject: 'ACTION REQUIRED: PRELIMINARY Review — Ethan James Broussard — 59.8% LTV' },
+    { direction: 'inbound',  subject: 'Re: ACTION REQUIRED: PRELIMINARY Review — Ethan James Broussard — 59.8% LTV' },
+  ];
+  if (_zHelper(_zEthanTimeline) !== false) {
+    throw new Error(`FAIL [ζ-ETHAN-FIXTURE]: signal must be false — got ${_zHelper(_zEthanTimeline)}`);
+  }
+  console.log('  PASS: Ethan S7 admin-handoff timeline → signal=false; forbidden-openers block fires; "Thanks for the confirmation" opener structurally suppressed');
+  console.log(`Group ζ-ETHAN-FIXTURE: matched Kevin shape — same admin-approval-triggered leak surface; block fires uniformly.`);
+
+  // ─── R6-ζ-PERMIT-LEGITIMATE ───────────────────────────────────────
+  console.log('\n========== R6-ζ-PERMIT-LEGITIMATE — broker-submission turns → signal=true → block absent ==========');
+  // Normal broker-reply turn — broker just sent docs/answered a question.
+  // signal=true; block empty; legitimate "Thanks for sending those through!"
+  // or "Appreciate the quick reply!" openers remain permitted.
+  const _zBrokerReply = [
+    { direction: 'inbound',  subject: 'New Submission — Patricia — Private First Mortgage' },
+    { direction: 'outbound', subject: 'Re: New Submission — Patricia' },
+    { direction: 'inbound',  subject: 'Re: Patricia — here are the credit reports' },
+  ];
+  if (_zHelper(_zBrokerReply) !== true) {
+    throw new Error(`FAIL [ζ-PERMIT]: broker just sent docs → signal must be true; got ${_zHelper(_zBrokerReply)}`);
+  }
+  const _zBlockPermitted = _zAi.buildForbiddenOpenersBlock(true);
+  if (_zBlockPermitted !== '') {
+    throw new Error(`FAIL [ζ-PERMIT]: signal=true → block must be empty (legitimate broker-reply turn, ack openers permitted)`);
+  }
+  console.log('  PASS: broker just sent docs → signal=true → block empty → "Thanks for sending those through" / "Appreciate the quick reply" openers remain permitted by the existing prompt rules');
+  console.log(`Group ζ-PERMIT-LEGITIMATE: no over-fire on legitimate broker-reply turns.`);
+
+  // ─── R6-ζ-CONSUMER-WIRING ────────────────────────────────────────
+  console.log('\n========== R6-ζ-CONSUMER-WIRING — closed-set call-site assertions ==========');
+  const _zFs = require('fs');
+  const _zWebhookSrc = _zFs.readFileSync('./src/routes/webhook.js', 'utf8');
+  const _zAiSrc = _zFs.readFileSync('./src/services/ai.js', 'utf8');
+
+  // (a) generateDocumentRequestEmail call sites passing the signal — exactly 2.
+  const _zDocReqCount = (_zWebhookSrc.match(/aiService\.generateDocumentRequestEmail\(/g) || []).length;
+  if (_zDocReqCount !== 2) {
+    throw new Error(`FAIL [ζ-CONSUMER-WIRING]: generateDocumentRequestEmail call sites = ${_zDocReqCount}; expected exactly 2 (admin-approval COMPLETE + PRELIMINARY branches). Drift suggests new call site without R6-ζ wrapper.`);
+  }
+  const _zDocReqWithSignal = (_zWebhookSrc.match(/aiService\.generateDocumentRequestEmail\([^)]*?[\s\S]*?brokerRepliedSinceLastViennaOutbound[\s\S]*?\)/g) || []).length;
+  if (_zDocReqWithSignal !== 2) {
+    throw new Error(`FAIL [ζ-CONSUMER-WIRING]: generateDocumentRequestEmail invocations threading brokerRepliedSinceLastViennaOutbound = ${_zDocReqWithSignal}; expected exactly 2.`);
+  }
+  console.log('  PASS: generateDocumentRequestEmail call sites = 2 + all 2 thread the brokerRepliedSinceLastViennaOutbound signal');
+
+  // (b) generateBrokerResponse call sites passing the signal — exactly 2.
+  const _zBrkRespCount = (_zWebhookSrc.match(/aiService\.generateBrokerResponse\(/g) || []).length;
+  if (_zBrkRespCount !== 2) {
+    throw new Error(`FAIL [ζ-CONSUMER-WIRING]: generateBrokerResponse call sites = ${_zBrkRespCount}; expected exactly 2 (under_review + active branches).`);
+  }
+  const _zBrkRespWithSignal = (_zWebhookSrc.match(/aiService\.generateBrokerResponse\([^)]*?[\s\S]*?brokerRepliedSinceLastViennaOutbound[\s\S]*?\)/g) || []).length;
+  if (_zBrkRespWithSignal !== 2) {
+    throw new Error(`FAIL [ζ-CONSUMER-WIRING]: generateBrokerResponse invocations threading brokerRepliedSinceLastViennaOutbound = ${_zBrkRespWithSignal}; expected exactly 2.`);
+  }
+  console.log('  PASS: generateBrokerResponse call sites = 2 + all 2 thread the brokerRepliedSinceLastViennaOutbound signal');
+
+  // (c) buildForbiddenOpenersBlock invocations in ai.js — exactly 2 (one per generator).
+  // Definition shape is `const buildForbiddenOpenersBlock = (...)` — the regex
+  // `buildForbiddenOpenersBlock\(` does NOT match the definition (space between
+  // identifier and `(`), so the count equals the number of invocations directly.
+  const _zBuildBlockInvocations = (_zAiSrc.match(/buildForbiddenOpenersBlock\(/g) || []).length;
+  if (_zBuildBlockInvocations !== 2) {
+    throw new Error(`FAIL [ζ-CONSUMER-WIRING]: buildForbiddenOpenersBlock invocations in ai.js = ${_zBuildBlockInvocations}; expected exactly 2 (one in generateBrokerResponse + one in generateDocumentRequestEmail).`);
+  }
+  console.log(`  PASS: buildForbiddenOpenersBlock invocations in ai.js = exactly 2 (single source of truth via Q3 fold-into-shared-helper verdict)`);
+
+  // (d) Helper exports present (so harness can import).
+  if (!/brokerRepliedSinceLastViennaOutbound,/.test(_zWebhookSrc)) {
+    throw new Error(`FAIL [ζ-CONSUMER-WIRING]: brokerRepliedSinceLastViennaOutbound missing from webhook.js exports`);
+  }
+  if (!/buildForbiddenOpenersBlock,/.test(_zAiSrc)) {
+    throw new Error(`FAIL [ζ-CONSUMER-WIRING]: buildForbiddenOpenersBlock missing from ai.js exports`);
+  }
+  console.log('  PASS: brokerRepliedSinceLastViennaOutbound + buildForbiddenOpenersBlock both exported');
+  console.log(`Group ζ-CONSUMER-WIRING: triple closed-set pinning (2 docReq + 2 brkResp + 2 buildBlock).`);
+
+  // ─── R6-ζ-CROSS-CLUSTER-INTEGRATION ──────────────────────────────
+  console.log('\n========== R6-ζ-CROSS-CLUSTER-INTEGRATION — prior arc + cascade position ==========');
+  // Prior arc anchors source-grep present in ai.js + webhook.js.
+  if (!/R6-γ \(2026-05-21\)/.test(_zAiSrc) && !/R6 Cluster η/.test(_zAiSrc)) {
+    throw new Error('FAIL: prior arc anchor missing from ai.js (expected R6-η or R6-γ marker)');
+  }
+  if (!/R6-η/.test(_zAiSrc)) throw new Error('FAIL: R6-η anchor missing from ai.js');
+  if (!/R6-β-A/.test(_zAiSrc) || !/R6-β-A/.test(require('fs').readFileSync('./src/services/canonical-fields.js', 'utf8'))) {
+    // R6-β-A anchor is in canonical-fields.js; require it there. ai.js doesn't necessarily have it.
+    const _zCf = require('fs').readFileSync('./src/services/canonical-fields.js', 'utf8');
+    if (!/R6-β-A/.test(_zCf)) throw new Error('FAIL: R6-β-A anchor missing from canonical-fields.js');
+  }
+  if (!/filterCanonicalLenderForPayoutOnly/.test(_zWebhookSrc)) throw new Error('FAIL: R6-γ filter wiring missing from webhook.js');
+  console.log('  PASS: R6-η + R6-γ + R6-β-A prior-arc anchors all source-grep-present');
+
+  // R6-ζ block sits AFTER R6-η Group XXX/CCC forbidden-phrases content in the
+  // generateBrokerResponse prompt — confirm cascade-order in source. Find
+  // positions of both anchors in ai.js source.
+  const _zXxxPos = _zAiSrc.indexOf('Group XXX, S5.2');
+  const _zZetaBlockPos = _zAiSrc.indexOf('FORBIDDEN NON-SEQUITUR OPENERS (Group R6-ζ');
+  if (_zXxxPos === -1) throw new Error('FAIL: Group XXX (S5.2) anchor missing from ai.js');
+  if (_zZetaBlockPos === -1) throw new Error('FAIL: R6-ζ FORBIDDEN-NON-SEQUITUR-OPENERS block content missing from ai.js (buildForbiddenOpenersBlock body)');
+  // The block is in the helper definition near the top; Group XXX content is
+  // in the inline prompts further down. Helper-position-before-prompt is fine —
+  // assert helper-content has Group XXX-style FORBIDDEN-PHRASES discipline.
+  if (!/FORBIDDEN NON-SEQUITUR OPENERS \(Group R6-ζ/.test(_zAiSrc)) {
+    throw new Error('FAIL: R6-ζ block missing its Group R6-ζ anchor in helper body');
+  }
+  console.log('  PASS: R6-ζ block content present + carries the Group R6-ζ load-bearing anchor (defense-in-depth alongside Group XXX content-based forbidden-phrases listing in prompts)');
+
+  // Signal helper handles the R6-γ classification field gracefully — i.e.,
+  // R6-γ touched message tuples on canonical_map, R6-ζ operates on messages
+  // table rows; no cross-cluster shape coupling. Defensive null/undefined check.
+  if (_zHelper(undefined) !== false) throw new Error('FAIL: helper(undefined) must return false');
+  if (_zHelper(null) !== false) throw new Error('FAIL: helper(null) must return false');
+  console.log('  PASS: helper handles null/undefined defensively (returns false — conservative)');
+
+  console.log(`Group ζ-CROSS-CLUSTER-INTEGRATION: prior arc holding + helper defensive + corpus anchored.`);
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
@@ -12155,8 +12459,11 @@ Crown Mortgage Group Lic. #MB556291`;
   // ─── Source-string regressions on generateBrokerResponse + ai.js ────
   console.log('\n---------- Group OOOO / Source-string regression on ai.js prompt ----------');
 
-  // Signature accepts stillMissingForReview in options
-  if (!/generateBrokerResponse: async \([\s\S]{0,400}stillMissingForReview = \[\][\s\S]{0,100}\}\)/.test(aiSource)) {
+  // Signature accepts stillMissingForReview in options.
+  // (R6-ζ 2026-05-21: trailing-tail widened from {0,100} → {0,300} to accommodate
+  // brokerRepliedSinceLastViennaOutbound added after stillMissingForReview in the
+  // opts destructure. Contract preserved — option still named, defaulted to [], in opts.)
+  if (!/generateBrokerResponse: async \([\s\S]{0,400}stillMissingForReview = \[\][\s\S]{0,300}\}\)/.test(aiSource)) {
     throw new Error(`FAIL [Group OOOO signature]: generateBrokerResponse signature must accept { ..., stillMissingForReview = [] } in options`);
   }
   console.log('  PASS [Group OOOO signature]: generateBrokerResponse accepts stillMissingForReview option');
@@ -13733,8 +14040,9 @@ Jordan`;
   console.log('  PASS [Group KKKK D3-block flag computation]: webhook.js computes postApprovalAmlPepAsk from JS-side signals');
 
   // Options object pass-through — webhook passes an object that destructures
-  // postApprovalAmlPepAsk. May contain other fields (OOOO's stillMissingForReview).
-  if (!/\{[\s\S]{0,200}postApprovalAmlPepAsk[\s\S]{0,200}\}/.test(webhookSrc)) {
+  // postApprovalAmlPepAsk. May contain other fields (OOOO's stillMissingForReview,
+  // R6-ζ's brokerRepliedSinceLastViennaOutbound, etc.) — tail widened accordingly.
+  if (!/\{[\s\S]{0,200}postApprovalAmlPepAsk[\s\S]{0,400}\}/.test(webhookSrc)) {
     throw new Error(`FAIL [Group KKKK D3-block flag pass-through]: webhook.js must pass { postApprovalAmlPepAsk, ... } options object as the trailing arg to generateBrokerResponse`);
   }
   console.log('  PASS [Group KKKK D3-block flag pass-through]: postApprovalAmlPepAsk present in options object pass-through');

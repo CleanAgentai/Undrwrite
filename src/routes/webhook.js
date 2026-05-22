@@ -185,6 +185,52 @@ const labelMessagesForLeadSummary = (messages, brokerName) => {
   });
 };
 
+// R6-ζ (2026-05-21): structured signal — did the broker reply since Vienna's
+// last outbound on this deal? Used by both generateDocumentRequestEmail (the
+// primary leak path on admin-approval-triggered turns: Kevin S6 178d714e +
+// Ethan S7 533fbd4f production corpus) and generateBrokerResponse to gate
+// the forbidden-non-sequitur-openers prompt block in ai.js.
+//
+// Semantic. Walk messages in REVERSE chronological order. First match wins:
+//   - outbound (from Vienna)                      → return false (no broker
+//                                                   reply since the last
+//                                                   Vienna outbound)
+//   - inbound that is NOT an admin reply (broker) → return true (broker DID
+//                                                   reply since the last
+//                                                   Vienna outbound)
+// Admin-inbound messages (isAdminReplySubject) are SKIPPED in the walk — they
+// don't count as broker replies. Empty history → false (conservative; no
+// prior context, so suppress the thanks-for-reply opener).
+//
+// Asymmetry handling. The just-arrived inbound that triggered this turn is
+// present in `messages` at compute time:
+//   - At admin-approval sites the trigger is admin-inbound — skipped by
+//     isAdminReplySubject; walk finds the previous Vienna outbound → false.
+//   - At active/under_review sites the trigger is broker-inbound (or admin) —
+//     broker case finds the just-arrived inbound and returns true; admin case
+//     skips it and walks past to find the previous outbound → false.
+// No explicit "exclude current turn" branch needed (Q1 verdict).
+//
+// Edge case (Q1 verdict, residual-flagged). Interleaved broker-clarification
+// arcs (broker → Vienna → broker → Vienna → admin → new outbound) resolve
+// correctly under the simple reverse-walk: the latest Vienna outbound
+// precedes the admin reply and was already a reply to the broker's most
+// recent inbound, so signal=false (no NEW reply since Vienna's last out).
+// If a sequence ever lands where the broker's latest inbound is more recent
+// than Vienna's latest outbound but interleaved with admin replies, the
+// helper returns true — Vienna's response can legitimately reference that
+// pending broker turn. Rare; defensible.
+const brokerRepliedSinceLastViennaOutbound = (messages) => {
+  const msgs = messages || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.direction === 'outbound') return false;
+    if (m.direction === 'inbound' && !isAdminReplySubject(m.subject)) return true;
+    // inbound-from-admin: skip and continue walk.
+  }
+  return false; // empty / admin-only history — conservative default.
+};
+
 // Group YYY (S5.3): build the References-header chain for a draft preview reply.
 // Pre-YYY chain was [...admin.references, admin.messageId] — relied on admin's
 // email client to echo Vienna's prior outbound IDs in its own References header.
@@ -1421,13 +1467,18 @@ ${draftEmail}
           }
           console.log('Deal approved by admin — generating draft doc request');
           const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
+          // R6-ζ (2026-05-21): admin-approval branch → broker has NOT replied
+          // since Vienna's last outbound by construction. Signal computed
+          // uniformly to preserve the structural pattern.
+          const _zRepliedPrelim = brokerRepliedSinceLastViennaOutbound(dealMessages);
           const docRequestEmail = await aiService.generateDocumentRequestEmail(
             existingDeal.extracted_data,
             existingDeal.ownership_type,
             existingDeal.has_application_form,
             existingDeal.has_pnw_statement,
             existingDocs,
-            dealMessages
+            dealMessages,
+            { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim }
           );
           await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
         } else if (intent === 'rejected') {
@@ -1486,13 +1537,16 @@ ${draftEmail}
           } else {
             // PRELIMINARY APPROVAL — still missing docs, generate doc request
             console.log('Preliminary approval by admin — generating draft doc request for remaining items');
+            // R6-ζ (2026-05-21): admin-approval branch → signal=false by construction.
+            const _zRepliedPrelimPartial = brokerRepliedSinceLastViennaOutbound(dealMessages);
             const docRequestEmail = await aiService.generateDocumentRequestEmail(
               existingDeal.extracted_data,
               existingDeal.ownership_type,
               existingDeal.has_application_form,
               existingDeal.has_pnw_statement,
               existingDocs,
-              dealMessages
+              dealMessages,
+              { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial }
             );
             await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
           }
@@ -2222,6 +2276,9 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           borrower_name: reviewSummaryIn?.borrower_name,
           sender_type: reviewSummaryIn?.sender_type,
         });
+        // R6-ζ (2026-05-21): structured signal for forbidden-non-sequitur-openers
+        // block in ai.js — see helper docblock at brokerRepliedSinceLastViennaOutbound.
+        const _zReviewBrokerReplied = brokerRepliedSinceLastViennaOutbound(reviewConversationHistory);
         const reviewResult = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -2230,7 +2287,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           labeledReviewHistory,
           reviewDocumentsOnFile,
           existingDeal.status,
-          { discrepancyDetected: _bDiscrepancyDetectedReview, canonicalFieldsPrompt: _bCanonicalCtxReview, greetingFirstName: _eReviewGreeting }
+          { discrepancyDetected: _bDiscrepancyDetectedReview, canonicalFieldsPrompt: _bCanonicalCtxReview, greetingFirstName: _eReviewGreeting, brokerRepliedSinceLastViennaOutbound: _zReviewBrokerReplied }
         );
         // Cluster B Commit 2b — post-Claude strip + inject on reply (even though NNN may suppress it from broker;
         // the suppressed text is still passed to sendPreliminaryReviewToAdmin via brokerFacingReplyText for D's gate).
@@ -2538,6 +2595,9 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           borrower_name: summaryIn?.borrower_name,
           sender_type: summaryIn?.sender_type,
         });
+        // R6-ζ (2026-05-21): structured signal for forbidden-non-sequitur-openers
+        // block — see helper docblock at brokerRepliedSinceLastViennaOutbound.
+        const _zActiveBrokerReplied = brokerRepliedSinceLastViennaOutbound(conversationHistory);
         const result = await aiService.generateBrokerResponse(
           email.textBody,
           email.attachments,
@@ -2546,7 +2606,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           labeledActiveHistory,
           documentsOnFile,
           existingDeal.status,
-          { postApprovalAmlPepAsk, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive, greetingFirstName: _eActiveGreeting }
+          { postApprovalAmlPepAsk, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive, greetingFirstName: _eActiveGreeting, brokerRepliedSinceLastViennaOutbound: _zActiveBrokerReplied }
         );
         // Cluster B Commit 2b — post-Claude strip + inject on broker-facing reply.
         if (_bDiscrepancyDetectedActive && result.responseEmail) {
@@ -2839,6 +2899,7 @@ module.exports.__test__ = {
   shouldSkipIntakeFormsForDeferredState,
   // Group DDDD: message pre-labeling for lead-summary / broker-response rendering
   labelMessagesForLeadSummary,
+  brokerRepliedSinceLastViennaOutbound,
   // Group EEEE: intake_asked_items snapshot computation
   computeIntakeAskedItems,
   // Group JJJJ: misattached doc filter for prelim-review gate
