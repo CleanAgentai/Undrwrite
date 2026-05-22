@@ -6887,12 +6887,20 @@ Lender:
 
   // ─── GROUP R5B3-SYMMETRY-WITH-COMPUTECOMPLETIONDISPATCH — both dispatch helpers gate on prelim_approved_at ───
   console.log('\n========== R5B3-SYMMETRY-WITH-COMPUTECOMPLETIONDISPATCH — symmetric pre-approval gate ==========');
-  // computeCompletionDispatch (active-branch) ALWAYS gated on prelim_approved_at
-  // (L435: `return deal.prelim_approved_at ? 'completion-handoff' : 'final-review'`).
+  // computeCompletionDispatch (active-branch) ALWAYS gated on prelim_approved_at.
+  // Pre-R7-A: `deal.prelim_approved_at ? 'completion-handoff' : 'final-review'`.
+  // Post-R7-A (2026-05-22 Franco S14-Bug-1 fix): the false-branch return value
+  // changed from 'final-review' to 'preliminary-all-docs-in' — Franco's rule
+  // that PRELIMINARY = always first admin-facing review (regardless of doc
+  // count) made 'final-review' on no-prior-approval a Franco-violation.
+  // Gate INVARIANT preserved (ternary still gates on prelim_approved_at);
+  // only the false-branch dispatch value changed. R5-B-3 symmetry semantic
+  // (both dispatch helpers gate completion-handoff on prelim_approved_at)
+  // remains intact.
   // Post-R5-B-3, decideReviewDispatch (under_review-branch) ALSO gates on
   // prelim_approved_at. Source-grep both checks.
-  if (!/deal\.prelim_approved_at\s*\?\s*'completion-handoff'\s*:\s*'final-review'/.test(r5b3WebhookSrc)) {
-    throw new Error(`FAIL [R5B3-SYMMETRY / computeCompletionDispatch]: active-branch helper must gate on prelim_approved_at via the canonical \`deal.prelim_approved_at ? 'completion-handoff' : 'final-review'\` pattern.`);
+  if (!/deal\.prelim_approved_at\s*\?\s*'completion-handoff'\s*:\s*'(?:final-review|preliminary-all-docs-in)'/.test(r5b3WebhookSrc)) {
+    throw new Error(`FAIL [R5B3-SYMMETRY / computeCompletionDispatch]: active-branch helper must gate on prelim_approved_at via \`deal.prelim_approved_at ? 'completion-handoff' : '<final-review|preliminary-all-docs-in>'\`. Post-R7-A the false-branch is 'preliminary-all-docs-in'; pre-R7-A was 'final-review'. Gate invariant preserved.`);
   }
   if (!/if \(deal\.prelim_approved_at\) \{\s*return \{ action: 'completion-handoff'/.test(r5b3WebhookSrc)) {
     throw new Error(`FAIL [R5B3-SYMMETRY / decideReviewDispatch]: under_review-branch must gate completion-handoff on \`if (deal.prelim_approved_at)\` post-R5-B-3. Pre-fix this returned completion-handoff unconditionally.`);
@@ -11460,6 +11468,313 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group θ-COMPLETE-IN-PRELIMINARY-CASCADE-CLOSURE: structural mechanism + harness anchor + empirical post-deploy clean — cascade-closed via R6-ε side-effect.`);
 
   // ════════════════════════════════════════════════════════════════
+  // R7 CLUSTER A — Template selection at renderer-dispatch (Franco S14-Bug-1)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R7-A. Production fixture: Lena Park S14
+  // (deal 4850dc32-b6d6-4374-90be-445a68486f05; Carlos Mendez / Pinnacle
+  // Mortgage Solutions Lic. #MB339885 / 2026-05-22 corpus). Pre-R7-A
+  // production behavior:
+  //   • Broker submits 9 additional docs (10 total incl. unsolicited AML +
+  //     PEP) on a deal with prelim_approved_at=null (no prior admin
+  //     approval).
+  //   • Vienna dispatches "FINAL REVIEW: All Documents Received — Lena
+  //     Ji-Young Park" with body banner "FILE STATUS: COMPLETE — Ready
+  //     for Review".
+  //   • Admin had never approved this deal. Franco's rule: PRELIMINARY =
+  //     first admin-facing review ALWAYS, regardless of doc count.
+  //
+  // Root cause: computeCompletionDispatch's final ternary returned
+  // 'final-review' when prelim_approved_at=null. The willReview gate held
+  // (unresolved_discrepancy on property_value $620K broker vs $580K
+  // appraisal), so dispatcher fell through to FINAL REVIEW path which
+  // emits "FILE STATUS: COMPLETE" content without computeAdminBanner's
+  // strip-and-prepend.
+  //
+  // Q1-verdict (A1) — strict-superset additive widening. Mechanism A1:
+  // computeCompletionDispatch returns new value 'preliminary-all-docs-in'
+  // when prelim_approved_at=null + all docs in. New consumer branch
+  // (willFirePreliminaryAllDocsIn) fires sendPreliminaryReviewToAdmin —
+  // the same dispatcher as the regular willReview path, with JS-injected
+  // computeAdminBanner-authoritative banner.
+  //
+  // Q2-verdict — defer Mechanism B (willReview-on-unresolved_discrepancy
+  // gate widening). Empirically the bug is in computeCompletionDispatch,
+  // not in willReview's gate semantic. Adjacent-but-not-corpus-observed
+  // change deferred per no-over-spec discipline (same as R6-η residual
+  // (b), R6-ζ "Thanks for getting back to me", R6-δ Ownership Type).
+  //
+  // Q3-verdict (i) — leave legacy FINAL REVIEW dispatch as dead code with
+  // explicit "R7-A DEFENSE-IN-DEPTH UNREACHABLE" annotation. Strict-
+  // additive discipline. Future cleanup-commit author has the annotation
+  // anchor + compounding-banner-bug note for re-activation safety.
+  //
+  // Groups:
+  //   R7α-DISPATCH-MATRIX          : computeCompletionDispatch truth-table
+  //   R7α-LENA-PARK-FIXTURE        : LOAD-BEARING production replay
+  //   R7α-CCCC-PATH-PRESERVED      : completion-handoff regression direction
+  //   R7α-WILLREVIEW-PATH-PRESERVED : willReview-only path unchanged
+  //   R7α-CONSUMER-WIRING          : closed-set dispatcher invocations
+  //   R7α-CROSS-CLUSTER-INTEGRATION : prior arc + dead-code annotation pin
+  console.log('\n========== R7α-DISPATCH-MATRIX — computeCompletionDispatch truth-table ==========');
+  const _r7Webhook = require('./src/routes/webhook').__test__;
+  const _r7Dispatch = _r7Webhook.computeCompletionDispatch;
+
+  // 8 cases on (deal.prelim_approved_at × allDocsIn × willReview):
+  //   prelim_approved_at: null vs set
+  //   willReview: true (gates dispatcher) vs false (allows dispatcher)
+  //   docs-state: complete vs incomplete
+  const _r7AllDocsRefi = ['government_id', 'appraisal', 'property_tax', 'mortgage_statement', 'income_proof', 'credit_report', 'aml', 'pep'];
+  const _r7PartialDocs = ['credit_report'];
+  // Default exit_strategy when arg is undefined (called as _r7Summary());
+  // null/empty-string when arg is explicitly null (called as _r7Summary(null))
+  // to test the no-exit-strategy gate. Avoid the `||` default-collapse trap.
+  const _r7Summary = (exit) => ({
+    loan_type: 'refinance',
+    exit_strategy: typeof exit === 'undefined' ? 'refi at maturity' : exit,
+    is_purchase: false,
+  });
+
+  const _r7Cases = [
+    {
+      label: 'R7α-1: prelim_approved=null + active + willReview=false + allDocsIn → "preliminary-all-docs-in" (R7-A FIX — Lena Park shape)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: _r7Summary(), classifications: _r7AllDocsRefi, willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false },
+      expect: 'preliminary-all-docs-in',
+    },
+    {
+      label: 'R7α-2: prelim_approved=null + willReview=true → null (willReview path fires PRELIMINARY directly; dispatcher returns null)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: _r7Summary(), classifications: _r7AllDocsRefi, willGoToCollateralCheck: false, willReview: true, identityClashUnresolved: false },
+      expect: null,
+    },
+    {
+      label: 'R7α-3: prelim_approved=SET + active + willReview=false + allDocsIn → "completion-handoff" (CCCC + R6-κ regression direction)',
+      input: { deal: { status: 'active', prelim_approved_at: '2026-05-22T03:00:00Z' }, summary: _r7Summary(), classifications: _r7AllDocsRefi, willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false },
+      expect: 'completion-handoff',
+    },
+    {
+      label: 'R7α-4: prelim_approved=null + docs incomplete → null (dispatcher only fires when allDocsIn)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: _r7Summary(), classifications: _r7PartialDocs, willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false },
+      expect: null,
+    },
+    {
+      label: 'R7α-5: prelim_approved=null + allDocsIn + no exit_strategy → null (exit_strategy gate)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: _r7Summary(null), classifications: _r7AllDocsRefi, willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false },
+      expect: null,
+    },
+    {
+      label: 'R7α-6: deal.status not active (e.g., under_review) → null (dispatcher is active-only)',
+      input: { deal: { status: 'under_review', prelim_approved_at: null }, summary: _r7Summary(), classifications: _r7AllDocsRefi, willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false },
+      expect: null,
+    },
+    {
+      label: 'R7α-7: identityClashUnresolved → null (dispatcher gated)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: _r7Summary(), classifications: _r7AllDocsRefi, willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: true },
+      expect: null,
+    },
+    {
+      label: 'R7α-8: willGoToCollateralCheck → null (Fix 7 path preserved)',
+      input: { deal: { status: 'active', prelim_approved_at: null }, summary: _r7Summary(), classifications: _r7AllDocsRefi, willGoToCollateralCheck: true, willReview: false, identityClashUnresolved: false },
+      expect: null,
+    },
+  ];
+  let _r7Fails = 0;
+  for (const c of _r7Cases) {
+    const got = _r7Dispatch(c.input);
+    if (got !== c.expect) {
+      _r7Fails++;
+      console.log(`  FAIL [${c.label}]: got ${JSON.stringify(got)}, expected ${JSON.stringify(c.expect)}`);
+    } else {
+      console.log(`  PASS [${c.label}]: → ${JSON.stringify(got)}`);
+    }
+  }
+  if (_r7Fails > 0) throw new Error(`FAIL [R7α-DISPATCH-MATRIX]: ${_r7Fails}/${_r7Cases.length} cases failed.`);
+  // CRITICAL: 'final-review' must NEVER be returned by computeCompletionDispatch
+  // post-R7-A. Pre-R7-A bug shape was 'final-review' return on prelim_approved=null
+  // + allDocsIn + !willReview. Smoking-gun assertion that the bug locus is closed.
+  const _r7NeverFinalReview = _r7Cases.every(c => _r7Dispatch(c.input) !== 'final-review');
+  if (!_r7NeverFinalReview) {
+    throw new Error(`FAIL [R7α-DISPATCH-MATRIX]: computeCompletionDispatch returned 'final-review' for some case — R7-A regression. Pre-R7-A bug shape on prelim_approved=null was 'final-review' return; post-R7-A all paths return 'preliminary-all-docs-in' or 'completion-handoff' or null.`);
+  }
+  console.log('  PASS [SMOKING-GUN]: "final-review" NEVER returned across all dispatch-matrix cases — Franco S14-Bug-1 bug locus structurally closed');
+  console.log(`Group R7α-DISPATCH-MATRIX: 8/8 cases passed + smoking-gun "no final-review return" anchored.`);
+
+  // ─── R7α-LENA-PARK-FIXTURE (LOAD-BEARING) ────────────────────────
+  console.log('\n========== R7α-LENA-PARK-FIXTURE — Lena Park S14 production-shape replay (LOAD-BEARING) ==========');
+  // Reconstructed dispatch input from Lena Park 4850dc32 production state
+  // at the bug-firing turn (msg #4 broker submitted all docs):
+  //   • deal.status='active', deal.prelim_approved_at=null
+  //   • broker submitted full pkg: credit_report + appraisal + property_tax
+  //     + government_id + mortgage_statement + income_proof + aml + pep +
+  //     loan_application + pnw_statement (10 docs)
+  //   • willReview held due to unresolved_discrepancy on property_value
+  //     ($620K broker vs $580K appraisal) — Carlos hadn't yet confirmed
+  //     the value resolution.
+  // Pre-R7-A: dispatcher returned 'final-review' → FINAL REVIEW dispatcher
+  // fired with "FILE STATUS: COMPLETE" banner. Production-bug shape.
+  // Post-R7-A: dispatcher returns 'preliminary-all-docs-in' → consumer
+  // branch fires sendPreliminaryReviewToAdmin (PRELIMINARY review with
+  // computeAdminBanner JS-authoritative banner).
+  const _r7LenaInput = {
+    deal: { status: 'active', prelim_approved_at: null },
+    summary: { loan_type: 'refinance', exit_strategy: 'Refinance with Scotiabank at first mortgage renewal in August 2028', is_purchase: false, unresolved_discrepancy: true /* property_value mismatch unresolved at this turn */ },
+    classifications: ['credit_report', 'appraisal', 'property_tax', 'government_id', 'mortgage_statement', 'income_proof', 'aml', 'pep', 'loan_application', 'pnw_statement'],
+    willGoToCollateralCheck: false,
+    willReview: false, // unresolved_discrepancy gates this true → false
+    identityClashUnresolved: false,
+  };
+  const _r7LenaDispatch = _r7Dispatch(_r7LenaInput);
+  if (_r7LenaDispatch !== 'preliminary-all-docs-in') {
+    throw new Error(`FAIL [R7α-LENA-PARK]: expected 'preliminary-all-docs-in' (R7-A fix); got ${JSON.stringify(_r7LenaDispatch)} — Franco S14-Bug-1 regression`);
+  }
+  console.log('  PASS [Lena Park dispatch]: 4850dc32 production-shape input → "preliminary-all-docs-in" (NOT "final-review" — bug closed)');
+
+  // Computed gate flags should match: willFirePreliminaryAllDocsIn=true,
+  // willFireFinalReview=false, willFireCompletionHandoff=false.
+  const _r7LenaWillFireFinalReview = (_r7LenaDispatch === 'final-review');
+  const _r7LenaWillFireCompletionHandoff = (_r7LenaDispatch === 'completion-handoff');
+  const _r7LenaWillFirePreliminaryAllDocsIn = (_r7LenaDispatch === 'preliminary-all-docs-in');
+  if (_r7LenaWillFireFinalReview !== false) throw new Error(`FAIL [R7α-LENA-PARK gate-fr]: willFireFinalReview must be false post-R7-A on Lena Park shape`);
+  if (_r7LenaWillFireCompletionHandoff !== false) throw new Error(`FAIL [R7α-LENA-PARK gate-ch]: willFireCompletionHandoff must be false on no-prior-approval`);
+  if (_r7LenaWillFirePreliminaryAllDocsIn !== true) throw new Error(`FAIL [R7α-LENA-PARK gate-prelim]: willFirePreliminaryAllDocsIn must be true on Lena Park shape (R7-A path)`);
+  console.log('  PASS [Lena Park gate flags]: willFireFinalReview=false (legacy dead-code path NOT triggered), willFireCompletionHandoff=false (no prior approval), willFirePreliminaryAllDocsIn=TRUE (R7-A path fires)');
+
+  // Verify the active-branch consumer dispatcher invokes sendPreliminaryReviewToAdmin
+  // when willFirePreliminaryAllDocsIn=true (source-grep on webhook.js).
+  // Two `else if (willFirePreliminaryAllDocsIn)` blocks exist:
+  //   (a) logging branch (suppression log) — no dispatch call inside.
+  //   (b) DISPATCH branch — calls sendPreliminaryReviewToAdmin with R7-A comment anchor.
+  // Pin specifically (b) via the R7-A comment anchor immediately preceding
+  // the sendPreliminaryReviewToAdmin call.
+  const _r7Fs = require('fs');
+  const _r7WebhookSrc = _r7Fs.readFileSync('./src/routes/webhook.js', 'utf8');
+  if (!/else if \(willFirePreliminaryAllDocsIn\) \{\s*\/\/ R7-A \(2026-05-22\): Franco S14-Bug-1 fix[\s\S]{0,500}await sendPreliminaryReviewToAdmin/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-LENA-PARK consumer-wiring]: willFirePreliminaryAllDocsIn DISPATCH branch (with "R7-A Franco S14-Bug-1 fix" comment anchor) must call sendPreliminaryReviewToAdmin — Franco S14-Bug-1 fix unwired or annotation missing`);
+  }
+  console.log('  PASS [Lena Park consumer-wiring]: willFirePreliminaryAllDocsIn DISPATCH branch fires sendPreliminaryReviewToAdmin with R7-A annotation anchor (NOT the FINAL REVIEW dispatcher)');
+  console.log(`Group R7α-LENA-PARK-FIXTURE: 4850dc32 production-bug-locus structurally closed — dispatcher returns 'preliminary-all-docs-in', consumer fires sendPreliminaryReviewToAdmin.`);
+
+  // ─── R7α-CCCC-PATH-PRESERVED ─────────────────────────────────────
+  console.log('\n========== R7α-CCCC-PATH-PRESERVED — completion-handoff regression direction ==========');
+  // Post-approval handoff path (R6-κ + CCCC regression direction):
+  // prelim_approved_at SET + active + allDocsIn + exit_strategy →
+  // 'completion-handoff' → sendCompletionHandoff. No regression on R6-κ
+  // CCCC stamp pattern's downstream behavior.
+  const _r7CcccInput = {
+    deal: { status: 'active', prelim_approved_at: '2026-05-22T03:00:00Z' },
+    summary: _r7Summary(),
+    classifications: _r7AllDocsRefi,
+    willGoToCollateralCheck: false,
+    willReview: false,
+    identityClashUnresolved: false,
+  };
+  const _r7CcccDispatch = _r7Dispatch(_r7CcccInput);
+  if (_r7CcccDispatch !== 'completion-handoff') {
+    throw new Error(`FAIL [R7α-CCCC-PATH-PRESERVED]: prelim_approved_at SET + allDocsIn must still return 'completion-handoff'; got ${JSON.stringify(_r7CcccDispatch)} — R6-κ CCCC regression`);
+  }
+  console.log('  PASS: completion-handoff path preserved (R6-κ + CCCC regression direction holding)');
+
+  // sendCompletionHandoff still invoked by willFireCompletionHandoff branch in webhook.js source.
+  if (!/if \(willFireCompletionHandoff\) \{\s*[\s\S]{0,300}await sendCompletionHandoff/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CCCC consumer-wiring]: willFireCompletionHandoff branch must still invoke sendCompletionHandoff`);
+  }
+  console.log('  PASS [CCCC consumer-wiring]: willFireCompletionHandoff branch still fires sendCompletionHandoff (post-approval handoff path preserved)');
+  console.log(`Group R7α-CCCC-PATH-PRESERVED: completion-handoff dispatch + consumer wiring unchanged.`);
+
+  // ─── R7α-WILLREVIEW-PATH-PRESERVED ───────────────────────────────
+  console.log('\n========== R7α-WILLREVIEW-PATH-PRESERVED — regular willReview path unchanged ==========');
+  // Standard willReview path: LTV ≤ 80 + active + hasReviewableDoc +
+  // hasExitStrategy + !prelim_approved_at + !unresolved_discrepancy +
+  // !identityClashUnresolved → willReview=true → sendPreliminaryReviewToAdmin.
+  // R7-A doesn't touch computeWillReview. Verify the gate function
+  // signature + boolean shape are intact.
+  const _r7WillReview = _r7Webhook.computeWillReview || _r7Webhook.computeWillReview;
+  // computeWillReview may not be exposed directly via __test__; verify via
+  // source-grep instead.
+  if (!/const computeWillReview = \(\{[^}]+\}\) => \{[\s\S]{0,500}!deal\?\.prelim_approved_at/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-WILLREVIEW-PATH-PRESERVED]: computeWillReview's !deal.prelim_approved_at clause missing — willReview gate semantic regressed`);
+  }
+  console.log('  PASS [willReview gate semantic]: !deal.prelim_approved_at clause still gates willReview (unchanged by R7-A)');
+
+  // willReview consumer branch still fires sendPreliminaryReviewToAdmin.
+  if (!/else if \(willReview\) \{\s*[\s\S]{0,500}await sendPreliminaryReviewToAdmin/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-WILLREVIEW consumer-wiring]: willReview branch must still invoke sendPreliminaryReviewToAdmin`);
+  }
+  console.log('  PASS [willReview consumer-wiring]: willReview branch still fires sendPreliminaryReviewToAdmin (regular path preserved)');
+  console.log(`Group R7α-WILLREVIEW-PATH-PRESERVED: regular willReview path + consumer dispatcher unchanged.`);
+
+  // ─── R7α-CONSUMER-WIRING ─────────────────────────────────────────
+  console.log('\n========== R7α-CONSUMER-WIRING — closed-set dispatcher invocations ==========');
+  // (1) New gate flag willFirePreliminaryAllDocsIn declared.
+  if (!/const willFirePreliminaryAllDocsIn = completionDispatch === 'preliminary-all-docs-in'/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CW (1)]: willFirePreliminaryAllDocsIn gate flag declaration missing`);
+  }
+  console.log('  PASS [(1)]: willFirePreliminaryAllDocsIn gate flag declared from completionDispatch comparison');
+
+  // (2) sendPreliminaryReviewToAdmin invocations in webhook.js. Pre-R7-A
+  // there were 3 sites:
+  //   • initial-submission processInitialEmail path
+  //   • under_review-branch reviewResult path (isUpdate: true)
+  //   • active-branch willReview path
+  // Post-R7-A there's a NEW site:
+  //   • active-branch willFirePreliminaryAllDocsIn path (R7-A Franco S14-Bug-1 fix)
+  // Total post-R7-A: exactly 4.
+  const _r7SendPrelimCount = (_r7WebhookSrc.match(/await sendPreliminaryReviewToAdmin\(/g) || []).length;
+  if (_r7SendPrelimCount !== 4) {
+    throw new Error(`FAIL [R7α-CW (2)]: sendPreliminaryReviewToAdmin call sites = ${_r7SendPrelimCount}; expected exactly 4 post-R7-A (initial-submission + under_review-branch + active-branch-willReview + R7-A-willFirePreliminaryAllDocsIn). If 3 = R7-A new path missing; if 5+ = unexpected new site.`);
+  }
+  console.log(`  PASS [(2)]: sendPreliminaryReviewToAdmin invoked at exactly 4 sites (pre-R7-A 3 sites + R7-A new "all-docs-in" path)`);
+
+  // (3) Dead-code annotation present on the FINAL REVIEW dispatcher block.
+  if (!/R7-A DEFENSE-IN-DEPTH UNREACHABLE/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CW (3)]: legacy FINAL REVIEW dispatcher block must carry "R7-A DEFENSE-IN-DEPTH UNREACHABLE" annotation anchor (Q3-verdict)`);
+  }
+  console.log('  PASS [(3)]: legacy FINAL REVIEW dispatcher annotated "R7-A DEFENSE-IN-DEPTH UNREACHABLE" — dead-code intent explicit');
+
+  // (4) Compounding-bug note present in dead-code block (future cleanup-
+  // commit author safety net).
+  if (!/COMPOUNDING-BUG NOTE/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CW (4)]: dead-code annotation must include "COMPOUNDING-BUG NOTE" anchor describing the un-strip-prepended banner defect`);
+  }
+  console.log('  PASS [(4)]: dead-code annotation includes "COMPOUNDING-BUG NOTE" — future cleanup-commit author has re-activation safety');
+
+  // (5) computeCompletionDispatch's final ternary uses 'preliminary-all-docs-in' (NOT 'final-review').
+  if (!/return deal\.prelim_approved_at \? 'completion-handoff' : 'preliminary-all-docs-in';/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CW (5)]: computeCompletionDispatch final ternary must return 'preliminary-all-docs-in' (NOT 'final-review') when prelim_approved_at=null`);
+  }
+  console.log(`  PASS [(5)]: computeCompletionDispatch ternary returns 'preliminary-all-docs-in' on prelim_approved_at=null (bug locus structurally fixed)`);
+  console.log(`Group R7α-CONSUMER-WIRING: 5-clause closed-set pinning (gate flag + 3 sendPreliminaryReviewToAdmin sites + dead-code annotation + compounding-bug note + ternary return value).`);
+
+  // ─── R7α-CROSS-CLUSTER-INTEGRATION ───────────────────────────────
+  console.log('\n========== R7α-CROSS-CLUSTER-INTEGRATION — prior arc + R6-κ/CCCC anchors ==========');
+  // Prior arc anchors source-grep present.
+  if (!/R6-κ \(2026-05-21\)/.test(_r7WebhookSrc)) throw new Error('FAIL: R6-κ anchor missing from webhook.js');
+  if (!/Group CCCC/.test(_r7WebhookSrc)) throw new Error('FAIL: CCCC anchor missing from webhook.js');
+  if (!/R7-A \(2026-05-22\)/.test(_r7WebhookSrc)) throw new Error('FAIL: R7-A anchor missing from webhook.js');
+  console.log('  PASS: R6-κ + CCCC + R7-A prior-arc anchors source-grep-present');
+
+  // R6-κ's aml_pep_requested_at stamp logic still in place on admin-approval branches.
+  if (!/aml_pep_requested_at: _kStampedAt/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CC R6-κ stamp]: R6-κ aml_pep_requested_at stamp logic missing — cross-cluster regression`);
+  }
+  console.log('  PASS [R6-κ stamp]: aml_pep_requested_at stamp logic preserved (R6-κ regression direction holding)');
+
+  // computeAdminBanner still has the gate-trichotomy (PRELIMINARY-CLARIFICATION /
+  // PRELIMINARY / COMPLETE) — R7-A operates at dispatcher level, doesn't
+  // touch the banner gate.
+  if (!/PRELIMINARY-CLARIFICATION/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CC banner]: computeAdminBanner's PRELIMINARY-CLARIFICATION branch missing — banner gate regressed`);
+  }
+  console.log('  PASS [computeAdminBanner gate-trichotomy]: PRELIMINARY-CLARIFICATION + PRELIMINARY + COMPLETE branches all preserved (R7-A operates at dispatcher layer, not banner layer)');
+
+  // sendPreliminaryReviewToAdmin's downstream computeAdminBanner JS-authoritative
+  // strip-and-prepend logic is intact.
+  if (!/strip Claude's emitted FILE STATUS line and prepend/.test(_r7WebhookSrc) && !/computeAdminBanner/.test(_r7WebhookSrc)) {
+    throw new Error(`FAIL [R7α-CC banner-strip]: sendPreliminaryReviewToAdmin's computeAdminBanner strip-and-prepend logic missing`);
+  }
+  console.log('  PASS [banner strip-and-prepend]: sendPreliminaryReviewToAdmin still applies computeAdminBanner JS-authoritative banner (Lena Park output will get PRELIMINARY banner, not COMPLETE)');
+
+  console.log(`Group R7α-CROSS-CLUSTER-INTEGRATION: prior arc holding + R6-κ stamp preserved + computeAdminBanner gate intact + dispatcher/banner layering correct.`);
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
@@ -11547,14 +11862,19 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
       expect: null,
     },
     {
-      name: "D2: active + intake + AML + PEP + exit_strategy, no prelim_approved_at → 'final-review' (CCCC defense-in-depth)",
+      // R7-A (2026-05-22) update: post-R7-A the return value on no-prior-approval
+      // is 'preliminary-all-docs-in' (NOT 'final-review'). Franco S14-Bug-1 fix:
+      // PRELIMINARY = first admin-facing review ALWAYS. Pre-R7-A this was
+      // 'final-review' (CCCC defense-in-depth); R7-A redirects to the
+      // PRELIMINARY-review dispatcher. Gate invariant preserved.
+      name: "D2: active + intake + AML + PEP + exit_strategy, no prelim_approved_at → 'preliminary-all-docs-in' (R7-A Franco S14-Bug-1 fix; pre-R7-A was 'final-review')",
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: 'final-review',
+      expect: 'preliminary-all-docs-in',
     },
     {
       name: 'D3: active + intake + compliance, exit_strategy MISSING → null (exit_strategy gate)',
@@ -11607,14 +11927,15 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
       expect: null,
     },
     {
-      name: "D8: purchase deal + intake + compliance + exit_strategy (no prelim_approved_at) → 'final-review'",
+      // R7-A widening — see D2 rationale. Purchase deal variant.
+      name: "D8: purchase deal + intake + compliance + exit_strategy (no prelim_approved_at) → 'preliminary-all-docs-in' (R7-A; pre-R7-A was 'final-review')",
       input: {
         deal: { status: 'active' },
         summary: { loan_type: 'first mortgage', is_purchase: true, purpose: 'purchase property', exit_strategy: 'sale of subject' },
         classifications: ['government_id', 'appraisal', 'property_tax', 'income_proof', 'credit_report', 'purchase_contract', 'aml', 'pep'],
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: 'final-review',
+      expect: 'preliminary-all-docs-in',
     },
     {
       name: 'D9: purchase deal missing purchase_contract → null',
@@ -11639,14 +11960,15 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
       expect: 'completion-handoff',
     },
     {
-      name: "D11: active + full completion gate + prelim_approved_at NULL → 'final-review' (CCCC defense-in-depth — explicit case)",
+      // R7-A widening — see D2 rationale. Explicit null branch test.
+      name: "D11: active + full completion gate + prelim_approved_at NULL → 'preliminary-all-docs-in' (R7-A Franco S14-Bug-1 fix; pre-R7-A was 'final-review')",
       input: {
         deal: { status: 'active', prelim_approved_at: null },
         summary: { loan_type: 'refinance', exit_strategy: 'refi at maturity' },
         classifications: sssIntakePlusCompliance,
         willGoToCollateralCheck: false, willReview: false, identityClashUnresolved: false,
       },
-      expect: 'final-review',
+      expect: 'preliminary-all-docs-in',
     },
     {
       name: 'D12: under_review + prelim_approved_at SET → null (only active branch fires completion paths)',

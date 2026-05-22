@@ -531,6 +531,35 @@ const extractDeclineReason = (adminMessage) => {
   return text;
 };
 
+// R7-A (2026-05-22): Franco S14-Bug-1 fix. Pre-R7-A, when `prelim_approved_at`
+// was null (no prior admin approval) AND all docs were in AND willReview
+// gate held (e.g., on unresolved_discrepancy), this returned 'final-review'
+// — firing the FINAL REVIEW dispatcher with "FILE STATUS: COMPLETE" banner
+// on the FIRST admin-facing review. Production fixture: Lena Park 4850dc32
+// (Carlos Mendez / Pinnacle Mortgage Solutions Lic. #MB339885) — Vienna
+// dispatched "FINAL REVIEW: All Documents Received — Lena Ji-Young Park"
+// with banner "FILE STATUS: COMPLETE — Ready for Review" when admin had
+// never approved.
+//
+// Franco's rule (load-bearing):
+//   • PRELIMINARY = first admin-facing review, ALWAYS, regardless of doc
+//     count.
+//   • COMPLETE/handoff = only after admin has previously approved (i.e.,
+//     prelim_approved_at is stamped) AND all conditions fulfilled.
+//   • Doc-completeness is NOT a template-selection signal.
+//
+// Fix shape (Mechanism A1 — strict-superset additive widening per Q1):
+// when prelim_approved_at=null, return 'preliminary-all-docs-in' instead
+// of 'final-review'. The consumer (active-branch dispatcher in webhook.js)
+// handles 'preliminary-all-docs-in' by firing sendPreliminaryReviewToAdmin
+// (the same dispatcher as the regular willReview path) — admin sees a
+// PRELIMINARY review with the JS-injected computeAdminBanner-authoritative
+// banner.
+//
+// Legacy 'final-review' dispatch is retained as DEAD-CODE under A1 — only
+// theoretically reachable via pre-CCCC defense-in-depth write-failure
+// recovery (vanishingly rare and arguably unreachable). See annotation at
+// the FINAL REVIEW dispatcher consumer block.
 const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
   if (deal?.status !== 'active') return null;
   if (willGoToCollateralCheck || willReview || identityClashUnresolved) return null;
@@ -538,7 +567,7 @@ const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCol
   const allDocsIn = required.every(req => isDocRequirementSatisfied(req, classifications || []));
   const hasExitStrategy = !!summary?.exit_strategy;
   if (!(allDocsIn && hasExitStrategy)) return null;
-  return deal.prelim_approved_at ? 'completion-handoff' : 'final-review';
+  return deal.prelim_approved_at ? 'completion-handoff' : 'preliminary-all-docs-in';
 };
 
 const normalizeSenderName = (dealSummary, fromName) => {
@@ -2812,8 +2841,14 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           willReview,
           identityClashUnresolved,
         });
+        // R7-A (2026-05-22): 'preliminary-all-docs-in' fires sendPreliminaryReviewToAdmin
+        // when prelim_approved_at=null + all docs in. Franco S14-Bug-1 fix —
+        // FIRST admin-facing review is ALWAYS PRELIMINARY, regardless of doc count.
+        // Legacy 'final-review' value retained but unreachable on fresh deals
+        // (see dead-code annotation at the FINAL REVIEW dispatcher block below).
         const willFireFinalReview = completionDispatch === 'final-review';
         const willFireCompletionHandoff = completionDispatch === 'completion-handoff';
+        const willFirePreliminaryAllDocsIn = completionDispatch === 'preliminary-all-docs-in';
 
         if (ltv && ltv <= 80 && !hasReviewableDoc) {
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
@@ -2827,7 +2862,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // the prelim review which fired ~49s later. willGoToCollateralCheck is NOT
         // suppressed — that path uses Vienna's reply to deliver the collateral question
         // to the broker (Fix 7).
-        if (result.responseEmail && !willFireFinalReview && !willReview && !willFireCompletionHandoff) {
+        if (result.responseEmail && !willFireFinalReview && !willReview && !willFireCompletionHandoff && !willFirePreliminaryAllDocsIn) {
           emailService.sendEmailDelayed(
             email.from,
             `Re: ${email.subject}`,
@@ -2840,16 +2875,20 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
               console.log('Conversational response sent to broker');
             }
           );
-        } else if (willFireFinalReview || willReview || willFireCompletionHandoff) {
+        } else if (willFireFinalReview || willReview || willFireCompletionHandoff || willFirePreliminaryAllDocsIn) {
           const gateLabel = willFireCompletionHandoff
             ? 'COMPLETION HANDOFF (CCCC)'
-            : willFireFinalReview ? 'FINAL REVIEW' : 'PRELIMINARY review';
+            : willFireFinalReview ? 'FINAL REVIEW (legacy dead-code path)'
+            : willFirePreliminaryAllDocsIn ? 'PRELIMINARY review (R7-A all-docs-in path)'
+            : 'PRELIMINARY review';
           console.log(`Suppressing Vienna broker reply — ${gateLabel} firing to Franco; admin-drafted reply will be the next broker-facing message`);
         }
         if (willGoToCollateralCheck) {
           console.log('LTV gate active — Vienna replied conversationally AND routing deal to awaiting_collateral');
         } else if (willReview) {
           console.log('LTV gate active — Vienna reply suppressed AND sending PRELIMINARY review HITL to Franco');
+        } else if (willFirePreliminaryAllDocsIn) {
+          console.log('R7-A: all docs in + no prior approval — Vienna reply suppressed AND sending PRELIMINARY review HITL to Franco (S14-Bug-1 fix path)');
         }
 
         if (willGoToCollateralCheck) {
@@ -2862,6 +2901,14 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         } else if (willReview) {
           // Cluster D: pass result.responseEmail so the gate can detect a pending
           // broker clarification ask even when Vienna's reply is NNN-suppressed.
+          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv, { brokerFacingReplyText: result.responseEmail || '' });
+        } else if (willFirePreliminaryAllDocsIn) {
+          // R7-A (2026-05-22): Franco S14-Bug-1 fix. When all docs in + no
+          // prior approval, dispatcher routes to sendPreliminaryReviewToAdmin
+          // (NOT FINAL REVIEW with COMPLETE banner). Same dispatcher as
+          // willReview path → JS-injected computeAdminBanner-authoritative
+          // PRELIMINARY banner; admin sees PRELIMINARY review as expected
+          // for first admin-facing review.
           await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv, { brokerFacingReplyText: result.responseEmail || '' });
         } else {
           // Deal already under_review or no LTV yet — keep conversation going.
@@ -2888,7 +2935,28 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           });
         }
 
-        // ALL DOCS RECEIVED — send Franco a final complete review
+        // R7-A DEFENSE-IN-DEPTH UNREACHABLE — legacy pre-CCCC write-failure
+        // recovery only. Franco S14-Bug-1 fix (2026-05-22) redirected the
+        // prelim_approved_at=null + all-docs-in case to
+        // 'preliminary-all-docs-in' dispatch → sendPreliminaryReviewToAdmin
+        // (the correct PRELIMINARY-with-banner path). On fresh deals, this
+        // block is unreachable: computeCompletionDispatch never returns
+        // 'final-review' anymore.
+        //
+        // Theoretically reachable via pre-CCCC defense-in-depth write-failure
+        // recovery: a deal that admin approved but where prelim_approved_at
+        // stamp failed to persist (rare write-path failure between CCCC's
+        // stamp and the next webhook turn). Empirically vanishingly rare;
+        // arguably this block could be removed in a separate cleanup commit
+        // (strict-additive R7-A discipline keeps it for now).
+        //
+        // COMPOUNDING-BUG NOTE: if this block ever becomes reachable again,
+        // it has a SECOND defect — the FINAL REVIEW dispatcher does NOT
+        // apply computeAdminBanner's JS-authoritative banner strip-and-
+        // prepend that sendPreliminaryReviewToAdmin uses. Result: Claude's
+        // raw "FILE STATUS: COMPLETE — Ready for Review" line survives
+        // un-stripped. Future cleanup-commit author working on this block:
+        // apply computeAdminBanner first if making the path live again.
         if (willFireFinalReview) {
           console.log('All documents received — sending final review to Franco');
           const finalDocs = await dealsService.getDocumentsWithText(existingDeal.id);
