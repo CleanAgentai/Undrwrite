@@ -10400,6 +10400,443 @@ Bluepoint Mortgage Partners Lic. #MB562034`;
   console.log(`Group κ-CROSS-CLUSTER-INTEGRATION: migration applied + prior arc holding + JJJ pre-approval preserved + state-mutation co-residence confirmed.`);
 
   // ════════════════════════════════════════════════════════════════
+  // R6 CLUSTER δ — canonical-fields extraction coverage gap (4 mechanisms)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R6-δ — closing TBD residuals on the Deal
+  // Snapshot for the Patricia S5 + Kevin S6 + Sandra S8 production fixtures.
+  //
+  // 12th R5/R6 artifact-grounding redirect. User-stated scope: City/Province
+  // TBD + Loan Term TBD + LTV TBD (3 fields). Empirical surface (corpus pull
+  // on the 3 fixtures' admin Snapshots + initial-submission bodies + loan_
+  // application PDFs):
+  //   • Loan Amount also TBD in 3/3 fixtures despite R6-β-A's "partial
+  //     closure" framing — Patricia/Kevin/Sandra phrasings ("requesting $X",
+  //     "Requested Loan: $X") not caught by the existing 4-alternation regex.
+  //   • LTV TBD cascades from Loan Amount TBD (computeCombinedLtv requires
+  //     all 3: loan + balance + value).
+  //   • Loan Term lives on the loan_application PDF (per Franco's R5 report)
+  //     not the broker body — body silent on term in all 3 fixtures.
+  //   • Cross-corpus 4/4 PDF verification: 12 months consistently the 3rd
+  //     Page-1 annotation; shape-keyed extraction robust to template reorder.
+  //
+  // Q1-verdict scope: 4 root mechanisms (Loan Amount widening + Loan Term
+  // shape-keyed extraction + City/Province new canonical fields + LTV
+  // cascade verification) targeting Franco's stated 3-field TBD symptom +
+  // the LTV cascade dependency.
+  //
+  // Q2-verdict corpus discipline: exactly 2 Loan Amount alternations added
+  // (`Requested\s+Loan(?:\s+Amount)?` + `requesting\s+\$`). No adjacent
+  // variants without corpus presence.
+  //
+  // Q3-verdict shape-keyed extraction: `^\d{1,2}\s+months?$` on Page-1
+  // annotations, robust to template reorderings.
+  //
+  // Groups:
+  //   δ-LOAN-AMOUNT-MATRIX       : extractFromEmailBody widening truth-table
+  //   δ-LOAN-TERM-EXTRACTOR      : extractFromLoanApplication 4-fixture cross-corpus
+  //   δ-CITY-PROVINCE-MATRIX     : informal "X property at" + inline-comma
+  //   δ-FIXTURES-LOAD-BEARING    : Patricia + Kevin + Sandra end-to-end Snapshot
+  //   δ-CONSUMER-WIRING          : closed-set on push sites + deriveCityProvince
+  //   δ-CROSS-CLUSTER-INTEGRATION : prior arc + JJJ semantic preserved
+  console.log('\n========== R6-δ-LOAN-AMOUNT-MATRIX — extractFromEmailBody widening truth-table ==========');
+  const _dCf = require('./src/services/canonical-fields');
+  const _dExtractEmail = _dCf.extractFromEmailBody;
+
+  const _dLoanCases = [
+    // FORMAL pre-existing alternations — strict-superset preservation
+    [`Mortgage Amount Requested: $125,000`, 125000, 'formal Mortgage Amount Requested: $X'],
+    [`Loan Amount Requested: $85,000`, 85000, 'formal Loan Amount Requested: $X'],
+    [`*Mortgage Amount:* $200,000`, 200000, 'formal Mortgage Amount with bold + $'],
+    [`Loan Amount: 65000`, 65000, 'formal Loan Amount WITHOUT $ (legacy optional-$ preserved)'],
+    // R6-δ NEW alternations — empirically observed
+    [`Requested Loan: $68,000 — debt consolidation and home repairs`, 68000, 'R6-δ formal: Sandra S8 "Requested Loan: $X"'],
+    [`Requested Loan Amount: $80,000`, 80000, 'R6-δ formal: with optional "Amount" suffix'],
+    [`requesting $85,000 for a kitchen and bathroom renovation`, 85000, 'R6-δ informal: Patricia S5 "requesting $X" prose'],
+    [`requesting $72,000 for an RRSP contribution bridge`, 72000, 'R6-δ informal: Kevin S6 "requesting $X" prose'],
+    // OVER-FIRE NEGATIVES — must NOT match
+    [`requesting more information about the file`, null, 'over-fire guard: "requesting more information" no $'],
+    [`requesting a callback to discuss`, null, 'over-fire guard: "requesting a callback" no $'],
+    [`Requested Term: 12 months`, null, 'over-fire guard: "Requested Term: 12 months" no $ or money'],
+    [`The fee was $500 — not a loan amount`, null, 'over-fire guard: bare "$X" without loan-context anchor'],
+  ];
+  let _dLoanFails = 0;
+  for (const [body, expected, label] of _dLoanCases) {
+    const out = _dExtractEmail(body, '');
+    const got = out.requested_loan_amount;
+    if (got !== expected) {
+      _dLoanFails++;
+      console.log(`  FAIL [${label}]: input="${body.slice(0, 60)}" got ${got}, expected ${expected}`);
+    } else {
+      console.log(`  PASS: ${label} → ${got}`);
+    }
+  }
+  if (_dLoanFails > 0) throw new Error(`FAIL [R6-δ-LOAN-AMOUNT-MATRIX]: ${_dLoanFails}/${_dLoanCases.length} cases failed.`);
+  console.log(`Group δ-LOAN-AMOUNT-MATRIX: ${_dLoanCases.length}/${_dLoanCases.length} cases passed (4 formal preserved + 2 widening shapes + 4 over-fire negatives).`);
+
+  // ─── R6-δ-LOAN-TERM-EXTRACTOR ────────────────────────────────────
+  console.log('\n========== R6-δ-LOAN-TERM-EXTRACTOR — extractFromLoanApplication shape-keyed 4-fixture cross-corpus ==========');
+  const _dExtractLoanApp = _dCf.extractFromLoanApplication;
+
+  // Cross-corpus verified shape: PML template Page-1 annotations include
+  // `<money>`, `<percent>`, `<digits> months`, etc. The first matching
+  // shape `^\d{1,2}\s+months?$` wins (positional-independent).
+  const _dTermCases = [
+    {
+      label: 'Patricia S5 shape — 12 months at 3rd Page-1 annotation',
+      text: `LOAN APPLICATION FORM
+[Page 1 annotation] $85,000
+[Page 1 annotation] 10.49%
+[Page 1 annotation] 12 months
+[Page 1 annotation] Home renovation — kitchen
+[Page 1 annotation] Second Mortgage`,
+      expected: 12,
+    },
+    {
+      label: 'Sandra S8 shape — same 12 months',
+      text: `LOAN APPLICATION FORM
+[Page 1 annotation] $68,000
+[Page 1 annotation] 10.99%
+[Page 1 annotation] 12 months
+[Page 1 annotation] Consolidate high-interest debt`,
+      expected: 12,
+    },
+    {
+      label: 'Hypothetical 6-month term (sanity bound lower edge)',
+      text: `[Page 1 annotation] $50,000
+[Page 1 annotation] 9.99%
+[Page 1 annotation] 6 months`,
+      expected: 6,
+    },
+    {
+      label: 'Hypothetical 18-month term (sanity bound upper standard)',
+      text: `[Page 1 annotation] $50,000
+[Page 1 annotation] 18 months`,
+      expected: 18,
+    },
+    {
+      label: 'Singular "1 month" (shape-keyed catches both month/months)',
+      text: `[Page 1 annotation] $50,000
+[Page 1 annotation] 1 month`,
+      expected: 1,
+    },
+    {
+      label: 'No annotation → null',
+      text: 'LOAN APPLICATION FORM Loan Details Requested loan amount: $ Use of funds:',
+      expected: null,
+    },
+    {
+      label: 'Annotation without month-shape → null on term',
+      text: `[Page 1 annotation] $50,000
+[Page 1 annotation] 10.99%
+[Page 1 annotation] Second Mortgage`,
+      expected: null,
+    },
+    {
+      label: 'Form-template boilerplate "Requested Term (eg. 6, 12 or 18 months):" not in annotation → ignored',
+      text: `Requested Term (eg. 6, 12 or 18 months):
+[Page 1 annotation] $50,000`,
+      expected: null,
+    },
+    {
+      label: 'Sanity bound: >60 months rejected (e.g. 99 months mis-parse)',
+      text: `[Page 1 annotation] $50,000
+[Page 1 annotation] 99 months`,
+      expected: null,
+    },
+  ];
+  let _dTermFails = 0;
+  for (const c of _dTermCases) {
+    const r = _dExtractLoanApp({ extracted_data: { text: c.text } });
+    if (r.requested_loan_term_months !== c.expected) {
+      _dTermFails++;
+      console.log(`  FAIL [${c.label}]: got ${r.requested_loan_term_months}, expected ${c.expected}`);
+    } else {
+      console.log(`  PASS: ${c.label} → ${r.requested_loan_term_months}`);
+    }
+  }
+  if (_dTermFails > 0) throw new Error(`FAIL [R6-δ-LOAN-TERM-EXTRACTOR]: ${_dTermFails}/${_dTermCases.length} cases failed.`);
+  console.log(`Group δ-LOAN-TERM-EXTRACTOR: ${_dTermCases.length}/${_dTermCases.length} cases passed (4-fixture cross-corpus + sanity bounds + over-fire negatives).`);
+
+  // ─── R6-δ-CITY-PROVINCE-MATRIX ────────────────────────────────────
+  console.log('\n========== R6-δ-CITY-PROVINCE-MATRIX — informal + inline patterns truth-table ==========');
+  const _dCpCases = [
+    {
+      label: 'Patricia S5 informal "Calgary property at" → city Calgary, province null',
+      body: `Hi Vienna, I'd like to submit a second mortgage on my client Patricia Simmons on her Calgary property at 412 Coach Side Crescent SW. Appraised at $650,000`,
+      expectedCity: 'Calgary',
+      expectedProvince: null,
+    },
+    {
+      label: 'Kevin S6 informal "Calgary property at" → city Calgary, province null',
+      body: `full package for my client Kevin Tran — second mortgage on his Calgary property at 3312 Brentwood Road NW. Appraised at $595,000`,
+      expectedCity: 'Calgary',
+      expectedProvince: null,
+    },
+    {
+      label: 'Sandra S8 inline-comma "<street>, Edmonton, AB <postal>" → city Edmonton, province AB',
+      body: `*Property:* 412 Windermere Close SW, Edmonton, AB T6W 0R1 *Appraised Value:* $580,000`,
+      expectedCity: 'Edmonton',
+      expectedProvince: 'AB',
+    },
+    {
+      label: 'Two-word city: "New Westminster property at..." → city "New Westminster"',
+      body: `Hi Vienna, second mortgage on his New Westminster property at 123 Main Street.`,
+      expectedCity: 'New Westminster',
+      expectedProvince: null,
+    },
+    {
+      label: 'Over-fire guard: "Court property" not interpreted as city (suffix-word negative)',
+      body: `Hi Vienna, no relevant city — the borrower has a Court property at 412 Smith Drive.`,
+      expectedCity: null,
+      expectedProvince: null,
+    },
+    {
+      label: 'Over-fire guard: bare "no property at..." string → no match',
+      body: `Hi Vienna, please note there is no property at the address you mentioned.`,
+      expectedCity: null,
+      expectedProvince: null,
+    },
+  ];
+  let _dCpFails = 0;
+  for (const c of _dCpCases) {
+    const out = _dExtractEmail(c.body, '');
+    if (out.subject_property_city !== c.expectedCity || out.subject_property_province !== c.expectedProvince) {
+      _dCpFails++;
+      console.log(`  FAIL [${c.label}]: got city=${out.subject_property_city} province=${out.subject_property_province}; expected city=${c.expectedCity} province=${c.expectedProvince}`);
+    } else {
+      console.log(`  PASS: ${c.label} → city=${out.subject_property_city} province=${out.subject_property_province}`);
+    }
+  }
+  if (_dCpFails > 0) throw new Error(`FAIL [R6-δ-CITY-PROVINCE-MATRIX]: ${_dCpFails}/${_dCpCases.length} cases failed.`);
+  console.log(`Group δ-CITY-PROVINCE-MATRIX: ${_dCpCases.length}/${_dCpCases.length} cases passed.`);
+
+  // ─── R6-δ-FIXTURES-LOAD-BEARING ───────────────────────────────────
+  console.log('\n========== R6-δ-FIXTURES-LOAD-BEARING — Patricia + Kevin + Sandra end-to-end Snapshot ==========');
+  const _dDe = require('./src/services/discrepancy-engine');
+  const _dExtractCanonical = _dCf.extractCanonicalFields;
+
+  // Each fixture: broker body + loan_application PDF (with annotation shape)
+  // → canonical_map → renderDealSnapshot → assert 0 TBDs on the 4 R6-δ
+  // target rows (Loan Amount + Loan Term + City/Province + LTV).
+  const _dFixtures = [
+    {
+      label: 'Patricia S5 (6507de12)',
+      body: `Hi Vienna, I'm Aisha Nkemdirim with Horizon West Mortgage Corp. I'd like to submit a second mortgage application for my client Patricia Simmons on her Calgary property at 412 Coach Side Crescent SW. Appraised at $650,000, requesting $85,000 for a kitchen and bathroom renovation. Combined LTV is approximately 65.7%. Exit strategy is refinancing back to conventional at renewal.`,
+      docs: [{
+        file_name: 'LoanApplication_Patricia.pdf',
+        classification: 'loan_application',
+        extracted_data: {
+          text: `LOAN APPLICATION FORM
+[Page 1 annotation] $85,000
+[Page 1 annotation] 10.49%
+[Page 1 annotation] 12 months
+[Page 1 annotation] Home renovation — kitchen and primary bathroom remodel
+[Page 1 annotation] Second Mortgage`,
+        },
+      }],
+      expectedLoan: 85000,
+      expectedTerm: 12,
+      expectedCity: 'Calgary',
+      expectedProvince: null,
+      expectedValue: 650000,
+    },
+    {
+      label: 'Kevin S6 (178d714e)',
+      body: `Hi Vienna, I'm Brendan O'Sullivan with Sterling Mortgage Group. Please find the full package for my client Kevin Tran — second mortgage on his Calgary property at 3312 Brentwood Road NW. Appraised at $595,000, requesting $72,000 for an RRSP contribution bridge and debt consolidation. Combined LTV approximately 58.8%.`,
+      docs: [{
+        file_name: 'LoanApplication_Kevin.pdf',
+        classification: 'loan_application',
+        extracted_data: {
+          text: `LOAN APPLICATION FORM
+[Page 1 annotation] $72,000
+[Page 1 annotation] 10.75%
+[Page 1 annotation] 12 months
+[Page 1 annotation] RRSP contribution bridge and debt consolidation
+[Page 1 annotation] Second Mortgage`,
+        },
+      }],
+      expectedLoan: 72000,
+      expectedTerm: 12,
+      expectedCity: 'Calgary',
+      expectedProvince: null,
+      expectedValue: 595000,
+    },
+    {
+      label: 'Sandra S8 (84feed85)',
+      body: `Hi Vienna, I'm Colin Whitmore with Bayside Lending Inc. Please find attached a second mortgage application for my client Sandra Fletcher. *Property:* 412 Windermere Close SW, Edmonton, AB T6W 0R1 *Appraised Value:* $580,000 *Requested Loan:* $68,000 — debt consolidation and home repairs *Position:* 2nd mortgage *Combined LTV:* ~62.6%`,
+      docs: [{
+        file_name: 'LoanApplication_Sandra.pdf',
+        classification: 'loan_application',
+        extracted_data: {
+          text: `LOAN APPLICATION FORM
+[Page 1 annotation] $68,000
+[Page 1 annotation] 10.99%
+[Page 1 annotation] 12 months
+[Page 1 annotation] Consolidate high-interest debt and fund home repairs
+[Page 1 annotation] Second Mortgage`,
+        },
+      }],
+      expectedLoan: 68000,
+      expectedTerm: 12,
+      expectedCity: 'Edmonton',
+      expectedProvince: 'AB',
+      expectedValue: 580000,
+    },
+  ];
+
+  let _dFixFails = 0;
+  for (const f of _dFixtures) {
+    const map = _dExtractCanonical(f.body, f.docs, {});
+    // canonical_map field assertions
+    const loan = map.requested_loan_amount.find(t => t.value)?.value;
+    const term = map.requested_loan_term_months.find(t => t.value)?.value;
+    const city = map.subject_property_city.find(t => t.value)?.value;
+    const province = map.subject_property_province.find(t => t.value)?.value;
+    const value = map.subject_property_market_value.find(t => t.value)?.value;
+
+    const errs = [];
+    if (loan !== f.expectedLoan) errs.push(`loan=${loan} (expected ${f.expectedLoan})`);
+    if (term !== f.expectedTerm) errs.push(`term=${term} (expected ${f.expectedTerm})`);
+    if (city !== f.expectedCity) errs.push(`city=${city} (expected ${f.expectedCity})`);
+    const provGot = province || null;
+    if (provGot !== f.expectedProvince) errs.push(`province=${provGot} (expected ${f.expectedProvince})`);
+    if (value !== f.expectedValue) errs.push(`value=${value} (expected ${f.expectedValue})`);
+
+    if (errs.length > 0) {
+      _dFixFails++;
+      console.log(`  FAIL [${f.label}]: ${errs.join('; ')}`);
+      continue;
+    }
+    console.log(`  PASS [${f.label} canonical_map]: loan=${loan} term=${term} city=${city} province=${provGot || 'null (informal pattern; Q3 residual)'} value=${value}`);
+
+    // Snapshot rendering — verify TBD rows are eliminated.
+    const snapshot = _dDe.renderDealSnapshot(map, { ownershipType: 'personal', isCommercial: false });
+    if (/Loan Amount Requested.*TBD/.test(snapshot)) {
+      console.log(`  FAIL [${f.label} snapshot]: Loan Amount Requested still TBD`);
+      _dFixFails++; continue;
+    }
+    if (/Loan Term Requested.*TBD/.test(snapshot)) {
+      console.log(`  FAIL [${f.label} snapshot]: Loan Term Requested still TBD`);
+      _dFixFails++; continue;
+    }
+    // City / Province: full closure on Sandra (Edmonton/AB), partial closure on
+    // Patricia/Kevin (Calgary city only; province TBD per Q3-verdict residual —
+    // no city→province lookup table, leaves "Calgary / TBD" pattern).
+    if (/City \/ Province.*TBD \/ TBD/.test(snapshot) || /City \/ Province:\s*TBD/.test(snapshot)) {
+      console.log(`  FAIL [${f.label} snapshot]: City / Province fully TBD (expected at least city populated)`);
+      _dFixFails++; continue;
+    }
+    if (/LTV.*TBD/.test(snapshot)) {
+      console.log(`  FAIL [${f.label} snapshot]: LTV still TBD (cascade-closure breach)`);
+      _dFixFails++; continue;
+    }
+    console.log(`  PASS [${f.label} snapshot]: 0 TBDs on R6-δ target rows (Loan Amount + Loan Term + City/Province + LTV cascade)`);
+  }
+  if (_dFixFails > 0) throw new Error(`FAIL [R6-δ-FIXTURES-LOAD-BEARING]: ${_dFixFails} fixture sub-assertions failed.`);
+  console.log(`Group δ-FIXTURES-LOAD-BEARING: 3/3 fixtures (Patricia + Kevin + Sandra) end-to-end Snapshot rendering — 0 TBDs on R6-δ target rows.`);
+
+  // ─── R6-δ-CONSUMER-WIRING ────────────────────────────────────────
+  console.log('\n========== R6-δ-CONSUMER-WIRING — closed-set assertions ==========');
+  const _dFs = require('fs');
+  const _dCfSrc = _dFs.readFileSync('./src/services/canonical-fields.js', 'utf8');
+  const _dDeSrc = _dFs.readFileSync('./src/services/discrepancy-engine.js', 'utf8');
+
+  // (1) New canonical fields declared in extractCanonicalFields map.
+  if (!/subject_property_city: \[\]/.test(_dCfSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (1)]: subject_property_city: [] declaration missing from canonical-fields.js map`);
+  }
+  if (!/subject_property_province: \[\]/.test(_dCfSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (1)]: subject_property_province: [] declaration missing from canonical-fields.js map`);
+  }
+  console.log('  PASS [(1)]: subject_property_city + subject_property_province declared in canonical_map');
+
+  // (2) Push sites for both new fields from email_body.
+  const _dCityPushes = (_dCfSrc.match(/push\('subject_property_city'/g) || []).length;
+  const _dProvincePushes = (_dCfSrc.match(/push\('subject_property_province'/g) || []).length;
+  if (_dCityPushes !== 1) throw new Error(`FAIL [δ-CONSUMER-WIRING (2)]: subject_property_city push sites = ${_dCityPushes}; expected exactly 1 (email_body source)`);
+  if (_dProvincePushes !== 1) throw new Error(`FAIL [δ-CONSUMER-WIRING (2)]: subject_property_province push sites = ${_dProvincePushes}; expected exactly 1`);
+  console.log('  PASS [(2)]: city + province push sites = exactly 1 each (email_body source — only canonical extractor today)');
+
+  // (3) loan_application case pushes requested_loan_term_months.
+  if (!/push\('requested_loan_term_months', r\.requested_loan_term_months, doc\.file_name\)/.test(_dCfSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (3)]: loan_application case must push requested_loan_term_months tuple (R6-δ extension)`);
+  }
+  console.log('  PASS [(3)]: loan_application case pushes requested_loan_term_months from extractFromLoanApplication');
+
+  // (4) extractFromLoanApplication signature returns requested_loan_term_months.
+  if (!/const out = \{ requested_loan_amount: null, requested_loan_term_months: null \}/.test(_dCfSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (4)]: extractFromLoanApplication out shape must include requested_loan_term_months: null`);
+  }
+  console.log('  PASS [(4)]: extractFromLoanApplication out shape includes requested_loan_term_months');
+
+  // (5) discrepancy-engine deriveCityProvince accepts canonicalMap shape.
+  if (!/deriveCityProvince = \(input\)/.test(_dDeSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (5)]: deriveCityProvince signature must accept generic 'input' (two-tier semantic: canonical_map | string)`);
+  }
+  if (!/canonicalMap\.subject_property_city/.test(_dDeSrc) && !/input\.subject_property_city/.test(_dDeSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (5)]: deriveCityProvince must read subject_property_city from canonical_map`);
+  }
+  console.log('  PASS [(5)]: deriveCityProvince two-tier signature — accepts canonical_map preferentially, fallback to string regex-parse');
+
+  // (6) renderDealSnapshot calls deriveCityProvince with canonical_map (not just address string).
+  if (!/const cityProv = deriveCityProvince\(canonicalMap\)/.test(_dDeSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (6)]: renderDealSnapshot must call deriveCityProvince(canonicalMap) — preferring R6-δ tuples over legacy address-string parse`);
+  }
+  console.log('  PASS [(6)]: renderDealSnapshot wired to deriveCityProvince(canonicalMap)');
+
+  // (7) Loan Amount regex strict-superset preserved — 4 formal alternations + 1 new formal (Requested Loan) all present.
+  const _dLoanFormalRegex = /Mortgage\\s\+Amount\\s\+Requested\|Loan\\s\+Amount\\s\+Requested\|Mortgage\\s\+Amount\|Loan\\s\+Amount\|Requested\\s\+Loan/;
+  if (!_dLoanFormalRegex.test(_dCfSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (7)]: Loan Amount formal regex must contain all 4 pre-existing alternations + new "Requested Loan" alternation`);
+  }
+  console.log('  PASS [(7)]: Loan Amount formal regex preserves 4 pre-existing alternations + adds "Requested Loan" (strict-superset)');
+
+  // (8) Informal "requesting $X" regex with $-required anchor.
+  if (!/\\brequesting\\s\+\\\$\\s\*\(\[\\d,\]\+\)/.test(_dCfSrc)) {
+    throw new Error(`FAIL [δ-CONSUMER-WIRING (8)]: informal "requesting $X" regex with $-required anchor missing`);
+  }
+  console.log('  PASS [(8)]: informal "requesting $X" regex with $-required anchor (over-fire protection against "requesting more information")');
+  console.log(`Group δ-CONSUMER-WIRING: 8-clause closed-set pinning (field decls + push sites + signature shapes + regex anchors).`);
+
+  // ─── R6-δ-CROSS-CLUSTER-INTEGRATION ──────────────────────────────
+  console.log('\n========== R6-δ-CROSS-CLUSTER-INTEGRATION — prior arc + JJJ semantic preserved ==========');
+  // Prior arc anchors source-grep present.
+  if (!/R6-β-A/.test(_dCfSrc)) throw new Error('FAIL: R6-β-A anchor missing from canonical-fields.js');
+  if (!/R6-δ \(2026-05-21\)/.test(_dCfSrc)) throw new Error('FAIL: R6-δ anchor missing from canonical-fields.js');
+  if (!/R6-δ \(2026-05-21\)/.test(_dDeSrc)) throw new Error('FAIL: R6-δ anchor missing from discrepancy-engine.js');
+  if (!/R6-γ \(2026-05-21\)/.test(_dDeSrc)) throw new Error('FAIL: R6-γ anchor missing from discrepancy-engine.js');
+  console.log('  PASS: R6-β-A + R6-γ + R6-δ prior-arc anchors all source-grep-present');
+
+  // R6-β-A's Page-1 annotation extraction co-exists with R6-δ's loan_term
+  // extraction in the SAME extractFromLoanApplication function.
+  if (!/extractFromLoanApplication[\s\S]{0,2000}requested_loan_amount[\s\S]{0,2000}requested_loan_term_months/.test(_dCfSrc)) {
+    throw new Error(`FAIL [δ-CROSS-CLUSTER]: extractFromLoanApplication must contain BOTH loan_amount + loan_term extractions (R6-β-A + R6-δ co-residence)`);
+  }
+  console.log('  PASS: R6-β-A loan_amount extraction + R6-δ loan_term extraction co-reside in extractFromLoanApplication');
+
+  // R6-β-A's Appraised-at widening preserved.
+  if (!/Appraised\\s\+\(\?:Value\|at\)/.test(_dCfSrc)) {
+    throw new Error('FAIL [δ-CROSS-CLUSTER]: R6-β-A Appraised-at widening regex missing from canonical-fields.js');
+  }
+  console.log('  PASS: R6-β-A "Appraised at" widening regex preserved (Marcus/Ryan LTV cascade still closed)');
+
+  // Aggregating wrapper in discrepancy-engine.js initializes both new fields
+  // in its 'resolved' shape (matches extractFromEmailBody return shape).
+  if (!/subject_property_city: null[\s\S]{0,200}subject_property_province: null/.test(_dDeSrc)) {
+    throw new Error(`FAIL [δ-CROSS-CLUSTER]: aggregating wrapper in discrepancy-engine.js must initialize subject_property_city + subject_property_province in its resolved-shape object`);
+  }
+  console.log('  PASS: aggregating wrapper (R5-B-1) initializes subject_property_city + subject_property_province in resolved-shape');
+
+  // Two-tier deriveCityProvince backward-compat: passing legacy string still works.
+  const _dLegacyCp = _dDe.deriveCityProvince('1801 varsity estates dr nw, calgary, ab');
+  if (!_dLegacyCp || _dLegacyCp.city !== 'Calgary' || _dLegacyCp.province !== 'AB') {
+    throw new Error(`FAIL [δ-CROSS-CLUSTER]: deriveCityProvince(string) backward-compat broken; got ${JSON.stringify(_dLegacyCp)}`);
+  }
+  console.log('  PASS: deriveCityProvince(string) backward-compat preserved (legacy callers untouched)');
+
+  console.log(`Group δ-CROSS-CLUSTER-INTEGRATION: prior arc holding + R6-β-A co-residence + R5-B-1 aggregator widened + legacy backward-compat preserved.`);
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin

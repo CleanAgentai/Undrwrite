@@ -264,6 +264,15 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   const out = {
     subject_property_address: null,
     subject_property_postal_code: null,
+    // R6-δ (2026-05-21): top-level city + province canonical fields (mirrors
+    // subject_property_postal_code naming). Populated from broker body's
+    // "X property at <street>" informal pattern (Patricia S5 + Kevin S6) or
+    // inline "<street>, City, Prov, postal" formal pattern (Sandra S8).
+    // Distinct semantic from address tuple — keeps cross-source discrepancy
+    // detection on bare street unchanged; deriveCityProvince in
+    // discrepancy-engine.js prefers these tuples when populated.
+    subject_property_city: null,
+    subject_property_province: null,
     requested_loan_amount: null,
     subject_property_market_value: null,
     mortgage_position: null,
@@ -307,6 +316,14 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
     if (addr) out.subject_property_address = normalizeAddress(addr);
     const postalM = block.match(POSTAL_RE_SINGLE);
     if (postalM) out.subject_property_postal_code = normalizePostal(postalM[1] + postalM[2]);
+    // R6-δ inline-comma pattern: `<street>, <City>, <Prov>[, postal]` —
+    // captures city + province when explicit (Sandra S8 deal 84feed85
+    // "412 Windermere Close SW, Edmonton, AB T6W 0R1" shape).
+    const inlineM = block.match(/(?:Boulevard|Drive|Street|Avenue|Road|Circle|Court|Lane|Place|Crescent|Way|Square|Terrace|Close|Highway|Parkway|Trail|Heights|Hill|Hills|Mews|Pointe|Promenade|Ridge|Run|Walk)(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?,?\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s*,\s*(AB|BC|SK|MB|ON|QC|NB|NS|PE|NL|NT|YT|NU)\b/);
+    if (inlineM) {
+      out.subject_property_city = inlineM[1].trim();
+      out.subject_property_province = inlineM[2].toUpperCase();
+    }
   } else {
     // Fallback for non-bold-template broker emails: line starting with "Property:"
     const lineM = emailBody.match(/Property\s*:\s*([\s\S]{0,200}?)(?:\n\n|\nLTV|\nAppraised|\nMortgage|$)/i);
@@ -315,11 +332,56 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
       if (addr) out.subject_property_address = normalizeAddress(addr);
       const postalM = lineM[1].match(POSTAL_RE_SINGLE);
       if (postalM) out.subject_property_postal_code = normalizePostal(postalM[1] + postalM[2]);
+      // R6-δ inline-comma pattern (same as bold-template branch).
+      const inlineM = lineM[1].match(/(?:Boulevard|Drive|Street|Avenue|Road|Circle|Court|Lane|Place|Crescent|Way|Square|Terrace|Close|Highway|Parkway|Trail|Heights|Hill|Hills|Mews|Pointe|Promenade|Ridge|Run|Walk)(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?,?\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s*,\s*(AB|BC|SK|MB|ON|QC|NB|NS|PE|NL|NT|YT|NU)\b/);
+      if (inlineM) {
+        out.subject_property_city = inlineM[1].trim();
+        out.subject_property_province = inlineM[2].toUpperCase();
+      }
     }
   }
-  // Loan amount: `*Mortgage Amount Requested:* $X` or similar
-  const loanM = emailBody.match(/\*?\s*(?:Mortgage\s+Amount\s+Requested|Loan\s+Amount\s+Requested|Mortgage\s+Amount|Loan\s+Amount)\s*:?\s*\*?\s*\$?\s*([\d,]+)/i);
-  if (loanM) out.requested_loan_amount = normalizeMoney(loanM[1]);
+  // R6-δ informal "<City> property at <street>" pattern — Patricia S5 +
+  // Kevin S6 prose shape ("Calgary property at 412 Coach Side Crescent SW").
+  // Only sets city + province when not already set by the inline-comma branch
+  // above (which has explicit province). Province is left null in this branch
+  // — Q3 verdict residual: no city→province lookup table (would over-fit if
+  // Franco expands beyond Alberta). City alone is still useful for the
+  // Snapshot row ("Calgary / TBD" → still better than "TBD / TBD").
+  if (!out.subject_property_city) {
+    const propAtM = emailBody.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+property\s+at\b/);
+    if (propAtM) {
+      const candidate = propAtM[1].trim();
+      // Negative guard: street-suffix words ("Court", "Hill", etc.) are not
+      // cities. Cross-check against the address normalization vocab.
+      const suffixWords = new Set(['Boulevard','Drive','Street','Avenue','Road','Circle','Court','Lane','Place','Crescent','Way','Square','Terrace','Close','Highway','Parkway','Trail','Park','Heights','Hill','Hills','Mews','Pointe','Promenade','Ridge','Run','Walk']);
+      if (!suffixWords.has(candidate.split(/\s+/)[0])) {
+        out.subject_property_city = candidate;
+        // province stays null per Q3 verdict (informal pattern has no
+        // explicit province; defer to deriveCityProvince fallback if needed).
+      }
+    }
+  }
+  // Loan amount.
+  //
+  // R6-δ (2026-05-21): strict-superset widening. Existing 4 formal alternations
+  // preserved unchanged (optional `$` preserved); 1 new formal alternation
+  // (`Requested\s+Loan(?:\s+Amount)?` — Sandra S8 deal 84feed85 "Requested
+  // Loan: $68,000" shape). One informal-prose alternation handled separately
+  // with REQUIRED `$` anchor to avoid false matches on non-money contexts
+  // ("requesting more information", "requesting a callback"):
+  //   • "requesting $X" — Patricia S5 + Kevin S6 prose shapes.
+  //
+  // Same widening discipline as R6-β-A "Appraised at" addition + R6-η R5-C-a
+  // widening. Q2 verdict: narrow corpus discipline — adjacent variants
+  // ("Loan Requested", "Funding Request", "Funds Requested") deliberately
+  // NOT added without corpus evidence.
+  const loanFormalM = emailBody.match(/\*?\s*(?:Mortgage\s+Amount\s+Requested|Loan\s+Amount\s+Requested|Mortgage\s+Amount|Loan\s+Amount|Requested\s+Loan(?:\s+Amount)?)\s*:?\s*\*?\s*\$?\s*([\d,]+)/i);
+  if (loanFormalM) {
+    out.requested_loan_amount = normalizeMoney(loanFormalM[1]);
+  } else {
+    const loanInformalM = emailBody.match(/\brequesting\s+\$\s*([\d,]+)/i);
+    if (loanInformalM) out.requested_loan_amount = normalizeMoney(loanInformalM[1]);
+  }
   // Appraised value (broker-stated): `*Appraised Value:* $X` (formal-template
   // shape) OR `Appraised at $X` (informal prose, Marcus/Ryan c56c2a0f R6-β-A
   // empirical addition — "Appraised at $545,000" without the "Value:" label).
@@ -603,7 +665,7 @@ const extractFromPnwStatement = (doc) => {
 // PNW template attachment. Two clusters compose cleanly; no interaction.
 const extractFromLoanApplication = (doc) => {
   const text = doc?.text || doc?.extracted_data?.text || '';
-  const out = { requested_loan_amount: null };
+  const out = { requested_loan_amount: null, requested_loan_term_months: null };
   if (!text) return out;
   // First Page-1 annotation matching money shape (optional `$`, digits with
   // commas, optional decimal). The `m` flag makes `$` match line-end so we
@@ -618,6 +680,25 @@ const extractFromLoanApplication = (doc) => {
     // around observed corpus range ($68k-$415k).
     if (amount != null && amount >= 5000 && amount <= 2000000) {
       out.requested_loan_amount = amount;
+    }
+  }
+  // R6-δ (2026-05-21): Loan Term extraction. Q3 verdict: shape-keyed (not
+  // positional) — scan ALL Page-1 annotations; FIRST that matches
+  // `^\d{1,2}\s+months?$` wins. Robust to PML template field reorderings.
+  // Cross-corpus verified on 4/4 fixtures (Patricia/Kevin/Sandra/Ryan — all
+  // produce 12 months as the 3rd Page-1 annotation in current template).
+  // Sanity bound 1-60 months matches the email-body extractor's range.
+  //
+  // Distinguishes the broker-filled annotation from form-template boilerplate
+  // ("Requested Term (eg. 6, 12 or 18 months):" appears in unwrapped text but
+  // NOT inside `[Page 1 annotation]` markers).
+  const annTermRe = /\[Page\s+1\s+annotation\]\s*(\d{1,2})\s+months?\s*$/gm;
+  let termMatch;
+  while ((termMatch = annTermRe.exec(text)) !== null) {
+    const n = parseInt(termMatch[1], 10);
+    if (n >= 1 && n <= 60) {
+      out.requested_loan_term_months = n;
+      break;
     }
   }
   return out;
@@ -660,6 +741,13 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   const map = {
     subject_property_address: [],
     subject_property_postal_code: [],
+    // R6-δ (2026-05-21): top-level city + province canonical fields.
+    // Mirrors subject_property_postal_code; display-only (not in
+    // discrepancy-compute list). Consumed by discrepancy-engine's
+    // deriveCityProvince, which prefers these tuples when populated and
+    // falls back to regex-parsing the address value.
+    subject_property_city: [],
+    subject_property_province: [],
     subject_property_market_value: [],
     subject_property_assessment_value: [],
     requested_loan_amount: [],
@@ -681,6 +769,8 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   const email = opts.preExtractedEmailFields || extractFromEmailBody(emailBody, emailSubject);
   push('subject_property_address', email.subject_property_address, 'email_body');
   push('subject_property_postal_code', email.subject_property_postal_code, 'email_body');
+  push('subject_property_city', email.subject_property_city, 'email_body');
+  push('subject_property_province', email.subject_property_province, 'email_body');
   push('subject_property_market_value', email.subject_property_market_value, 'email_body');
   push('requested_loan_amount', email.requested_loan_amount, 'email_body');
   push('mortgage_position', email.mortgage_position, 'email_subject_or_body');
@@ -746,13 +836,15 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       push('primary_borrower_full_name', r.primary_borrower_full_name, doc.file_name);
     } else if (cls === 'loan_application') {
       // R6-β-A (2026-05-21): Page-1 annotation extraction of requested_loan_amount.
-      // Closes the extraction gap that caused Marcus/Ryan c56c2a0f's initial LTV
-      // escalation to never fire (Franco's S4 Bug 1, mis-framed as workflow ordering).
-      // Also cascades to close loan_amount TBD in Deal Snapshot on S5/S6/S8 fixtures
-      // (R6-δ partial closure). See extractFromLoanApplication header for full
+      // R6-δ (2026-05-21): same extractor extended for requested_loan_term_months
+      // via shape-keyed Page-1 annotation matching `^\d{1,2}\s+months?$`. Both
+      // values come from the PML loan_application template's Page-1 annotations.
+      // Cross-corpus verified on 4/4 fixtures (Patricia/Kevin/Sandra/Ryan — all
+      // 12-month terms). See extractFromLoanApplication header for full
       // diagnosis + corpus convention + cross-cluster cascade notes.
       const r = extractFromLoanApplication(doc);
       push('requested_loan_amount', r.requested_loan_amount, doc.file_name);
+      push('requested_loan_term_months', r.requested_loan_term_months, doc.file_name);
     } else if (cls === 'pnw_statement') {
       // R4-RESIDUAL-2: PNW-only existing-first-mortgage fallback. Page-2
       // annotation anchor `<Lender> — First Mortgage` + immediately-following

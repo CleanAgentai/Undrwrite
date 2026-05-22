@@ -212,11 +212,38 @@ const renderDiscrepancySection = (discrepancySet) => {
 // Derive city/province from a normalized address string.
 // Heuristic: address pattern "<num> <name> <suffix>, <city>, <prov> <postal>"
 // or concatenated equivalents. Conservative — returns null if unable to parse.
-const deriveCityProvince = (normalizedAddress) => {
-  if (!normalizedAddress) return null;
-  // Look for ", <city>, <prov>" or "<city> <prov>" trailing pattern
-  const m = normalizedAddress.match(/,\s*([a-z][a-z\s'\-]+?),\s*(ab|bc|sk|mb|on|qc|nb|ns|pe|nl|nt|yt|nu)\b/i)
-         || normalizedAddress.match(/\s([a-z][a-z\s'\-]+?)\s+(ab|bc|sk|mb|on|qc|nb|ns|pe|nl|nt|yt|nu)\b/i);
+// R6-δ (2026-05-21): two-tier semantic. Accepts either:
+//   (a) a canonical_map object — prefer canonical_map.subject_property_city +
+//       canonical_map.subject_property_province tuples populated by R6-δ's
+//       extractFromEmailBody (informal "X property at <street>" pattern +
+//       inline "<street>, City, Prov, postal" pattern). Province may be
+//       null on the informal-pattern path (Q3-verdict residual — no
+//       city→province lookup table).
+//   (b) a normalized-address string — legacy contract; regex-parses the
+//       embedded ", City, Prov" or " City Prov" trailing portion.
+// Backward-compat: existing string callers continue to work; new
+// renderDealSnapshot wiring passes the canonical_map first.
+const deriveCityProvince = (input) => {
+  if (!input) return null;
+  // (a) canonical_map shape — has subject_property_city array OR fallback to
+  //     address tuples for the legacy regex.
+  if (typeof input === 'object' && !Array.isArray(input)) {
+    const cityTuples = input.subject_property_city || [];
+    const provinceTuples = input.subject_property_province || [];
+    const city = cityTuples.find(t => t.value)?.value || null;
+    const province = provinceTuples.find(t => t.value)?.value || null;
+    if (city) return { city, province: province || 'TBD' };
+    // Fall through to regex-parse via the first address tuple value.
+    const addressTuples = input.subject_property_address || [];
+    for (const t of addressTuples) {
+      const r = deriveCityProvince(t.value);
+      if (r) return r;
+    }
+    return null;
+  }
+  // (b) string shape — legacy regex.
+  const m = input.match(/,\s*([a-z][a-z\s'\-]+?),\s*(ab|bc|sk|mb|on|qc|nb|ns|pe|nl|nt|yt|nu)\b/i)
+         || input.match(/\s([a-z][a-z\s'\-]+?)\s+(ab|bc|sk|mb|on|qc|nb|ns|pe|nl|nt|yt|nu)\b/i);
   if (!m) return null;
   const city = m[1].split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
   const province = m[2].toUpperCase();
@@ -366,13 +393,12 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address));
   }
 
-  // City / Province derived from address.
-  const addressTuples = canonicalMap.subject_property_address || [];
-  let cityProv = null;
-  for (const t of addressTuples) {
-    cityProv = deriveCityProvince(t.value);
-    if (cityProv) break;
-  }
+  // City / Province — R6-δ two-tier: prefer canonical_map.subject_property_city
+  // + subject_property_province tuples (populated by extractFromEmailBody's
+  // informal + inline patterns); fallback to regex-parse the address tuple
+  // value when those are empty (legacy path for cross-source docs that embed
+  // city/province in the address line).
+  const cityProv = deriveCityProvince(canonicalMap);
   if (cityProv) {
     lines.push(`<p><strong>City / Province:</strong> ${cityProv.city} / ${cityProv.province}</p>`);
   } else {
@@ -651,6 +677,9 @@ const extractCanonicalFieldsAggregated = (inboundMessages, savedDocs, opts = {})
   const resolved = {
     subject_property_address: null,
     subject_property_postal_code: null,
+    // R6-δ (2026-05-21): match extractFromEmailBody return shape.
+    subject_property_city: null,
+    subject_property_province: null,
     subject_property_market_value: null,
     requested_loan_amount: null,
     mortgage_position: null,
@@ -718,6 +747,10 @@ module.exports = {
   renderDiscrepancyBullet,
   renderDiscrepancySection,
   renderDealSnapshot,
+  // R6-δ (2026-05-21): two-tier city/province derivation — accepts
+  // canonical_map (preferred, reads subject_property_city + _province
+  // tuples) or normalized-address string (legacy backward-compat).
+  deriveCityProvince,
   computeCombinedLtv,
   // R4-RESIDUAL-1: combined-LTV escalation trigger
   COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
