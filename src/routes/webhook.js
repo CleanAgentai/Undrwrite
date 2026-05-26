@@ -473,6 +473,129 @@ const computeStillMissingForReview = ({ deal, summary, classifications, identity
   return items;
 };
 
+// R9-F (2026-05-26): pre-create intake classification + data-model gate —
+// non-deal entry filter at deal-create boundary.
+//
+// Empirical root (scripts/r9zeta-corpus-grep.js — production corpus pull
+// PERSISTENT from R4):
+//   8 non-deal entries surfaced in 123-deal corpus:
+//     "Westgate Aggravation owners" (company/junk)
+//     "Franco Maione" × 2 (admin-as-borrower)
+//     "King of Dates Corp" (junk company)
+//     "Mateen Jannesar and Kochay Habibzai" (admin-direct co-borrowers)
+//     "David Chen" (broker-persona — ambiguous)
+//     "Mateen Jannesar and Kochay Habibzai / King of Dates Corp" (junk)
+//     "Sarah Mitchell" (broker-persona — ambiguous)
+//   Plus: "Postmark Team" × 2 (system-sender emails treated as deals)
+//
+// 3rd architectural template family established this session:
+//   (1) Canonical-map source-hierarchy enforcement (R6-γ + R6-α + R9-B + R9-D)
+//   (2) State-derived gate signal (R6-κ + R6-ζ + R5-D Surface A + R9-A')
+//   (3) Pre-create intake classification + data-model gate (R9-F — new this
+//       cycle). Operates BEFORE LLM/prompt machinery fires; data-model
+//       layer; filters non-deal entries at deal-create boundary.
+//
+// Per Q1-(a) SPLIT + Q2-(a) ALERT-ADMIN-AND-SKIP + Q3-(a) FAIL-OPEN verdict:
+//   Q1-(a) SPLIT: R9-F = intake-gate non-deal-entry filter (this cycle).
+//     R9-F' (borrower-identity dedup, sub-bugs 1+2) deferred to separate
+//     cycle — architectural change, may need Supabase migration for
+//     canonical_borrower_identity column (R6-κ aml_pep_requested_at
+//     precedent).
+//   Q2-(a) ALERT-ADMIN-AND-SKIP: on reject, send admin alert email
+//     (Group ZZZ defensive-alert precedent) + skip deal-create. Preserves
+//     Franco visibility for review-and-override on misfire.
+//   Q3-(a) FAIL-OPEN: ambiguous cases default to accept. Conservative
+//     "never silently drop legitimate broker submission" discipline.
+//     Mis-accepting non-deal = low cost (manual cleanup via daily summary);
+//     mis-rejecting legitimate broker = high cost (lost business signal).
+//
+// Reject categories (CLEAR-reject only, per fail-open):
+//   'reject:admin-as-borrower' — borrower_name first-token === ADMIN_FIRST_NAME
+//     AND no broker_name (broker-set submission for legitimately-named-Franco
+//     borrower remains acceptable). Defensive guard against Franco-as-borrower
+//     mock-test entries.
+//   'reject:system-sender' — borrower_name matches known system-sender shape
+//     (Postmark Team, Mailer-Daemon, noreply, etc.). System notification
+//     emails should never create deal records.
+//   'reject:no-human-name' — borrower_name contains org-suffix (Corp/Inc/Ltd/
+//     LLC/Owners/Company/Holdings/Partners) AND lacks two-adjacent-title-case-
+//     tokens (no plausible "First Last" human name). "King of Dates Corp" /
+//     "Westgate Aggravation owners" reject; "John Smith Holdings" accepts
+//     (real borrower with org-suffix in name).
+//
+// Ambiguous cases (David Chen / Sarah Mitchell / Mateen-and-Kochay variants /
+// broker-persona-names) DEFAULT TO ACCEPT per Q3 fail-open. Admin reviews
+// via existing daily summary if real misfire surfaces. R9-F handles only
+// the CLEAR-reject categories empirically grounded.
+const classifyIntakeBorrower = (input) => {
+  // Defensive: null/undefined/non-object input → fail-open accept (Q3).
+  if (!input || typeof input !== 'object') return 'accept';
+  const { borrower_name, broker_name } = input;
+  if (!borrower_name || typeof borrower_name !== 'string') return 'accept';  // fail-open on missing data
+  const trimmed = borrower_name.trim();
+  if (!trimmed) return 'accept';
+
+  // 1. admin-as-borrower: first-token matches ADMIN_FIRST_NAME ("Franco") + no broker_name set.
+  //    The no-broker-set guard is the discriminator that lets a legitimate
+  //    broker-submitted "Franco Vieanna" borrower through (broker_name would
+  //    be the broker's name, not Franco). Franco-as-borrower-with-no-broker
+  //    is the empirical mock-test pattern (6870b225 + 617f1626 fixtures).
+  const firstToken = trimmed.split(/\s+/)[0];
+  if (firstToken && firstToken.toLowerCase() === ADMIN_FIRST_NAME.toLowerCase()) {
+    if (!broker_name || !String(broker_name).trim()) {
+      return 'reject:admin-as-borrower';
+    }
+    // broker_name set — could be legitimately-named-Franco borrower submitted
+    // by another broker. Per Q3 fail-open: accept; admin reviews if misfire.
+  }
+
+  // 2. system-sender: known system patterns appearing as borrower (Postmark
+  //    Team × 2 fixtures; defensive against other notification-source emails).
+  const systemSenderPatterns = [
+    /^postmark team$/i,
+    /^postmark$/i,
+    /^mailer.?daemon$/i,
+    /^noreply$/i,
+    /^no.?reply$/i,
+    /^do.?not.?reply$/i,
+    /^support team$/i,
+    /^notification(?:s)?$/i,
+  ];
+  for (const re of systemSenderPatterns) {
+    if (re.test(trimmed)) return 'reject:system-sender';
+  }
+
+  // 3. no-human-name: org-suffix present AND pre-org-portion does not START
+  //    with two-adjacent-title-case-tokens (no plausible "First Last" human
+  //    name at the start of the borrower_name string). The "start with
+  //    adjacent title-case" rule rejects phrase-shape names like "King of
+  //    Dates Corp" (lowercase "of" breaks adjacency at start) while
+  //    accepting legit shapes like "John Smith Holdings" (preserves real
+  //    borrowers with org-suffix in name).
+  //
+  //    Ambiguous shapes like "Westgate Aggravation owners" — two title-case
+  //    tokens at start but not actually human names — fall on the accept
+  //    side per Q3 fail-open. Admin reviews via existing daily summary if
+  //    misfire; classifier surface-bounded to CLEAR rejects only.
+  //
+  //    "Mateen Jannesar and Kochay Habibzai / King of Dates Corp" → preOrg=
+  //    "Mateen Jannesar and Kochay Habibzai /" → starts with "Mateen
+  //    Jannesar" (adjacent title-case) → accept (legit co-borrower shape
+  //    with junky company suffix).
+  const orgSuffixMatch = trimmed.match(/\b(Corp\.?|Inc\.?|Ltd\.?|LLC|LLP|Owners|Tenants|Residents|Company|Co\.?|Holdings|Partners)\b/i);
+  if (orgSuffixMatch) {
+    const preOrgPortion = trimmed.slice(0, orgSuffixMatch.index).trim();
+    // Two-adjacent-title-case-tokens AT START of pre-org-portion. Phrase-
+    // pattern names with lowercase connectors ("King of Dates") fail this.
+    const humanNameAtStartRe = /^[A-Z][a-z]+\s+[A-Z][a-z]+\b/;
+    if (!humanNameAtStartRe.test(preOrgPortion)) {
+      return 'reject:no-human-name';
+    }
+  }
+
+  return 'accept';
+};
+
 // R9-A' (2026-05-26): state-derived gate signal — post-approval AML/PEP pending
 // receipt (broker may have claimed to attach but docs not yet in table).
 //
@@ -1945,6 +2068,46 @@ Please reply with the referred person's email address explicitly stated.
           return;
         }
 
+        // R9-F (2026-05-26): pre-create intake classification — alert-admin-
+        // and-skip on clear-reject categories (admin-as-borrower / system-
+        // sender / no-human-name with org-suffix). Q3 fail-open: ambiguous
+        // cases default to accept. Group ZZZ admin-alert precedent.
+        // At admin-referral path, broker_name is absent (referral source is
+        // admin, not a broker) — admin-as-borrower with no broker IS the
+        // Franco-Maione mock-test fixture shape.
+        const _r9fReferralClassification = classifyIntakeBorrower({
+          borrower_name: referral.referred_name || '',
+          broker_name: null,
+        });
+        if (_r9fReferralClassification !== 'accept') {
+          console.log(`R9-F: admin-referral classified as ${_r9fReferralClassification} — alerting admin + skipping deal-create`);
+          const _r9fAlertBody = `Vienna filtered an admin referral as a non-deal entry.
+
+Classification: ${_r9fReferralClassification}
+Referred borrower_name: ${referral.referred_name || '(empty)'}
+Referred email: ${referral.referred_email || '(empty)'}
+
+Parsed referral snapshot:
+${JSON.stringify(referral, null, 2)}
+
+Original referral body (first 500 chars):
+${(email.textBody || '').slice(0, 500)}
+
+Postmark MessageID: ${email.messageId}
+
+No deal record was created. If this was a legitimate referral, please reply with the corrected borrower name + email and Vienna will retry.
+
+(This alert is automatic — R9-F intake-gate classifier, alert-admin-and-skip semantics per Q2-(a) verdict. Reject categories: admin-as-borrower / system-sender / no-human-name. Ambiguous cases default to accept per Q3 fail-open.)`;
+          await emailService.sendEmail(
+            config.adminEmail,
+            `[Intake Filter] Referral rejected — ${referral.referred_name || 'unnamed'}`,
+            _r9fAlertBody,
+            null,
+            [],
+            []
+          );
+          return;
+        }
         // Create a new deal for the referred person
         const deal = await dealsService.create({
           email: referral.referred_email,
@@ -2047,6 +2210,45 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
       let createdDeal = null;
       try {
         console.log('New client detected, creating deal...');
+
+        // R9-F (2026-05-26): pre-create intake classification — alert-admin-
+        // and-skip on clear-reject categories. At broker-submission path,
+        // broker_name isn't yet known (processInitialEmail hasn't run); pass
+        // borrower_name from Postmark fromName only. Per Q3 fail-open,
+        // ambiguous cases default to accept — the classifier only catches
+        // CLEAR reject categories (Postmark Team system-sender being the
+        // primary empirical fixture at this path).
+        const _r9fIntakeClassification = classifyIntakeBorrower({
+          borrower_name: email.fromName || '',
+          broker_name: null,
+        });
+        if (_r9fIntakeClassification !== 'accept') {
+          console.log(`R9-F: new-client intake classified as ${_r9fIntakeClassification} — alerting admin + skipping deal-create`);
+          const _r9fAlertBody = `Vienna filtered a new-client intake as a non-deal entry.
+
+Classification: ${_r9fIntakeClassification}
+Postmark From-Name: ${email.fromName || '(empty)'}
+Postmark From-Email: ${email.from}
+Subject: ${email.subject || '(empty)'}
+
+Original body (first 500 chars):
+${(email.textBody || '').slice(0, 500)}
+
+Postmark MessageID: ${email.messageId}
+
+No deal record was created. If this was a legitimate broker submission, please review and either reply directly or re-submit with corrected From-Name.
+
+(This alert is automatic — R9-F intake-gate classifier, alert-admin-and-skip semantics per Q2-(a) verdict. Reject categories: admin-as-borrower / system-sender / no-human-name. Ambiguous cases default to accept per Q3 fail-open.)`;
+          await emailService.sendEmail(
+            config.adminEmail,
+            `[Intake Filter] New-client intake rejected — ${email.fromName || 'unnamed'}`,
+            _r9fAlertBody,
+            null,
+            [],
+            []
+          );
+          return;
+        }
 
         // Create deal in database
         const deal = await dealsService.create({
@@ -3357,4 +3559,6 @@ module.exports.__test__ = {
   computeCanonicalLenderForReview,
   // R9-A' (2026-05-26): post-approval AML/PEP pending receipt — state-derived gate signal
   isPostApprovalAmlPepPending,
+  // R9-F (2026-05-26): pre-create intake classification — non-deal-entry filter
+  classifyIntakeBorrower,
 };

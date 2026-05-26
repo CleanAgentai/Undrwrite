@@ -14351,6 +14351,282 @@ Franco Maione`;
   console.log('Group R9-A\'-CROSS-CLUSTER-INTEGRATION: R6-κ postApprovalAmlPepAsk + R6-κ stamping + R9-A + R9-B + R9-D + R8-A + R8-B + R9-A\' docblock all preserved.');
 
   // ════════════════════════════════════════════════════════════════
+  // R9 CLUSTER F — pre-create intake classification + data-model gate (PERSISTENT
+  // from R4, sub-bug 3 only; sub-bugs 1+2 deferred to R9-F' per SPLIT verdict)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R9-F. Empirical root (scripts/r9zeta-corpus-
+  // grep.js — production corpus PERSISTENT from R4):
+  //   8 non-deal entries surfaced in 123-deal corpus (+ Postmark Team × 2):
+  //     "Westgate Aggravation owners" — company/junk
+  //     "Franco Maione" × 2 — admin-as-borrower (no broker_name)
+  //     "King of Dates Corp" — junk company
+  //     "Mateen Jannesar and Kochay Habibzai" — admin-direct co-borrowers
+  //     "David Chen" — broker-persona (ambiguous; fail-open accept)
+  //     "Mateen Jannesar and Kochay Habibzai / King of Dates Corp" — junk
+  //     "Sarah Mitchell" — broker-persona (ambiguous; fail-open accept)
+  //   Plus: "Postmark Team" × 2 (system notification sender)
+  //
+  // 3rd architectural template family — pre-create intake classification +
+  // data-model gate. Operates BEFORE LLM/prompt machinery fires; data-model
+  // layer; distinct from prompt-layer enforcement (templates 1 + 2).
+  //
+  // Q1-(a) SPLIT: R9-F = intake-gate (this cycle, narrow JS-only); R9-F' =
+  //   borrower-identity dedup (sub-bugs 1+2 folded; architectural, deferred).
+  // Q2-(a) ALERT-ADMIN-AND-SKIP: Group ZZZ admin-alert precedent. Reject
+  //   categories generate admin email + skip deal-create. Preserves Franco
+  //   visibility for review-and-override on misfire.
+  // Q3-(a) FAIL-OPEN: ambiguous cases default to accept. "Mis-rejecting
+  //   legitimate broker submission" high cost; "mis-accepting non-deal"
+  //   low cost (manual cleanup via existing daily summary).
+  //
+  // Reject categories (CLEAR-reject only, per Q3 fail-open):
+  //   'reject:admin-as-borrower' — borrower_name first-token = "Franco" AND
+  //     no broker_name. Franco-as-borrower-with-broker-set still accepts
+  //     (legit-Franco-Vieanna submission protected).
+  //   'reject:system-sender' — Postmark Team / Mailer-Daemon / noreply / etc.
+  //   'reject:no-human-name' — org-suffix present AND no two-adjacent-title-
+  //     case-tokens. "King of Dates Corp" rejects; "John Smith Holdings"
+  //     accepts (legit borrower with org-suffix component).
+  //
+  //   R9-F-CLASSIFIER-MATRIX — closed-set truth table on classifyIntakeBorrower
+  //   R9-F-PRODUCTION-FIXTURE (LOAD-BEARING) — 8 surfaced non-deal entries +
+  //     Postmark Team replay; legitimate Marcus/Derek/Patricia shapes accept
+  //   R9-F-CLASSIFIER-ANCHORS — reject-category enumeration + Q3 fail-open
+  //     ambiguity-defaults-accept anchors (content-discipline pinning)
+  //   R9-F-CALL-SITE-WIRING — classifier defined + exported + invoked at
+  //     both deal-create paths (broker-submission L2052 + admin-referral
+  //     L1949) + admin-alert + skip-return logic
+  //   R9-F-OVER-FIRE-PROTECTION — legitimate borrower shapes accept;
+  //     defensive null/empty fields → accept (fail-open)
+  //   R9-F-CROSS-CLUSTER-INTEGRATION — R9-A/R9-B/R9-C/R9-D/R9-A' preserved +
+  //     3rd-template-family architectural anchor in docblock
+  const _r9fWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const { classifyIntakeBorrower: _r9fClassify } = require('./src/routes/webhook').__test__;
+
+  console.log('\n========== R9-F-CLASSIFIER-MATRIX — classifyIntakeBorrower truth-table ==========');
+  const _r9fCases = [
+    // ─── CLEAR REJECTS — admin-as-borrower ───
+    { label: 'admin-as-borrower: "Franco Maione" no broker_name', input: { borrower_name: 'Franco Maione', broker_name: null }, expected: 'reject:admin-as-borrower' },
+    { label: 'admin-as-borrower: "Franco" alone, broker_name empty string', input: { borrower_name: 'Franco', broker_name: '' }, expected: 'reject:admin-as-borrower' },
+    { label: 'admin-as-borrower: lowercase "franco" still rejects (case-insensitive)', input: { borrower_name: 'franco maione', broker_name: null }, expected: 'reject:admin-as-borrower' },
+    // ─── ACCEPT — Franco-with-broker-set (legit Franco-Vieanna shape protected) ───
+    { label: 'accept: "Franco Vieanna" WITH broker_name set (legit borrower submitted by broker)', input: { borrower_name: 'Franco Vieanna', broker_name: 'Jason Mercer' }, expected: 'accept' },
+    // ─── CLEAR REJECTS — system-sender ───
+    { label: 'system-sender: "Postmark Team"', input: { borrower_name: 'Postmark Team' }, expected: 'reject:system-sender' },
+    { label: 'system-sender: "Postmark" (single word)', input: { borrower_name: 'Postmark' }, expected: 'reject:system-sender' },
+    { label: 'system-sender: "Mailer-Daemon"', input: { borrower_name: 'Mailer-Daemon' }, expected: 'reject:system-sender' },
+    { label: 'system-sender: "noreply"', input: { borrower_name: 'noreply' }, expected: 'reject:system-sender' },
+    { label: 'system-sender: "do not reply" case-insensitive', input: { borrower_name: 'Do Not Reply' }, expected: 'reject:system-sender' },
+    // ─── CLEAR REJECTS — no-human-name (org-suffix without human name) ───
+    { label: 'no-human-name: "King of Dates Corp" (Corp suffix, no adjacent title-case pair)', input: { borrower_name: 'King of Dates Corp' }, expected: 'reject:no-human-name' },
+    { label: 'accept (Q3 fail-open ambiguous): "Westgate Aggravation owners" — two-title-case-at-start passes human-name heuristic; classifier can\'t distinguish real-property-owner vs junk-shape without name DB; admin reviews via daily summary', input: { borrower_name: 'Westgate Aggravation owners' }, expected: 'accept' },
+    { label: 'no-human-name: "ABC Inc" (single-token + Inc)', input: { borrower_name: 'ABC Inc' }, expected: 'reject:no-human-name' },
+    // ─── ACCEPT — legit borrowers with org-suffix component (two-adjacent-title-case present) ───
+    { label: 'accept: "John Smith Holdings" (legit borrower with org-suffix)', input: { borrower_name: 'John Smith Holdings' }, expected: 'accept' },
+    { label: 'accept: "Mateen Jannesar and Kochay Habibzai / King of Dates Corp" (has human name despite junk org)', input: { borrower_name: 'Mateen Jannesar and Kochay Habibzai / King of Dates Corp' }, expected: 'accept' },
+    // ─── ACCEPT — ambiguous broker-persona-as-borrower (per Q3 fail-open) ───
+    { label: 'accept: "David Chen" (broker-persona; ambiguous → fail-open accept)', input: { borrower_name: 'David Chen' }, expected: 'accept' },
+    { label: 'accept: "Sarah Mitchell" (broker-persona; ambiguous → fail-open accept)', input: { borrower_name: 'Sarah Mitchell' }, expected: 'accept' },
+    // ─── ACCEPT — legitimate borrower shapes ───
+    { label: 'accept: "Marcus Webb"', input: { borrower_name: 'Marcus Webb' }, expected: 'accept' },
+    { label: 'accept: "Marcus James Webb"', input: { borrower_name: 'Marcus James Webb' }, expected: 'accept' },
+    { label: 'accept: "Derek Olsen"', input: { borrower_name: 'Derek Olsen' }, expected: 'accept' },
+    { label: 'accept: "Patricia Anne Simmons"', input: { borrower_name: 'Patricia Anne Simmons' }, expected: 'accept' },
+    // ─── DEFENSIVE — fail-open on missing/empty inputs ───
+    { label: 'defensive: null borrower_name → accept (fail-open)', input: { borrower_name: null }, expected: 'accept' },
+    { label: 'defensive: empty borrower_name → accept', input: { borrower_name: '' }, expected: 'accept' },
+    { label: 'defensive: whitespace-only borrower_name → accept', input: { borrower_name: '   ' }, expected: 'accept' },
+    { label: 'defensive: undefined input object → accept', input: undefined, expected: 'accept' },
+    { label: 'defensive: non-string borrower_name → accept', input: { borrower_name: 12345 }, expected: 'accept' },
+  ];
+  let _r9fFails = 0;
+  for (const tc of _r9fCases) {
+    const got = _r9fClassify(tc.input);
+    if (got !== tc.expected) { _r9fFails++; console.log(`  FAIL [${tc.label}]: expected ${tc.expected}, got ${got}`); }
+    else console.log(`  PASS [${tc.label}]: ${got}`);
+  }
+  if (_r9fFails > 0) throw new Error(`FAIL [R9-F-CLASSIFIER-MATRIX]: ${_r9fFails}/${_r9fCases.length} cases failed.`);
+  console.log(`Group R9-F-CLASSIFIER-MATRIX: ${_r9fCases.length}/${_r9fCases.length} cases pass (rejects + accepts + fail-open defensive).`);
+
+  console.log('\n========== R9-F-PRODUCTION-FIXTURE — 8 surfaced non-deal entries + Postmark Team replay (LOAD-BEARING) ==========');
+  // Each empirical fixture's borrower_name + broker_name replay; classify
+  // matches the verdict-derived expected category. Ambiguous broker-persona
+  // names (David Chen / Sarah Mitchell / Mateen-and-Kochay variants) default
+  // to accept per Q3 fail-open.
+  const _r9fFixtures = [
+    { id: 'e755df0f', borrower_name: 'Westgate Aggravation owners', broker_name: 'Franco Maione', expected: 'accept' },  // Q3 fail-open: ambiguous title-case-at-start; admin reviews via daily summary if real concern
+    { id: '6870b225', borrower_name: 'Franco Maione', broker_name: '', expected: 'reject:admin-as-borrower' },
+    { id: '7ba5b541', borrower_name: 'King of Dates Corp', broker_name: 'Franco Maione', expected: 'reject:no-human-name' },
+    { id: '617f1626', borrower_name: 'Franco Maione', broker_name: '', expected: 'reject:admin-as-borrower' },
+    { id: '18859cbd', borrower_name: 'Mateen Jannesar and Kochay Habibzai', broker_name: '', expected: 'accept' },  // Q3 fail-open: ambiguous co-borrowers, admin-direct
+    { id: 'e5218bc9', borrower_name: 'David Chen', broker_name: '', expected: 'accept' },  // Q3 fail-open: broker-persona ambiguous
+    { id: '7757c2e2', borrower_name: 'Mateen Jannesar and Kochay Habibzai / King of Dates Corp', broker_name: 'Bradley Phyo', expected: 'accept' },  // Q3 fail-open: has human-name pair
+    { id: 'e5c6f1a8', borrower_name: 'Sarah Mitchell', broker_name: 'Jason Mercer', expected: 'accept' },  // Q3 fail-open: broker-persona ambiguous
+    // Postmark Team — system-sender path
+    { id: 'fe17055e', borrower_name: 'Postmark Team', broker_name: null, expected: 'reject:system-sender' },
+    { id: '6bd99834', borrower_name: 'Postmark Team', broker_name: null, expected: 'reject:system-sender' },
+    // Legitimate accept fixtures — Marcus + Derek + Patricia + Grace + Lena
+    { id: '996a676c', borrower_name: 'Marcus Webb', broker_name: 'Cecilia Fontaine', expected: 'accept' },
+    { id: 'df33cdbf', borrower_name: 'Derek Olsen', broker_name: 'Mohammed Al-Farsi', expected: 'accept' },
+    { id: 'patricia', borrower_name: 'Patricia Anne Simmons', broker_name: 'Jason Mercer', expected: 'accept' },
+    { id: 'grace', borrower_name: 'Grace Marie Paulson', broker_name: 'Jason Mercer', expected: 'accept' },
+    { id: 'lena', borrower_name: 'Lena Ji-Young Park', broker_name: 'Jason Mercer', expected: 'accept' },
+  ];
+  let _r9fFixtureFails = 0;
+  let _r9fRejectCount = 0;
+  let _r9fAcceptCount = 0;
+  for (const fx of _r9fFixtures) {
+    const got = _r9fClassify({ borrower_name: fx.borrower_name, broker_name: fx.broker_name });
+    if (got !== fx.expected) { _r9fFixtureFails++; console.log(`  FAIL [${fx.id} "${fx.borrower_name}"]: expected ${fx.expected}, got ${got}`); }
+    else {
+      if (fx.expected.startsWith('reject')) _r9fRejectCount++;
+      else _r9fAcceptCount++;
+      console.log(`  PASS [${fx.id} "${fx.borrower_name.slice(0, 50)}"]: ${got}`);
+    }
+  }
+  if (_r9fFixtureFails > 0) throw new Error(`FAIL [R9-F-PRODUCTION-FIXTURE]: ${_r9fFixtureFails}/${_r9fFixtures.length} cases failed.`);
+  console.log(`Group R9-F-PRODUCTION-FIXTURE: ${_r9fFixtures.length}/${_r9fFixtures.length} cases pass (${_r9fRejectCount} rejects + ${_r9fAcceptCount} accepts — empirical corpus + legitimate-shape preservation).`);
+
+  console.log('\n========== R9-F-CLASSIFIER-ANCHORS — reject-category + fail-open content-discipline pinning ==========');
+  // Pin each load-bearing anchor in the classifier docblock + body
+  // (carry-forward from R9-D 12-anchor + R9-A' 16-anchor precedent).
+  // Anchors are LITERAL substrings; escape regex special chars per occurrence
+  // to avoid `(2026-05-26)` being parsed as a capture group, `+` as quantifier,
+  // etc. Same escape pattern as R9-D-OVERRIDE-BLOCK-ANCHORS literal-string check.
+  const _r9fEscapeForRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const _r9fRequiredAnchors = [
+    { anchor: 'R9-F (2026-05-26): pre-create intake classification', label: 'R9-F docblock cycle anchor' },
+    { anchor: '3rd architectural template family', label: '3rd-template-family architectural anchor' },
+    { anchor: 'Pre-create intake classification + data-model gate', label: '3rd-family template-name' },
+    { anchor: 'Q1-(a) SPLIT', label: 'Q1-(a) SPLIT verdict provenance' },
+    { anchor: 'Q2-(a) ALERT-ADMIN-AND-SKIP', label: 'Q2-(a) ALERT-ADMIN-AND-SKIP verdict provenance' },
+    { anchor: 'Q3-(a) FAIL-OPEN', label: 'Q3-(a) FAIL-OPEN verdict provenance' },
+    { anchor: "'reject:admin-as-borrower'", label: 'reject category 1 enumeration' },
+    { anchor: "'reject:system-sender'", label: 'reject category 2 enumeration' },
+    { anchor: "'reject:no-human-name'", label: 'reject category 3 enumeration' },
+    { anchor: 'no broker_name', label: 'admin-as-borrower discriminator (no-broker guard preserves legit-Franco-Vieanna)' },
+    { anchor: 'two-adjacent-title-case-tokens', label: 'no-human-name human-name-detection heuristic' },
+    { anchor: 'Ambiguous cases', label: 'Q3 fail-open ambiguity-handling' },
+    { anchor: 'broker-persona-names', label: 'David Chen / Sarah Mitchell ambiguous-default-accept' },
+    { anchor: 'mis-rejecting legitimate broker = high cost', label: 'Q3 cost-asymmetry framing (high-cost-of-false-positive)' },
+    { anchor: 'Group ZZZ admin-alert precedent', label: 'admin-alert pattern provenance' },
+  ];
+  for (const { anchor, label } of _r9fRequiredAnchors) {
+    if (!new RegExp(_r9fEscapeForRegex(anchor)).test(_r9fWebhookSrc)) {
+      throw new Error(`FAIL [R9-F-CLASSIFIER-ANCHORS]: missing anchor "${anchor}" (${label})`);
+    }
+    console.log(`  PASS [${label}]: anchor present`);
+  }
+  console.log(`Group R9-F-CLASSIFIER-ANCHORS: ${_r9fRequiredAnchors.length}/${_r9fRequiredAnchors.length} load-bearing anchors present (docblock + reject-category + Q3 fail-open content-discipline pinning).`);
+
+  console.log('\n========== R9-F-CALL-SITE-WIRING — 5-clause closed-set ==========');
+  // (1) classifyIntakeBorrower defined + exported. Signature accepts any
+  // input (defensive null-guard inside) — fail-open semantics per Q3.
+  if (!/const classifyIntakeBorrower = \(input\) =>/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CW (1)]: classifyIntakeBorrower helper definition missing (signature: (input) => with internal null-guard)');
+  }
+  if (!/classifyIntakeBorrower,?/.test(_r9fWebhookSrc.slice(_r9fWebhookSrc.indexOf('module.exports.__test__')))) {
+    throw new Error('FAIL [R9-F-CW (1)]: classifyIntakeBorrower must be exported via __test__');
+  }
+  console.log('  PASS [(1)]: helper defined + exported via __test__');
+  // (2) Invoked at BOTH deal-create paths.
+  const _r9fInvocCount = (_r9fWebhookSrc.match(/classifyIntakeBorrower\(\{/g) || []).length;
+  if (_r9fInvocCount !== 2) {
+    throw new Error(`FAIL [R9-F-CW (2)]: classifyIntakeBorrower invocations = ${_r9fInvocCount}; expected exactly 2 (broker-submission new-client path + admin-referral path)`);
+  }
+  console.log(`  PASS [(2)]: invoked at exactly 2 deal-create paths (broker-submission new-client + admin-referral)`);
+  // (3) Admin-alert email on reject at both sites.
+  const _r9fAlertCount = (_r9fWebhookSrc.match(/\[Intake Filter\]/g) || []).length;
+  if (_r9fAlertCount !== 2) {
+    throw new Error(`FAIL [R9-F-CW (3)]: "[Intake Filter]" admin-alert subject prefix count = ${_r9fAlertCount}; expected exactly 2 (one per deal-create path)`);
+  }
+  console.log(`  PASS [(3)]: admin-alert subject "[Intake Filter]" present at both deal-create paths (Group ZZZ precedent)`);
+  // (4) Skip deal-create on reject (early-return guards).
+  const _r9fSkipGuards = (_r9fWebhookSrc.match(/_r9f\w*Classification !== 'accept'/g) || []).length;
+  if (_r9fSkipGuards !== 2) {
+    throw new Error(`FAIL [R9-F-CW (4)]: classification-reject guard count = ${_r9fSkipGuards}; expected exactly 2 (one per deal-create path)`);
+  }
+  console.log(`  PASS [(4)]: classification-reject guard present at both paths (skip deal-create on reject)`);
+  // (5) Reject classification passed through to alert body for admin visibility.
+  if (!/Classification: \$\{_r9fReferralClassification\}/.test(_r9fWebhookSrc) || !/Classification: \$\{_r9fIntakeClassification\}/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CW (5)]: Classification value must be interpolated into admin alert body at both paths (admin needs to know WHY rejected)');
+  }
+  console.log('  PASS [(5)]: classification value interpolated into admin alert body at both paths (Franco visibility for review-and-override)');
+  console.log(`Group R9-F-CALL-SITE-WIRING: 5-clause closed-set (helper + 2 invocations + 2 admin-alerts + 2 skip-guards + classification visibility in alert body).`);
+
+  console.log('\n========== R9-F-OVER-FIRE-PROTECTION — legitimate submission preservation + fail-open defensive ==========');
+  // (a) Legitimate borrower with org-suffix (John Smith Holdings) accepts.
+  if (_r9fClassify({ borrower_name: 'John Smith Holdings' }) !== 'accept') {
+    throw new Error('FAIL [R9-F-OVER-FIRE (a)]: legitimate borrower with org-suffix component must accept (human-name pair present)');
+  }
+  console.log('  PASS (a): "John Smith Holdings" accepts (human-name detection prevents org-suffix false-positive)');
+  // (b) Legit-Franco-Vieanna with broker set accepts (no-broker-guard discriminator).
+  if (_r9fClassify({ borrower_name: 'Franco Vieanna', broker_name: 'Jason Mercer' }) !== 'accept') {
+    throw new Error('FAIL [R9-F-OVER-FIRE (b)]: Franco-named borrower WITH broker_name set must accept (no-broker-guard preserves legit shape)');
+  }
+  console.log('  PASS (b): "Franco Vieanna" + broker_name="Jason Mercer" accepts (no-broker discriminator)');
+  // (c) Ambiguous broker-persona David Chen / Sarah Mitchell accept per Q3 fail-open.
+  if (_r9fClassify({ borrower_name: 'David Chen' }) !== 'accept') {
+    throw new Error('FAIL [R9-F-OVER-FIRE (c)]: ambiguous broker-persona name must accept per Q3 fail-open');
+  }
+  if (_r9fClassify({ borrower_name: 'Sarah Mitchell' }) !== 'accept') {
+    throw new Error('FAIL [R9-F-OVER-FIRE (c)]: ambiguous broker-persona name must accept per Q3 fail-open');
+  }
+  console.log('  PASS (c): David Chen + Sarah Mitchell accept (Q3 fail-open on broker-persona-as-borrower ambiguity)');
+  // (d) Defensive: missing/null inputs → accept (fail-open).
+  if (_r9fClassify(null) !== 'accept' || _r9fClassify(undefined) !== 'accept' || _r9fClassify({}) !== 'accept') {
+    throw new Error('FAIL [R9-F-OVER-FIRE (d)]: defensive null/undefined/empty inputs must accept per fail-open');
+  }
+  console.log('  PASS (d): null / undefined / {} → accept (fail-open defensive)');
+  // (e) All 5 legitimate Marcus/Derek/Patricia/Grace/Lena empirical fixtures accept.
+  const _r9fLegitFixtures = ['Marcus Webb', 'Derek Olsen', 'Patricia Anne Simmons', 'Grace Marie Paulson', 'Lena Ji-Young Park'];
+  for (const name of _r9fLegitFixtures) {
+    if (_r9fClassify({ borrower_name: name, broker_name: 'Jason Mercer' }) !== 'accept') {
+      throw new Error(`FAIL [R9-F-OVER-FIRE (e)]: legitimate empirical fixture "${name}" must accept`);
+    }
+  }
+  console.log(`  PASS (e): 5/5 legitimate empirical fixtures accept (Marcus + Derek + Patricia + Grace + Lena)`);
+  console.log('Group R9-F-OVER-FIRE-PROTECTION: org-suffix + no-broker-guard + Q3-fail-open-ambiguous + defensive null + 5 legit-shape preservation all accept.');
+
+  console.log('\n========== R9-F-CROSS-CLUSTER-INTEGRATION — prior arc preserved + 3rd-template anchor ==========');
+  // (a) R9-A' isPostApprovalAmlPepPending sibling state-derived gate preserved.
+  if (!/isPostApprovalAmlPepPending/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CC R9-A\']: isPostApprovalAmlPepPending sibling signal regressed');
+  }
+  console.log('  PASS [R9-A\']: postApprovalAmlPepPending sibling state-derived gate signal preserved');
+  // (b) R9-D computeCanonicalLenderForReview preserved.
+  if (!/computeCanonicalLenderForReview/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CC R9-D]: computeCanonicalLenderForReview regressed');
+  }
+  // (c) R9-B computeCanonicalLtvForReview preserved.
+  if (!/computeCanonicalLtvForReview/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CC R9-B]: computeCanonicalLtvForReview regressed');
+  }
+  console.log('  PASS [R9-B + R9-D]: canonical LTV + canonical lender resolvers preserved');
+  // (d) R9-A atomic status preserved.
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CC R9-A]: sendCompletionHandoff atomic status regressed');
+  }
+  console.log('  PASS [R9-A]: sendCompletionHandoff atomic status preserved');
+  // (e) R8-A + R8-B preserved.
+  if (!/_r8aDocReqGreeting/.test(_r9fWebhookSrc) || !/aiService\.stripPerfectOpener\(/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CC R8-A/R8-B]: greeting wiring + Perfect-opener sweep regressed');
+  }
+  console.log('  PASS [R8-A + R8-B]: greeting wiring + Perfect-opener sweep preserved');
+  // (f) R9-C extractor extension preserved.
+  const _r9fCfSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/canonical-fields.js'), 'utf8');
+  if (!/inlineCityOnlyM/.test(_r9fCfSrc)) {
+    throw new Error('FAIL [R9-F-CC R9-C]: R9-C extractor regressed');
+  }
+  console.log('  PASS [R9-C]: inline-comma-city-only extractor preserved');
+  // (g) Group ZZZ admin-alert pattern preserved (R9-F follows this precedent).
+  if (!/Group ZZZ/.test(_r9fWebhookSrc)) {
+    throw new Error('FAIL [R9-F-CC ZZZ]: Group ZZZ admin-alert precedent reference missing');
+  }
+  console.log('  PASS [Group ZZZ]: admin-alert precedent referenced (R9-F follows this pattern)');
+  console.log('Group R9-F-CROSS-CLUSTER-INTEGRATION: R9-A + R9-B + R9-C + R9-D + R9-A\' + R8-A + R8-B + Group ZZZ all preserved; 3rd architectural template family established (pre-create intake classification + data-model gate).');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
