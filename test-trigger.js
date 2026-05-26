@@ -24407,6 +24407,297 @@ Meridian Mortgage Group Lic. #MB552934`;
 
   console.log('\n========== R9-E groups PASS ==========');
 
+  // ════════════════════════════════════════════════════════════════
+  // R9-F' — borrower-identity dedup (closes S13 PERSISTENT-from-R4
+  // sub-bug 1+2 — 77% duplicate rate, 95 of 123 deals across 19
+  // normalized-name groups)
+  // ════════════════════════════════════════════════════════════════
+  // Root cause (empirically grounded 2026-05-26):
+  //   findActiveByEmail's status filter `.not('status', 'in',
+  //   '("completed","rejected")')` excluded terminal deals — so the same
+  //   borrower re-submitting after deal closure silently created a new
+  //   record. 89 of 95 production duplicates would have been caught by
+  //   an "email-only, all-status" lookup. Remaining 6 in 1 group
+  //   (Patricia Simmons) with 3 distinct emails — mostly synthetic
+  //   test-round Postmark plus-addresses.
+  //
+  // Fix mechanism (Q1-a verdict): new findExistingDealForBorrower helper
+  // in dealsService that queries by email (no status filter) + walks
+  // candidates with carve-outs:
+  //   - Q2: property fuzzy-match via FSA + street# anchor (calibrated to
+  //     empirical noise pattern — Grace Paulson "T3..." truncation,
+  //     Marcus Webb "T6R 3K2" vs no-postal variants)
+  //   - Q3: alert-admin + skip on high-confidence match (Group ZZZ
+  //     precedent; cost-asymmetry — false-positive dedup high cost)
+  //   - Q3a: fail-open on property-missing ambiguity (consistent with
+  //     R9-F "never silently drop legitimate broker submission")
+  //   - Q4: temporal carve-out — terminal deals >90 days = refinance
+  //     new deal
+  //
+  // Architectural family: extends 3rd template family (pre-create
+  // intake classification + data-model gate). Two clusters now in this
+  // family:
+  //   - R9-F classifyIntakeBorrower: "is this a real deal at all?"
+  //   - R9-F' findExistingDealForBorrower: "is this real deal a
+  //     duplicate of an existing one?"
+  // Same boundary; same alert-admin-skip pattern; same fail-open
+  // discipline. Different decision semantics.
+  //
+  // Seven verification groups:
+  //   (1) R9-F'-PROPERTY-CANONICAL-MATRIX (17 cases) — canonicalizeProperty
+  //       truth table including FSA extraction + truncation + null inputs
+  //   (2) R9-F'-FUZZY-MATCH-MATRIX (12 cases) — propertyFuzzyMatch truth
+  //       table including FSA anchor + fallback path + Grace/Marcus/Derek
+  //       empirical pairs
+  //   (3) R9-F'-FIND-EXISTING-DEAL-MATRIX (12 cases) — decideExistingDealMatch
+  //       pure decision tree against fixture candidates
+  //   (4) R9-F'-CALL-SITE-WIRING (8 anchors) — source pin on helper
+  //       definition + webhook wire site ordering
+  //   (5) R9-F'-CROSS-CLUSTER-INTEGRATION (10 anchors) — preserved
+  //       invariants from R5-F-2, R5-F-3, R6-κ, R9-E, R9-F
+  //   (6) R9-F'-CARVE-OUT-RESPECT (7 fixtures) — refinance / new-property /
+  //       same-day-typo / property-missing empirical replays
+  //   (7) R9-F'-ADMIN-ALERT-CONTENT-ANCHORS (12 anchors) — admin handoff
+  //       email content discipline (Group ZZZ pattern parity)
+
+  console.log('\n========== R9-F\' — borrower-identity dedup ==========');
+
+  const _r9fpDealsSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/deals.js'), 'utf8');
+  const _r9fpWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const { canonicalizeProperty: _r9fpCanon, propertyFuzzyMatch: _r9fpFuzzy, TEMPORAL_CARVEOUT_DAYS: _r9fpTemporalDays, decideExistingDealMatch: _r9fpDecide } = dealsService.__test__;
+
+  let _r9fpPass = 0;
+  let _r9fpFail = 0;
+  const _r9fpExpect = (label, cond) => {
+    if (cond) { console.log(`  PASS ${label}`); _r9fpPass++; }
+    else { _r9fpFail++; throw new Error(`FAIL [${label}]`); }
+  };
+
+  // ─── R9-F'-PROPERTY-CANONICAL-MATRIX ───
+  console.log('\n--- R9-F\'-PROPERTY-CANONICAL-MATRIX ---');
+  _r9fpExpect('(a1) null input', _r9fpCanon(null) === null);
+  _r9fpExpect('(a2) empty string', _r9fpCanon('') === null);
+  _r9fpExpect('(a3) whitespace only', _r9fpCanon('   ') === null);
+  _r9fpExpect('(a4) non-string input', _r9fpCanon(12345) === null);
+  { const c = _r9fpCanon('1142 Tory Road NW, Edmonton, AB T6R 3K2');
+    _r9fpExpect('(b1) FSA extraction', c.postalPrefix === 't6r');
+    _r9fpExpect('(b2) street number', c.streetNumber === '1142');
+    _r9fpExpect('(b3) street tokens contains tory', c.streetTokens.includes('tory')); }
+  { const c = _r9fpCanon('88 Harvest Hills Blvd NE, Calgary, AB T3K 4G9');
+    _r9fpExpect('(c1) Grace full postal', c.postalPrefix === 't3k' && c.streetNumber === '88'); }
+  { const c = _r9fpCanon('88 Harvest Hills Blvd NE, Calgary, AB T3K');
+    _r9fpExpect('(c2) Grace FSA-only', c.postalPrefix === 't3k' && c.streetNumber === '88'); }
+  { const c = _r9fpCanon('88 Harvest Hills Blvd NE, Calgary, AB');
+    _r9fpExpect('(c3) Grace no postal', c.postalPrefix === null && c.streetNumber === '88'); }
+  { const c1 = _r9fpCanon('1142 Tory Road NW, Edmonton, AB T6R 3K2');
+    const c2 = _r9fpCanon('1142 Tory Road NW, Edmonton');
+    _r9fpExpect('(d1) Marcus both have street#', c1.streetNumber === '1142' && c2.streetNumber === '1142');
+    _r9fpExpect('(d2) Marcus postal asymmetry', c1.postalPrefix === 't6r' && c2.postalPrefix === null); }
+  { const c = _r9fpCanon('  1142   Tory  Road  NW,,  Edmonton.,  AB  T6R 3K2  ');
+    _r9fpExpect('(e1) whitespace + punctuation normalized', c.streetNumber === '1142' && c.postalPrefix === 't6r'); }
+  { const c1 = _r9fpCanon('1142 TORY ROAD NW T6R 3K2');
+    const c2 = _r9fpCanon('1142 tory road nw t6r 3k2');
+    _r9fpExpect('(f1) case insensitive equiv', c1.postalPrefix === c2.postalPrefix && c1.streetNumber === c2.streetNumber); }
+  { const c = _r9fpCanon('Calgary, AB T3K 4G9');
+    _r9fpExpect('(g1) no street number', c.streetNumber === null && c.postalPrefix === 't3k'); }
+
+  // ─── R9-F'-FUZZY-MATCH-MATRIX ───
+  console.log('\n--- R9-F\'-FUZZY-MATCH-MATRIX ---');
+  _r9fpExpect('(a) exact same → match', _r9fpFuzzy('1142 Tory Road NW T6R 3K2', '1142 Tory Road NW T6R 3K2') === true);
+  _r9fpExpect('(b) Grace full vs partial → match', _r9fpFuzzy('88 Harvest Hills Blvd NE, Calgary, AB T3K 4G9', '88 Harvest Hills Blvd NE, Calgary, AB T3K') === true);
+  _r9fpExpect('(c) Marcus postal-asymmetry → match (fallback)', _r9fpFuzzy('1142 Tory Road NW, Edmonton, AB T6R 3K2', '1142 Tory Road NW, Edmonton') === true);
+  _r9fpExpect('(d) different FSA same street# → no match', _r9fpFuzzy('1142 Tory Road NW T6R 3K2', '1142 Tory Road NW T2P 0X4') === false);
+  _r9fpExpect('(e) same FSA different street# → no match', _r9fpFuzzy('1142 Tory Road NW T6R 3K2', '8234 Tory Road NW T6R 3K2') === false);
+  _r9fpExpect('(f) no postal + same street# different street → no match', _r9fpFuzzy('1142 Tory Road NW, Edmonton', '1142 Whyte Avenue, Edmonton') === false);
+  _r9fpExpect('(g1) null + null → no match', _r9fpFuzzy(null, null) === false);
+  _r9fpExpect('(g2) null + valid → no match', _r9fpFuzzy(null, '1142 Tory Road NW T6R 3K2') === false);
+  _r9fpExpect('(g3) valid + null → no match', _r9fpFuzzy('1142 Tory Road NW T6R 3K2', null) === false);
+  _r9fpExpect('(h1) Grace empirical pairwise', _r9fpFuzzy('88 Harvest Hills Blvd NE, Calgary, AB T3K 4G9', '88 Harvest Hills Blvd NE, Calgary') === true);
+  _r9fpExpect('(h2) Marcus empirical pairwise', _r9fpFuzzy('1142 Tory Road NW, Edmonton, AB T6R 3K2', '1142 Tory Road NW, Edmonton, AB') === true);
+  _r9fpExpect('(h3) Derek empirical pairwise', _r9fpFuzzy('5519 Henwood Road SW, Calgary, AB T3E 6K3', '5519 Henwood Road SW, Calgary') === true);
+
+  // ─── R9-F'-FIND-EXISTING-DEAL-MATRIX (decideExistingDealMatch) ───
+  console.log('\n--- R9-F\'-FIND-EXISTING-DEAL-MATRIX ---');
+  const _r9fpNow = new Date('2026-05-26T00:00:00Z').getTime();
+  const _r9fpDeal = (overrides) => ({
+    id: 'deal-' + Math.random().toString(36).slice(2, 8),
+    email: 'broker@example.com', borrower_name: 'Test Borrower', status: 'active',
+    extracted_data: {}, created_at: '2026-05-20T00:00:00Z', updated_at: '2026-05-20T00:00:00Z',
+    ...overrides,
+  });
+  _r9fpExpect('(a) empty candidates → null no_match', (() => {
+    const r = _r9fpDecide([], { subject_property_address: '1142 Tory Road NW T6R 3K2' }, _r9fpNow);
+    return r.existingDeal === null && r.reason === 'no_match';
+  })());
+  _r9fpExpect('(b) active + same property → match', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW Edmonton' }, _r9fpNow);
+    return r.existingDeal === c && r.reason === 'property_match_active';
+  })());
+  _r9fpExpect('(c) active + different property → null', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], { subject_property_address: '8234 Whyte Avenue Edmonton T6E 1A1' }, _r9fpNow);
+    return r.existingDeal === null;
+  })());
+  _r9fpExpect('(d) terminal <90 + same property → match (recent_terminal)', (() => {
+    const c = _r9fpDeal({ status: 'completed', updated_at: '2026-04-01T00:00:00Z', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === c && r.reason === 'property_match_recent_terminal';
+  })());
+  _r9fpExpect('(e) terminal >90 + same property → null (refinance)', (() => {
+    const c = _r9fpDeal({ status: 'completed', updated_at: '2026-01-01T00:00:00Z', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === null;
+  })());
+  _r9fpExpect('(f) non-terminal priority over terminal', (() => {
+    const active = _r9fpDeal({ id: 'deal-active', status: 'active', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const completed = _r9fpDeal({ id: 'deal-completed', status: 'completed', updated_at: '2026-04-01T00:00:00Z', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([completed, active], { subject_property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === active && r.reason === 'property_match_active';
+  })());
+  _r9fpExpect('(g) Q3a fail-open: new property missing → null', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], {}, _r9fpNow);
+    return r.existingDeal === null;
+  })());
+  _r9fpExpect('(h) Q3a fail-open: candidate property missing → null', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: {} });
+    const r = _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === null;
+  })());
+  _r9fpExpect('(i) rejected <90 + same property → match', (() => {
+    const c = _r9fpDeal({ status: 'rejected', updated_at: '2026-04-01T00:00:00Z', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === c && r.reason === 'property_match_recent_terminal';
+  })());
+  _r9fpExpect('(j) multiple non-terminal, finds matching property', (() => {
+    const c1 = _r9fpDeal({ id: 'c1', status: 'active', extracted_data: { subject_property_address: '8234 Whyte Avenue Edmonton T6E 1A1' } });
+    const c2 = _r9fpDeal({ id: 'c2', status: 'under_review', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c1, c2], { subject_property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === c2 && r.reason === 'property_match_active';
+  })());
+  _r9fpExpect('(k) all different non-terminal properties → null', (() => {
+    const c1 = _r9fpDeal({ id: 'c1', status: 'active', extracted_data: { subject_property_address: '8234 Whyte Avenue Edmonton T6E 1A1' } });
+    const c2 = _r9fpDeal({ id: 'c2', status: 'under_review', extracted_data: { subject_property_address: '5519 Henwood Road SW, Calgary, AB T3E 6K3' } });
+    const r = _r9fpDecide([c1, c2], { subject_property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === null;
+  })());
+  _r9fpExpect('(l) property_address fallback key (not subject_property_address)', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], { property_address: '1142 Tory Road NW T6R' }, _r9fpNow);
+    return r.existingDeal === c && r.reason === 'property_match_active';
+  })());
+
+  // ─── R9-F'-CALL-SITE-WIRING (8 anchors) ───
+  console.log('\n--- R9-F\'-CALL-SITE-WIRING ---');
+  _r9fpExpect('(a) findExistingDealForBorrower exported from deals.js',
+    /findExistingDealForBorrower:\s*async/.test(_r9fpDealsSrc));
+  _r9fpExpect('(b) __test__ exposes canonicalizeProperty + propertyFuzzyMatch + TEMPORAL_CARVEOUT_DAYS + decideExistingDealMatch',
+    /module\.exports\.__test__ = \{[\s\S]*?canonicalizeProperty[\s\S]*?propertyFuzzyMatch[\s\S]*?TEMPORAL_CARVEOUT_DAYS[\s\S]*?decideExistingDealMatch[\s\S]*?\}/.test(_r9fpDealsSrc));
+  _r9fpExpect('(c) webhook.js calls findExistingDealForBorrower after R9-F gate', (() => {
+    const r9fIdx = _r9fpWebhookSrc.search(/_r9fIntakeClassification\s*=\s*classifyIntakeBorrower/);
+    const r9fpIdx = _r9fpWebhookSrc.search(/_r9fPrimeDupCheck\s*=\s*await\s+dealsService\.findExistingDealForBorrower/);
+    return r9fIdx !== -1 && r9fpIdx !== -1 && r9fpIdx > r9fIdx;
+  })());
+  _r9fpExpect('(d) webhook.js calls findExistingDealForBorrower before dealsService.create', (() => {
+    const r9fpIdx = _r9fpWebhookSrc.search(/_r9fPrimeDupCheck\s*=\s*await\s+dealsService\.findExistingDealForBorrower/);
+    const afterR9fp = _r9fpWebhookSrc.slice(r9fpIdx);
+    const createMatch = afterR9fp.search(/const deal = await dealsService\.create\(\{\s*email: email\.from,/);
+    return r9fpIdx !== -1 && createMatch > 0;
+  })());
+  _r9fpExpect('(e) duplicate route invokes sendDuplicateAlertToAdmin + returns without create',
+    /if \(_r9fPrimeDupCheck\.existingDeal\)\s*\{[\s\S]*?sendDuplicateAlertToAdmin[\s\S]*?return;\s*\}/.test(_r9fpWebhookSrc));
+  _r9fpExpect('(f) sendDuplicateAlertToAdmin defined + admin subject contains [Potential Duplicate]',
+    /const sendDuplicateAlertToAdmin = async/.test(_r9fpWebhookSrc) && /\[Potential Duplicate\]/.test(_r9fpWebhookSrc));
+  _r9fpExpect('(g) duplicate route saves NO deal record', (() => {
+    const handoffMatch = _r9fpWebhookSrc.match(/if \(_r9fPrimeDupCheck\.existingDeal\)\s*\{[\s\S]*?return;\s*\}/);
+    if (!handoffMatch) return false;
+    const branch = handoffMatch[0];
+    return !/dealsService\.create/.test(branch) && !/dealsService\.saveMessage/.test(branch);
+  })());
+  _r9fpExpect('(h) R9-F classifyIntakeBorrower gate still wired',
+    /_r9fIntakeClassification\s*=\s*classifyIntakeBorrower/.test(_r9fpWebhookSrc));
+
+  // ─── R9-F'-CROSS-CLUSTER-INTEGRATION (10 anchors) ───
+  console.log('\n--- R9-F\'-CROSS-CLUSTER-INTEGRATION ---');
+  _r9fpExpect('(a) findActiveByEmail behavior UNCHANGED',
+    /findActiveByEmail:\s*async\s*\(email\)\s*=>[\s\S]*?\.not\(['"]status['"],\s*['"]in['"],\s*['"]\("completed","rejected"\)['"]\)/.test(_r9fpDealsSrc));
+  _r9fpExpect('(b) R9-F classifyIntakeBorrower still wired', /classifyIntakeBorrower/.test(_r9fpWebhookSrc));
+  _r9fpExpect('(c) R9-E startCron factory present', (() => {
+    const cronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+    return /const startCron = \(\) =>/.test(cronSrc) || /function startCron\s*\(/.test(cronSrc);
+  })());
+  _r9fpExpect('(d) R6-κ aml_pep flow preserved', /aml_pep_requested_at/.test(_r9fpWebhookSrc));
+  _r9fpExpect('(e) R5-F-2 claimDailySummarySlot preserved',
+    /claimDailySummarySlot/.test(require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8')));
+  _r9fpExpect('(f) Postmark email sending unaffected', /emailService\.sendEmail/.test(_r9fpWebhookSrc));
+  _r9fpExpect('(g) extracted_data property keys both supported',
+    /subject_property_address\s*\|\|\s*[\w.]*property_address/.test(_r9fpDealsSrc));
+  _r9fpExpect('(h) module.exports.findExistingDealForBorrower + __test__ exports preserved',
+    /findExistingDealForBorrower:\s*async/.test(_r9fpDealsSrc) && /module\.exports\.__test__ = \{/.test(_r9fpDealsSrc));
+  _r9fpExpect('(i) Group ZZZ admin-alert pattern reused',
+    /const sendDuplicateAlertToAdmin = async[\s\S]*?emailService\.sendEmail\(\s*config\.adminEmail/.test(_r9fpWebhookSrc));
+  _r9fpExpect('(j) Idempotency: duplicate route is pure read + email send (no DB mutation)', (() => {
+    const handoffMatch = _r9fpWebhookSrc.match(/if \(_r9fPrimeDupCheck\.existingDeal\)\s*\{[\s\S]*?return;\s*\}/);
+    if (!handoffMatch) return false;
+    const branch = handoffMatch[0];
+    return !/dealsService\.update/.test(branch) && !/dealsService\.create/.test(branch);
+  })());
+
+  // ─── R9-F'-CARVE-OUT-RESPECT (7 fixtures) ───
+  console.log('\n--- R9-F\'-CARVE-OUT-RESPECT ---');
+  _r9fpExpect('(refinance-1) Marcus 100-day-old completed → create proceeds', (() => {
+    const c = _r9fpDeal({ status: 'completed', updated_at: '2026-02-15T00:00:00Z', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    return _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW Edmonton' }, _r9fpNow).existingDeal === null;
+  })());
+  _r9fpExpect('(refinance-2) Grace 150-day-old rejected → create proceeds', (() => {
+    const c = _r9fpDeal({ status: 'rejected', updated_at: '2025-12-27T00:00:00Z', extracted_data: { subject_property_address: '88 Harvest Hills Blvd NE T3K 4G9' } });
+    return _r9fpDecide([c], { subject_property_address: '88 Harvest Hills Blvd NE Calgary' }, _r9fpNow).existingDeal === null;
+  })());
+  _r9fpExpect('(new-property-1) Marcus different property → create proceeds', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    return _r9fpDecide([c], { subject_property_address: '8234 Whyte Avenue Edmonton T6E 1A1' }, _r9fpNow).existingDeal === null;
+  })());
+  _r9fpExpect('(new-property-2) Grace different FSA same street# → create proceeds', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { subject_property_address: '88 Harvest Hills Blvd NE T3K 4G9' } });
+    return _r9fpDecide([c], { subject_property_address: '88 Harvest Hills Blvd NE Edmonton T6R 3K2' }, _r9fpNow).existingDeal === null;
+  })());
+  _r9fpExpect('(typo-resubmit-1) Marcus same-day active dup → admin handoff', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    const r = _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW Edmonton' }, _r9fpNow);
+    return r.existingDeal === c && r.reason === 'property_match_active';
+  })());
+  _r9fpExpect('(property-missing-1) new submission no property → fail-open', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: { subject_property_address: '1142 Tory Road NW T6R 3K2' } });
+    return _r9fpDecide([c], {}, _r9fpNow).existingDeal === null;
+  })());
+  _r9fpExpect('(property-missing-2) candidate no property → fail-open', (() => {
+    const c = _r9fpDeal({ status: 'active', extracted_data: {} });
+    return _r9fpDecide([c], { subject_property_address: '1142 Tory Road NW T6R 3K2' }, _r9fpNow).existingDeal === null;
+  })());
+
+  // ─── R9-F'-ADMIN-ALERT-CONTENT-ANCHORS (12 anchors) ───
+  console.log('\n--- R9-F\'-ADMIN-ALERT-CONTENT-ANCHORS ---');
+  const _r9fpSendDupSrc = (() => {
+    const start = _r9fpWebhookSrc.indexOf('const sendDuplicateAlertToAdmin');
+    const end = _r9fpWebhookSrc.indexOf('};', start);
+    return _r9fpWebhookSrc.slice(start, end + 2);
+  })();
+  _r9fpExpect('(1) [Potential Duplicate] subject prefix', /\[Potential Duplicate\]/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(2) borrower name in subject', /\$\{newBorrowerName\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(3) broker email in subject', /\$\{newBrokerEmail\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(4) "NEW SUBMISSION" section header', /NEW SUBMISSION/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(5) "EXISTING DEAL" section header', /EXISTING DEAL/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(6) existing deal ID anchor', /\$\{existingDeal\.id\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(7) existing deal status anchor', /\$\{existingDeal\.status\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(8) existing deal created_at anchor', /\$\{existingDeal\.created_at\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(9) existing deal property_address anchor', /\$\{existingProperty\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(10) new submission property_address anchor', /\$\{newProperty\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(11) reason classification anchor', /\$\{reason\}/.test(_r9fpSendDupSrc));
+  _r9fpExpect('(12) decision-prompt directive', /To link these deals|If this is a new deal/.test(_r9fpSendDupSrc));
+
+  console.log(`\n========== R9-F' groups: ${_r9fpPass} PASS ==========`);
+
   console.log('\n────────────────────────────────────────');
   console.log('HARNESS COMPLETE — all checks passed');
   console.log('────────────────────────────────────────');

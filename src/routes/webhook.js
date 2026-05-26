@@ -596,6 +596,63 @@ const classifyIntakeBorrower = (input) => {
   return 'accept';
 };
 
+// R9-F' (2026-05-26): admin-handoff email for potential-duplicate detection.
+// Sibling mechanism to R9-F classifyIntakeBorrower at the same pre-create
+// data-model boundary. Same alert-admin-and-skip semantics; same Group ZZZ
+// admin-handoff precedent.
+//
+// Q3 verdict: cost-asymmetry — false-positive dedup (rejecting legitimate
+// submission via auto-link) > false-negative dedup (admin manually consolidates).
+// Therefore: send admin a side-by-side comparison of NEW SUBMISSION vs
+// EXISTING DEAL; admin manually decides link-vs-create.
+//
+// Content discipline (R9-F'-ADMIN-ALERT-CONTENT-ANCHORS verification group):
+// each anchor is load-bearing for admin's link-vs-create decision. Removing
+// any anchor in future "simplification" silently weakens triage capability.
+const sendDuplicateAlertToAdmin = async (newEmail, existingDeal, newExtracted, reason) => {
+  const newBorrowerName = newEmail.fromName || '(unknown)';
+  const newBrokerEmail = newEmail.from;
+  const newProperty = newExtracted?.subject_property_address
+    || newExtracted?.property_address
+    || '(no property extracted from email body)';
+  const existingProperty = existingDeal.extracted_data?.subject_property_address
+    || existingDeal.extracted_data?.property_address
+    || '(no property on record)';
+  const subject = `[Potential Duplicate] ${newBorrowerName} — ${newBrokerEmail}`;
+  const body = `Vienna detected a potential duplicate submission and did not create a new deal.
+
+Reason classification: ${reason}
+
+NEW SUBMISSION
+  Borrower name:    ${newBorrowerName}
+  Broker email:     ${newBrokerEmail}
+  Property address: ${newProperty}
+  Subject:          ${newEmail.subject || '(empty)'}
+  Postmark MID:     ${newEmail.messageId}
+
+EXISTING DEAL
+  Deal ID:          ${existingDeal.id}
+  Status:           ${existingDeal.status}
+  Created at:       ${existingDeal.created_at}
+  Property address: ${existingProperty}
+  Borrower (DB):    ${existingDeal.borrower_name || '(none)'}
+
+DECISION PROMPT
+  To link these deals, reply to the existing-deal thread (deal ${existingDeal.id}) and forward the new submission's content/docs into that thread.
+  If this is a new deal (different transaction), please reply directly to ${newBrokerEmail} and ask the broker to resubmit — Vienna will create a new record on the re-submission.
+
+(This alert is automatic — R9-F' borrower-identity dedup, alert-admin-and-skip semantics per Q3 verdict. Carve-outs honored: different property (FSA+street# differs) → new deal proceeds; refinance after >90 days terminal → new deal proceeds; property missing in either side → Q3a fail-open new deal proceeds. Match reasons: property_match_active = same property + non-terminal deal on file; property_match_recent_terminal = same property + terminal deal closed <90 days ago.)`;
+
+  await emailService.sendEmail(
+    config.adminEmail,
+    subject,
+    body,
+    null,
+    [],
+    []
+  );
+};
+
 // R9-A' (2026-05-26): state-derived gate signal — post-approval AML/PEP pending
 // receipt (broker may have claimed to attach but docs not yet in table).
 //
@@ -2308,6 +2365,33 @@ No deal record was created. If this was a legitimate broker submission, please r
             [],
             []
           );
+          return;
+        }
+
+        // R9-F' (2026-05-26): cross-status duplicate detection. Pre-create
+        // dedup using email + lightweight property extraction (no AI cost).
+        // findActiveByEmail (the broker-reply continuation lookup) filtered
+        // by status — so re-submitting after a deal closed silently created
+        // a new record. R9-F' catches that gap with carve-outs for legitimate
+        // refinance (>90 days), new property (FSA + street# differs), and
+        // ambiguity (property missing → Q3a fail-open).
+        //
+        // Property comes from cFields.extractFromEmailBody — pure regex on
+        // broker email body (subject_property_address). Same extractor used
+        // at line 2607 for combined-LTV computation; reusing pre-create
+        // avoids redundant AI extraction.
+        //
+        // On duplicate detected: alert admin via sendDuplicateAlertToAdmin
+        // (Group ZZZ admin-handoff precedent) + skip create. Admin manually
+        // decides link-vs-create.
+        const _r9fPrimeExtract = cFields.extractFromEmailBody(email.textBody || '', email.subject || '');
+        const _r9fPrimeDupCheck = await dealsService.findExistingDealForBorrower(
+          email.from,
+          _r9fPrimeExtract
+        );
+        if (_r9fPrimeDupCheck.existingDeal) {
+          console.log(`R9-F': duplicate detected — reason=${_r9fPrimeDupCheck.reason}, existing=${_r9fPrimeDupCheck.existingDeal.id} (status=${_r9fPrimeDupCheck.existingDeal.status}). Alerting admin + skipping deal-create.`);
+          await sendDuplicateAlertToAdmin(email, _r9fPrimeDupCheck.existingDeal, _r9fPrimeExtract, _r9fPrimeDupCheck.reason);
           return;
         }
 

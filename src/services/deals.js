@@ -95,6 +95,44 @@ module.exports = {
     return data;
   },
 
+  // R9-F' (2026-05-26): cross-status duplicate detection. Catches the case
+  // findActiveByEmail misses by design — when a previously-completed (or
+  // rejected) deal exists for the same borrower and the broker re-submits.
+  //
+  // Returns { existingDeal: Deal | null, reason: string }:
+  //   - null match: caller proceeds with create normally
+  //   - non-null match: caller routes to admin-handoff (alert + skip create)
+  //
+  // Decision tree (Q1/Q2/Q3/Q3a/Q4 verdicts baked in):
+  //   1. SELECT all deals for this email, ordered by created_at DESC
+  //   2. If none: return null (no_match)
+  //   3. Walk candidates by status priority (non-terminal first, then terminal):
+  //      a. For terminal candidates: skip if updated_at > 90 days ago (Q4
+  //         refinance carve-out)
+  //      b. Property fuzzy match (Q2 FSA + street number):
+  //         - if both properties present AND fuzzy-match → MATCH (return existingDeal)
+  //         - if both properties present AND different → CONTINUE (Q2 different-property carve-out)
+  //         - if property missing in EITHER side → CONTINUE (Q3a fail-open ambiguity)
+  //   4. No candidate matched → return null
+  //
+  // Fail-open per Q3a: ambiguous cases (property missing) default to no-match
+  // → new deal proceeds. Cost-asymmetry: false-positive dedup (rejecting
+  // legitimate submission) > false-negative dedup (admin manually consolidates
+  // via daily-summary surface).
+  findExistingDealForBorrower: async (email, extractedFields) => {
+    if (!email) return { existingDeal: null, reason: 'no_email' };
+
+    const { data: candidates, error } = await supabase
+      .from('deals')
+      .select('*')
+      .eq('email', email)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    // Delegate decision tree to the pure helper for testability + clean separation
+    return decideExistingDealMatch(candidates, extractedFields);
+  },
+
   // Create a new deal
   create: async ({ email, borrower_name }) => {
     const { data, error } = await supabase
@@ -553,7 +591,134 @@ module.exports = {
   },
 };
 
+// R9-F' (2026-05-26): borrower-identity dedup helpers — pure functions
+// for property fuzzy-match canonicalization + temporal carve-out threshold.
+//
+// Closes the cross-status duplicate-submission gap. Pre-R9-F', findActiveByEmail
+// filtered out completed/rejected deals — so re-submitting after a deal closed
+// silently created a new record. 89 of 95 production duplicates would have
+// been caught by an "email-only, all-status" lookup (per R9-F' empirical).
+//
+// Architectural family: extends the 3rd template family (pre-create intake
+// classification + data-model gate). R9-F classifyIntakeBorrower answers
+// "is this a real deal at all?"; R9-F' findExistingDealForBorrower answers
+// "is this real deal a duplicate of an existing one?" Same boundary, same
+// alert-admin-skip pattern, same fail-open discipline on ambiguity.
+//
+// Property fuzzy-match policy (Q2 verdict): FSA (postal first-3) + street
+// number anchor with whitespace + case + punctuation normalization.
+// Calibrated to empirical noise pattern — Grace Paulson "T3..." truncation,
+// Marcus Webb "T6R 3K2" vs no-postal variants, Derek Olsen, Ryan Callahan.
+// FSA prefix matches across truncation; street number prevents same-FSA
+// different-building false matches.
+//
+// Temporal carve-out (Q4 verdict): 90 days since last terminal-status closure.
+// Covers typical refinance cycle without false-blocking quick re-submits.
+const TEMPORAL_CARVEOUT_DAYS = 90;
+
+// Canonicalize a property address string into a structured shape for fuzzy
+// matching. Returns { postalPrefix, streetNumber, streetTokens } or null.
+//   - postalPrefix: first 3 chars of Canadian postal code (FSA) — anchor signal
+//   - streetNumber: first numeric token (e.g., "1142")
+//   - streetTokens: first 3 tokens after street number, space-joined
+const canonicalizeProperty = (addr) => {
+  if (!addr || typeof addr !== 'string') return null;
+  const s = addr.toLowerCase().replace(/[,.]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  // Canadian postal code (FSA + LDU): A1A 1A1 or A1A1A1
+  const postalMatch = s.match(/\b([a-z]\d[a-z])\s*(\d[a-z]\d)?\b/);
+  const postalPrefix = postalMatch ? postalMatch[1] : null;
+  // Remove postal from the string for street-token extraction
+  const noPostal = postalMatch ? s.replace(postalMatch[0], ' ').replace(/\s+/g, ' ').trim() : s;
+  const tokens = noPostal.split(' ').filter(Boolean);
+  const streetNumber = (tokens[0] && /^\d+$/.test(tokens[0])) ? tokens[0] : null;
+  // first 3 tokens after street number — captures "street-name + suffix" for
+  // moderate disambiguation when postal absent
+  const remainingTokens = streetNumber ? tokens.slice(1) : tokens;
+  const streetTokens = remainingTokens.slice(0, 3).join(' ');
+  return { postalPrefix, streetNumber, streetTokens };
+};
+
+// Fuzzy match two property address strings. Returns true if both canonicalize
+// to the same FSA + street number (preferred), OR same street number + street
+// tokens (fallback when postal missing in either). Q3a (verdict): callers must
+// fail-open on null input — propertyFuzzyMatch returns false on any null
+// canonicalization, which the calling logic treats as "no carve-out signal
+// available, fall through to next candidate" — NOT as "definite no-match".
+const propertyFuzzyMatch = (a, b) => {
+  const ca = canonicalizeProperty(a);
+  const cb = canonicalizeProperty(b);
+  if (!ca || !cb) return false;
+  // Preferred path: both have postal FSA — anchor on FSA + street number
+  if (ca.postalPrefix && cb.postalPrefix) {
+    return ca.postalPrefix === cb.postalPrefix
+      && !!ca.streetNumber && ca.streetNumber === cb.streetNumber;
+  }
+  // Fallback path: postal missing in either — anchor on street number + street tokens
+  return !!ca.streetNumber && ca.streetNumber === cb.streetNumber
+    && !!ca.streetTokens && ca.streetTokens === cb.streetTokens;
+};
+
+// Pure decision tree for findExistingDealForBorrower. Takes the candidate
+// array (already SELECTed by email) + new submission's extracted fields,
+// returns the same { existingDeal, reason } shape as findExistingDealForBorrower.
+// Extracted as a pure function so test-trigger.js can exercise the full
+// decision tree against fixture candidate arrays without stubbing supabase.
+const decideExistingDealMatch = (candidates, extractedFields, now = Date.now()) => {
+  if (!candidates || candidates.length === 0) {
+    return { existingDeal: null, reason: 'no_match' };
+  }
+  const newProperty = extractedFields
+    ? (extractedFields.subject_property_address || extractedFields.property_address)
+    : null;
+
+  // Priority: non-terminal candidates first (most likely an active duplicate),
+  // then terminal candidates (potential refinance / resubmission).
+  const nonTerminal = candidates.filter(d => d.status !== 'completed' && d.status !== 'rejected');
+  const terminal = candidates.filter(d => d.status === 'completed' || d.status === 'rejected');
+  const ordered = [...nonTerminal, ...terminal];
+
+  for (const candidate of ordered) {
+    const isTerminal = candidate.status === 'completed' || candidate.status === 'rejected';
+    if (isTerminal) {
+      const daysSince = (now - new Date(candidate.updated_at).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSince > TEMPORAL_CARVEOUT_DAYS) {
+        // Q4 refinance carve-out — terminal deal old enough that this is
+        // legitimately a new transaction. Skip this candidate.
+        continue;
+      }
+    }
+    const candidateProperty = candidate.extracted_data
+      ? (candidate.extracted_data.subject_property_address || candidate.extracted_data.property_address)
+      : null;
+
+    // Q3a fail-open: if property missing in either side, treat as ambiguous
+    // → continue to next candidate (don't auto-match)
+    if (!newProperty || !candidateProperty) continue;
+
+    // Q2 propertyFuzzyMatch — FSA + street number anchor
+    if (propertyFuzzyMatch(newProperty, candidateProperty)) {
+      const reason = isTerminal ? 'property_match_recent_terminal' : 'property_match_active';
+      return { existingDeal: candidate, reason };
+    }
+    // Q2 different-property carve-out — same email, different property =
+    // new deal. Continue to next candidate (other candidates may match).
+  }
+
+  return { existingDeal: null, reason: 'no_property_match_or_carveout' };
+};
+
 // Test-only exposure for the deterministic classifier truth table (Group B).
 // Production callers use the local const at module scope; this just makes the
 // pure-regex predicate reachable from test-trigger.js without a DB roundtrip.
-module.exports.__test__ = { classifyDocument };
+// R9-F' (2026-05-26): also expose canonicalizeProperty + propertyFuzzyMatch +
+// TEMPORAL_CARVEOUT_DAYS + decideExistingDealMatch for the R9-F' truth-table
+// matrices. decideExistingDealMatch is the pure decision tree; the async
+// findExistingDealForBorrower wraps it with the supabase SELECT.
+module.exports.__test__ = {
+  classifyDocument,
+  canonicalizeProperty,
+  propertyFuzzyMatch,
+  TEMPORAL_CARVEOUT_DAYS,
+  decideExistingDealMatch,
+};
