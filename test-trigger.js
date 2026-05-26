@@ -24091,6 +24091,322 @@ Meridian Mortgage Group Lic. #MB552934`;
     console.log('\n[live Claude smoke SKIPPED — set a real CLAUDE_API_KEY to run]');
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // R9-E — startCron() factory extraction (cron module-load side-effect closure)
+  // ════════════════════════════════════════════════════════════════
+  // Root cause (empirically grounded 2026-05-26):
+  //   1. test-trigger.js requires ./src/cron/dailySummary at multiple sites
+  //      (lines 714, 3424, 7828).
+  //   2. Pre-R9-E, the require triggered cron.schedule(CRON_SCHEDULE,
+  //      runDailySummary, {timezone: ADMIN_TIMEZONE}) at module load.
+  //   3. test-trigger.js mocks emailService.sendEmail at module level (line 79)
+  //      and stubs dealsService.getActiveDeals during Bug A tests (line 3449).
+  //   4. test-trigger.js is 1.5 MB — runs take many minutes. If the test
+  //      process is alive at 21:00 Edmonton, the in-process cron fired with
+  //      mocked sendEmail (returns MOCK-${N}) + stubbed getActiveDeals
+  //      (1 fake deal) + REAL Supabase claim.
+  //   5. The in-process cron INSERTed a row into PRODUCTION daily_summaries
+  //      with message_id=MOCK-N, active_deals_count=1, reminders_sent=1.
+  //   6. When Render production cron fired that same minute,
+  //      claimDailySummarySlot returned claimed=false (UNIQUE on date_edmonton)
+  //      and silent-skipped. Franco got NO daily summary email those days.
+  //
+  // Empirical evidence chain:
+  //   - daily_summaries had 3 MOCK rows: May 21 Thu MOCK-3, May 22 Fri MOCK-5,
+  //     May 24 Sun MOCK-3 (active_deals=1, reminders=1, html_len 1-8 KB —
+  //     matches Bug A stub returning 1 fake deal).
+  //   - daily_summaries had 2 real Postmark rows: May 23 Sat (active=90),
+  //     May 25 Mon (active=92).
+  //   - Render logs at 2026-05-25T03:00 UTC: "DAILY SUMMARY CRON" banner at
+  //     .011 + "Daily summary skipped — already claimed for 2026-05-24 by
+  //     another worker/restart-tick (R5-F-2 idempotency)" at 1.005.
+  //   - MOCK row attempted_at at .471 — beat Render's claim by ~534 ms.
+  //
+  // Fix mechanism (b) verdict: extract cron.schedule into startCron() factory.
+  //   - Production: src/index.js explicitly invokes startCron() in app.listen
+  //     callback (post R9-E: same firing semantics).
+  //   - Tests/dev: require no longer triggers cron registration. No in-process
+  //     cron firing possible. Production daily_summaries idempotency claim
+  //     can no longer be poisoned by test runs.
+  //
+  // Six verification groups:
+  //   (1) R9-E-FACTORY-EXTRACTION — 5-anchor source pin on startCron shape
+  //   (2) R9-E-PRODUCTION-WIRING — 3-anchor source pin on src/index.js
+  //   (3) R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE — LOAD-BEARING empirical
+  //       replay (cron.schedule call-counting stub + require.cache management)
+  //   (4) R9-E-REGRESSION-MOCK-POLLUTION-PREVENTION — LOAD-BEARING empirical
+  //       replay (mirrors test-trigger.js setup pattern; asserts claim-spy
+  //       NOT called because cron not registered)
+  //   (5) R9-E-CROSS-CLUSTER-INTEGRATION — 8-anchor closed-set on R5-F-2 +
+  //       R5-F-3 + IIII + ADMIN_TIMEZONE + cron patterns + existing helpers
+  //   (6) R9-E-COMMENT-FIX — 2-anchor pin on dailySummary.js:21-22 comment
+  //       correction (R5-F-1 carry-forward: deploy required for env var
+  //       changes since CRON_SCHEDULE is captured at module load).
+
+  console.log('\n========== R9-E — startCron() factory extraction ==========');
+
+  const _r9eFs = require('fs');
+  const _r9ePath = require('path');
+  const _r9eCronSrc = _r9eFs.readFileSync(_r9ePath.join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  const _r9eIndexSrc = _r9eFs.readFileSync(_r9ePath.join(__dirname, 'src/index.js'), 'utf8');
+
+  // ─── R9-E-FACTORY-EXTRACTION — 5-anchor source pin ───
+  console.log('\n--- R9-E-FACTORY-EXTRACTION ---');
+
+  // (a) startCron defined as a function/arrow in dailySummary.js
+  if (!/(const startCron = \(\) =>|function startCron\s*\()/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-FACTORY-EXTRACTION (a)]: startCron function definition missing in dailySummary.js');
+  }
+  console.log('  PASS (a): startCron function definition present');
+
+  // (b) cron.schedule(CRON_SCHEDULE, runDailySummary, ...) appears INSIDE
+  //     startCron body — verified by relative-position search.
+  const _r9eStartCronIdx = _r9eCronSrc.search(/(const startCron = \(\) =>|function startCron\s*\()/);
+  const _r9eCronScheduleIdx = _r9eCronSrc.indexOf('cron.schedule(CRON_SCHEDULE, runDailySummary');
+  if (_r9eStartCronIdx === -1 || _r9eCronScheduleIdx === -1) {
+    throw new Error(`FAIL [R9-E-FACTORY-EXTRACTION (b)]: startCron def or cron.schedule call not found — startCronIdx=${_r9eStartCronIdx} scheduleIdx=${_r9eCronScheduleIdx}`);
+  }
+  if (_r9eCronScheduleIdx <= _r9eStartCronIdx) {
+    throw new Error(`FAIL [R9-E-FACTORY-EXTRACTION (b)]: cron.schedule must appear AFTER startCron definition (inside the function body) — startCronIdx=${_r9eStartCronIdx}, scheduleIdx=${_r9eCronScheduleIdx}`);
+  }
+  console.log('  PASS (b): cron.schedule(CRON_SCHEDULE, runDailySummary, ...) inside startCron body');
+
+  // (c) Exactly 1 cron.schedule call in dailySummary.js — no top-level call
+  //     surviving outside the factory.
+  const _r9eAllScheduleCalls = (_r9eCronSrc.match(/cron\.schedule\(/g) || []).length;
+  if (_r9eAllScheduleCalls !== 1) {
+    throw new Error(`FAIL [R9-E-FACTORY-EXTRACTION (c)]: expected exactly 1 cron.schedule call in dailySummary.js, got ${_r9eAllScheduleCalls}`);
+  }
+  console.log('  PASS (c): exactly 1 cron.schedule call site (inside startCron)');
+
+  // (d) startCron exported via module.exports
+  if (!/module\.exports = \{[\s\S]*?\bstartCron\b[\s\S]*?\};?/m.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-FACTORY-EXTRACTION (d)]: startCron must be exported from dailySummary.js');
+  }
+  console.log('  PASS (d): startCron exported');
+
+  // (e) Idempotent guard — module-level handle + early-return on second call.
+  if (!/let _r9eCronHandle = null;?/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-FACTORY-EXTRACTION (e)]: module-level _r9eCronHandle declaration missing');
+  }
+  if (!/if \(_r9eCronHandle\)[\s\S]{0,200}return _r9eCronHandle/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-FACTORY-EXTRACTION (e)]: startCron must contain idempotent guard `if (_r9eCronHandle) ... return _r9eCronHandle`');
+  }
+  console.log('  PASS (e): idempotent guard with module-level _r9eCronHandle + early-return');
+
+  // ─── R9-E-PRODUCTION-WIRING — 3-anchor source pin ───
+  console.log('\n--- R9-E-PRODUCTION-WIRING ---');
+
+  // (a) src/index.js requires startCron from ./cron/dailySummary
+  if (!/require\(['"]\.\/cron\/dailySummary['"]\)/.test(_r9eIndexSrc)) {
+    throw new Error('FAIL [R9-E-PRODUCTION-WIRING (a)]: src/index.js must require ./cron/dailySummary');
+  }
+  if (!/\bstartCron\b/.test(_r9eIndexSrc)) {
+    throw new Error('FAIL [R9-E-PRODUCTION-WIRING (a)]: src/index.js must reference startCron');
+  }
+  console.log('  PASS (a): src/index.js requires ./cron/dailySummary with startCron reference');
+
+  // (b) src/index.js invokes startCron (or aliased name) inside app.listen callback
+  const _r9eListenIdx = _r9eIndexSrc.search(/app\.listen\(/);
+  if (_r9eListenIdx === -1) throw new Error('FAIL [R9-E-PRODUCTION-WIRING (b)]: app.listen call not found in src/index.js');
+  const _r9eAfterListen = _r9eIndexSrc.slice(_r9eListenIdx);
+  if (!/startDailySummaryCron\(\)|startCron\(\)/.test(_r9eAfterListen)) {
+    throw new Error('FAIL [R9-E-PRODUCTION-WIRING (b)]: startCron must be invoked inside app.listen callback in src/index.js');
+  }
+  console.log('  PASS (b): startCron invoked inside app.listen callback');
+
+  // (c) Bare side-effect require `require('./cron/dailySummary');` is GONE.
+  //     Match standalone bare require not followed by a member access or call.
+  if (/^\s*require\(['"]\.\/cron\/dailySummary['"]\)\s*;?\s*$/m.test(_r9eIndexSrc)) {
+    throw new Error('FAIL [R9-E-PRODUCTION-WIRING (c)]: bare side-effect require of ./cron/dailySummary remains in src/index.js — must be destructured + invoked');
+  }
+  console.log('  PASS (c): bare side-effect require form is GONE');
+
+  // ─── R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE — LOAD-BEARING empirical replay ───
+  console.log('\n--- R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE (LOAD-BEARING) ---');
+
+  {
+    // Stub node-cron's schedule with a call counter. Save original for restore.
+    const _r9eNodeCron = require('node-cron');
+    const _r9eOrigSchedule = _r9eNodeCron.schedule;
+    let _r9eScheduleCallCount = 0;
+    _r9eNodeCron.schedule = function (_pattern, _fn, _opts) {
+      _r9eScheduleCallCount++;
+      return { _r9eStub: true, stop: () => {} };
+    };
+
+    try {
+      // Clear require.cache to force fresh module load with stubbed cron
+      const _r9eDsPath = require.resolve('./src/cron/dailySummary');
+      delete require.cache[_r9eDsPath];
+
+      // Fresh require — counter should remain 0 (no module-load side effect)
+      const _r9eFreshDs = require('./src/cron/dailySummary');
+      if (_r9eScheduleCallCount !== 0) {
+        throw new Error(`FAIL [R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE (i)]: require triggered cron.schedule — count=${_r9eScheduleCallCount} (expected 0)`);
+      }
+      console.log('  PASS (i): require ./src/cron/dailySummary did NOT register cron schedule (count=0)');
+
+      if (typeof _r9eFreshDs.startCron !== 'function') {
+        throw new Error(`FAIL [R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE (ii)]: startCron must be exported (typeof=${typeof _r9eFreshDs.startCron})`);
+      }
+      console.log('  PASS (ii): startCron exported and callable');
+
+      // First startCron() call — counter should become 1
+      const _r9eHandle1 = _r9eFreshDs.startCron();
+      if (_r9eScheduleCallCount !== 1) {
+        throw new Error(`FAIL [R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE (iii)]: first startCron() must register cron — count=${_r9eScheduleCallCount} (expected 1)`);
+      }
+      console.log('  PASS (iii): first startCron() registered cron schedule (count=1)');
+
+      if (!_r9eHandle1 || _r9eHandle1._r9eStub !== true) {
+        throw new Error('FAIL [R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE (iv)]: startCron() must return the cron handle');
+      }
+      console.log('  PASS (iv): startCron() returned the cron handle');
+
+      // Second startCron() call — counter must stay 1 (idempotent guard)
+      const _r9eHandle2 = _r9eFreshDs.startCron();
+      if (_r9eScheduleCallCount !== 1) {
+        throw new Error(`FAIL [R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE (v)]: second startCron() must be idempotent — count=${_r9eScheduleCallCount} (expected 1)`);
+      }
+      console.log('  PASS (v): second startCron() was idempotent (count remained 1)');
+
+      if (_r9eHandle2 !== _r9eHandle1) {
+        throw new Error('FAIL [R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE (vi)]: second startCron() must return the same cron handle as the first call');
+      }
+      console.log('  PASS (vi): second startCron() returned the same handle');
+    } finally {
+      // Restore node-cron.schedule + clear cache so downstream tests get a fresh module
+      _r9eNodeCron.schedule = _r9eOrigSchedule;
+      delete require.cache[require.resolve('./src/cron/dailySummary')];
+    }
+  }
+
+  // ─── R9-E-REGRESSION-MOCK-POLLUTION-PREVENTION — LOAD-BEARING empirical replay ───
+  // Mirrors test-trigger.js's exact setup pattern: mocked emailService.sendEmail
+  // + claim spy on dealsService.claimDailySummarySlot. Pre-R9-E, requiring the
+  // module would register cron.schedule and the in-process cron could fire at
+  // 21:00 Edmonton, calling the claim spy. Post-R9-E, requiring the module
+  // does NOT register cron.schedule, so the claim spy CANNOT be called from
+  // test-trigger.js — even with the process alive for hours.
+  // This is the "fix proves the bug surface is structurally closed" assertion.
+  console.log('\n--- R9-E-REGRESSION-MOCK-POLLUTION-PREVENTION (LOAD-BEARING) ---');
+
+  {
+    let _r9eClaimSpyCalls = 0;
+    const _r9eOrigClaim = dealsService.claimDailySummarySlot;
+    dealsService.claimDailySummarySlot = async (dateEdmonton) => {
+      _r9eClaimSpyCalls++;
+      return { claimed: true, id: `r9e-spy-${dateEdmonton}` };
+    };
+
+    const _r9eNodeCron2 = require('node-cron');
+    const _r9eOrigSchedule2 = _r9eNodeCron2.schedule;
+    let _r9eScheduleCallsReg = 0;
+    _r9eNodeCron2.schedule = function () {
+      _r9eScheduleCallsReg++;
+      return { stop: () => {} };
+    };
+
+    try {
+      // Clear require.cache to mirror test-trigger.js line 7828 pattern
+      delete require.cache[require.resolve('./src/cron/dailySummary')];
+
+      // Require alone — pre-R9-E this would have registered the cron via
+      // module-load side effect. Post-R9-E, no registration occurs.
+      require('./src/cron/dailySummary');
+
+      if (_r9eScheduleCallsReg !== 0) {
+        throw new Error(`FAIL [R9-E-REGRESSION-MOCK-POLLUTION-PREVENTION (i)]: require triggered cron.schedule — fix did not close the bug. count=${_r9eScheduleCallsReg}`);
+      }
+      console.log('  PASS (i): require alone does NOT register cron schedule (mock pollution surface closed)');
+
+      if (_r9eClaimSpyCalls !== 0) {
+        throw new Error(`FAIL [R9-E-REGRESSION-MOCK-POLLUTION-PREVENTION (ii)]: claimDailySummarySlot was called — fix did not close the bug. count=${_r9eClaimSpyCalls}`);
+      }
+      console.log('  PASS (ii): claimDailySummarySlot NOT called post-require (no in-process cron fire possible)');
+
+      console.log('  PASS [structural closure]: fix proves the bug surface is structurally closed at the require-time boundary');
+    } finally {
+      dealsService.claimDailySummarySlot = _r9eOrigClaim;
+      _r9eNodeCron2.schedule = _r9eOrigSchedule2;
+      delete require.cache[require.resolve('./src/cron/dailySummary')];
+    }
+  }
+
+  // ─── R9-E-CROSS-CLUSTER-INTEGRATION — 8-anchor closed-set ───
+  console.log('\n--- R9-E-CROSS-CLUSTER-INTEGRATION ---');
+
+  // (a) R5-F-2 claimDailySummarySlot wired in runDailySummary
+  if (!/dealsService\.claimDailySummarySlot\(dateKey\)/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-CROSS-CLUSTER (a)]: R5-F-2 claimDailySummarySlot must be wired in runDailySummary');
+  }
+  console.log('  PASS (a): R5-F-2 claimDailySummarySlot wired in runDailySummary');
+
+  // (b) R5-F-3 computeDealClassification priority order intact
+  if (!/computeDealClassification = \(deal, lastInboundAt\)/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-CROSS-CLUSTER (b)]: R5-F-3 computeDealClassification missing');
+  }
+  console.log('  PASS (b): R5-F-3 computeDealClassification preserved');
+
+  // (c) IIII gate (shouldFireDailySummaryNow) present and unchanged
+  if (!/const shouldFireDailySummaryNow = \(now, timezone\) =>/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-CROSS-CLUSTER (c)]: IIII shouldFireDailySummaryNow missing');
+  }
+  if (!/return hour === 21 && minute === 0/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-CROSS-CLUSTER (c)]: IIII gate predicate (hour===21 && minute===0) missing');
+  }
+  console.log('  PASS (c): IIII shouldFireDailySummaryNow gate preserved');
+
+  // (d) ADMIN_TIMEZONE single-source-of-truth preserved
+  const _r9eAdminTzDefs = (_r9eCronSrc.match(/const ADMIN_TIMEZONE = 'America\/Edmonton'/g) || []).length;
+  if (_r9eAdminTzDefs !== 1) {
+    throw new Error(`FAIL [R9-E-CROSS-CLUSTER (d)]: ADMIN_TIMEZONE must be defined exactly once (got ${_r9eAdminTzDefs})`);
+  }
+  console.log('  PASS (d): ADMIN_TIMEZONE single-source preserved');
+
+  // (e) Production cron pattern '0 21 * * *' + testing-mode pattern unchanged
+  if (!/CRON_SCHEDULE\s*=\s*REMINDER_TESTING_MODE \? '\*\/30 \* \* \* \*' : '0 21 \* \* \*'/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-CROSS-CLUSTER (e)]: CRON_SCHEDULE production/testing pattern changed');
+  }
+  console.log('  PASS (e): CRON_SCHEDULE production + testing patterns unchanged');
+
+  // (f) cron.schedule passes {timezone: ADMIN_TIMEZONE}
+  if (!/cron\.schedule\(CRON_SCHEDULE, runDailySummary, \{\s*timezone: ADMIN_TIMEZONE,?\s*\}\)/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-CROSS-CLUSTER (f)]: cron.schedule must pass {timezone: ADMIN_TIMEZONE}');
+  }
+  console.log('  PASS (f): cron.schedule timezone option preserved');
+
+  // (g) runFollowUpReminders signature unchanged (no args) — Bug A integration intact
+  if (!/const runFollowUpReminders = async \(\) =>/.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-CROSS-CLUSTER (g)]: runFollowUpReminders signature changed');
+  }
+  console.log('  PASS (g): runFollowUpReminders signature unchanged');
+
+  // (h) module.exports still exposes pre-R9-E exports
+  for (const _r9eExp of ['runDailySummary', 'runFollowUpReminders', 'formatAdminDate', 'ADMIN_TIMEZONE', 'shouldFireDailySummaryNow', 'edmontonDateKey', 'computeDealClassification']) {
+    const _r9eRe = new RegExp(`module\\.exports = \\{[\\s\\S]*?\\b${_r9eExp}\\b[\\s\\S]*?\\};?`, 'm');
+    if (!_r9eRe.test(_r9eCronSrc)) {
+      throw new Error(`FAIL [R9-E-CROSS-CLUSTER (h)]: ${_r9eExp} no longer exported`);
+    }
+  }
+  console.log('  PASS (h): all pre-R9-E exports preserved + startCron added');
+
+  // ─── R9-E-COMMENT-FIX — 2-anchor pin ───
+  console.log('\n--- R9-E-COMMENT-FIX ---');
+
+  if (!/(deploy required|redeploy required)/i.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-COMMENT-FIX (a)]: comment at dailySummary.js:21-22 must contain "deploy required" or "redeploy required"');
+  }
+  console.log('  PASS (a): "deploy required" / "redeploy required" string present');
+
+  if (/No deploy needed/i.test(_r9eCronSrc)) {
+    throw new Error('FAIL [R9-E-COMMENT-FIX (b)]: stale "No deploy needed" string still present in dailySummary.js');
+  }
+  console.log('  PASS (b): "No deploy needed" string is GONE');
+
+  console.log('\n========== R9-E groups PASS ==========');
+
   console.log('\n────────────────────────────────────────');
   console.log('HARNESS COMPLETE — all checks passed');
   console.log('────────────────────────────────────────');

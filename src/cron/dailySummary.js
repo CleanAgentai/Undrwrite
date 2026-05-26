@@ -18,8 +18,11 @@ const { isAdminFacingSubject } = require('../lib/adminReply');
 // flip together — cron schedule, silence threshold, and resend guard — so
 // they don't drift apart. Default (env var unset) preserves the production
 // cadence: daily 9 PM Edmonton cron, 2-day silence threshold, 20-hour guard.
-// Revert path: unset REMINDER_TESTING_MODE on Render; next cron tick reads
-// the production defaults. No deploy needed.
+// Revert path: unset REMINDER_TESTING_MODE on Render; redeploy required to
+// pick up the production default (CRON_SCHEDULE captured at module load,
+// line 26). Confirmed empirically during R5-F-1 (2026-05-26) — direct API
+// env-var DELETE persists at config layer but does not propagate to the
+// running container's already-scheduled cron until a process restart.
 const REMINDER_TESTING_MODE = !!process.env.REMINDER_TESTING_MODE;
 const FOLLOW_UP_AFTER_DAYS = REMINDER_TESTING_MODE ? (1 / 24) : 2;   // 1h vs 2d
 const RESEND_GUARD_HOURS   = REMINDER_TESTING_MODE ? 0.5         : 20;   // 30m vs 20h
@@ -554,19 +557,64 @@ const runDailySummary = async () => {
   }
 };
 
-// Run every day at 9:00 PM in the admin's timezone (handles DST automatically
-// via IANA TZ — 9 PM MST in winter, 9 PM MDT in summer). When
-// REMINDER_TESTING_MODE is set, the cron pattern is overridden above and
-// fires every 30 minutes for end-to-end testing.
-cron.schedule(CRON_SCHEDULE, runDailySummary, {
-  timezone: ADMIN_TIMEZONE,
-});
-
-if (REMINDER_TESTING_MODE) {
-  console.warn(`⚠️  REMINDER_TESTING_MODE active — cron='${CRON_SCHEDULE}', silence_threshold=${FOLLOW_UP_AFTER_DAYS} days (~1h), resend_guard=${RESEND_GUARD_HOURS}h. UNSET ON RENDER BEFORE GOING LIVE.`);
-} else {
-  console.log(`Daily summary cron scheduled — runs at 9:00 PM ${ADMIN_TIMEZONE}`);
-}
+// R9-E (2026-05-26): cron registration extracted from module-load into an
+// explicit startCron() factory. Pre-R9-E, requiring this module from any
+// process (notably test-trigger.js) registered the cron schedule at module
+// load — so if the process stayed alive across 21:00 Edmonton, the in-process
+// cron fired with whatever services the requirer had stubbed/mocked + REAL
+// Supabase claim. This poisoned the production daily_summaries idempotency
+// claim: Render's real cron silent-skipped those days (Franco missed Sunday
+// May 24 summary plus May 21 + May 22).
+//
+// Empirical evidence chain (preserved for future maintainers):
+//   - MOCK-prefixed message_id strings only originate in test-trigger.js
+//     emailService.sendEmail mocks (line 79, line 3462).
+//   - daily_summaries had 3 MOCK rows: May 21 Thu MOCK-3, May 22 Fri MOCK-5,
+//     May 24 Sun MOCK-3 (active_deals_count=1, reminders_sent=1, html_len
+//     1-8 KB — matches Bug A stub returning 1 fake deal).
+//   - Render logs at 2026-05-25T03:00 UTC: "DAILY SUMMARY CRON" banner at
+//     .011 + "Daily summary skipped — already claimed for 2026-05-24 by
+//     another worker/restart-tick (R5-F-2 idempotency)" at 1.005.
+//   - MOCK row attempted_at at .471 — beat Render's claim by ~534 ms.
+//
+// Post-R9-E:
+//   - Production: src/index.js explicitly invokes startCron() in app.listen
+//     callback. Cron registered → daily 21:00 Edmonton fire identical to
+//     pre-R9-E behavior.
+//   - Tests/dev: require('./cron/dailySummary') no longer registers cron.
+//     test-trigger.js can run at any hour without poisoning production
+//     daily_summaries. Sunday-cron-not-firing surface structurally closed.
+//
+// Idempotent: module-level _r9eCronHandle guard prevents double-registration
+// if startCron() is invoked twice (hot-reload, accidental wiring in multiple
+// boot paths). Second call returns the existing handle + logs.
+//
+// Returns: cron handle. Enables clean stop/restart for test isolation
+// (R9-E-TEST-IMPORT-SIDE-EFFECT-ABSENCE empirical replay).
+//
+// REMINDER_TESTING_MODE warning moved from module-load to startCron — the
+// warning describes the registered schedule, so it only makes sense to fire
+// when a schedule is registered. Tests that require the module without
+// invoking startCron don't get the noise.
+//
+// CRON_SCHEDULE captured at module load (line 26) — UNCHANGED by R9-E.
+// Env var changes require redeploy to take effect (R5-F-1 carry-forward).
+let _r9eCronHandle = null;
+const startCron = () => {
+  if (_r9eCronHandle) {
+    console.log('startCron: cron already registered — idempotent skip');
+    return _r9eCronHandle;
+  }
+  _r9eCronHandle = cron.schedule(CRON_SCHEDULE, runDailySummary, {
+    timezone: ADMIN_TIMEZONE,
+  });
+  if (REMINDER_TESTING_MODE) {
+    console.warn(`⚠️  REMINDER_TESTING_MODE active — cron='${CRON_SCHEDULE}', silence_threshold=${FOLLOW_UP_AFTER_DAYS} days (~1h), resend_guard=${RESEND_GUARD_HOURS}h. UNSET ON RENDER BEFORE GOING LIVE.`);
+  } else {
+    console.log(`Daily summary cron scheduled — runs at 9:00 PM ${ADMIN_TIMEZONE}`);
+  }
+  return _r9eCronHandle;
+};
 
 // Export for manual triggering/testing. formatAdminDate is exposed for the
 // harness to pin Bug 13.1 (timezone wrap on date header).
@@ -583,4 +631,8 @@ module.exports = {
   // requires_action > stale > at_max_reminders > other_active)
   computeDealClassification,
   STALE_DAYS_THRESHOLD,
+  // R9-E (2026-05-26): explicit factory for cron registration. Production
+  // (src/index.js) invokes after app.listen; tests get pure helpers without
+  // the registration side effect.
+  startCron,
 };

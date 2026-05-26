@@ -1,6 +1,7 @@
 const express = require('express');
 const config = require('./config');
 const routes = require('./routes');
+const { startCron: startDailySummaryCron } = require('./cron/dailySummary');
 
 const app = express();
 
@@ -36,6 +37,11 @@ app.use((err, req, res, next) => {
 app.listen(config.port, () => {
   console.log(`Server running on port ${config.port} in ${config.nodeEnv} mode`);
 
-  // Start cron jobs
-  require('./cron/dailySummary');
+  // R9-E (2026-05-26): explicitly start the daily-summary cron AFTER server
+  // boot. Pre-R9-E this was a bare `require('./cron/dailySummary')` that
+  // relied on a module-load side effect; the factory extraction prevents
+  // test-trigger.js from accidentally registering the cron in-process and
+  // poisoning the production daily_summaries idempotency claim. See
+  // dailySummary.js startCron docblock for the empirical evidence chain.
+  startDailySummaryCron();
 });
