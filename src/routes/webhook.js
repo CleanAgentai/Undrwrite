@@ -473,6 +473,65 @@ const computeStillMissingForReview = ({ deal, summary, classifications, identity
   return items;
 };
 
+// R9-A' (2026-05-26): state-derived gate signal — post-approval AML/PEP pending
+// receipt (broker may have claimed to attach but docs not yet in table).
+//
+// Empirical root (Derek df33cdbf retest, R9-A SPLIT-deferred cluster):
+//   1. Admin "Approved" at msg #8 → prelim_approved_at stamped 04:25:56
+//   2. R6-κ post-approval flow fires at msg #9 — Vienna draft preview asking
+//      for AML/PEP → aml_pep_requested_at stamped 04:26:01
+//   3. Broker msg #10 INBOUND 04:27: "Please find the AML and PEP forms
+//      attached" — but NO AML/PEP rows landed in documents table
+//      (Franco-testing-artifact inferred from Marcus parallel succeeding +
+//      zero docs created at 04:27 timestamp + no archival raw payload)
+//   4. computeCompletionDispatch returned null (allDocsIn=false) → active
+//      branch conversational generateBrokerResponse fires
+//   5. stillMissingForReview was empty (SSS scopes intake-only; AML/PEP
+//      out of OOOO gate scope post-approval); STANDARD DOC CHECKLIST in
+//      generateBrokerResponse prompt didn't include AML/PEP (JJJ scope);
+//      L1858 forbidden-phrase block silent → Vienna emitted "we now have
+//      everything we need for Derek's file and can proceed with our
+//      review." (Franco S3-Bug-3 confirmed).
+//
+// Architectural family — state-derived gate signal (per Q1-(a) narrow scope):
+//   Same architectural shape as R6-κ postApprovalAmlPepAsk + R6-ζ
+//   brokerRepliedSinceLastViennaOutbound + R5-D Surface A structured
+//   identity_clash signal + computeStillMissingForReview. JS-side derived
+//   boolean from durable deal/state fields → conditional prompt-context
+//   block. Structural > prompt content-matching (Franco's standing
+//   direction; matches R5-D Surface A / R6-γ / R6-ζ / R6-α precedent).
+//
+// Q2-(a) PROMPT-SIDE ONLY verdict: this signal feeds a NEW prompt ban-block
+// (ai.js generateBrokerResponse). JS post-gen strip deferred per Q2-(a) —
+// prompt-first, sweep-on-empirical-failure (R8-B precedent: 3 months of
+// prompt-only failure justified structural backstop; R9-A' has 1 empirical
+// fixture + the LLM hasn't been TOLD to suppress this language yet).
+//
+// Q3-(a) BAN + ASK-TO-RESEND: prompt block forbids completion-shape phrases
+// AND positively directs Vienna to acknowledge broker claim + ask to
+// resend (attachment may not have come through).
+//
+// Semantic: TRUE when admin has approved (prelim_approved_at SET) AND
+// AML/PEP was requested (aml_pep_requested_at SET) AND at least one of
+// AML/PEP is NOT yet classified in the deal's documents.
+//   - prelim_approved_at NULL → FALSE (pre-approval; AML/PEP not relevant)
+//   - aml_pep_requested_at NULL → FALSE (request not yet sent; covered by
+//     R6-κ's postApprovalAmlPepAsk family — Vienna asks via that path)
+//   - Both AML AND PEP on file → FALSE (received-and-classified; signal
+//     would over-fire on legitimate completion-shape language)
+//
+// Pure-function shape for harness testability + matches the family precedent
+// (computeStillMissingForReview, computeWillReview, brokerRepliedSinceLast
+// ViennaOutbound) — exported via __test__.
+const isPostApprovalAmlPepPending = (deal, classifications) => {
+  if (!deal || !deal.prelim_approved_at) return false;
+  if (!deal.aml_pep_requested_at) return false;
+  const cls = Array.isArray(classifications) ? classifications : [];
+  const amlOnFile = cls.includes('aml');
+  const pepOnFile = cls.includes('pep');
+  return !amlOnFile || !pepOnFile;
+};
+
 // Group RRRR (S8.3): extract the admin's stated decline reason from the
 // parsed admin reply text. parseAdminReply returns { intent, message } where
 // message carries the full admin text; pre-RRRR generateRejectionEmail only
@@ -2867,6 +2926,19 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           && (!activeAmlOnFile || !activePepOnFile)
           && !existingDeal.aml_pep_requested_at;
 
+        // R9-A' (2026-05-26): post-approval AML/PEP pending receipt — fires
+        // AFTER aml_pep_requested_at stamped but BEFORE AML+PEP land in docs.
+        // Sibling signal to postApprovalAmlPepAsk above (which fires when
+        // the request hasn't gone out yet). Derek df33cdbf empirical
+        // fixture: broker claimed "AML/PEP attached" at msg #10 but zero
+        // docs arrived → Vienna emitted "we now have everything we need for
+        // Derek's file and can proceed with our review." R9-A' signal feeds
+        // a new prompt ban-block forbidding completion-shape language +
+        // ask-to-resend directive when this state is detected. See
+        // isPostApprovalAmlPepPending docblock at file scope for full
+        // architectural family + verdict provenance.
+        const postApprovalAmlPepPending = isPostApprovalAmlPepPending(existingDeal, activeDocsClassifications);
+
         // Group OOOO (S6.1): pre-approval enumeration of items blocking the
         // willReview gate. JS-computed signal → generateBrokerResponse's
         // stillMissingBlock injection. Same JS-flag-into-prompt pattern as
@@ -2924,7 +2996,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           labeledActiveHistory,
           documentsOnFile,
           existingDeal.status,
-          { postApprovalAmlPepAsk, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive, greetingFirstName: _eActiveGreeting, brokerRepliedSinceLastViennaOutbound: _zActiveBrokerReplied }
+          { postApprovalAmlPepAsk, postApprovalAmlPepPending, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive, greetingFirstName: _eActiveGreeting, brokerRepliedSinceLastViennaOutbound: _zActiveBrokerReplied }
         );
         // Cluster B Commit 2b — post-Claude strip + inject on broker-facing reply.
         if (_bDiscrepancyDetectedActive && result.responseEmail) {
@@ -3283,4 +3355,6 @@ module.exports.__test__ = {
   computeCanonicalLtvForReview,
   // R9-D (2026-05-26): canonical existing-mortgage lender resolver (R6-γ filtered)
   computeCanonicalLenderForReview,
+  // R9-A' (2026-05-26): post-approval AML/PEP pending receipt — state-derived gate signal
+  isPostApprovalAmlPepPending,
 };

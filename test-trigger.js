@@ -14041,6 +14041,316 @@ Franco Maione`;
   console.log('Group R9-D-CROSS-CLUSTER-INTEGRATION: R6-γ filter pipeline + R9-B canonical LTV + R9-A + R9-C + R8-A + R8-B + R9-D docblock all preserved.');
 
   // ════════════════════════════════════════════════════════════════
+  // R9 CLUSTER A' — Derek conversational-handler hallucination (post-approval
+  // AML/PEP pending receipt) — deferred from R9-A SPLIT verdict
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R9-A'. Empirical root
+  // (scripts/r9aprime-corpus-grep.js — Derek df33cdbf retest):
+  //   msg #9 04:26: Vienna draft preview asking AML/PEP (R6-κ post-approval)
+  //   msg #10 04:27 INBOUND: broker "Please find the AML and PEP forms attached"
+  //     BUT zero docs created at 04:27 timestamp in DB → Franco-testing-artifact
+  //     (no actual attachments; Marcus parallel succeeded with same handler).
+  //   msg #11 04:27 OUTBOUND: Vienna emitted "we now have everything we need
+  //     for Derek's file and can proceed with our review" — completion-shape
+  //     hallucination despite allDocsIn=false.
+  //
+  // Sub-question (1) DOCS-LAYER: Franco-testing-artifact (no DB archival of
+  //   raw Postmark payload exists, but Marcus's parallel "See attached"
+  //   inbound DID save AML/PEP — same handler code, no systemic parsing
+  //   bug). Documents-layer fix NOT in R9-A' scope (caveat: if Franco
+  //   surfaces non-testing case where attachments demonstrably arrived but
+  //   weren't saved, separate cycle).
+  // Sub-question (2) CONVERSATIONAL HALLUCINATION: structural gap in
+  //   existing prompt blocks. OOOO stillMissingBlock scoped intake-only;
+  //   DOCUMENT-STATUS SELF-CONSISTENCY block gated on STANDARD DOC
+  //   CHECKLIST (broker-facing intake-only — excludes AML/PEP per JJJ).
+  //   Derek's post-approval-AML/PEP-pending state fell through both gates.
+  //
+  // Q1 (a) NARROW SCOPE: postApprovalAmlPepPending state-derived signal
+  //   only. Reject (b) broader "broker claimed attached but no docs"
+  //   detection — over-fire risk on partial-submission turns. Same R8-B/
+  //   R9-C/R9-D narrow-scope discipline.
+  // Q2 (a) PROMPT-SIDE ONLY: new ban-block + ASK-TO-RESEND positive
+  //   directive. JS post-gen strip deferred per R8-B precedent (3 months
+  //   of empirical prompt-only failure justified structural backstop;
+  //   R9-A' has 1 fixture + LLM hasn't been TOLD to suppress yet).
+  // Q3 (a) BAN + ASK-TO-RESEND: positive-shape directive grounds correct
+  //   output (acknowledge claim + note attachment may not have come through
+  //   + ask to resend). Matches R6-α/R9-B/R9-D pattern (explicit positive
+  //   instruction, not just away from wrong shape).
+  //
+  // Architectural family — 4th cluster in state-derived gate signal family:
+  //   R6-κ postApprovalAmlPepAsk + R6-ζ brokerRepliedSinceLastViennaOutbound
+  //   + R5-D Surface A structured identity_clash + R9-A'
+  //   postApprovalAmlPepPending. Pattern: JS-side derived boolean from
+  //   durable deal/state fields → conditional prompt-context block.
+  //   Structural > prompt content-matching (R5-D Surface A / R6-γ / R6-ζ /
+  //   R6-α standing direction precedent).
+  //
+  //   R9-A'-SIGNAL-MATRIX — closed-set truth table on
+  //     isPostApprovalAmlPepPending(deal, classifications): TRUE when
+  //     prelim_approved + aml_pep_requested + (AML OR PEP missing); FALSE
+  //     on pre-approval / request-not-yet-sent / both-on-file.
+  //   R9-A'-DEREK-FIXTURE (LOAD-BEARING) — Derek state replay: signal=true;
+  //     would have suppressed the completion-shape language at msg #11.
+  //   R9-A'-BLOCK-ANCHORS — forbidden-phrase list + positive ASK-TO-RESEND
+  //     directive + acknowledge-claim language (content-discipline pinning
+  //     per R9-D 12-anchor precedent).
+  //   R9-A'-CALL-SITE-WIRING — helper defined + exported + invoked at
+  //     active-branch generateBrokerResponse call site + opt threading +
+  //     conditional injection.
+  //   R9-A'-OVER-FIRE-PROTECTION — defensive negatives: pre-approval state;
+  //     request-not-yet-sent; both-on-file; null deal; defensive on
+  //     null/undefined classifications.
+  //   R9-A'-CROSS-CLUSTER-INTEGRATION — R6-κ postApprovalAmlPepAsk
+  //     preserved + R9-A atomic status + R9-B/R9-D override blocks +
+  //     R8-A/R8-B + state-derived signal family docblock provenance.
+  const _r9apWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _r9apAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const { isPostApprovalAmlPepPending: _r9apSignal } = require('./src/routes/webhook').__test__;
+
+  console.log('\n========== R9-A\'-SIGNAL-MATRIX — isPostApprovalAmlPepPending truth-table ==========');
+  const _r9apSignalCases = [
+    {
+      label: 'TRUE: Derek state — prelim_approved + aml_pep_requested + AML+PEP both missing',
+      deal: { prelim_approved_at: '2026-05-26T04:25:56Z', aml_pep_requested_at: '2026-05-26T04:26:01Z' },
+      classifications: ['credit_report', 'noa', 'loan_application', 'appraisal', 'pnw_statement', 'government_id', 'mortgage_statement', 'property_tax'],
+      expected: true,
+    },
+    {
+      label: 'TRUE: only AML missing (PEP on file)',
+      deal: { prelim_approved_at: 'set', aml_pep_requested_at: 'set' },
+      classifications: ['pep', 'credit_report', 'loan_application'],
+      expected: true,
+    },
+    {
+      label: 'TRUE: only PEP missing (AML on file)',
+      deal: { prelim_approved_at: 'set', aml_pep_requested_at: 'set' },
+      classifications: ['aml', 'credit_report', 'loan_application'],
+      expected: true,
+    },
+    {
+      label: 'FALSE: pre-approval (prelim_approved_at null)',
+      deal: { prelim_approved_at: null, aml_pep_requested_at: 'set' },
+      classifications: [],
+      expected: false,
+    },
+    {
+      label: 'FALSE: AML/PEP request not yet sent (aml_pep_requested_at null)',
+      deal: { prelim_approved_at: 'set', aml_pep_requested_at: null },
+      classifications: ['credit_report', 'loan_application'],
+      expected: false,
+    },
+    {
+      label: 'FALSE: both AML AND PEP on file (received-and-classified)',
+      deal: { prelim_approved_at: 'set', aml_pep_requested_at: 'set' },
+      classifications: ['aml', 'pep', 'credit_report', 'loan_application'],
+      expected: false,
+    },
+    {
+      label: 'FALSE: defensive — null deal',
+      deal: null,
+      classifications: ['aml', 'pep'],
+      expected: false,
+    },
+    {
+      label: 'FALSE: defensive — undefined deal',
+      deal: undefined,
+      classifications: ['aml', 'pep'],
+      expected: false,
+    },
+    {
+      label: 'TRUE: defensive — null classifications (treated as empty array)',
+      deal: { prelim_approved_at: 'set', aml_pep_requested_at: 'set' },
+      classifications: null,
+      expected: true,
+    },
+    {
+      label: 'TRUE: defensive — undefined classifications (treated as empty array)',
+      deal: { prelim_approved_at: 'set', aml_pep_requested_at: 'set' },
+      classifications: undefined,
+      expected: true,
+    },
+  ];
+  let _r9apSignalFails = 0;
+  for (const tc of _r9apSignalCases) {
+    const got = _r9apSignal(tc.deal, tc.classifications);
+    if (got !== tc.expected) {
+      _r9apSignalFails++;
+      console.log(`  FAIL [${tc.label}]: expected ${tc.expected}, got ${got}`);
+    } else {
+      console.log(`  PASS [${tc.label}]: ${got}`);
+    }
+  }
+  if (_r9apSignalFails > 0) throw new Error(`FAIL [R9-A'-SIGNAL-MATRIX]: ${_r9apSignalFails}/${_r9apSignalCases.length} cases failed.`);
+  console.log(`Group R9-A'-SIGNAL-MATRIX: ${_r9apSignalCases.length}/${_r9apSignalCases.length} cases pass (3 TRUE + 5 FALSE + 2 defensive-classifications).`);
+
+  console.log('\n========== R9-A\'-DEREK-FIXTURE — Derek retest conversational hallucination closure (LOAD-BEARING) ==========');
+  // Derek df33cdbf msg #10 state replay: prelim_approved_at SET at 04:25:56,
+  // aml_pep_requested_at SET at 04:26:01, 8 intake docs (no aml/pep yet).
+  // Triple-anchor verification:
+  //   (a) Signal returns TRUE on Derek msg #10 state shape
+  //   (b) Prompt block rendered with forbidden-phrase enumeration + ASK-TO-RESEND
+  //   (c) Block interpolation point (between stillMissingBlock and forbiddenOpenersBlock)
+  const _r9apDerekDeal = {
+    prelim_approved_at: '2026-05-26T04:25:56.962+00:00',
+    aml_pep_requested_at: '2026-05-26T04:26:01.319+00:00',
+  };
+  const _r9apDerekClassifications = ['credit_report', 'noa', 'loan_application', 'appraisal', 'pnw_statement', 'government_id', 'mortgage_statement', 'property_tax'];
+  const _r9apDerekSignal = _r9apSignal(_r9apDerekDeal, _r9apDerekClassifications);
+  if (_r9apDerekSignal !== true) {
+    throw new Error(`FAIL [R9-A'-DEREK (a)]: signal expected TRUE on Derek msg #10 state shape. Got ${_r9apDerekSignal}.`);
+  }
+  console.log('  PASS (a): isPostApprovalAmlPepPending(Derek df33cdbf state) → true (R6-κ post-approval + asked + AML/PEP missing)');
+  // (b) Prompt block rendered with required content per Q2-(a) + Q3-(a).
+  if (!/CRITICAL — POST-APPROVAL AML\/PEP PENDING RECEIPT \(R9-A' JS-deterministic/.test(_r9apAiSrc)) {
+    throw new Error('FAIL [R9-A\'-DEREK (b)]: R9-A\' block header missing from generateBrokerResponse prompt');
+  }
+  if (!/Acknowledge politely that the broker mentioned attaching AML\/PEP/.test(_r9apAiSrc)) {
+    throw new Error('FAIL [R9-A\'-DEREK (b)]: ASK-TO-RESEND positive directive ("Acknowledge politely") missing per Q3-(a) BAN+ASK verdict');
+  }
+  console.log('  PASS (b): prompt block contains R9-A\' header + ASK-TO-RESEND positive directive (Q3-(a) BAN+ASK)');
+  // (c) Block interpolated into prompt template.
+  if (!/\$\{postApprovalAmlPepPendingBlock\}/.test(_r9apAiSrc)) {
+    throw new Error('FAIL [R9-A\'-DEREK (c)]: ${postApprovalAmlPepPendingBlock} interpolation missing from generateBrokerResponse prompt');
+  }
+  console.log('  PASS (c): ${postApprovalAmlPepPendingBlock} interpolated into generateBrokerResponse prompt template');
+  console.log('Group R9-A\'-DEREK-FIXTURE: Derek retest conversational hallucination structurally closed (signal fires; prompt block instructs ASK-TO-RESEND).');
+
+  console.log('\n========== R9-A\'-BLOCK-ANCHORS — content-discipline pinning ==========');
+  // Pin each load-bearing anchor in the prompt block (carry-forward from
+  // R9-D 12-anchor precedent — pin CONTENT not just presence).
+  const _r9apRequiredAnchors = [
+    { anchor: 'CRITICAL — POST-APPROVAL AML/PEP PENDING RECEIPT', label: 'R9-A\' block header' },
+    { anchor: 'R9-A\' JS-deterministic, structural gate fired', label: 'structural-gate provenance' },
+    { anchor: 'post-admin-approval', label: 'state-precondition: post-approval' },
+    { anchor: 'requested AML/PEP from the broker', label: 'state-precondition: request sent' },
+    { anchor: 'NOT yet been received and classified', label: 'state-precondition: docs not yet in system' },
+    { anchor: 'attachment did not come through', label: 'why-claim-without-evidence explanation' },
+    { anchor: 'DO NOT emit completion-shape language', label: 'core ban directive (Q2-(a))' },
+    { anchor: 'we now have everything we need', label: 'forbidden-phrase: completion claim' },
+    { anchor: 'can proceed with our review', label: 'forbidden-phrase: review-proceed claim (Derek hallucination verbatim)' },
+    { anchor: 'ready to start working on', label: 'forbidden-phrase: ready-to-start' },
+    { anchor: 'the file is complete', label: 'forbidden-phrase: completion shape' },
+    { anchor: 'POSITIVE INSTRUCTION', label: 'positive-shape directive marker (Q3-(a))' },
+    { anchor: 'Acknowledge politely', label: 'positive-shape: acknowledge claim' },
+    { anchor: 'attachment may not have come through to our end', label: 'positive-shape: note attachment failure (non-blaming)' },
+    { anchor: 'Ask them to resend', label: 'positive-shape: ASK-TO-RESEND directive (Q3-(a))' },
+    { anchor: 'Production case driving this rule: Derek Olsen df33cdbf', label: 'empirical-fixture provenance' },
+  ];
+  for (const { anchor, label } of _r9apRequiredAnchors) {
+    // Escape special regex chars when constructing pattern (literal-string check).
+    const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(escaped).test(_r9apAiSrc)) {
+      throw new Error(`FAIL [R9-A'-BLOCK-ANCHORS]: missing anchor "${anchor}" (${label})`);
+    }
+    console.log(`  PASS [${label}]: anchor present`);
+  }
+  console.log(`Group R9-A'-BLOCK-ANCHORS: ${_r9apRequiredAnchors.length}/${_r9apRequiredAnchors.length} load-bearing anchors present (Q2-(a) ban + Q3-(a) ASK-TO-RESEND fully wired).`);
+
+  console.log('\n========== R9-A\'-CALL-SITE-WIRING — 5-clause closed-set ==========');
+  // (1) Helper defined + exported via __test__.
+  if (!/const isPostApprovalAmlPepPending = \(deal, classifications\) =>/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CW (1)]: isPostApprovalAmlPepPending helper definition missing');
+  }
+  if (!/isPostApprovalAmlPepPending,?/.test(_r9apWebhookSrc.slice(_r9apWebhookSrc.indexOf('module.exports.__test__')))) {
+    throw new Error('FAIL [R9-A\'-CW (1)]: isPostApprovalAmlPepPending must be exported via __test__');
+  }
+  console.log('  PASS [(1)]: helper defined + exported via __test__');
+  // (2) Invoked at active-branch call site (sibling to postApprovalAmlPepAsk).
+  if (!/const postApprovalAmlPepPending = isPostApprovalAmlPepPending\(existingDeal, activeDocsClassifications\)/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CW (2)]: isPostApprovalAmlPepPending must be invoked at active-branch call site with (existingDeal, activeDocsClassifications)');
+  }
+  console.log('  PASS [(2)]: invoked at active-branch generateBrokerResponse call site (sibling to postApprovalAmlPepAsk per architectural pattern)');
+  // (3) generateBrokerResponse opts destructure postApprovalAmlPepPending.
+  if (!/postApprovalAmlPepPending = false/.test(_r9apAiSrc)) {
+    throw new Error('FAIL [R9-A\'-CW (3)]: generateBrokerResponse opts must destructure postApprovalAmlPepPending = false');
+  }
+  console.log('  PASS [(3)]: generateBrokerResponse opts destructure postApprovalAmlPepPending');
+  // (4) Opt threaded from active-branch call site.
+  if (!/postApprovalAmlPepAsk,\s*postApprovalAmlPepPending,/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CW (4)]: opt threaded from active-branch call site (sibling to postApprovalAmlPepAsk)');
+  }
+  console.log('  PASS [(4)]: opt threaded from active-branch generateBrokerResponse call site');
+  // (5) Block conditionally injected on signal=true.
+  if (!/postApprovalAmlPepPendingBlock = postApprovalAmlPepPending\s*\n?\s*\?/.test(_r9apAiSrc) && !/postApprovalAmlPepPendingBlock = postApprovalAmlPepPending\s*\?/.test(_r9apAiSrc)) {
+    throw new Error('FAIL [R9-A\'-CW (5)]: prompt block must be conditionally injected (postApprovalAmlPepPending ? ... : \'\')');
+  }
+  console.log('  PASS [(5)]: prompt block conditional injection (signal=false → empty block)');
+  console.log('Group R9-A\'-CALL-SITE-WIRING: 5-clause closed-set (helper + invocation + opts destructure + opt threading + conditional injection).');
+
+  console.log('\n========== R9-A\'-OVER-FIRE-PROTECTION — defensive null + state-precondition checks ==========');
+  // (a) Pre-approval state — must NOT fire.
+  if (_r9apSignal({ prelim_approved_at: null, aml_pep_requested_at: 'set' }, []) !== false) {
+    throw new Error('FAIL [R9-A\'-OVER-FIRE (a)]: pre-approval state must return false (R9-A\' is post-approval-only)');
+  }
+  console.log('  PASS (a): pre-approval state → false (R9-A\' is post-approval-only signal)');
+  // (b) Request not yet sent — must NOT fire (covered by R6-κ postApprovalAmlPepAsk family).
+  if (_r9apSignal({ prelim_approved_at: 'set', aml_pep_requested_at: null }, []) !== false) {
+    throw new Error('FAIL [R9-A\'-OVER-FIRE (b)]: request-not-yet-sent state must return false (R6-κ family handles ASK; R9-A\' handles POST-ASK pending receipt)');
+  }
+  console.log('  PASS (b): request-not-yet-sent state → false (R6-κ postApprovalAmlPepAsk handles ASK; R9-A\' handles POST-ASK pending receipt)');
+  // (c) Both AML AND PEP on file — must NOT fire.
+  if (_r9apSignal({ prelim_approved_at: 'set', aml_pep_requested_at: 'set' }, ['aml', 'pep', 'credit_report']) !== false) {
+    throw new Error('FAIL [R9-A\'-OVER-FIRE (c)]: both-on-file state must return false (legitimate completion-shape language permitted)');
+  }
+  console.log('  PASS (c): both AML+PEP on file → false (legitimate completion-shape language permitted)');
+  // (d) Defensive: null/undefined deal.
+  if (_r9apSignal(null, []) !== false || _r9apSignal(undefined, []) !== false) {
+    throw new Error('FAIL [R9-A\'-OVER-FIRE (d)]: null/undefined deal must return false');
+  }
+  console.log('  PASS (d): null/undefined deal → false (defensive)');
+  // (e) Block conditional guard prevents injection when signal=false.
+  if (!/postApprovalAmlPepPendingBlock = postApprovalAmlPepPending/.test(_r9apAiSrc)) {
+    throw new Error('FAIL [R9-A\'-OVER-FIRE (e)]: conditional injection guard missing');
+  }
+  console.log('  PASS (e): conditional injection guard prevents block when signal=false (pre-R9-A\' behavior preserved on out-of-scope shapes)');
+  console.log('Group R9-A\'-OVER-FIRE-PROTECTION: pre-approval + request-not-yet-sent + both-on-file + null/undefined deal + conditional injection guard all defensive.');
+
+  console.log('\n========== R9-A\'-CROSS-CLUSTER-INTEGRATION — prior arc preserved ==========');
+  // (a) R6-κ postApprovalAmlPepAsk preserved (sibling signal in same family).
+  if (!/postApprovalAmlPepAsk = !!existingDeal\.prelim_approved_at/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC R6-κ]: postApprovalAmlPepAsk computation regressed');
+  }
+  console.log('  PASS [R6-κ]: postApprovalAmlPepAsk preserved (sibling signal in state-derived gate family — handles ASK; R9-A\' handles POST-ASK pending)');
+  // (b) aml_pep_requested_at stamping preserved at admin-approval branches.
+  if (!/aml_pep_requested_at: _kStampedAt/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC R6-κ stamp]: aml_pep_requested_at stamp logic regressed');
+  }
+  console.log('  PASS [R6-κ stamp]: aml_pep_requested_at stamping preserved (R9-A\' depends on this stamp being set)');
+  // (c) R9-A sendCompletionHandoff atomic status preserved.
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC R9-A]: sendCompletionHandoff atomic status regressed');
+  }
+  console.log('  PASS [R9-A]: sendCompletionHandoff atomic status transition preserved');
+  // (d) R9-B canonical LTV resolver preserved.
+  if (!/computeCanonicalLtvForReview/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC R9-B]: computeCanonicalLtvForReview regressed');
+  }
+  // (e) R9-D canonical lender resolver preserved.
+  if (!/computeCanonicalLenderForReview/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC R9-D]: computeCanonicalLenderForReview regressed');
+  }
+  console.log('  PASS [R9-B + R9-D]: canonical LTV + canonical lender resolvers preserved');
+  // (f) R8-A + R8-B preserved.
+  if (!/_r8aDocReqGreeting/.test(_r9apWebhookSrc) || !/aiService\.stripPerfectOpener\(/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC R8-A/R8-B]: greeting wiring + Perfect-opener sweep regressed');
+  }
+  console.log('  PASS [R8-A + R8-B]: greeting wiring + Perfect-opener sweep preserved');
+  // (g) R9-A' docblock + state-derived gate signal family anchor.
+  if (!/R9-A' \(2026-05-26\)/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC docblock]: R9-A\' docblock annotation anchor missing');
+  }
+  if (!/state-derived gate signal/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC docblock]: "state-derived gate signal" architectural-family anchor missing');
+  }
+  if (!/Q1-\(a\) NARROW/.test(_r9apWebhookSrc) || !/Q2-\(a\) PROMPT-SIDE ONLY/.test(_r9apWebhookSrc) || !/Q3-\(a\) BAN \+ ASK-TO-RESEND/.test(_r9apWebhookSrc)) {
+    throw new Error('FAIL [R9-A\'-CC docblock]: Q1/Q2/Q3 verdict provenance anchors missing');
+  }
+  console.log('  PASS [docblock provenance]: R9-A\' date + state-derived gate signal family anchor + Q1/Q2/Q3 verdict anchors present');
+  console.log('Group R9-A\'-CROSS-CLUSTER-INTEGRATION: R6-κ postApprovalAmlPepAsk + R6-κ stamping + R9-A + R9-B + R9-D + R8-A + R8-B + R9-A\' docblock all preserved.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
@@ -16392,10 +16702,16 @@ Crown Mortgage Group Lic. #MB556291`;
   // pair-presence (B-2b adds discrepancyDetected + canonicalFieldsPrompt to the
   // same options object; OOOO's intent — both fields present in the options
   // pass-through — is preserved.)
-  if (!/postApprovalAmlPepAsk[,\s]+stillMissingForReview/.test(webhookSrc)) {
-    throw new Error(`FAIL [Group OOOO options pass-through]: webhook.js must pass postApprovalAmlPepAsk and stillMissingForReview as options to generateBrokerResponse`);
+  // R9-A' (2026-05-26) bounded widening: between-anchors charset extended from
+  // `[,\s]+` to permit additional sibling opts (R9-A' adds postApprovalAmlPepPending
+  // between postApprovalAmlPepAsk and stillMissingForReview). OOOO invariant
+  // (both fields present in pass-through) PRESERVED — only intervening
+  // sibling-opt count widened. Same precedent as R9-D's R9-B-CW (3) regex
+  // relaxation for canonicalLenderOverride sibling opt.
+  if (!/postApprovalAmlPepAsk[,\s\w]*[,\s]+stillMissingForReview/.test(webhookSrc)) {
+    throw new Error(`FAIL [Group OOOO options pass-through]: webhook.js must pass postApprovalAmlPepAsk and stillMissingForReview as options to generateBrokerResponse (R9-A' bounded widening: sibling opts allowed between)`);
   }
-  console.log('  PASS [Group OOOO options pass-through]: flag passed via options object');
+  console.log('  PASS [Group OOOO options pass-through]: flag passed via options object (R9-A\' bounded widening: postApprovalAmlPepPending may sit between sibling anchors)');
 
   // ─── Source-string regressions on generateBrokerResponse + ai.js ────
   console.log('\n---------- Group OOOO / Source-string regression on ai.js prompt ----------');

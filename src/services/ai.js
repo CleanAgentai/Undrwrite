@@ -1584,7 +1584,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   },
 
   // Conversational broker response — reads full context and responds naturally
-  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '', greetingFirstName = null, brokerRepliedSinceLastViennaOutbound = true } = {}) => {
+  generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, postApprovalAmlPepPending = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '', greetingFirstName = null, brokerRepliedSinceLastViennaOutbound = true } = {}) => {
     try {
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -1652,6 +1652,65 @@ FORBIDDEN PHRASES while this block is active (do NOT use any of these — they o
 This block OVERRIDES the general template later in this prompt that suggests phrasing like "I believe we have everything we need to send the file for review." That template applies ONLY when this block is absent (JS gate would pass — willReview fires and your conversational reply gets suppressed at the dispatch anyway). When this block is present (the gate holds), enumerate the missing items above instead.
 
 Production case driving this rule: Kevin Tran 2026-05-16 — exit_strategy was null, JS gate correctly held, but Vienna said "I believe we have everything we need to send the file for review" verbatim. File stalled with no prelim ever firing; only cron reminders nudged Vienna into asking for exit_strategy on subsequent turns.`
+        : '';
+
+      // R9-A' (2026-05-26): post-approval AML/PEP pending-receipt ban-block.
+      //
+      // Empirical root: Derek df33cdbf retest msg #10 broker INBOUND claimed
+      // "Please find the AML and PEP forms attached" — but zero docs arrived
+      // in DB (Franco-testing-artifact inferred from Marcus parallel
+      // succeeding with same handler code). Vienna's response at msg #11:
+      // "we now have everything we need for Derek's file and can proceed
+      // with our review" — completion-shape language despite allDocsIn=false.
+      //
+      // Why existing prompt blocks didn't catch:
+      //   - OOOO stillMissingBlock (line 1634): scoped to intake-only; AML/PEP
+      //     is post-approval compliance, NOT in stillMissingForReview list.
+      //   - DOCUMENT-STATUS SELF-CONSISTENCY block (line 1856): forbidden
+      //     phrases gated on "STANDARD DOC CHECKLIST items outstanding". The
+      //     broker-facing checklist excludes AML/PEP (JJJ rule — only ASKED
+      //     post-approval). Derek had all 8 intake docs on file → from
+      //     Claude's view nothing outstanding → block silent.
+      //
+      // R9-A' adds a NEW gate: when prelim_approved + aml_pep_requested but
+      // AML/PEP not yet classified in docs, forbid completion-shape language
+      // AND positively direct Vienna to acknowledge claim + ask to resend.
+      //
+      // Q1-(a) NARROW: postApprovalAmlPepPending only (this specific state
+      // signal). Broader "broker claimed attached but no docs arrived"
+      // detection deferred — over-fire risk on partial submissions.
+      // Q2-(a) PROMPT-ONLY: no JS post-gen strip this cycle. Defer to future-
+      // trigger if Franco retest shows non-compliance (R8-B precedent: 3
+      // months of empirical prompt-only failure justified structural backstop).
+      // Q3-(a) BAN + ASK-TO-RESEND: positive-shape directive (matches R6-α/
+      // R9-B/R9-D pattern — explicit positive instruction grounds correct
+      // output, not just away from wrong output).
+      //
+      // 4th cluster in the state-derived gate signal family (per architectural
+      // carry-forward): R6-κ postApprovalAmlPepAsk + R6-ζ
+      // brokerRepliedSinceLastViennaOutbound + R5-D Surface A structured
+      // identity_clash + R9-A' postApprovalAmlPepPending. Pattern: JS-side
+      // derived boolean → conditional prompt-context block. Structural >
+      // prompt content-matching.
+      const postApprovalAmlPepPendingBlock = postApprovalAmlPepPending
+        ? `
+
+CRITICAL — POST-APPROVAL AML/PEP PENDING RECEIPT (R9-A' JS-deterministic, structural gate fired):
+- The deal IS post-admin-approval AND we have requested AML/PEP from the broker, but AML and/or PEP forms have NOT yet been received and classified in our document system. The broker may have just claimed in their message that they attached the forms, but the attachment did not come through (the actual files are not on our end).
+- DO NOT emit completion-shape language. The following phrases are FORBIDDEN while this block is active (extends the DOCUMENT-STATUS SELF-CONSISTENCY ban below to fire on the post-approval-AML/PEP-pending state, which is otherwise out of that block's intake-only scope):
+  * "we now have everything we need" / "we have everything we need" / "we have all we need"
+  * "ready to start working on" / "ready to start" / "ready to move forward with the review"
+  * "can proceed with our review" / "can proceed with the review" / "can proceed" / "proceed with the review process"
+  * "the file is complete" / "complete document package" / "complete package" / "all the documentation" / "all the documents we need"
+  * "ready to send for review" / "ready to send" / "file is ready" / "package is ready"
+  * Any variant that claims the file is complete, the package is ready, or that we can move forward.
+- POSITIVE INSTRUCTION (use this shape instead):
+  * Acknowledge politely that the broker mentioned attaching AML/PEP, AND
+  * Note that the attachment may not have come through to our end (do not accuse the broker; the attachment system is the assumed culprit), AND
+  * Ask them to resend the AML and PEP forms so we can confirm receipt and continue.
+  * Example shape (paraphrase, do not echo verbatim): "Thanks for the message — I want to flag that the AML and PEP forms don't appear to have come through on our end. Could you resend them when you have a moment? Once we have them confirmed, we'll continue."
+- This block OVERRIDES the general template suggesting "we have everything we need to send the file for review" phrasing. That template applies ONLY when this block is absent.
+- Production case driving this rule: Derek Olsen df33cdbf 2026-05-26 retest — admin approved + AML/PEP requested via R6-κ → broker reply claimed "attached" → no docs arrived → Vienna emitted "we now have everything we need for Derek's file and can proceed with our review." Franco S3-Bug-3.`
         : '';
 
       const attachmentNames = attachments.length > 0
@@ -1763,7 +1822,7 @@ You have TWO tasks. Return both using the exact format at the bottom.
 
 === TASK 1: RESPOND TO THE SENDER ===
 
-Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.${postApprovalAmlPepBlock}${stillMissingBlock}${forbiddenOpenersBlock}
+Read the FULL conversation history and the sender's latest email. Then write a natural, conversational response.${postApprovalAmlPepBlock}${stillMissingBlock}${postApprovalAmlPepPendingBlock}${forbiddenOpenersBlock}
 
 PRIORITY ORDER — handle these in order:
 1. ANSWER any questions the sender asked — this is your #1 job. Never ignore a question.
