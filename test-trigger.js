@@ -13428,6 +13428,274 @@ Franco Maione`;
   console.log('Group R9-B-CROSS-CLUSTER-INTEGRATION: R6-α/γ + B Commit 2 + R9-A + R8-A + R8-B + R9-B docblock provenance all preserved.');
 
   // ════════════════════════════════════════════════════════════════
+  // R9 CLUSTER C — City/Province TBD on <street>, <City> shape with no province
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R9-C. Empirical root (scripts/r9gamma-corpus-
+  // grep.js — Marcus + Derek retest fixtures):
+  //   Marcus "Property: 1142 Tory Road NW, Edmonton" — comma after suffix-
+  //     direction + city, NO province. Deal Snapshot pre-R9-C: "City /
+  //     Province: TBD". R6-δ existing inline-comma pattern requires province
+  //     group; R6-δ informal "X property at" pattern requires "property at"
+  //     connector. Marcus shape matched neither.
+  //   Derek "Property: 5519 Henwood Road SW, Calgary" — same shape, same
+  //     TBD fall-through.
+  //
+  // Q1 (a) NARROW SCOPE: inline-comma-city-only pattern (Marcus/Derek shape).
+  //   Don't extend informal "X property at" (already supports city-only via
+  //   R6-δ partial closure). Don't pre-emptively add line-with-city-on-next-
+  //   line / parenthetical city shapes — same no-over-spec discipline as
+  //   R6-η/R6-ζ/R6-δ adjacent-variant deferrals.
+  // Q2 (a) PARALLEL ADDITIVE: new regex runs AFTER existing with-province
+  //   regex; only fires on no-match (inner else branch). Strict-superset
+  //   additive widening — matches R6-δ's original two-pattern precedent.
+  //   Keeps the two paths (with-province vs city-only) cleanly decomposable;
+  //   doesn't conflate partial-closure semantic with explicit-province semantic.
+  // Q3 (a) COMMA-REQUIRED: new pattern requires `,` between street-suffix-
+  //   direction and city. Anchored on empirical shapes (both Marcus + Derek
+  //   have comma). Defers comma-optional ("Road NW Edmonton") to future-
+  //   trigger — concrete over-fire risk ("Boulevard West Region" would
+  //   capture "West Region" as 2-word city).
+  //
+  // Carry-forward discipline: this is the third extension cycle on R6-δ's
+  // extractor pattern (R6-δ original + R8-A parser hardening direction +
+  // R9-C city-only inline-comma). Future extractor extensions on this
+  // surface should follow: identify empirical shape, add as parallel
+  // pattern in existing branch, run AFTER existing patterns with no-match
+  // gating. Don't refactor branch architecture without driving reason.
+  //
+  // Defended residuals NOT in R9-C scope:
+  //   (a) No city→province lookup (Q1-(a) — would over-fit beyond AB);
+  //       partial-closure "Edmonton / TBD" is correct shape per
+  //       discrepancy-engine.js:235 deriveCityProvince fall-through.
+  //   (b) Comma-optional shape deferred per Q3-(a) — future-trigger if
+  //       Franco surfaces empirical comma-less fixture.
+  //
+  //   R9-C-EXTRACTOR-MATRIX — closed-set on extractFromEmailBody: new
+  //     shapes capture city; R6-δ preserved shapes regression direction;
+  //     over-fire negatives held.
+  //   R9-C-MARCUS-FIXTURE (LOAD-BEARING) — verbatim Marcus retest body →
+  //     city="Edmonton", province=null.
+  //   R9-C-DEREK-FIXTURE (LOAD-BEARING) — verbatim Derek retest body →
+  //     city="Calgary", province=null.
+  //   R9-C-SNAPSHOT-PARTIAL-CLOSURE — downstream deriveCityProvince returns
+  //     {city, province: 'TBD'} when city populated + province null →
+  //     Snapshot row renders "Edmonton / TBD" (NOT "TBD / TBD").
+  //   R9-C-OVER-FIRE-PROTECTION — deterministic negatives on comma-required
+  //     boundary + city-group-newline-bound + no-suffix shapes.
+  //   R9-C-CROSS-CLUSTER-INTEGRATION — R6-δ with-province + R6-δ informal
+  //     + R9-A + R9-B + R8-A + R8-B all preserved.
+  const _r9cCf = require('./src/services/canonical-fields');
+  const _r9cDEngine = require('./src/services/discrepancy-engine');
+  const _r9cCfSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/canonical-fields.js'), 'utf8');
+
+  console.log('\n========== R9-C-EXTRACTOR-MATRIX — extractFromEmailBody city/province truth-table ==========');
+  const _r9cExtractorCases = [
+    // ─── NEW R9-C shapes — must extract city, province null ───
+    {
+      label: 'R9γ-N1 Marcus retest "Property: <street>, <city>" non-bold-template (Edmonton)',
+      body: `Hi,\n\nMy name is Cecilia Fontaine from Goldstream Mortgage Group (Lic. #MB446152). I'd like to submit a new file.\n\nBorrower: Marcus Webb\nProperty: 1142 Tory Road NW, Edmonton\nLoan Request: Second mortgage for debt consolidation\nExisting mortgage: RBC`,
+      subject: 'New File Submission — Marcus Webb',
+      expected: { city: 'Edmonton', province: null },
+    },
+    {
+      label: 'R9γ-N2 Derek retest "Property: <street>, <city>" non-bold-template (Calgary)',
+      body: `Hi,\n\nMy name is Mohammed Al-Farsi from Trident Mortgage Solutions (Lic. #MB557263). I'd like to submit a new file for review.\n\nBorrower: Derek Olsen\nProperty: 5519 Henwood Road SW, Calgary\nLoan Request: Second mortgage for debt consolidation\nExisting mortgage: Scotia`,
+      subject: 'New File Submission — Derek Olsen',
+      expected: { city: 'Calgary', province: null },
+    },
+    {
+      label: 'R9γ-N3 Bold-template variant "*Property:* <street>, <city>" no province',
+      body: `*Borrower:* Test Person *Property:* 555 Maple Avenue NW, Edmonton *Loan Amount Requested:* $100,000`,
+      subject: 'Test',
+      expected: { city: 'Edmonton', province: null },
+    },
+    {
+      label: 'R9γ-N4 Two-word city captured (Grande Prairie)',
+      body: `Property: 102 Tundra Lane SW, Grande Prairie\nLoan: $80,000`,
+      subject: 'Submission',
+      expected: { city: 'Grande Prairie', province: null },
+    },
+    // ─── R6-δ PRESERVED — with-province path still wins ───
+    {
+      label: 'R9γ-P1 R6-δ inline-comma WITH province (Sandra S8 — Edmonton, AB)',
+      body: `Hi,\n\n*Borrower:* Sandra Fletcher *Property:* 412 Windermere Close SW, Edmonton, AB T6W 0R1\n*Loan Amount Requested:* $68,000 *Mortgage Position:* 2nd`,
+      subject: 'Second Mortgage — Sandra Fletcher',
+      expected: { city: 'Edmonton', province: 'AB' },
+    },
+    {
+      label: 'R9γ-P2 R6-δ informal "<City> property at <street>" (Patricia/Kevin)',
+      body: `Hi, I'm submitting Patricia Simmons's file. Calgary property at 412 Coach Side Crescent SW. Loan request $75,000.`,
+      subject: 'New File',
+      expected: { city: 'Calgary', province: null },
+    },
+    // ─── OVER-FIRE NEGATIVES ───
+    {
+      label: 'R9γ-O1 No address → null',
+      body: 'Hi, I have a question about underwriting. No specific deal yet.',
+      subject: 'Question',
+      expected: { city: null, province: null },
+    },
+    {
+      label: 'R9γ-O2 Street with no city / no following comma → null',
+      body: 'Property: 1142 Tory Road NW',
+      subject: 'Submission',
+      expected: { city: null, province: null },
+    },
+    {
+      label: 'R9γ-O3 Suffix + lowercase next word (no city capture) → null',
+      body: 'Property: 555 Maple Avenue, where I have an inquiry',
+      subject: 'Inquiry',
+      expected: { city: null, province: null },
+    },
+  ];
+  let _r9cExtractorFails = 0;
+  for (const tc of _r9cExtractorCases) {
+    const out = _r9cCf.extractFromEmailBody(tc.body, tc.subject);
+    const got = { city: out.subject_property_city, province: out.subject_property_province };
+    const pass = got.city === tc.expected.city && got.province === tc.expected.province;
+    if (!pass) {
+      _r9cExtractorFails++;
+      console.log(`  FAIL [${tc.label}]: got ${JSON.stringify(got)}, expected ${JSON.stringify(tc.expected)}`);
+    } else {
+      console.log(`  PASS [${tc.label}]: ${JSON.stringify(got)}`);
+    }
+  }
+  if (_r9cExtractorFails > 0) throw new Error(`FAIL [R9-C-EXTRACTOR-MATRIX]: ${_r9cExtractorFails}/${_r9cExtractorCases.length} cases failed.`);
+  console.log(`Group R9-C-EXTRACTOR-MATRIX: ${_r9cExtractorCases.length}/${_r9cExtractorCases.length} cases pass (4 new R9-C + 2 R6-δ preserved + 3 over-fire).`);
+
+  console.log('\n========== R9-C-MARCUS-FIXTURE — verbatim Marcus retest body (LOAD-BEARING) ==========');
+  const _r9cMarcusBody = `Hi,\n\nMy name is Cecilia Fontaine from Goldstream Mortgage Group (Lic. #MB446152). I'd like to submit a new file for your review.\n\nBorrower: Marcus Webb\nProperty: 1142 Tory Road NW, Edmonton\nLoan Request: Second mortgage for debt consolidation\nExisting mortgage: RBC\n\nDocuments attached:\n- Loan Application\n- Credit Bureau\n- T4 (2025)\n- Appraisal\n- PNW Statement\n\nPlease advise on next steps.\n\nCecilia Fontaine\nGoldstream Mortgage Group\nLic. #MB446152`;
+  const _r9cMarcusOut = _r9cCf.extractFromEmailBody(_r9cMarcusBody, 'New File Submission — Marcus Webb');
+  if (_r9cMarcusOut.subject_property_city !== 'Edmonton') {
+    throw new Error(`FAIL [R9-C-MARCUS (a)]: city expected "Edmonton", got ${JSON.stringify(_r9cMarcusOut.subject_property_city)}. Pre-R9-C: null (TBD in Snapshot).`);
+  }
+  console.log('  PASS (a): Marcus body → subject_property_city = "Edmonton"');
+  if (_r9cMarcusOut.subject_property_province !== null) {
+    throw new Error(`FAIL [R9-C-MARCUS (b)]: province must stay null per Q1-(a) partial-closure (no city→province lookup). Got ${JSON.stringify(_r9cMarcusOut.subject_property_province)}.`);
+  }
+  console.log('  PASS (b): Marcus body → subject_property_province = null (partial-closure preserved per Q1-(a))');
+  // (c) City group newline-bound — does NOT capture "Edmonton\nLoan".
+  if (/\n/.test(_r9cMarcusOut.subject_property_city || '')) {
+    throw new Error(`FAIL [R9-C-MARCUS (c)]: city must not span newlines. Got ${JSON.stringify(_r9cMarcusOut.subject_property_city)}.`);
+  }
+  console.log('  PASS (c): Marcus city group newline-bound (does not capture "Edmonton\\nLoan" continuation)');
+  console.log('Group R9-C-MARCUS-FIXTURE: Marcus retest production-fixture root structurally closed (Edmonton extracted, province=null per partial-closure).');
+
+  console.log('\n========== R9-C-DEREK-FIXTURE — verbatim Derek retest body (LOAD-BEARING) ==========');
+  const _r9cDerekBody = `Hi,\n\nMy name is Mohammed Al-Farsi from Trident Mortgage Solutions (Lic. #MB557263). I'd like to submit a new file for review.\n\nBorrower: Derek Olsen\nProperty: 5519 Henwood Road SW, Calgary\nLoan Request: Second mortgage for debt consolidation\nExisting mortgage: Scotia\n\nDocuments attached:\n- Loan Application\n- Credit Bureau\n- NOA (2024)\n- Appraisal\n- PNW Statement\n\nLet me know what else you need.\n\nMohammed Al-Farsi\nTrident Mortgage Solutions\nLic. #MB557263`;
+  const _r9cDerekOut = _r9cCf.extractFromEmailBody(_r9cDerekBody, 'New File Submission — Derek Olsen');
+  if (_r9cDerekOut.subject_property_city !== 'Calgary') {
+    throw new Error(`FAIL [R9-C-DEREK (a)]: city expected "Calgary", got ${JSON.stringify(_r9cDerekOut.subject_property_city)}.`);
+  }
+  console.log('  PASS (a): Derek body → subject_property_city = "Calgary"');
+  if (_r9cDerekOut.subject_property_province !== null) {
+    throw new Error(`FAIL [R9-C-DEREK (b)]: province must stay null per partial-closure. Got ${JSON.stringify(_r9cDerekOut.subject_property_province)}.`);
+  }
+  console.log('  PASS (b): Derek body → subject_property_province = null (partial-closure)');
+  if (/\n/.test(_r9cDerekOut.subject_property_city || '')) {
+    throw new Error(`FAIL [R9-C-DEREK (c)]: city must not span newlines. Got ${JSON.stringify(_r9cDerekOut.subject_property_city)}.`);
+  }
+  console.log('  PASS (c): Derek city group newline-bound');
+  console.log('Group R9-C-DEREK-FIXTURE: Derek retest production-fixture root structurally closed.');
+
+  console.log('\n========== R9-C-SNAPSHOT-PARTIAL-CLOSURE — deriveCityProvince renders "<City> / TBD" ==========');
+  // Downstream verification: when canonical_map has city populated + province
+  // empty, deriveCityProvince returns { city, province: 'TBD' } per
+  // discrepancy-engine.js:235. Confirms Snapshot row renders "Edmonton / TBD"
+  // not "TBD / TBD" on the new R9-C path.
+  const _r9cPartialMap = {
+    subject_property_city: [{ value: 'Edmonton', source: 'email_body' }],
+    subject_property_province: [],  // empty (R9-C partial-closure)
+  };
+  const _r9cPartialDerived = _r9cDEngine.deriveCityProvince(_r9cPartialMap);
+  if (!_r9cPartialDerived || _r9cPartialDerived.city !== 'Edmonton' || _r9cPartialDerived.province !== 'TBD') {
+    throw new Error(`FAIL [R9-C-SNAPSHOT-PARTIAL-CLOSURE]: expected {city: 'Edmonton', province: 'TBD'}, got ${JSON.stringify(_r9cPartialDerived)}. Snapshot row would render "<City> / TBD" partial-closure; regression direction would be back to "TBD / TBD".`);
+  }
+  console.log('  PASS: deriveCityProvince({city: ["Edmonton"], province: []}) → {city: "Edmonton", province: "TBD"} (partial-closure preserved)');
+  // Confirm full-explicit path still returns explicit province (Sandra shape).
+  const _r9cExplicitMap = {
+    subject_property_city: [{ value: 'Edmonton', source: 'email_body' }],
+    subject_property_province: [{ value: 'AB', source: 'email_body' }],
+  };
+  const _r9cExplicitDerived = _r9cDEngine.deriveCityProvince(_r9cExplicitMap);
+  if (!_r9cExplicitDerived || _r9cExplicitDerived.city !== 'Edmonton' || _r9cExplicitDerived.province !== 'AB') {
+    throw new Error(`FAIL [R9-C-SNAPSHOT-PARTIAL-CLOSURE]: with-province path regression. Expected {city: 'Edmonton', province: 'AB'}, got ${JSON.stringify(_r9cExplicitDerived)}.`);
+  }
+  console.log('  PASS: deriveCityProvince with explicit province still renders province (R6-δ with-province path preserved)');
+  console.log('Group R9-C-SNAPSHOT-PARTIAL-CLOSURE: downstream rendering correctly handles {city populated, province null} → "<City> / TBD" partial-closure.');
+
+  console.log('\n========== R9-C-OVER-FIRE-PROTECTION — comma-required + newline-bound + no-suffix ==========');
+  // (a) Comma REQUIRED — "Road NW Edmonton" (no comma) does NOT extract.
+  const _r9cNoComma = _r9cCf.extractFromEmailBody('Property: 1142 Tory Road NW Edmonton', 'Sub');
+  if (_r9cNoComma.subject_property_city !== null) {
+    throw new Error(`FAIL [R9-C-OVER-FIRE (a)]: comma-less shape must NOT extract city (Q3-(a) verdict — comma is the discriminator). Got ${JSON.stringify(_r9cNoComma.subject_property_city)}.`);
+  }
+  console.log('  PASS (a): comma-less "Road NW Edmonton" → null (comma-required discriminator preserved per Q3-(a))');
+  // (b) Newline-bound — city group does NOT capture across newlines.
+  const _r9cNewlineBound = _r9cCf.extractFromEmailBody('Property: 1142 Tory Road NW, Edmonton\nLoan Request: $95k', 'Sub');
+  if (_r9cNewlineBound.subject_property_city !== 'Edmonton') {
+    throw new Error(`FAIL [R9-C-OVER-FIRE (b)]: city group must stop at newline. Got ${JSON.stringify(_r9cNewlineBound.subject_property_city)}.`);
+  }
+  console.log('  PASS (b): city group bounded by newline ("Edmonton\\nLoan" → captures "Edmonton" only)');
+  // (c) No street suffix → no match.
+  const _r9cNoSuffix = _r9cCf.extractFromEmailBody('Property: just a paragraph mentioning Edmonton', 'Sub');
+  if (_r9cNoSuffix.subject_property_city !== null) {
+    throw new Error(`FAIL [R9-C-OVER-FIRE (c)]: no street-suffix anchor → must NOT extract. Got ${JSON.stringify(_r9cNoSuffix.subject_property_city)}.`);
+  }
+  console.log('  PASS (c): no street-suffix → no match (vocabulary-anchored pattern)');
+  // (d) Lowercase next word after suffix-comma → no match (no city).
+  const _r9cLower = _r9cCf.extractFromEmailBody('Property: 555 Maple Avenue, where I have an inquiry', 'Sub');
+  if (_r9cLower.subject_property_city !== null) {
+    throw new Error(`FAIL [R9-C-OVER-FIRE (d)]: lowercase next word ("where") → must NOT capture as city. Got ${JSON.stringify(_r9cLower.subject_property_city)}.`);
+  }
+  console.log('  PASS (d): lowercase "where" after comma → no city capture (capitalization-anchored pattern)');
+  console.log('Group R9-C-OVER-FIRE-PROTECTION: comma-required discriminator + newline-bound + suffix-vocabulary + capitalization all enforce conservative match boundary.');
+
+  console.log('\n========== R9-C-CROSS-CLUSTER-INTEGRATION — prior arc preserved ==========');
+  // (a) R6-δ with-province pattern preserved (both branches).
+  const _r6dWithProvincePatternCount = (_r9cCfSrc.match(/\\s\*,\\s\*\(AB\|BC\|SK\|MB\|ON\|QC\|NB\|NS\|PE\|NL\|NT\|YT\|NU\)/g) || []).length;
+  if (_r6dWithProvincePatternCount < 2) {
+    throw new Error(`FAIL [R9-C-CC R6-δ]: R6-δ inline-comma-with-province pattern count = ${_r6dWithProvincePatternCount}; expected >= 2 (bold-template branch + non-bold fallback branch). R9-C must NOT remove the with-province path.`);
+  }
+  console.log(`  PASS [R6-δ with-province]: pattern preserved at ${_r6dWithProvincePatternCount} sites (bold + non-bold branches)`);
+  // (b) R6-δ informal "<City> property at" pattern preserved.
+  if (!/\\b\(\[A-Z\]\[a-z\]\+\(\?:\\s\+\[A-Z\]\[a-z\]\+\)\?\)\\s\+property\\s\+at\\b/.test(_r9cCfSrc)) {
+    throw new Error('FAIL [R9-C-CC R6-δ informal]: "<City> property at" informal pattern regressed');
+  }
+  console.log('  PASS [R6-δ informal]: "<City> property at" pattern preserved (Patricia/Kevin shape)');
+  // (c) R9-C new pattern added at both branches (bold-template + non-bold fallback).
+  const _r9cNewPatternCount = (_r9cCfSrc.match(/inlineCityOnlyM/g) || []).length;
+  if (_r9cNewPatternCount < 2) {
+    throw new Error(`FAIL [R9-C-CC new pattern symmetry]: inlineCityOnlyM declarations = ${_r9cNewPatternCount}; expected >= 2 (one per branch — bold-template + non-bold fallback symmetric).`);
+  }
+  console.log(`  PASS [R9-C new pattern symmetry]: inlineCityOnlyM applied at ${_r9cNewPatternCount} sites (both branches symmetric)`);
+  // (d) R9-A sendCompletionHandoff atomic status preserved.
+  const _r9cWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9cWebhookSrc)) {
+    throw new Error('FAIL [R9-C-CC R9-A]: sendCompletionHandoff atomic status regressed');
+  }
+  console.log('  PASS [R9-A]: sendCompletionHandoff atomic status preserved');
+  // (e) R9-B canonical LTV resolver preserved.
+  if (!/computeCanonicalLtvForReview/.test(_r9cWebhookSrc)) {
+    throw new Error('FAIL [R9-C-CC R9-B]: computeCanonicalLtvForReview regressed');
+  }
+  console.log('  PASS [R9-B]: computeCanonicalLtvForReview canonical LTV resolver preserved');
+  // (f) R8-A/R8-B preserved.
+  if (!/_r8aDocReqGreeting/.test(_r9cWebhookSrc) || !/aiService\.stripPerfectOpener\(/.test(_r9cWebhookSrc)) {
+    throw new Error('FAIL [R9-C-CC R8-A/R8-B]: R8-A greeting wiring OR R8-B Perfect-opener sweep regressed');
+  }
+  console.log('  PASS [R8-A/R8-B]: greeting wiring + Perfect-opener sweep preserved');
+  // (g) R9-C docblock provenance anchors.
+  if (!/R9-C \(2026-05-26\)/.test(_r9cCfSrc)) {
+    throw new Error('FAIL [R9-C-CC docblock]: R9-C docblock annotation anchor missing from canonical-fields.js');
+  }
+  if (!/Q3-\(a\) verdict|Q3-\(a\)/.test(_r9cCfSrc)) {
+    throw new Error('FAIL [R9-C-CC docblock]: Q3-(a) verdict provenance anchor missing');
+  }
+  console.log('  PASS [docblock provenance]: R9-C date + Q3-(a) verdict anchors present');
+  console.log('Group R9-C-CROSS-CLUSTER-INTEGRATION: R6-δ with-province + R6-δ informal + R9-A + R9-B + R8-A + R8-B + R9-C docblock all preserved.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin

@@ -323,6 +323,24 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
     if (inlineM) {
       out.subject_property_city = inlineM[1].trim();
       out.subject_property_province = inlineM[2].toUpperCase();
+    } else {
+      // R9-C (2026-05-26): inline-comma-city-only — `<street-suffix>(<direction>)?, <City>`
+      // with NO trailing province. Marcus retest 996a676c
+      // "1142 Tory Road NW, Edmonton" + Derek retest df33cdbf
+      // "5519 Henwood Road SW, Calgary" shapes. Comma REQUIRED (Q3-(a)
+      // verdict — anchors where city starts; without comma "Road NW Edmonton"
+      // can't reliably mark city boundary vs continuation of street name).
+      // Strict-superset additive widening (Q2-(a) parallel pattern AFTER
+      // with-province; only fires on no-match per inner `else` branch).
+      // Same partial-closure semantic as R6-δ's "<City> property at" informal
+      // pattern: city populated, province null (Q1-(a) narrow — no
+      // city→province lookup; would over-fit beyond Alberta jurisdictions).
+      // Downstream deriveCityProvince renders "Edmonton / TBD" partial-
+      // closure shape per discrepancy-engine.js:235.
+      const inlineCityOnlyM = block.match(/(?:Boulevard|Drive|Street|Avenue|Road|Circle|Court|Lane|Place|Crescent|Way|Square|Terrace|Close|Highway|Parkway|Trail|Heights|Hill|Hills|Mews|Pointe|Promenade|Ridge|Run|Walk)(?:[ \t]+(?:NW|NE|SW|SE|N|S|E|W))?,[ \t]+([A-Z][a-zA-Z]+(?:[ \t]+[A-Z][a-zA-Z]+)?)\b/);
+      if (inlineCityOnlyM) {
+        out.subject_property_city = inlineCityOnlyM[1].trim();
+      }
     }
   } else {
     // Fallback for non-bold-template broker emails: line starting with "Property:"
@@ -337,6 +355,16 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
       if (inlineM) {
         out.subject_property_city = inlineM[1].trim();
         out.subject_property_province = inlineM[2].toUpperCase();
+      } else {
+        // R9-C (2026-05-26): symmetric extension in non-bold-template fallback
+        // branch. Same shape as bold-template branch above. Marcus + Derek
+        // retest fixtures use "Property: <street>, <City>" (non-bold) — this
+        // branch handles them. Bold-template variant
+        // ("*Property:* <street>, <City>") routes through the upper branch.
+        const inlineCityOnlyM = lineM[1].match(/(?:Boulevard|Drive|Street|Avenue|Road|Circle|Court|Lane|Place|Crescent|Way|Square|Terrace|Close|Highway|Parkway|Trail|Heights|Hill|Hills|Mews|Pointe|Promenade|Ridge|Run|Walk)(?:[ \t]+(?:NW|NE|SW|SE|N|S|E|W))?,[ \t]+([A-Z][a-zA-Z]+(?:[ \t]+[A-Z][a-zA-Z]+)?)\b/);
+        if (inlineCityOnlyM) {
+          out.subject_property_city = inlineCityOnlyM[1].trim();
+        }
       }
     }
   }
