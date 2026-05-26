@@ -24698,6 +24698,212 @@ Meridian Mortgage Group Lic. #MB552934`;
 
   console.log(`\n========== R9-F' groups: ${_r9fpPass} PASS ==========`);
 
+  // ════════════════════════════════════════════════════════════════
+  // R10-A — body-aware classifier + acknowledgment-on-reject (closes
+  // Franco Round-6 Donna Blackwood + Jerome Osei silent-drop bugs)
+  // ════════════════════════════════════════════════════════════════
+  // Root cause (Franco Round 6 Scenarios 4 + 5):
+  //   1. Broker submits with Postmark From-Name="Franco Maione" (broker Gmail
+  //      account display-name artifact, NOT impersonation — both Donna
+  //      Blackwood and Jerome Osei submitted this way)
+  //   2. R9-F classifyIntakeBorrower sees borrower_name first-token = admin
+  //      name → returns reject:admin-as-borrower
+  //   3. Email body clearly identifies broker via "I'm X from Y" pattern +
+  //      "Lic. #MB######" signature — classifier doesn't read body
+  //   4. Silent drop: deal not created; broker gets no acknowledgment;
+  //      admin gets alert but Stage 2 retest cycle blocks
+  //
+  // Fix mechanism (Q1-(a) REUSE R8-A + Q1-relock matchAll enhancement,
+  // Q2-(a) override both admin-as-borrower + no-human-name when body-signal
+  // present, Q3-(a) broker ack on those categories (not system-sender),
+  // Q4-(a) generic-receipt content, Q5-(a) new R10-A cluster designation,
+  // Q6-(a) BOTH call sites, Q7-(a) every-reject-sends-ack):
+  //   - classifyIntakeBorrower signature extended with opts.emailBody
+  //   - aiService.parseBrokerFirstNameFromSignature (R8-A) is the reused
+  //     pure helper for body-signal extraction
+  //   - R8-A pattern (a) enhanced with matchAll + last-to-first iteration
+  //     (Q1-relock — empirical revealed R8-A as-is doesn't catch Donna shape;
+  //     enhancement is backwards-compatible with 5-fixture truth table)
+  //   - sendBrokerAcknowledgmentOnReject helper fires on admin-as-borrower /
+  //     no-human-name reject categories; system-sender stays silent-drop
+  //   - Both call sites (referral + new-client INITIAL) wired
+  //
+  // Seven verification groups (mini-harness 72/72 PASS — canonical at
+  // scripts/r10a-mini-harness.js):
+  //   (1) R10-A-BODY-SIGNAL-OVERRIDE-MATRIX — classifier truth table
+  //   (2) R10-A-FRANCO-FIXTURE-LOAD-BEARING — Donna + Jerome synthetic replays
+  //   (3) R10-A-ACKNOWLEDGMENT-WIRING — both call sites + ack ordering
+  //   (4) R10-A-ACK-CONTENT-ANCHORS — 10-anchor content discipline
+  //   (5) R10-A-R8-A-REUSE-CROSS-CLUSTER — R8-A enhancement + truth-table regression
+  //   (6) R10-A-OVER-FIRE-PROTECTION — system-sender silent-drop preserved
+  //   (7) R10-A-CROSS-CLUSTER-INTEGRATION — R9-F/R9-F'/R9-E/R6-κ preservation
+
+  console.log('\n========== R10-A — body-aware classifier + ack-on-reject ==========');
+
+  const _r10aWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _r10aAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const { classifyIntakeBorrower: _r10aClassify } = require('./src/routes/webhook').__test__;
+  const _r10aAiService = require('./src/services/ai');
+
+  let _r10aPass = 0;
+  const _r10aExpect = (label, cond) => {
+    if (cond) { console.log(`  PASS ${label}`); _r10aPass++; }
+    else throw new Error(`FAIL [${label}]`);
+  };
+
+  // Synthetic Donna / Jerome fixtures (Franco Round-6 bug-report shapes;
+  // actual bodies not retrievable from DB since silent-dropped)
+  const _r10aDonnaBody = `Hi Franco,
+
+I'm Donna Blackwood from Pemberton Lending Inc. Lic. #MB668374. I have a client looking for a $250,000 second mortgage on her property at 88 Harvest Hills Blvd NE, Calgary, AB T3K 4G9.
+
+Please find the loan application + credit bureau attached.
+
+Donna Blackwood
+Pemberton Lending Inc. Lic. #MB668374`;
+  const _r10aJeromeBody = `Hello Franco,
+
+I'm Jerome Osei from Clearpath Mortgage Partners (Lic. #MB779485). Client referral for Patricia Simmons — looking for first mortgage refinance, $385K.
+
+Documents attached.
+
+Jerome Osei
+Clearpath Mortgage Partners Lic. #MB779485`;
+  const _r10aAdminProxyBody = `Hi,\n\nPlease review.\n\nFranco Maione\nVIMA Real Broker Lic. #MB000`;
+
+  // ─── R10-A-BODY-SIGNAL-OVERRIDE-MATRIX ───
+  console.log('\n--- R10-A-BODY-SIGNAL-OVERRIDE-MATRIX ---');
+  _r10aExpect('(a) opts absent + admin-as-borrower input → R9-F preserved',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }) === 'reject:admin-as-borrower');
+  _r10aExpect('(b) opts.emailBody=plain-text (no Lic.#) → reject preserved',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }, { emailBody: 'Just a note.' }) === 'reject:admin-as-borrower');
+  _r10aExpect('(c) Donna body + admin-as-borrower → OVERRIDE to accept',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }, { emailBody: _r10aDonnaBody }) === 'accept');
+  _r10aExpect('(d) Jerome body + admin-as-borrower → OVERRIDE to accept',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }, { emailBody: _r10aJeromeBody }) === 'accept');
+  _r10aExpect('(e) Donna body + no-human-name (King of Dates Corp) → OVERRIDE to accept',
+    _r10aClassify({ borrower_name: 'King of Dates Corp', broker_name: null }, { emailBody: _r10aDonnaBody }) === 'accept');
+  _r10aExpect('(f) Donna body + system-sender (Postmark Team) → NO override',
+    _r10aClassify({ borrower_name: 'Postmark Team', broker_name: null }, { emailBody: _r10aDonnaBody }) === 'reject:system-sender');
+  _r10aExpect('(g) admin-proxy signature body → admin-name filter active → no override',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }, { emailBody: _r10aAdminProxyBody }) === 'reject:admin-as-borrower');
+  _r10aExpect('(h) opts.emailBody=null → no override',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }, { emailBody: null }) === 'reject:admin-as-borrower');
+
+  // ─── R10-A-FRANCO-FIXTURE-LOAD-BEARING ───
+  console.log('\n--- R10-A-FRANCO-FIXTURE-LOAD-BEARING ---');
+  _r10aExpect('Donna pre-R10-A would-have-been reject:admin-as-borrower (no body)',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }) === 'reject:admin-as-borrower');
+  _r10aExpect('Donna post-R10-A body-signal override → accept',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }, { emailBody: _r10aDonnaBody }) === 'accept');
+  _r10aExpect('Jerome pre-R10-A would-have-been reject:admin-as-borrower (no body)',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }) === 'reject:admin-as-borrower');
+  _r10aExpect('Jerome post-R10-A body-signal override → accept',
+    _r10aClassify({ borrower_name: 'Franco Maione', broker_name: null }, { emailBody: _r10aJeromeBody }) === 'accept');
+  _r10aExpect('Donna body-signal: parseBrokerFirstNameFromSignature returns "Donna"',
+    _r10aAiService.parseBrokerFirstNameFromSignature(_r10aDonnaBody) === 'Donna');
+  _r10aExpect('Jerome body-signal: parseBrokerFirstNameFromSignature returns "Jerome"',
+    _r10aAiService.parseBrokerFirstNameFromSignature(_r10aJeromeBody) === 'Jerome');
+
+  // ─── R10-A-ACKNOWLEDGMENT-WIRING ───
+  console.log('\n--- R10-A-ACKNOWLEDGMENT-WIRING ---');
+  _r10aExpect('(a) sendBrokerAcknowledgmentOnReject defined as async',
+    /const sendBrokerAcknowledgmentOnReject = async/.test(_r10aWebhookSrc));
+  const _r10aClassifierCallSitesBody = [..._r10aWebhookSrc.matchAll(/classifyIntakeBorrower\([\s\S]*?emailBody:/g)].length;
+  _r10aExpect('(b) Both classifyIntakeBorrower call sites pass opts.emailBody',
+    _r10aClassifierCallSitesBody >= 2);
+  _r10aExpect('(c) Both call sites invoke ack on reject:admin-as-borrower',
+    (_r10aWebhookSrc.match(/=== 'reject:admin-as-borrower'[\s\S]{0,200}?sendBrokerAcknowledgmentOnReject/g) || []).length >= 2);
+  _r10aExpect('(d) Both call sites invoke ack on reject:no-human-name',
+    (_r10aWebhookSrc.match(/reject:no-human-name'[\s\S]{0,200}?sendBrokerAcknowledgmentOnReject/g) || []).length >= 2);
+  _r10aExpect('(e) system-sender excluded from broker-ack conditional (silent-drop preserved)',
+    !/reject:system-sender'[\s\S]{0,50}?sendBrokerAcknowledgmentOnReject/.test(_r10aWebhookSrc));
+  const _r10aNewClientBlock = _r10aWebhookSrc.match(/`\[Intake Filter\] New-client intake rejected[\s\S]*?return;\s*\}/);
+  const _r10aReferralBlock = _r10aWebhookSrc.match(/`\[Intake Filter\] Referral rejected[\s\S]*?return;\s*\}/);
+  _r10aExpect('(f-new-client) admin alert sent BEFORE broker ack',
+    _r10aNewClientBlock && _r10aNewClientBlock[0].indexOf('config.adminEmail') < _r10aNewClientBlock[0].indexOf('sendBrokerAcknowledgmentOnReject'));
+  _r10aExpect('(f-referral) admin alert sent BEFORE broker ack',
+    _r10aReferralBlock && _r10aReferralBlock[0].indexOf('config.adminEmail') < _r10aReferralBlock[0].indexOf('sendBrokerAcknowledgmentOnReject'));
+
+  // ─── R10-A-ACK-CONTENT-ANCHORS (10 anchors) ───
+  console.log('\n--- R10-A-ACK-CONTENT-ANCHORS ---');
+  const _r10aAckSrc = (() => {
+    const start = _r10aWebhookSrc.indexOf('const sendBrokerAcknowledgmentOnReject');
+    const end = _r10aWebhookSrc.indexOf('};', start);
+    return _r10aWebhookSrc.slice(start, end + 2);
+  })();
+  _r10aExpect('(1) subject Re: prefix when missing', /\(email\.subject \|\| ''\)\.startsWith\('Re:'\)/.test(_r10aAckSrc));
+  _r10aExpect('(2) "Hi there!" generic greeting', /Hi there!/.test(_r10aAckSrc));
+  _r10aExpect('(3) "We received your submission"', /We received your submission/.test(_r10aAckSrc));
+  _r10aExpect('(4) "reviewing it" status phrase', /reviewing it/.test(_r10aAckSrc));
+  _r10aExpect('(5) "You\'ll hear back shortly"', /You'll hear back shortly/.test(_r10aAckSrc));
+  _r10aExpect('(6) "Vienna" signature line', /Vienna\b/.test(_r10aAckSrc));
+  _r10aExpect('(7) "Private Mortgage Link" company line', /Private Mortgage Link/.test(_r10aAckSrc));
+  _r10aExpect('(8) NO classifier-decision leak', !/\b(rejected|filtered|classified)\b/.test(_r10aAckSrc));
+  _r10aExpect('(9) email.from is recipient', /emailService\.sendEmail\(\s*email\.from,/.test(_r10aAckSrc));
+  _r10aExpect('(10) NO CC / attachments slot empty', /emailService\.sendEmail\([\s\S]*?email\.from,[\s\S]*?subject,[\s\S]*?textBody,[\s\S]*?null,[\s\S]*?\[\],[\s\S]*?\[\][\s\S]*?\)/.test(_r10aAckSrc));
+
+  // ─── R10-A-R8-A-REUSE-CROSS-CLUSTER (with R8A matchAll enhancement) ───
+  console.log('\n--- R10-A-R8-A-REUSE-CROSS-CLUSTER ---');
+  _r10aExpect('(a) parseBrokerFirstNameFromSignature exported', /^\s+parseBrokerFirstNameFromSignature,\s*$/m.test(_r10aAiSrc));
+  _r10aExpect('(b) admin-name filter preserved', /firstToken\.toLowerCase\(\) === 'franco'/.test(_r10aAiSrc));
+  _r10aExpect('(c) greeting-word filter preserved', /\^\(Hi\|Hello\|Hey\|Dear\|Greetings\)\$/i.test(_r10aAiSrc));
+  _r10aExpect('(d) R10-A pattern (a) uses matchAll', /precedingMatches = \[\.\.\.beforeFooter\.matchAll/.test(_r10aAiSrc));
+  _r10aExpect('(e) R10-A pattern (a) iterates last-to-first', /for \(let i = precedingMatches\.length - 1; i >= 0; i--\)/.test(_r10aAiSrc));
+  _r10aExpect('(f) R8-A regression: Eric → "Eric"',
+    _r10aAiService.parseBrokerFirstNameFromSignature(`Hi, I'm Eric Johansson with Willow Creek Mortgage Group (Lic. #MB884572).\n\nEric Johansson\n\nWillow Creek Mortgage Group Lic. #MB884572\n\n-- \n\nFranco Maione\n`) === 'Eric');
+  _r10aExpect('(g) R8-A regression: Marcus (Natalie sig + Franco footer) → "Natalie"',
+    _r10aAiService.parseBrokerFirstNameFromSignature(`*Natalie Bergman*\n\nSummit Financial Group Lic. #MB338764\n\n-- \n\nFranco Maione\n`) === 'Natalie');
+  _r10aExpect('(h) R8-A regression: Nadia (inline-sep pipe) → "Nadia"',
+    _r10aAiService.parseBrokerFirstNameFromSignature(`Hi, I'm Nadia Petrov with Eastview Mortgage Group, Lic. #MB440996.\n\nNadia Petrov | Eastview Mortgage Group | Lic. #MB440996 -- Franco Maione`) === 'Nadia');
+  _r10aExpect('(i) R10-A new: Donna body → "Donna"',
+    _r10aAiService.parseBrokerFirstNameFromSignature(_r10aDonnaBody) === 'Donna');
+  _r10aExpect('(j) R10-A new: Jerome body → "Jerome"',
+    _r10aAiService.parseBrokerFirstNameFromSignature(_r10aJeromeBody) === 'Jerome');
+  _r10aExpect('(k) edge: admin-proxy → null', _r10aAiService.parseBrokerFirstNameFromSignature(_r10aAdminProxyBody) === null);
+  _r10aExpect('(l) edge: null input → null', _r10aAiService.parseBrokerFirstNameFromSignature(null) === null);
+
+  // ─── R10-A-OVER-FIRE-PROTECTION ───
+  console.log('\n--- R10-A-OVER-FIRE-PROTECTION ---');
+  _r10aExpect('(a) Postmark Team + no body → reject:system-sender',
+    _r10aClassify({ borrower_name: 'Postmark Team', broker_name: null }) === 'reject:system-sender');
+  _r10aExpect('(b) Postmark Team + body with Lic.# → STILL reject:system-sender',
+    _r10aClassify({ borrower_name: 'Postmark Team', broker_name: null }, { emailBody: _r10aDonnaBody }) === 'reject:system-sender');
+  _r10aExpect('(c) mailer-daemon → reject:system-sender',
+    _r10aClassify({ borrower_name: 'mailer-daemon', broker_name: null }) === 'reject:system-sender');
+  _r10aExpect('(d) noreply + body Lic.# → STILL reject:system-sender',
+    _r10aClassify({ borrower_name: 'noreply', broker_name: null }, { emailBody: _r10aDonnaBody }) === 'reject:system-sender');
+  _r10aExpect('(e) wire-site: system-sender absent from ack conditional',
+    !/reject:system-sender'[\s\S]{0,50}?sendBrokerAcknowledgmentOnReject/.test(_r10aWebhookSrc));
+
+  // ─── R10-A-CROSS-CLUSTER-INTEGRATION ───
+  console.log('\n--- R10-A-CROSS-CLUSTER-INTEGRATION ---');
+  _r10aExpect('(a) R9-F reject:admin-as-borrower category preserved', /return 'reject:admin-as-borrower'/.test(_r10aWebhookSrc));
+  _r10aExpect('(a2) R9-F reject:system-sender category preserved', /return 'reject:system-sender'/.test(_r10aWebhookSrc));
+  _r10aExpect('(a3) R9-F reject:no-human-name category preserved', /return 'reject:no-human-name'/.test(_r10aWebhookSrc));
+  const _r10aR9fpIdx = _r10aWebhookSrc.search(/_r9fPrimeDupCheck\s*=\s*await\s+dealsService\.findExistingDealForBorrower/);
+  const _r10aAckBlockIdx = _r10aWebhookSrc.search(/sendBrokerAcknowledgmentOnReject\(email\)/);
+  _r10aExpect('(b) R9-F\' wire AFTER R10-A classifier on new-client INITIAL path', _r10aR9fpIdx > _r10aAckBlockIdx);
+  const _r10aCronSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+  _r10aExpect('(c) R9-E startCron factory preserved', /const startCron = \(\) =>/.test(_r10aCronSrc));
+  _r10aExpect('(d) R6-κ aml_pep_requested_at preserved', /aml_pep_requested_at/.test(_r10aWebhookSrc));
+  _r10aExpect('(e) R5-F-2 claimDailySummarySlot preserved', /claimDailySummarySlot/.test(_r10aCronSrc));
+  _r10aExpect('(f) R9-F admin alert preserved at both call sites',
+    /\[Intake Filter\] New-client intake rejected/.test(_r10aWebhookSrc)
+    && /\[Intake Filter\] Referral rejected/.test(_r10aWebhookSrc));
+  _r10aExpect('(g) admin alert preserved + broker ack additive',
+    /config\.adminEmail,[\s\S]{0,100}`\[Intake Filter\] New-client intake rejected[\s\S]*?if \(_r9fIntakeClassification === 'reject:admin-as-borrower'/.test(_r10aWebhookSrc));
+  _r10aExpect('(h) emailService.sendEmail signature unchanged', /emailService\.sendEmail\(\s*email\.from/.test(_r10aWebhookSrc));
+  _r10aExpect('(i) R10-A classifier → R9-F\' dedup ordering preserved', (() => {
+    const block = _r10aWebhookSrc.match(/_r9fIntakeClassification\s*=\s*classifyIntakeBorrower\([\s\S]*?dealsService\.create\(/);
+    if (!block) return false;
+    return block[0].indexOf('classifyIntakeBorrower') < block[0].indexOf('findExistingDealForBorrower')
+        && block[0].indexOf('findExistingDealForBorrower') < block[0].indexOf('dealsService.create');
+  })());
+  _r10aExpect('(j) classifyIntakeBorrower exported', /^\s+classifyIntakeBorrower,?\s*$/m.test(_r10aWebhookSrc));
+
+  console.log(`\n========== R10-A groups: ${_r10aPass} PASS ==========`);
+
   console.log('\n────────────────────────────────────────');
   console.log('HARNESS COMPLETE — all checks passed');
   console.log('────────────────────────────────────────');

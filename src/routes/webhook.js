@@ -527,13 +527,28 @@ const computeStillMissingForReview = ({ deal, summary, classifications, identity
 // broker-persona-names) DEFAULT TO ACCEPT per Q3 fail-open. Admin reviews
 // via existing daily summary if real misfire surfaces. R9-F handles only
 // the CLEAR-reject categories empirically grounded.
-const classifyIntakeBorrower = (input) => {
+const classifyIntakeBorrower = (input, opts = {}) => {
   // Defensive: null/undefined/non-object input → fail-open accept (Q3).
   if (!input || typeof input !== 'object') return 'accept';
   const { borrower_name, broker_name } = input;
   if (!borrower_name || typeof borrower_name !== 'string') return 'accept';  // fail-open on missing data
   const trimmed = borrower_name.trim();
   if (!trimmed) return 'accept';
+
+  // R10-A (2026-05-26): body-aware classifier signal computed up-front; reused
+  // in admin-as-borrower + no-human-name override branches below. opts.emailBody
+  // is the broker email body (email.textBody at webhook call site); when null/
+  // undefined, no override path fires (preserves pre-R10-A behavior for any
+  // legacy single-arg callers). aiService.parseBrokerFirstNameFromSignature
+  // (R8-A) is the reused pure helper — anchors on `Lic. #` signature marker;
+  // returns null when no broker signal OR when signature first-token is
+  // "franco" (admin-name filter built in at ai.js:886). Non-null return = high-
+  // confidence broker self-identification → structurally invalidates admin-as-
+  // borrower / no-human-name false-positive class. See R10-A docblock in
+  // test-trigger.js for the Donna Blackwood + Jerome Osei Round-6 fixtures.
+  const _r10aBodySignal = opts.emailBody
+    ? aiService.parseBrokerFirstNameFromSignature(opts.emailBody)
+    : null;
 
   // 1. admin-as-borrower: first-token matches ADMIN_FIRST_NAME ("Franco") + no broker_name set.
   //    The no-broker-set guard is the discriminator that lets a legitimate
@@ -543,6 +558,17 @@ const classifyIntakeBorrower = (input) => {
   const firstToken = trimmed.split(/\s+/)[0];
   if (firstToken && firstToken.toLowerCase() === ADMIN_FIRST_NAME.toLowerCase()) {
     if (!broker_name || !String(broker_name).trim()) {
+      // R10-A (2026-05-26): body-signal override. Donna Blackwood / Jerome Osei
+      // Round-6 fixtures had Postmark From-Name="Franco Maione" (broker Gmail
+      // display-name artifact) + body=("I'm Donna Blackwood from Pemberton
+      // Lending Inc. Lic. #MB668374"). _r10aBodySignal returns non-null when
+      // body carries broker Lic. # signature (R8-A pure helper, admin-name
+      // filter built in). Non-null = structural invalidation of admin-as-
+      // borrower false-positive; override to accept.
+      if (_r10aBodySignal) {
+        console.log(`R10-A: body-signal override fired (admin-as-borrower → accept); body identifies broker as "${_r10aBodySignal}"`);
+        return 'accept';
+      }
       return 'reject:admin-as-borrower';
     }
     // broker_name set — could be legitimately-named-Franco borrower submitted
@@ -589,6 +615,14 @@ const classifyIntakeBorrower = (input) => {
     // pattern names with lowercase connectors ("King of Dates") fail this.
     const humanNameAtStartRe = /^[A-Z][a-z]+\s+[A-Z][a-z]+\b/;
     if (!humanNameAtStartRe.test(preOrgPortion)) {
+      // R10-A (2026-05-26): body-signal override (symmetric with admin-as-
+      // borrower branch above). Body-signal non-null = broker is identifying
+      // themselves via Lic. # signature → structural invalidation of no-
+      // human-name false-positive. Same _r10aBodySignal computed above.
+      if (_r10aBodySignal) {
+        console.log(`R10-A: body-signal override fired (no-human-name → accept); body identifies broker as "${_r10aBodySignal}"`);
+        return 'accept';
+      }
       return 'reject:no-human-name';
     }
   }
@@ -647,6 +681,42 @@ DECISION PROMPT
     config.adminEmail,
     subject,
     body,
+    null,
+    [],
+    []
+  );
+};
+
+// R10-A (2026-05-26): broker acknowledgment on classifier-reject categories
+// where false-positive risk is non-trivial (admin-as-borrower / no-human-name).
+// system-sender stays silent-drop (structurally impossible for legitimate
+// broker submission to come from Postmark Team / mailer-daemon display name —
+// see classifyIntakeBorrower system-sender branch).
+//
+// Q4-(a) generic-receipt content discipline: doesn't leak classifier decision;
+// broker-friendly; admin alert (existing R9-F path, unchanged) carries full
+// triage context for admin to override. Same content-anchor discipline as
+// R9-D / R9-A' / R9-F / R9-F' precedents — load-bearing UX preserved by
+// closed-set anchors in R10-A-ACK-CONTENT-ANCHORS verification group.
+//
+// Q7-(a) every-reject-sends-ack: no idempotency state tracking. Rejected
+// submissions don't create deal records, so there's no DB state to query
+// for "did this broker get an ack before?" Cost of occasional duplicate ack
+// when broker re-submits is low; admin alert is the primary signal.
+const sendBrokerAcknowledgmentOnReject = async (email) => {
+  const subject = (email.subject || '').startsWith('Re:')
+    ? email.subject
+    : `Re: ${email.subject || 'Your submission'}`;
+  const textBody = `Hi there!
+
+We received your submission and are reviewing it. You'll hear back shortly.
+
+Vienna
+Private Mortgage Link`;
+  await emailService.sendEmail(
+    email.from,
+    subject,
+    textBody,
     null,
     [],
     []
@@ -2193,10 +2263,13 @@ Please reply with the referred person's email address explicitly stated.
         // At admin-referral path, broker_name is absent (referral source is
         // admin, not a broker) — admin-as-borrower with no broker IS the
         // Franco-Maione mock-test fixture shape.
-        const _r9fReferralClassification = classifyIntakeBorrower({
-          borrower_name: referral.referred_name || '',
-          broker_name: null,
-        });
+        const _r9fReferralClassification = classifyIntakeBorrower(
+          {
+            borrower_name: referral.referred_name || '',
+            broker_name: null,
+          },
+          { emailBody: email.textBody || '' }  // R10-A (2026-05-26): body-signal source
+        );
         if (_r9fReferralClassification !== 'accept') {
           console.log(`R9-F: admin-referral classified as ${_r9fReferralClassification} — alerting admin + skipping deal-create`);
           const _r9fAlertBody = `Vienna filtered an admin referral as a non-deal entry.
@@ -2224,6 +2297,16 @@ No deal record was created. If this was a legitimate referral, please reply with
             [],
             []
           );
+          // R10-A (2026-05-26): broker acknowledgment on uncertain-reject
+          // categories (admin-as-borrower / no-human-name). system-sender
+          // stays silent-drop (no false-positive surface). Q3-(a) cost-asymmetry
+          // verdict: false-positive on these categories has high broker-
+          // confusion cost; admin alert above is the primary signal for Franco
+          // to override via daily-summary surface or direct reply.
+          if (_r9fReferralClassification === 'reject:admin-as-borrower'
+              || _r9fReferralClassification === 'reject:no-human-name') {
+            await sendBrokerAcknowledgmentOnReject(email);
+          }
           return;
         }
         // Create a new deal for the referred person
@@ -2336,10 +2419,13 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
         // ambiguous cases default to accept — the classifier only catches
         // CLEAR reject categories (Postmark Team system-sender being the
         // primary empirical fixture at this path).
-        const _r9fIntakeClassification = classifyIntakeBorrower({
-          borrower_name: email.fromName || '',
-          broker_name: null,
-        });
+        const _r9fIntakeClassification = classifyIntakeBorrower(
+          {
+            borrower_name: email.fromName || '',
+            broker_name: null,
+          },
+          { emailBody: email.textBody || '' }  // R10-A (2026-05-26): body-signal source
+        );
         if (_r9fIntakeClassification !== 'accept') {
           console.log(`R9-F: new-client intake classified as ${_r9fIntakeClassification} — alerting admin + skipping deal-create`);
           const _r9fAlertBody = `Vienna filtered a new-client intake as a non-deal entry.
@@ -2365,6 +2451,16 @@ No deal record was created. If this was a legitimate broker submission, please r
             [],
             []
           );
+          // R10-A (2026-05-26): broker acknowledgment on uncertain-reject
+          // categories (admin-as-borrower / no-human-name). system-sender
+          // stays silent-drop (no false-positive surface). Q3-(a) cost-asymmetry
+          // verdict: false-positive on these categories has high broker-
+          // confusion cost; admin alert above is the primary signal for Franco
+          // to override via daily-summary surface or direct reply.
+          if (_r9fIntakeClassification === 'reject:admin-as-borrower'
+              || _r9fIntakeClassification === 'reject:no-human-name') {
+            await sendBrokerAcknowledgmentOnReject(email);
+          }
           return;
         }
 

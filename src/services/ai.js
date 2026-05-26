@@ -887,10 +887,30 @@ const parseBrokerFirstNameFromSignature = (emailBody) => {
     return firstToken;
   };
 
-  // (a) Preceding-line shape — try first.
-  const precedingMatch = beforeFooter.match(/([^\n]+)\n+[^\n]*Lic\.\s*#/i);
-  if (precedingMatch) {
-    const result = validateCapture(precedingMatch[1]);
+  // (a) Preceding-line shape — try LAST occurrence first, fall back to earlier.
+  //
+  // R10-A (2026-05-26): matchAll + last-to-first iteration + validate-each-
+  // fall-through. Pre-R10-A used .match() (first only); empirically falsified
+  // by Donna Blackwood / Jerome Osei Round-6 fixtures where Lic. # appears
+  // BOTH in body prose (preceded by greeting line "Hi Franco,") AND in
+  // signature (preceded by broker self-ID line "Donna Blackwood"). First-
+  // match captured the greeting, got rejected by the greeting-word filter
+  // in validateCapture, and pre-R10-A fell through to pattern (b) which
+  // requires pipe → null overall.
+  //
+  // Last-to-first iteration: canonical broker signature is at body end
+  // (post-greeting, post-prose). Iterate matches in reverse, validate each;
+  // first valid capture wins. Same last-to-first discipline as pattern (b)
+  // below — keeps R8-A's structural symmetry.
+  //
+  // Backwards-compat: when only 1 valid capture exists (R8-A's Eric / Marcus
+  // / Natalie / Steven / Alex 5-fixture truth table — preserved by structural
+  // analysis: their body-prose Lic. # either lacks a valid preceding-line
+  // match OR collapses to the same capture as the signature-line match).
+  // Last-match = first-match in those cases; truth table behavior unchanged.
+  const precedingMatches = [...beforeFooter.matchAll(/([^\n]+)\n+[^\n]*Lic\.\s*#/gi)];
+  for (let i = precedingMatches.length - 1; i >= 0; i--) {
+    const result = validateCapture(precedingMatches[i][1]);
     if (result) return result;
   }
 
