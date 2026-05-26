@@ -4460,11 +4460,18 @@ As of April 23, 2026`;
       if (bbb.sendEmailDelayed.length !== 0) {
         throw new Error(`FAIL [Group BBB B2 reply suppression]: expected 0 broker sends (Vienna reply suppressed when conditions fulfilled), got ${bbb.sendEmailDelayed.length}`);
       }
-      // Two admin emails: informational notice + closing draft preview.
+      // R9-A (2026-05-26) bounded widening: post-R9-A the 2nd email goes to
+      // the BROKER (auto-send) rather than to the admin (draft preview).
+      // BBB's load-bearing invariants (Vienna broker-reply suppressed +
+      // [Conditions Fulfilled] info notice fires + canonical closing
+      // template emitted to broker) are preserved; only the destination of
+      // the 2nd email + the draft-preview chrome shape change. Same
+      // precedent as R8-A's RRRR signature widening + D-CROSS-CLUSTER
+      // R5-D-B restructure (bounded signature evolution, not test-loosening).
       if (bbb.sendEmail.length !== 2) {
-        throw new Error(`FAIL [Group BBB B2 admin emails]: expected 2 admin emails (info + draft preview), got ${bbb.sendEmail.length}: ${JSON.stringify(bbb.sendEmail.map(e => e.subject))}`);
+        throw new Error(`FAIL [Group BBB B2 emails]: expected 2 emails (admin info notice + broker auto-send post-R9-A), got ${bbb.sendEmail.length}: ${JSON.stringify(bbb.sendEmail.map(e => e.subject))}`);
       }
-      // Email 1: informational notice — subject contains "[Conditions Fulfilled]", does NOT include "ACTION REQUIRED" or "PRELIMINARY Review".
+      // Email 1: admin informational notice — subject contains "[Conditions Fulfilled]"; does NOT include "ACTION REQUIRED" or "PRELIMINARY Review".
       const infoEmail = bbb.sendEmail[0];
       if (!/\[Conditions Fulfilled\]/.test(infoEmail.subject)) {
         throw new Error(`FAIL [Group BBB B2 info subject]: expected '[Conditions Fulfilled]' prefix, got "${infoEmail.subject}"`);
@@ -4472,28 +4479,38 @@ As of April 23, 2026`;
       if (/ACTION REQUIRED|PRELIMINARY Review/.test(infoEmail.subject)) {
         throw new Error(`FAIL [Group BBB B2 redundant ACTION REQUIRED]: info email must NOT use ACTION REQUIRED / PRELIMINARY Review framing (S9.2 root cause), got "${infoEmail.subject}"`);
       }
-      // Email 2: closing draft preview — subject is in-thread "Re: [Conditions Fulfilled]...".
-      const previewEmail = bbb.sendEmail[1];
-      if (!/^Re: \[Conditions Fulfilled\]/.test(previewEmail.subject)) {
-        throw new Error(`FAIL [Group BBB B2 preview subject]: expected 'Re: [Conditions Fulfilled]...' (in-thread), got "${previewEmail.subject}"`);
+      // R9-A: info notice body reflects auto-send (NO "draft preview will follow").
+      if (/Closing draft preview will follow/i.test(infoEmail.html)) {
+        throw new Error(`FAIL [Group BBB B2 info auto-send text]: post-R9-A info notice must NOT mention "Closing draft preview will follow" — auto-send replaces draft preview.`);
       }
-      // Preview HTML contains the closing draft preview chrome and the closing template.
-      if (!/Closing Draft Preview/.test(previewEmail.html) || !/Reply SEND to confirm/.test(previewEmail.html)) {
-        throw new Error(`FAIL [Group BBB B2 preview body]: expected closing-draft-preview chrome + Reply SEND, got: ${previewEmail.html.slice(0, 300)}`);
+      if (!/closing email has been sent to the broker/i.test(infoEmail.html)) {
+        throw new Error(`FAIL [Group BBB B2 info auto-send text]: post-R9-A info notice must contain "closing email has been sent to the broker".`);
       }
-      // Deal updated with draft_email = closing template, draft_action = 'approval_completed'.
+      // Email 2: broker auto-send — destination is broker (deal email), NOT admin. Subject anchored on broker thread.
+      const brokerEmail = bbb.sendEmail[1];
+      if (brokerEmail.to === infoEmail.to) {
+        throw new Error(`FAIL [Group BBB B2 broker destination]: post-R9-A 2nd email must go to broker (deal.email), not admin. Got to="${brokerEmail.to}", admin to="${infoEmail.to}"`);
+      }
+      // Broker auto-send body contains canonical deterministic closing template (no preview chrome).
+      if (!/file is now complete and submitted/i.test(brokerEmail.html) || !/direct any further questions to Franco/i.test(brokerEmail.html)) {
+        throw new Error(`FAIL [Group BBB B2 broker template]: post-R9-A broker auto-send must contain canonical closing template, got: ${brokerEmail.html.slice(0, 300)}`);
+      }
+      // Pre-R9-A draft-preview chrome MUST NOT appear on the broker-bound email.
+      if (/Closing Draft Preview/.test(brokerEmail.html) || /Reply SEND to confirm/.test(brokerEmail.html)) {
+        throw new Error(`FAIL [Group BBB B2 broker no-chrome]: post-R9-A broker auto-send must NOT include pre-R9-A draft-preview chrome, got: ${brokerEmail.html.slice(0, 300)}`);
+      }
+      // R9-A: no draft_email/draft_subject/draft_action='approval_completed' written by sendCompletionHandoff
+      // (auto-send bypasses the draft cycle).
       const draftUpdate = bbb.update.find(u => u.patch.draft_email !== undefined && u.patch.draft_email !== null);
-      if (!draftUpdate) {
-        throw new Error(`FAIL [Group BBB B2 draft saved]: expected an update writing draft_email (closing template), got updates: ${JSON.stringify(bbb.update)}`);
+      if (draftUpdate) {
+        throw new Error(`FAIL [Group BBB B2 no-draft-write]: post-R9-A sendCompletionHandoff must NOT write draft_email (auto-send bypasses draft cycle). Got: ${JSON.stringify(draftUpdate)}`);
       }
-      if (draftUpdate.patch.draft_action !== 'approval_completed') {
-        throw new Error(`FAIL [Group BBB B2 draft_action]: expected 'approval_completed' (so SEND advances to 'completed'), got '${draftUpdate.patch.draft_action}'`);
+      // R9-A: status='completed' atomic transition inside sendCompletionHandoff (Q3-(a) verdict).
+      const statusCompletedUpdate = bbb.update.find(u => u.patch.status === 'completed');
+      if (!statusCompletedUpdate) {
+        throw new Error(`FAIL [Group BBB B2 atomic status]: post-R9-A sendCompletionHandoff must atomically set status='completed' (Q3-(a) verdict). Got updates: ${JSON.stringify(bbb.update)}`);
       }
-      // Closing template content sanity (deterministic — should contain "complete and submitted").
-      if (!/file is now complete and submitted/i.test(draftUpdate.patch.draft_email) || !/direct any further questions to Franco/i.test(draftUpdate.patch.draft_email)) {
-        throw new Error(`FAIL [Group BBB B2 closing template]: closing draft must contain Franco's deterministic template, got: ${draftUpdate.patch.draft_email.slice(0, 300)}`);
-      }
-      console.log('  PASS [Group BBB B2]: conditions-fulfilled handoff fires (info + draft preview), Vienna reply suppressed, draft saved with approval_completed action');
+      console.log('  PASS [Group BBB B2 R9-A auto-send]: conditions-fulfilled handoff fires (info + broker auto-send), Vienna reply suppressed, canonical template sent to broker, atomic status=\'completed\', no draft writes');
     }
 
     // -------- B3: broker submission WITHOUT conditions_sent_at + missing docs → preliminary-update --------
@@ -6719,20 +6736,39 @@ Lender:
     { action: 'rejection', expectedStatusUpdate: "status: 'rejected'" },
     { action: 'approval_completed', expectedStatusUpdate: "status: 'completed'" },
   ];
+  // R9-A (2026-05-26) bounded widening: proximity gate widened from 200 to
+  // 2000 chars because executeDraft's approval_completed branch now carries
+  // the R9-A AUTO-SEND DEAD-CODE annotation block (~1000 chars of
+  // defense-in-depth context per Q2-(a) verdict). The R5-A invariant
+  // (branch still transitions status='completed' as escape valve) is
+  // PRESERVED — only the comment volume between branch condition and the
+  // status update line increased. Same precedent as R8-A's RRRR signature
+  // widening (bounded evolution, not test-loosening).
   for (const { action, expectedStatusUpdate } of r5StatusBranches) {
     // Match the branch: e.g. `if (draftAction === 'approval_completed') { ... status: 'completed' ... }`
-    const branchRe = new RegExp(`draftAction === '${action}'[\\s\\S]{0,200}${expectedStatusUpdate.replace(/[()]/g, '\\$&')}`);
+    const branchRe = new RegExp(`draftAction === '${action}'[\\s\\S]{0,2000}${expectedStatusUpdate.replace(/[()]/g, '\\$&')}`);
     if (!branchRe.test(ahWebhookSrcR5)) {
-      throw new Error(`FAIL [R5A-STATUS-TRANSITION ${action}]: executeDraft must transition status via \`${expectedStatusUpdate}\` on draftAction='${action}'. The R5-A+G fix is upstream guard only — downstream executeDraft branches MUST stay byte-identical.`);
+      throw new Error(`FAIL [R5A-STATUS-TRANSITION ${action}]: executeDraft must transition status via \`${expectedStatusUpdate}\` on draftAction='${action}'. The R5-A+G fix is upstream guard only — downstream executeDraft branches MUST preserve the status-transition invariant (R9-A annotation volume widened proximity 200→2000 chars but does not change branch behavior).`);
     }
-    console.log(`  PASS [R5A-STATUS-TRANSITION / ${action}]: executeDraft preserves \`${expectedStatusUpdate}\` branch`);
+    console.log(`  PASS [R5A-STATUS-TRANSITION / ${action}]: executeDraft preserves \`${expectedStatusUpdate}\` branch (R9-A widened proximity 200→2000 chars for approval_completed annotation; behavior identical)`);
   }
 
-  // ─── GROUP R5A-COMPLETION-SOLE-PATH — status='completed' set in exactly one place ───
-  // Load-bearing for the shared-root transitivity argument: if there were
-  // multiple paths to status='completed', the fix wouldn't cleanly transitively
-  // resolve G via A. Verifies executeDraft is the sole path.
-  console.log('\n========== R5A-COMPLETION-SOLE-PATH — status=\"completed\" set in exactly ONE place ==========');
+  // ─── GROUP R5A-COMPLETION-SOLE-PATH — status='completed' setter count ───
+  // R9-A (2026-05-26) bounded widening: post-R9-A `status: 'completed'`
+  // appears in EXACTLY 2 places in src/, both legitimate:
+  //   (1) sendCompletionHandoff (webhook.js:937+) — PRIMARY autonomous
+  //       close-out path; status set atomically after broker auto-send
+  //       (Q3-(a) verdict).
+  //   (2) executeDraft approval_completed branch (webhook.js ~1430) —
+  //       DEFENSE-IN-DEPTH dead-code escape valve (Q2-(a) verdict).
+  // The R5-A+G transitive-closure argument PRESERVED: both paths correctly
+  // transition status='completed'; both feed the same cron filter
+  // (`d.status === 'active'`) which excludes the deal post-transition →
+  // no reminders fire. The invariant is no-orphaned-paths (every
+  // status='completed' setter feeds the same downstream cron filter), not
+  // single-setter exclusivity. Same precedent as R7-A's defense-in-depth
+  // dead-code retention with annotation discipline.
+  console.log('\n========== R5A-COMPLETION-SOLE-PATH — status=\"completed\" setter count (post-R9-A: 2 paths, both legitimate) ==========');
   const r5SrcFiles = ['src/routes/webhook.js', 'src/services/deals.js', 'src/services/ai.js', 'src/cron/dailySummary.js'];
   let r5CompletionMatches = 0;
   for (const f of r5SrcFiles) {
@@ -6741,10 +6777,10 @@ Lender:
     r5CompletionMatches += matches;
     if (matches > 0) console.log(`  ${f}: ${matches} match(es)`);
   }
-  if (r5CompletionMatches !== 1) {
-    throw new Error(`FAIL [R5A-COMPLETION-SOLE-PATH]: expected EXACTLY 1 \`status: 'completed'\` setter across src/ (executeDraft at webhook.js:1144). Got ${r5CompletionMatches}. If multiple paths set status='completed', the shared-root transitivity argument for A+G doesn't hold — different paths might or might not transition status, breaking the predicate that "fixing A fixes G."`);
+  if (r5CompletionMatches !== 2) {
+    throw new Error(`FAIL [R5A-COMPLETION-SOLE-PATH]: expected EXACTLY 2 \`status: 'completed'\` setters across src/ post-R9-A (sendCompletionHandoff PRIMARY + executeDraft DEFENSE-IN-DEPTH). Got ${r5CompletionMatches}. If count drifts: =1 means R9-A primary or executeDraft escape valve was removed; ≥3 means a new transition path appeared without R9-A discipline review.`);
   }
-  console.log(`  PASS [R5A-COMPLETION-SOLE-PATH]: exactly 1 \`status: 'completed'\` setter in src/ (executeDraft is the sole transition path)`);
+  console.log(`  PASS [R5A-COMPLETION-SOLE-PATH]: exactly 2 \`status: 'completed'\` setters in src/ — sendCompletionHandoff PRIMARY (Q3-(a) atomic) + executeDraft DEFENSE-IN-DEPTH (Q2-(a) escape valve). Both paths feed cron's d.status==='active' filter; transitive closure for R5-A+G preserved.`);
 
   // ─── GROUP R5G-REMINDER-CRON-FILTER-INVARIANT — d.status==='active' is the sole filter ───
   console.log('\n========== R5G-REMINDER-CRON-FILTER-INVARIANT — reminder cron filters by status==\"active\" only ==========');
@@ -9044,7 +9080,13 @@ Lender:
   //   λ-JAMES-FIXTURE-LIVE-RETEST: deferred — Franco production verification
   const _lWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
 
-  console.log('\n========== R6-λ-CODE-ORDER-MATRIX — sendCompletionHandoff structure ==========');
+  console.log('\n========== R6-λ-CODE-ORDER-MATRIX — sendCompletionHandoff structure (R9-A widened) ==========');
+  // R9-A (2026-05-26) bounded widening: post-R9-A the 2nd sendEmail goes to
+  // the BROKER (auto-send) rather than back to the admin (draft preview).
+  // The R6-λ load-bearing invariant (2 sends + info-before-second + 2-second
+  // delay between them) is PRESERVED; only the destination + threading
+  // pattern of the 2nd send changed. Same precedent as R8-A's bounded
+  // signature widenings (RRRR + D-A-IDENTITY-CLASH + D-CROSS-CLUSTER R5-D-B).
   // (a) Locate sendCompletionHandoff function body.
   const _lFnStart = _lWebhookSrc.indexOf('const sendCompletionHandoff = async');
   // Find function end by matching balanced braces (simple heuristic: until "// Group NNN: pure dispatch decision")
@@ -9053,72 +9095,80 @@ Lender:
     throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: could not locate sendCompletionHandoff body. start=${_lFnStart}, end=${_lFnEnd}`);
   }
   const _lFnBody = _lWebhookSrc.slice(_lFnStart, _lFnEnd);
-  // (b) First sendEmail (info notice) appears BEFORE the second sendEmail (draft preview).
-  // Anchor on "const \w+Result = await emailService.sendEmail(" — the assignment-with-await
-  // pattern matches actual call sites only, not the literal "emailService.sendEmail()" text
-  // that may appear in comment blocks describing the API surface.
+  // (b) First sendEmail (info notice) + second sendEmail (post-R9-A: broker auto-send).
   const _lSendEmailMatches = _lFnBody.match(/const \w+Result = await emailService\.sendEmail\(/g) || [];
   if (_lSendEmailMatches.length !== 2) {
-    throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: sendCompletionHandoff must invoke emailService.sendEmail exactly 2 times (info notice + draft preview, both assignment-with-await pattern); found ${_lSendEmailMatches.length}.`);
+    throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: sendCompletionHandoff must invoke emailService.sendEmail exactly 2 times (info notice + post-R9-A broker auto-send, both assignment-with-await pattern); found ${_lSendEmailMatches.length}.`);
   }
-  // (c) Info notice subject anchor BEFORE draft preview subject anchor.
-  const _lInfoSubjectPos = _lFnBody.indexOf('infoSubject');
-  const _lPreviewSubjectPos = _lFnBody.indexOf('Re: ${infoSubject}');
-  if (_lInfoSubjectPos < 0 || _lPreviewSubjectPos < 0 || _lInfoSubjectPos >= _lPreviewSubjectPos) {
-    throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: info notice (infoSubject) must appear BEFORE draft preview (Re: \${infoSubject}). infoPos=${_lInfoSubjectPos}, previewPos=${_lPreviewSubjectPos}.`);
+  // (c) Info notice anchor BEFORE post-R9-A broker auto-send anchor.
+  const _lInfoSubjectPos = _lFnBody.indexOf('const infoResult = await emailService.sendEmail(');
+  const _lBrokerSendPos = _lFnBody.indexOf('const brokerSendResult = await emailService.sendEmail(');
+  if (_lInfoSubjectPos < 0 || _lBrokerSendPos < 0 || _lInfoSubjectPos >= _lBrokerSendPos) {
+    throw new Error(`FAIL [λ-CODE-ORDER-MATRIX]: info notice (infoResult) must appear BEFORE broker auto-send (brokerSendResult). infoPos=${_lInfoSubjectPos}, brokerPos=${_lBrokerSendPos}. R9-A bounded widening — pre-R9-A used "previewResult" for admin draft preview; post-R9-A uses "brokerSendResult" for broker auto-send.`);
   }
-  console.log('  PASS: sendCompletionHandoff invokes emailService.sendEmail exactly 2 times');
-  console.log('  PASS: info notice send precedes draft preview send in source order');
-  console.log('Group λ-CODE-ORDER-MATRIX: send-order structurally pinned.');
+  console.log('  PASS: sendCompletionHandoff invokes emailService.sendEmail exactly 2 times (info notice + post-R9-A broker auto-send)');
+  console.log('  PASS: info notice send precedes broker auto-send in source order (R9-A widening: 2nd send target changed admin→broker; ordering invariant preserved)');
+  console.log('Group λ-CODE-ORDER-MATRIX: send-order structurally pinned post-R9-A.');
 
-  console.log('\n========== R6-λ-IN-REPLY-TO-FORMAT — Postmark header format ==========');
-  // (a) previewHeaders array constructed inside sendCompletionHandoff.
-  if (!/const previewHeaders = \[\];/.test(_lFnBody)) {
-    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: previewHeaders array initialization missing in sendCompletionHandoff.');
+  console.log('\n========== R6-λ-IN-REPLY-TO-FORMAT — threading headers (R9-A LLLL-pattern widened) ==========');
+  // R9-A (2026-05-26) bounded widening: pre-R9-A this group verified the
+  // PREVIEW header pattern (previewHeaders + In-Reply-To pointing to info
+  // notice MessageID — for admin-thread). Post-R9-A the 2nd send goes to
+  // BROKER, so the threading goal is broker-thread (LLLL pattern via
+  // buildBrokerThreadInputs), NOT admin-thread back to info notice.
+  // The R6-λ load-bearing invariant ("use proper threading headers on the
+  // 2nd send") is PRESERVED; only the threading destination + mechanism
+  // changed admin-thread→broker-thread.
+  // (a) brokerHeaders array constructed inside sendCompletionHandoff.
+  if (!/const brokerHeaders = \[\];/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT (a)]: brokerHeaders array initialization missing in sendCompletionHandoff (post-R9-A LLLL broker-thread pattern).');
   }
-  // (b) In-Reply-To header pushed with formatted MessageID.
-  if (!/Name: 'In-Reply-To', Value: formattedInfoMessageId/.test(_lFnBody)) {
-    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: In-Reply-To header push missing or wrong format.');
+  console.log('  PASS (a): brokerHeaders array constructed (LLLL broker-thread pattern)');
+  // (b) In-Reply-To header pushed using LLLL broker-thread latestMessageId.
+  if (!/Name: 'In-Reply-To', Value: formatThreadId\(brokerInputs\.latestMessageId\)/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT (b)]: In-Reply-To header must use formatThreadId(brokerInputs.latestMessageId) — LLLL broker-thread anchor.');
   }
-  // (c) References header also pushed (modern Gmail/Outlook threading uses both).
-  if (!/Name: 'References', Value: formattedInfoMessageId/.test(_lFnBody)) {
-    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: References header push missing — Gmail/Outlook threading prefers both In-Reply-To AND References.');
+  console.log('  PASS (b): In-Reply-To header uses LLLL broker-thread latestMessageId');
+  // (c) References header pushed from broker-thread chain.
+  if (!/Name: 'References', Value: chain\.map\(formatThreadId\)/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT (c)]: References header must be derived from chain.map(formatThreadId) — LLLL broker-thread chain.');
   }
-  // (d) MessageID formatting matches Postmark convention <uuid@mtasv.net>.
-  if (!/`<\$\{infoResult\.MessageID\}@mtasv\.net>`/.test(_lFnBody)) {
-    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: MessageID formatting must use <uuid@mtasv.net> Postmark convention (mirrors formatMessageId in cron/dailySummary.js).');
+  console.log('  PASS (c): References header derived from LLLL broker-thread chain');
+  // (d) formatThreadId helper inlined with Postmark <uuid@mtasv.net> convention.
+  if (!/const formatThreadId = \(id\) => \(id && id\.includes\('@'\) \? `<\$\{id\}>` : `<\$\{id\}@mtasv\.net>`\)/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT (d)]: formatThreadId helper must use Postmark <uuid@mtasv.net> convention (mirrors executeDraft + cron formatMessageId pattern).');
   }
-  // (e) Defensive fallback if MessageID is missing/falsy.
-  if (!/if \(infoResult\?\.MessageID\)/.test(_lFnBody)) {
-    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: defensive guard "if (infoResult?.MessageID)" missing — threading should only attempt with a valid MessageID.');
+  console.log('  PASS (d): formatThreadId helper uses Postmark <uuid@mtasv.net> convention');
+  // (e) Defensive fallback if brokerInputs.latestMessageId missing.
+  if (!/if \(brokerInputs\.latestMessageId\)/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT (e)]: defensive guard "if (brokerInputs.latestMessageId)" missing — threading should only attempt with a valid latest broker MessageID.');
   }
-  // (f) previewHeaders passed to draft preview sendEmail call.
-  if (!/previewResult = await emailService\.sendEmail\([\s\S]*?previewHeaders\s*\)/.test(_lFnBody)) {
-    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT]: previewHeaders not passed to the draft-preview sendEmail call.');
+  console.log('  PASS (e): defensive guard on brokerInputs.latestMessageId present');
+  // (f) brokerHeaders passed to broker auto-send sendEmail call.
+  if (!/brokerSendResult = await emailService\.sendEmail\([\s\S]*?brokerHeaders\s*\)/.test(_lFnBody)) {
+    throw new Error('FAIL [λ-IN-REPLY-TO-FORMAT (f)]: brokerHeaders not passed to the broker auto-send sendEmail call.');
   }
-  console.log('  PASS: previewHeaders array constructed');
-  console.log('  PASS: In-Reply-To + References headers pushed (both — modern client threading)');
-  console.log('  PASS: MessageID formatted as <uuid@mtasv.net> Postmark convention');
-  console.log('  PASS: defensive guard on infoResult?.MessageID present');
-  console.log('  PASS: previewHeaders threaded to draft-preview sendEmail call');
-  console.log('Group λ-IN-REPLY-TO-FORMAT: Postmark threading wired correctly.');
+  console.log('  PASS (f): brokerHeaders threaded to broker auto-send sendEmail call');
+  console.log('Group λ-IN-REPLY-TO-FORMAT: post-R9-A LLLL broker-thread headers wired correctly (admin-thread previewHeaders pattern superseded — different recipient, different threading goal).');
 
-  console.log('\n========== R6-λ-DELAY-PRESENT — 2-second setTimeout between sends ==========');
-  // Capture the chunk of sendCompletionHandoff BETWEEN the two sendEmail calls.
-  // Anchor on the assignment-with-await pattern to avoid matching the literal
-  // "emailService.sendEmail()" text in adjacent comment blocks.
+  console.log('\n========== R6-λ-DELAY-PRESENT — 2-second setTimeout between sends (R9-A preserved) ==========');
+  // R9-A (2026-05-26): pre-R9-A delay was between admin info notice + admin
+  // draft preview (both to admin — Postmark queue-parallelism concern). Post-
+  // R9-A delay is between admin info notice + broker auto-send. Same defense
+  // logic applies: forces sequential Postmark API acceptance; admin sees info
+  // notice before broker confirms receipt.
   const _lFirstSendIdx = _lFnBody.indexOf('const infoResult = await emailService.sendEmail(');
-  const _lSecondSendIdx = _lFnBody.indexOf('const previewResult = await emailService.sendEmail(');
+  const _lSecondSendIdx = _lFnBody.indexOf('const brokerSendResult = await emailService.sendEmail(');
   if (_lFirstSendIdx < 0 || _lSecondSendIdx < 0) {
-    throw new Error(`FAIL [λ-DELAY-PRESENT]: could not locate both sendEmail calls (anchor on assignment-with-await). first=${_lFirstSendIdx}, second=${_lSecondSendIdx}`);
+    throw new Error(`FAIL [λ-DELAY-PRESENT]: could not locate both sendEmail calls (anchor on assignment-with-await). first=${_lFirstSendIdx}, second=${_lSecondSendIdx}. R9-A widening: 2nd send is now brokerSendResult (was previewResult pre-R9-A).`);
   }
   const _lBetween = _lFnBody.slice(_lFirstSendIdx, _lSecondSendIdx);
   // (a) setTimeout-based delay present (Promise wrapper for await).
   if (!/await new Promise\(\(resolve\) => setTimeout\(resolve, 2000\)\)/.test(_lBetween)) {
-    throw new Error('FAIL [λ-DELAY-PRESENT]: 2-second setTimeout-based delay missing between info notice and draft preview sendEmail calls.');
+    throw new Error('FAIL [λ-DELAY-PRESENT]: 2-second setTimeout-based delay missing between info notice and broker auto-send sendEmail calls.');
   }
-  console.log('  PASS: 2-second delay (await new Promise + setTimeout) present between sends');
-  console.log('Group λ-DELAY-PRESENT: localized 2s delay structurally pinned.');
+  console.log('  PASS: 2-second delay (await new Promise + setTimeout) preserved between info notice + broker auto-send (R9-A invariant preserved)');
+  console.log('Group λ-DELAY-PRESENT: localized 2s delay structurally pinned post-R9-A.');
 
   console.log('\n========== R6-λ-CALL-SITE-CHECK — sendCompletionHandoff invocation count unchanged ==========');
   // sendCompletionHandoff is invoked at:
@@ -12783,6 +12833,243 @@ Franco Maione`;
   }
   console.log('  PASS [docblock anchors]: stripPerfectOpener carries Empirical corpus + CASCADE COMPOSITION + SCOPE LOCK Q1 NARROW anchors');
   console.log('Group R8-B-CROSS-CLUSTER-INTEGRATION: R8-A + R5-E + C.7 parser + R6-ζ + R5-C cascade + docblock anchors all preserved post-R8-B.');
+
+  // ════════════════════════════════════════════════════════════════
+  // R9 CLUSTER A — File-completion handoff auto-send (admin SEND gate removal)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R9-A. Franco's R8/S2-Bug-1 + S3-Bug-2
+  // (PERSISTENT cross-scenario): final handoff requires admin SEND
+  // confirmation. Standard fixed language never needs editing; auto-send
+  // required.
+  //
+  // Empirical grounding (scripts/r9alpha-corpus-grep.js):
+  //   Marcus (S2) 996a676c — status=completed, 4-message admin handshake:
+  //     [File Complete] info → Closing Draft Preview → admin SEND → broker close
+  //   Derek (S3) df33cdbf — status=active, AML+PEP never saved (R9-A' docs-
+  //     layer empirical question deferred). R9-A' empirical-grounding redirect
+  //     surfaced two-root structure: workflow gate (R9-A scope) vs Claude
+  //     conversational hallucination (R9-A' separate cluster).
+  //
+  // Q1 (a) NARROW PURE AUTO-SEND: admin sees only [File Complete] info
+  //   notice; broker receives closing email directly. No [Closing Sent]
+  //   confirmation to admin (deferred as future-trigger residual).
+  // Q2 (a) RETAIN APPROVAL_COMPLETED BRANCH WITH R9-A AUTO-SEND DEAD-CODE
+  //   ANNOTATION (R7-A DEFENSE-IN-DEPTH UNREACHABLE precedent). Includes
+  //   COMPOUNDING-BUG GUARD reactivation discipline.
+  // Q3 (a) ATOMIC STATUS TRANSITION INLINE: dealsService.update(deal.id,
+  //   { status: 'completed' }) inside sendCompletionHandoff immediately
+  //   after broker auto-send. Single-source-of-truth co-location (R6-κ
+  //   first-stamp-wins pattern).
+  //
+  // Post-R9-A admin handshake: 2-message (info notice → broker auto-send).
+  //
+  //   R9-A-FLOW-MATRIX: closed-set on new sendCompletionHandoff behavior —
+  //     5-clause structural pin (2 emailService.sendEmail calls + no draft
+  //     fields written + status='completed' atomic + R6-λ delay preserved +
+  //     LLLL headers inlined).
+  //   R9-A-MARCUS-FIXTURE (LOAD-BEARING): triple-anchor on Marcus retest
+  //     fixture — (a) deterministic template via generateCompletionEmail
+  //     unchanged; (b) canonical closing language preserved; (c) info
+  //     notice text reflects auto-send.
+  //   R9-A-INFO-NOTICE-TEXT: notice body contains "closing email has been
+  //     sent to the broker"; does NOT contain "draft preview will follow"
+  //     (pre-R9-A string).
+  //   R9-A-CALL-SITE-WIRING: 6-clause closed-set (sendCompletionHandoff
+  //     signature + invocation count + R6-λ delay + LLLL inline + status
+  //     atomic + no draft writes).
+  //   R9-A-EXECUTE-DRAFT-DEFENSE: executeDraft 'approval_completed' branch
+  //     retained with R9-A AUTO-SEND DEAD-CODE + REACTIVATION NOTE +
+  //     COMPOUNDING-BUG GUARD annotations.
+  //   R9-A-CROSS-CLUSTER-INTEGRATION: R6-λ + LLLL helpers + R6-κ stamp +
+  //     R5-B-3/CCCC dispatcher + R8-A/R8-B all preserved.
+  const _r9aWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _r9aAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+
+  console.log('\n========== R9-A-FLOW-MATRIX — sendCompletionHandoff 5-clause structural pin ==========');
+  // Isolate sendCompletionHandoff body for scoped greps.
+  const _r9aSendHandoffMatch = _r9aWebhookSrc.match(/const sendCompletionHandoff = async[\s\S]+?\n\};/);
+  if (!_r9aSendHandoffMatch) throw new Error('FAIL [R9-A-FLOW-MATRIX]: sendCompletionHandoff function body not located');
+  const _r9aSendHandoffBody = _r9aSendHandoffMatch[0];
+  // (1) Exactly 2 emailService.sendEmail calls inside sendCompletionHandoff
+  //     (info notice to admin + broker auto-send). Pre-R9-A was also 2 (info
+  //     notice + draft preview) but the second has changed destination/shape.
+  const _r9aSendEmailCount = (_r9aSendHandoffBody.match(/emailService\.sendEmail\(/g) || []).length;
+  if (_r9aSendEmailCount !== 2) {
+    throw new Error(`FAIL [R9-A-FLOW (1)]: emailService.sendEmail calls inside sendCompletionHandoff = ${_r9aSendEmailCount}; expected exactly 2 (info notice to admin + broker auto-send).`);
+  }
+  console.log(`  PASS [(1)]: exactly 2 emailService.sendEmail calls (info notice + broker auto-send)`);
+  // (2) No draft_email/draft_subject/draft_action being SET inside sendCompletionHandoff
+  //     (the autonomous close-out path no longer goes through the draft cycle).
+  if (/draft_email:\s*[^,\s]/.test(_r9aSendHandoffBody) ||
+      /draft_subject:\s*[^,\s]/.test(_r9aSendHandoffBody) ||
+      /draft_action:\s*['"]approval_completed['"]/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-FLOW (2)]: sendCompletionHandoff must NOT set draft_email/draft_subject/draft_action='approval_completed' (auto-send bypasses draft cycle).`);
+  }
+  console.log(`  PASS [(2)]: no draft_email / draft_subject / draft_action='approval_completed' written inside sendCompletionHandoff (auto-send bypasses draft cycle)`);
+  // (3) status='completed' set atomically inside sendCompletionHandoff (Q3-(a) verdict).
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-FLOW (3)]: status='completed' atomic transition must be inside sendCompletionHandoff (Q3-(a) verdict).`);
+  }
+  console.log(`  PASS [(3)]: status='completed' set atomically inside sendCompletionHandoff (Q3-(a) atomic co-location)`);
+  // (4) R6-λ 2-second delay preserved (defense against Postmark queue parallelism).
+  if (!/await new Promise\(\(resolve\) => setTimeout\(resolve, 2000\)\)/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-FLOW (4)]: R6-λ 2-second delay (await new Promise/setTimeout 2000) must be preserved inside sendCompletionHandoff.`);
+  }
+  console.log(`  PASS [(4)]: R6-λ 2-second delay between info notice + broker auto-send preserved`);
+  // (5) LLLL broker-thread headers inlined (buildBrokerThreadInputs + buildPreviewThreadChain consumed).
+  if (!/buildBrokerThreadInputs\(allMessages\)/.test(_r9aSendHandoffBody) ||
+      !/buildPreviewThreadChain\(brokerInputs\)/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-FLOW (5)]: LLLL broker-thread header helpers (buildBrokerThreadInputs + buildPreviewThreadChain) must be consumed inside sendCompletionHandoff for broker auto-send threading.`);
+  }
+  console.log(`  PASS [(5)]: LLLL broker-thread helpers inlined (buildBrokerThreadInputs + buildPreviewThreadChain)`);
+  console.log(`Group R9-A-FLOW-MATRIX: 5-clause structural pin (2 sendEmail + no draft writes + atomic status + R6-λ delay + LLLL headers).`);
+
+  console.log('\n========== R9-A-MARCUS-FIXTURE — Marcus retest production replay (LOAD-BEARING) ==========');
+  // Marcus 996a676c-f227-4151-8e19-bf75e180ae85 (status=completed). Pre-R9-A
+  // 4-message admin handshake: [File Complete] info → Closing Draft Preview →
+  // admin SEND → broker close. Post-R9-A 2-message: [File Complete] info →
+  // broker auto-send.
+  // Triple-anchor verification (carry-forward from R8-A/R8-B):
+  //   (a) Deterministic template via generateCompletionEmail (no Claude call;
+  //       fixed canonical language); ai.js:2124 unchanged by R9-A.
+  //   (b) Canonical closing language preserved verbatim.
+  //   (c) Info notice text updated to reflect auto-send.
+  // (a) generateCompletionEmail still deterministic template (no Claude call).
+  const _r9aGenCompletionMatch = _r9aAiSrc.match(/generateCompletionEmail:\s*async[\s\S]+?\n\s*\},/);
+  if (!_r9aGenCompletionMatch) throw new Error('FAIL [R9-A-MARCUS (a)]: generateCompletionEmail not located in ai.js');
+  const _r9aGenCompletionBody = _r9aGenCompletionMatch[0];
+  if (/callClaude\(/.test(_r9aGenCompletionBody) || /claude\./.test(_r9aGenCompletionBody)) {
+    throw new Error('FAIL [R9-A-MARCUS (a)]: generateCompletionEmail must remain a deterministic template (no Claude call); R9-A does not change ai.js:2124');
+  }
+  console.log('  PASS (a): generateCompletionEmail remains deterministic template (no Claude call); ai.js:2124 unchanged');
+  // (b) Canonical closing language preserved verbatim.
+  if (!/The file is now complete and submitted\. Please direct any further questions to Franco at franco@privatemortgagelink\.com\./.test(_r9aGenCompletionBody)) {
+    throw new Error('FAIL [R9-A-MARCUS (b)]: canonical closing language ("The file is now complete and submitted. Please direct any further questions to Franco at franco@privatemortgagelink.com.") missing from generateCompletionEmail');
+  }
+  console.log('  PASS (b): canonical closing language preserved verbatim ("The file is now complete and submitted. Please direct any further questions to Franco at franco@privatemortgagelink.com.")');
+  // (c) Info notice text reflects auto-send.
+  if (!/The closing email has been sent to the broker\./.test(_r9aSendHandoffBody)) {
+    throw new Error('FAIL [R9-A-MARCUS (c)]: info notice body must contain "The closing email has been sent to the broker." (post-R9-A auto-send text)');
+  }
+  console.log('  PASS (c): [File Complete] info notice body reflects auto-send ("The closing email has been sent to the broker.")');
+  console.log('Group R9-A-MARCUS-FIXTURE: triple-anchor pin (deterministic template + canonical language + auto-send info text) — Marcus retest production root structurally closed.');
+
+  console.log('\n========== R9-A-INFO-NOTICE-TEXT — pre-R9-A string ABSENT + post-R9-A string PRESENT ==========');
+  // Pre-R9-A: "Closing draft preview will follow in this thread."
+  // Post-R9-A: "The closing email has been sent to the broker."
+  if (/Closing draft preview will follow in this thread/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-INFO-NOTICE-TEXT]: pre-R9-A "Closing draft preview will follow" string still present in sendCompletionHandoff. Auto-send text replacement incomplete.`);
+  }
+  console.log(`  PASS [pre-R9-A absent]: "Closing draft preview will follow" string removed`);
+  if (!/The closing email has been sent to the broker\./.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-INFO-NOTICE-TEXT]: post-R9-A "The closing email has been sent to the broker." string missing.`);
+  }
+  console.log(`  PASS [post-R9-A present]: "The closing email has been sent to the broker." auto-send text inserted`);
+  // The pre-R9-A "Closing Draft Preview" wrapper template + "Reply SEND to confirm" prompt must also be absent.
+  if (/Closing Draft Preview/.test(_r9aSendHandoffBody) || /Reply SEND to confirm/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-INFO-NOTICE-TEXT]: pre-R9-A "Closing Draft Preview" wrapper or "Reply SEND to confirm" prompt still present. Draft-preview block not fully removed.`);
+  }
+  console.log(`  PASS [draft-preview wrapper absent]: "Closing Draft Preview" + "Reply SEND to confirm" both removed`);
+  console.log(`Group R9-A-INFO-NOTICE-TEXT: pre-R9-A draft-preview text + wrapper fully removed; post-R9-A auto-send text inserted.`);
+
+  console.log('\n========== R9-A-CALL-SITE-WIRING — 6-clause closed-set ==========');
+  // (1) sendCompletionHandoff invocation count = exactly 2 (review-path + active-path; unchanged by R9-A).
+  const _r9aHandoffInvocs = (_r9aWebhookSrc.match(/sendCompletionHandoff\(/g) || []).length;
+  // Definition + 2 call sites = 3 occurrences total.
+  if (_r9aHandoffInvocs !== 3) {
+    throw new Error(`FAIL [R9-A-CW (1)]: sendCompletionHandoff total occurrences = ${_r9aHandoffInvocs}; expected exactly 3 (1 definition + 2 call sites: review-path + active-path).`);
+  }
+  console.log(`  PASS [(1)]: sendCompletionHandoff invocation count unchanged by R9-A (1 def + 2 calls = 3 total occurrences)`);
+  // (2) Signature unchanged (backward compat).
+  if (!/const sendCompletionHandoff = async \(deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail, \{ conditionsFulfilled = false \} = \{\}\) => \{/.test(_r9aWebhookSrc)) {
+    throw new Error(`FAIL [R9-A-CW (2)]: sendCompletionHandoff signature changed (must remain backward compat).`);
+  }
+  console.log(`  PASS [(2)]: sendCompletionHandoff signature unchanged (backward compat preserved)`);
+  // (3) R6-λ delay anchor preserved (cross-cluster verification).
+  if (!/setTimeout\(resolve, 2000\)/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-CW (3)]: R6-λ 2000ms delay anchor missing from sendCompletionHandoff.`);
+  }
+  console.log(`  PASS [(3)]: R6-λ 2000ms delay anchor preserved`);
+  // (4) LLLL inline anchor.
+  if (!/buildBrokerThreadInputs\(allMessages\)/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-CW (4)]: LLLL inline anchor (buildBrokerThreadInputs(allMessages)) missing.`);
+  }
+  console.log(`  PASS [(4)]: LLLL inline anchor (buildBrokerThreadInputs + buildPreviewThreadChain) consumed`);
+  // (5) Atomic status='completed' inside sendCompletionHandoff (Q3-(a) verdict).
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9aSendHandoffBody)) {
+    throw new Error(`FAIL [R9-A-CW (5)]: atomic status='completed' transition missing from sendCompletionHandoff.`);
+  }
+  console.log(`  PASS [(5)]: atomic status='completed' transition inside sendCompletionHandoff (Q3-(a))`);
+  // (6) R9-A annotation anchor in sendCompletionHandoff docblock.
+  if (!/R9-A \(2026-05-26\)/.test(_r9aSendHandoffBody) && !/R9-A \(2026-05-26\)/.test(_r9aWebhookSrc.slice(Math.max(0, _r9aWebhookSrc.indexOf('const sendCompletionHandoff') - 2000), _r9aWebhookSrc.indexOf('const sendCompletionHandoff')))) {
+    throw new Error(`FAIL [R9-A-CW (6)]: R9-A annotation anchor (R9-A (2026-05-26)) missing from sendCompletionHandoff docblock.`);
+  }
+  console.log(`  PASS [(6)]: R9-A docblock annotation anchor present`);
+  console.log(`Group R9-A-CALL-SITE-WIRING: 6-clause closed-set (invoc count + signature + R6-λ delay + LLLL inline + atomic status + R9-A annotation).`);
+
+  console.log('\n========== R9-A-EXECUTE-DRAFT-DEFENSE — approval_completed branch dead-code annotation ==========');
+  // executeDraft's approval_completed branch retained as defense-in-depth
+  // (Q2-(a) verdict). Same precedent as R7-A's DEFENSE-IN-DEPTH UNREACHABLE.
+  // Annotations required:
+  //   (a) "R9-A AUTO-SEND DEAD-CODE" anchor
+  //   (b) "DEFENSE-IN-DEPTH" / "Q2-(a) verdict" anchor
+  //   (c) "R9-A REACTIVATION NOTE" + "COMPOUNDING-BUG GUARD" anchor
+  //   (d) Branch still functionally sets status='completed' (escape-valve preservation)
+  // Locate the approval_completed branch.
+  const _r9aApprovalCompletedBlock = _r9aWebhookSrc.match(/else if \(draftAction === 'approval_completed'\) \{[\s\S]+?\}\s*else \{/);
+  if (!_r9aApprovalCompletedBlock) throw new Error('FAIL [R9-A-EXECUTE-DRAFT-DEFENSE]: executeDraft approval_completed branch not located');
+  const _r9aApprovalCompletedBody = _r9aApprovalCompletedBlock[0];
+  if (!/R9-A AUTO-SEND DEAD-CODE/.test(_r9aApprovalCompletedBody)) {
+    throw new Error('FAIL [R9-A-EXECUTE-DRAFT-DEFENSE (a)]: "R9-A AUTO-SEND DEAD-CODE" anchor missing from approval_completed branch');
+  }
+  console.log('  PASS (a): "R9-A AUTO-SEND DEAD-CODE" annotation anchor present');
+  if (!/DEFENSE-IN-DEPTH/.test(_r9aApprovalCompletedBody) || !/Q2-\(a\)/.test(_r9aApprovalCompletedBody)) {
+    throw new Error('FAIL [R9-A-EXECUTE-DRAFT-DEFENSE (b)]: "DEFENSE-IN-DEPTH" + "Q2-(a) verdict" anchors missing');
+  }
+  console.log('  PASS (b): "DEFENSE-IN-DEPTH" + "Q2-(a) verdict" anchors present');
+  if (!/REACTIVATION NOTE/.test(_r9aApprovalCompletedBody) || !/COMPOUNDING-BUG GUARD/.test(_r9aApprovalCompletedBody)) {
+    throw new Error('FAIL [R9-A-EXECUTE-DRAFT-DEFENSE (c)]: "REACTIVATION NOTE" + "COMPOUNDING-BUG GUARD" anchors missing');
+  }
+  console.log('  PASS (c): "REACTIVATION NOTE" + "COMPOUNDING-BUG GUARD" reactivation discipline anchors present');
+  // (d) Branch behavior unchanged — still sets status='completed' as escape valve.
+  if (!/status:\s*'completed'/.test(_r9aApprovalCompletedBody) || !/draft_email:\s*null/.test(_r9aApprovalCompletedBody)) {
+    throw new Error('FAIL [R9-A-EXECUTE-DRAFT-DEFENSE (d)]: approval_completed branch behavior changed — status=\'completed\' + draft_email:null escape-valve must remain functional');
+  }
+  console.log('  PASS (d): approval_completed branch behavior preserved as defense-in-depth escape valve (status=\'completed\' + draft fields nulled)');
+  console.log('Group R9-A-EXECUTE-DRAFT-DEFENSE: dead-code annotation discipline + branch behavior preserved (R7-A DEFENSE-IN-DEPTH UNREACHABLE precedent).');
+
+  console.log('\n========== R9-A-CROSS-CLUSTER-INTEGRATION — prior arc preserved ==========');
+  // R6-λ ordering defense.
+  if (!/R6-λ \(2026-05-21\) PRESERVED/.test(_r9aSendHandoffBody) && !/R6-λ.*2-second delay/.test(_r9aSendHandoffBody)) {
+    throw new Error('FAIL [R9-A-CC R6-λ]: R6-λ preservation anchor missing from sendCompletionHandoff (2-second delay defense)');
+  }
+  console.log('  PASS [R6-λ]: 2-second delay defense preserved with explicit "R6-λ" preservation anchor in docblock');
+  // LLLL helpers consumed.
+  if (!/buildBrokerThreadInputs\(allMessages\)/.test(_r9aSendHandoffBody) || !/buildPreviewThreadChain\(brokerInputs\)/.test(_r9aSendHandoffBody)) {
+    throw new Error('FAIL [R9-A-CC LLLL]: LLLL helpers (buildBrokerThreadInputs + buildPreviewThreadChain) not consumed in sendCompletionHandoff broker auto-send');
+  }
+  console.log('  PASS [LLLL]: broker-thread header helpers consumed (mirrors executeDraft pattern)');
+  // R6-κ stamp logic preserved.
+  if (!/aml_pep_requested_at: _kStampedAt/.test(_r9aWebhookSrc)) {
+    throw new Error('FAIL [R9-A-CC R6-κ]: aml_pep_requested_at stamp logic missing — R9-A must not regress R6-κ');
+  }
+  console.log('  PASS [R6-κ]: aml_pep_requested_at stamp logic preserved (R9-A does not touch R6-κ post-approval gate)');
+  // R5-B-3/CCCC dispatcher preserved.
+  if (!/computeCompletionDispatch/.test(_r9aWebhookSrc)) {
+    throw new Error('FAIL [R9-A-CC R5-B-3/CCCC]: computeCompletionDispatch dispatcher missing — R9-A must not regress dispatcher');
+  }
+  console.log('  PASS [R5-B-3/CCCC]: computeCompletionDispatch active-branch dispatcher preserved');
+  // R8-A wiring preserved.
+  if (!/_r8aDocReqGreeting/.test(_r9aWebhookSrc) || !/_r8aRejectionGreeting/.test(_r9aWebhookSrc)) {
+    throw new Error('FAIL [R9-A-CC R8-A]: R8-A greeting wiring anchors regressed');
+  }
+  console.log('  PASS [R8-A]: greeting wiring at admin-reply branches preserved');
+  // R8-B stripPerfectOpener preserved.
+  if (!/aiService\.stripPerfectOpener\(/.test(_r9aWebhookSrc)) {
+    throw new Error('FAIL [R9-A-CC R8-B]: stripPerfectOpener post-gen sweep call sites regressed');
+  }
+  console.log('  PASS [R8-B]: stripPerfectOpener post-gen sweep call sites preserved');
+  console.log('Group R9-A-CROSS-CLUSTER-INTEGRATION: R6-λ + LLLL + R6-κ + R5-B-3/CCCC + R8-A + R8-B all preserved post-R9-A.');
 
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask

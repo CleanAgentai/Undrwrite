@@ -934,17 +934,46 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
 // Vienna's broker reply is suppressed in the call site (NNN extended this from
 // BBB-only to the whole under_review/ltv_escalated branch). The next broker-
 // facing message is the closing email after admin SENDs the preview.
+// R9-A (2026-05-26): pure auto-send close-out — admin-SEND-confirmation gate
+// removed. Pre-R9-A: 4-message admin-side handshake (info notice → draft
+// preview → admin SEND → broker close). Post-R9-A: 2-message admin-side
+// (info notice → broker auto-send). Franco's R8/S2-Bug-1 + S3-Bug-2
+// PERSISTENT cross-scenario ask: "Standard fixed language never needs
+// editing; auto-send required." generateCompletionEmail's deterministic
+// template (ai.js:2124) was already correct-language pre-R9-A — only the
+// SEND gate remained as friction. R9-A removes that gate by short-circuiting
+// the draft cycle and directly sending the deterministic closing email to
+// the broker with LLLL broker-thread headers (mirrors executeDraft's
+// header-construction logic, inlined here per single-site usage).
+//
+// Status transition is atomic: dealsService.update(deal.id, { status:
+// 'completed' }) immediately follows the broker auto-send. Single-source-
+// of-truth co-location (R6-κ first-stamp-wins pattern). executeDraft's
+// 'approval_completed' branch (L1429-1431) is now structurally dead-code
+// for the autonomous close-out path but is RETAINED as defense-in-depth
+// (Q2-(a) verdict) — see annotation at that branch.
+//
+// Two-stage verification:
+//   Stage 1 (this commit): deterministic harness pins code-side fix-shape.
+//     R9-A-FLOW-MATRIX + R9-A-MARCUS-FIXTURE + R9-A-INFO-NOTICE-TEXT +
+//     R9-A-CALL-SITE-WIRING + R9-A-EXECUTE-DRAFT-DEFENSE + R9-A-CROSS-
+//     CLUSTER-INTEGRATION.
+//   Stage 2 (Franco retest): next file-completion arc with AML/PEP saved
+//     observes 2-message admin handshake + auto-sent closing with canonical
+//     fixed-template language; NO Closing Draft Preview, NO SEND gate,
+//     status='completed' atomic.
 const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail, { conditionsFulfilled = false } = {}) => {
   const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
 
-  // 1. Informational notice — no APPROVED/DECLINE, no action required.
+  // 1. Informational notice to admin — no action required (R9-A: text
+  // updated from "Closing draft preview will follow" to reflect auto-send).
   const infoSubject = conditionsFulfilled
     ? `[Conditions Fulfilled] ${borrowerName} — File Complete`
     : `[File Complete] ${borrowerName} — Ready to Close`;
   const infoBodyLead = conditionsFulfilled
     ? `Broker submitted the remaining condition docs for <strong>${borrowerName}</strong>. The file is now complete.`
     : `Broker submitted the remaining required docs for <strong>${borrowerName}</strong>. The file is now complete.`;
-  const infoBody = `<p>${infoBodyLead}</p><p>Closing draft preview will follow in this thread.</p>`;
+  const infoBody = `<p>${infoBodyLead}</p><p>The closing email has been sent to the broker.</p>`;
   const infoResult = await emailService.sendEmail(
     config.adminEmail,
     infoSubject,
@@ -953,79 +982,58 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
     []
   );
   await dealsService.saveMessage(deal.id, 'outbound', infoSubject, infoBody, infoResult.MessageID);
-  console.log(`Completion-handoff informational notice sent to admin (conditionsFulfilled=${conditionsFulfilled})`);
+  console.log(`R9-A: completion-handoff informational notice sent to admin (conditionsFulfilled=${conditionsFulfilled})`);
 
   // ────────────────────────────────────────────────────────────────────
-  // R6-λ (2026-05-21): admin email ordering on close-out dispatch.
-  //
-  // Franco's R5 S9 Bug 4 (James Okafor 004cf263): "Closing draft preview
-  // arrived first, File complete notification arrived second" in his admin
-  // inbox — opposite of the code's intended order. Two root mechanisms
-  // can produce this:
-  //   (1) Postmark queue/MTA parallelism — await emailService.sendEmail()
-  //       resolves when Postmark ACCEPTS the API call, not when delivered;
-  //       Postmark may dispatch the two emails to recipient MTA in parallel
-  //       or in any order.
-  //   (2) Email-client display order — Gmail/Outlook may sort by various
-  //       fields (Received header, threading-position, content) that differ
-  //       from server-timestamp order.
-  //
-  // Defense-in-depth fix (per R6-λ Q1 verdict — λ-C):
-  //   (a) 2-second explicit delay between the two sendEmail calls. Forces
-  //       sequential Postmark API acceptance; reduces queue-parallelism risk.
-  //   (b) In-Reply-To header on the draft preview pointing to the file-
-  //       complete notification's MessageID. Email clients thread the two
-  //       as a single conversation; chronological display within thread is
-  //       reliable. Mirrors the cron/dailySummary.js reminder-threading
-  //       pattern (formatMessageId helper).
-  //
-  // Cannot fully verify in harness — depends on Postmark + email-client
-  // behavior. Two-stage verification: (1) deterministic harness pins code-
-  // side fix-shape NOW; (2) Franco's next retest cycle observes correct
-  // close-out ordering in production. Residual (a) acknowledged.
+  // R6-λ (2026-05-21) PRESERVED: 2-second delay between admin info notice
+  // and broker auto-send. Pre-R9-A this delay was between the two ADMIN
+  // emails (info notice + draft preview); post-R9-A the second email is
+  // the BROKER auto-send. Same Postmark queue-parallelism defense applies
+  // — the broker receives the closing after the admin sees the [File
+  // Complete] notification, matching Franco's stated mental model.
   // ────────────────────────────────────────────────────────────────────
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  // 2. Closing draft preview — replicate saveDraftAndPreview pattern (the helper
-  // is scoped inside the admin-reply branch, not reachable here). Sets draft_email,
-  // draft_subject, draft_action; sends preview to admin in-thread. Admin's eventual
-  // SEND on this preview triggers executeDraft with action='approval_completed' →
-  // broker gets the deterministic closing template, status flips to 'completed'.
+  // 2. Auto-send deterministic closing email to broker (R9-A — no draft
+  // cycle). LLLL pattern: subject + In-Reply-To + References derive from
+  // broker-direction message slice so the close-out lands in the broker's
+  // existing conversation. Mirrors executeDraft's header construction
+  // (L1376-1397), inlined here per single-site usage.
   const closingEmail = await aiService.generateCompletionEmail(dealSummary, dealMessages, dealDocs);
-  const borrowerSubject = `Re: ${borrowerName}`;
-  await dealsService.update(deal.id, {
-    draft_email: closingEmail,
-    draft_subject: borrowerSubject,
-    draft_action: 'approval_completed',
-  });
-  const previewLead = conditionsFulfilled ? 'Conditions fulfilled' : 'File complete';
-  const previewHtml = `<h3>Closing Draft Preview — ${borrowerName}</h3>
-<p>${previewLead}. Here's the closing email Vienna will send to <strong>${deal.email}</strong>:</p>
-<hr>
-${closingEmail}
-<hr>
-<p><strong>Reply SEND to confirm, or reply with your edits.</strong></p>`;
-  // R6-λ: In-Reply-To header threading. Postmark MessageIDs are UUIDs without
-  // an @ delimiter; the email wire format requires <uuid@mtasv.net>. Mirrors
-  // formatMessageId in cron/dailySummary.js (kept inline here — single use site).
-  const previewHeaders = [];
-  if (infoResult?.MessageID) {
-    const formattedInfoMessageId = infoResult.MessageID.includes('@')
-      ? `<${infoResult.MessageID}>`
-      : `<${infoResult.MessageID}@mtasv.net>`;
-    previewHeaders.push({ Name: 'In-Reply-To', Value: formattedInfoMessageId });
-    previewHeaders.push({ Name: 'References', Value: formattedInfoMessageId });
+  const allMessages = await dealsService.getMessages(deal.id);
+  const brokerInputs = buildBrokerThreadInputs(allMessages);
+  const chain = buildPreviewThreadChain(brokerInputs);
+  const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+  const brokerHeaders = [];
+  if (brokerInputs.latestMessageId) {
+    brokerHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(brokerInputs.latestMessageId) });
   }
-  const previewResult = await emailService.sendEmail(
-    config.adminEmail,
-    `Re: ${infoSubject}`,
-    previewHtml.replace(/<[^>]*>/g, ''),
-    previewHtml,
+  if (chain.length > 0) {
+    brokerHeaders.push({ Name: 'References', Value: chain.map(formatThreadId).join(' ') });
+  }
+  const anchorSubject = brokerInputs.earliestBrokerSubject
+    ? (brokerInputs.earliestBrokerSubject.startsWith('Re:')
+        ? brokerInputs.earliestBrokerSubject
+        : `Re: ${brokerInputs.earliestBrokerSubject}`)
+    : `Re: ${borrowerName}`;
+  const brokerSendResult = await emailService.sendEmail(
+    deal.email,
+    anchorSubject,
+    closingEmail.replace(/<[^>]*>/g, ''),
+    closingEmail,
     [],
-    previewHeaders
+    brokerHeaders
   );
-  await dealsService.saveMessage(deal.id, 'outbound', `Re: ${infoSubject}`, previewHtml, previewResult.MessageID);
-  console.log(`R6-λ: closing draft preview sent to admin (in-thread via In-Reply-To: ${infoResult?.MessageID ? 'set' : 'no-id'}; 2s delay after info notice)`);
+  await dealsService.saveMessage(deal.id, 'outbound', anchorSubject, closingEmail, brokerSendResult.MessageID);
+  console.log(`R9-A: closing email auto-sent to broker (LLLL: threaded into broker conversation, subject="${anchorSubject}", headers=${brokerHeaders.length})`);
+
+  // 3. Atomic status transition — R9-A co-location with the action that
+  // triggers it (Q3-(a) verdict). Mirrors R6-κ first-stamp-wins pattern.
+  // Pre-R9-A status='completed' was set inside executeDraft's
+  // 'approval_completed' branch (L1430); that branch is now defense-in-
+  // depth dead-code (Q2-(a) verdict + annotation).
+  await dealsService.update(deal.id, { status: 'completed' });
+  console.log(`R9-A: deal status transitioned to 'completed' atomically (single-source-of-truth co-location with broker auto-send)`);
 };
 
 // Group NNN: pure dispatch decision for the under_review/ltv_escalated branch.
@@ -1427,6 +1435,29 @@ ${draftEmail}
             await dealsService.update(existingDeal.id, { status: 'rejected', draft_email: null, draft_subject: null, draft_action: null });
             console.log('Deal status: rejected');
           } else if (draftAction === 'approval_completed') {
+            // R9-A AUTO-SEND DEAD-CODE (2026-05-26): post-R9-A this branch is
+            // structurally unreachable from the autonomous close-out path.
+            // sendCompletionHandoff (webhook.js:937+) now auto-sends the
+            // deterministic closing email to the broker directly and sets
+            // status='completed' inline, bypassing the draft cycle entirely.
+            // The 'approval_completed' draft_action is no longer written by
+            // sendCompletionHandoff, so executeDraft never sees this branch
+            // value from the autonomous flow.
+            //
+            // RETAINED AS DEFENSE-IN-DEPTH (Q2-(a) verdict, R7-A precedent for
+            // DEFENSE-IN-DEPTH UNREACHABLE annotation): branch remains
+            // theoretically reachable via admin-controlled-mode escape valve
+            // or future admin-edit-then-SEND scenarios that explicitly set
+            // draft_action='approval_completed' from an out-of-band path.
+            //
+            // R9-A REACTIVATION NOTE (COMPOUNDING-BUG GUARD — R7-A precedent):
+            // If a future cleanup-commit reactivates this branch as a primary
+            // dispatch path, it MUST ALSO re-implement the status='completed'
+            // atomic transition co-located with the broker send. The current
+            // line below transitions status here ONLY because executeDraft is
+            // the historical pre-R9-A close-out path. Sending the broker email
+            // without flipping status (or vice versa) leaves the deal in a
+            // half-completed state. Co-location is the invariant.
             await dealsService.update(existingDeal.id, { status: 'completed', draft_email: null, draft_subject: null, draft_action: null });
             console.log('Deal status: completed');
           } else {
