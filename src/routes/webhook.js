@@ -1285,21 +1285,82 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
 const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail, { conditionsFulfilled = false } = {}) => {
   const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
 
+  // R9-G (2026-05-26): NEW FEATURE — submission-ready document package
+  // attached to the [File Complete] info notice. Franco S2-Bug-2: at file
+  // completion, admin should receive a bundled package of all borrower
+  // documents to take directly to the lender. R9-G integrates the existing
+  // downloadDocsAsZip helper (deals.js:384, already used at 3 prior sites:
+  // sendEscalationToAdmin / sendPreliminaryReviewToAdmin / legacy FINAL
+  // REVIEW dispatcher post-R7-A DEFENSE-IN-DEPTH UNREACHABLE) into
+  // sendCompletionHandoff — additive deliverable at the existing dispatcher
+  // boundary using existing infrastructure.
+  //
+  // Architectural framing — NEW FEATURE (not new template family):
+  // doesn't fit (1) canonical-map source-hierarchy enforcement (no source
+  // divergence) / (2) state-derived gate signal (no prompt conditional) /
+  // (3) pre-create intake classification (post-completion delivery).
+  // "Augment existing dispatcher with new deliverable using existing
+  // helpers" is generic feature-development, not architectural pattern
+  // requiring a new template family.
+  //
+  // Q1-(a) ATTACH-TO-INFO-NOTICE: single admin email; zip attached to
+  // existing [File Complete] info notice (currently empty attachments
+  // array). No second admin email. Postmark attachment-size limits +
+  // signed-URL alternative deferred per Q1-(c) future-trigger if
+  // empirically surfaced.
+  // Q2-(a) ALL DOCS ON FILE: bundle every classified document in dealDocs.
+  // Marcus fixture = 10 docs (intake + AML + PEP). Admin curates outbound
+  // to lender on their side; R9-G doesn't pre-filter (AML/PEP exclusion
+  // deferred per Q2-(b) future-trigger).
+  // Q3-(a) CATCH + LOG + CONTINUE on zip-helper failure: defense-in-depth
+  // discipline (R9-A "never silently block close-out" principle). Status=
+  // 'completed' still transitions; broker still gets closing email; admin
+  // still gets info notice (without package — admin grabs docs manually).
+  //
+  // Naming convention: `{SafeName}_Complete_Documents.zip` mirrors legacy
+  // FINAL REVIEW path (webhook.js:3496) for cross-call-site grep discipline.
+  let _r9gPackageAttachments = [];
+  if (Array.isArray(dealDocs) && dealDocs.length > 0) {
+    try {
+      const _r9gZipBase64 = await dealsService.downloadDocsAsZip(deal.id, dealDocs);
+      const _r9gSafeName = (borrowerName || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+      _r9gPackageAttachments = [{
+        Name: `${_r9gSafeName}_Complete_Documents.zip`,
+        Content: _r9gZipBase64,
+        ContentType: 'application/zip',
+      }];
+      console.log(`R9-G: submission-ready document package built — ${dealDocs.length} docs in ${_r9gSafeName}_Complete_Documents.zip`);
+    } catch (err) {
+      // Q3-(a) defensive: zip failure should NOT block the close-out flow.
+      // Info notice still fires (without attachment); broker still gets
+      // closing email; status='completed' still transitions. Admin can
+      // grab docs manually from the deal on observing missing attachment.
+      console.error(`R9-G: downloadDocsAsZip failed for deal ${deal.id}, continuing without attachment:`, err.message);
+    }
+  } else {
+    console.log(`R9-G: no docs available for completion package (dealDocs ${Array.isArray(dealDocs) ? 'empty' : 'invalid'}); info notice fires without attachment`);
+  }
+
   // 1. Informational notice to admin — no action required (R9-A: text
-  // updated from "Closing draft preview will follow" to reflect auto-send).
+  // updated from "Closing draft preview will follow" to reflect auto-send.
+  // R9-G: body text now references attached package + attachments array
+  // interpolates _r9gPackageAttachments).
   const infoSubject = conditionsFulfilled
     ? `[Conditions Fulfilled] ${borrowerName} — File Complete`
     : `[File Complete] ${borrowerName} — Ready to Close`;
   const infoBodyLead = conditionsFulfilled
     ? `Broker submitted the remaining condition docs for <strong>${borrowerName}</strong>. The file is now complete.`
     : `Broker submitted the remaining required docs for <strong>${borrowerName}</strong>. The file is now complete.`;
-  const infoBody = `<p>${infoBodyLead}</p><p>The closing email has been sent to the broker.</p>`;
+  const _r9gPackageLine = _r9gPackageAttachments.length > 0
+    ? `<p>The closing email has been sent to the broker. Attached: complete document package ready for lender submission.</p>`
+    : `<p>The closing email has been sent to the broker.</p>`;
+  const infoBody = `<p>${infoBodyLead}</p>${_r9gPackageLine}`;
   const infoResult = await emailService.sendEmail(
     config.adminEmail,
     infoSubject,
     infoBody.replace(/<[^>]*>/g, ''),
     infoBody,
-    []
+    _r9gPackageAttachments
   );
   await dealsService.saveMessage(deal.id, 'outbound', infoSubject, infoBody, infoResult.MessageID);
   console.log(`R9-A: completion-handoff informational notice sent to admin (conditionsFulfilled=${conditionsFulfilled})`);

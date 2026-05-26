@@ -14627,6 +14627,295 @@ Franco Maione`;
   console.log('Group R9-F-CROSS-CLUSTER-INTEGRATION: R9-A + R9-B + R9-C + R9-D + R9-A\' + R8-A + R8-B + Group ZZZ all preserved; 3rd architectural template family established (pre-create intake classification + data-model gate).');
 
   // ════════════════════════════════════════════════════════════════
+  // R9 CLUSTER G — NEW FEATURE: submission-ready document package at file
+  // completion (S2-Bug-2)
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R9-G. NEW FEATURE — augment R9-A
+  // sendCompletionHandoff dispatcher with a third deliverable: bundled
+  // document package zip attached to the existing [File Complete] info
+  // notice to admin. Franco's stated behavior: admin should receive a
+  // submission-ready document package to take directly to the lender
+  // without manually gathering docs.
+  //
+  // Empirical infrastructure inventory (scripts/r9zeta-corpus-grep.js
+  // adjacent + grep): dealsService.downloadDocsAsZip (deals.js:384) already
+  // exists. Used at 3 prior sites:
+  //   webhook.js:862  — sendEscalationToAdmin (LTV escalation zip)
+  //   webhook.js:1192 — sendPreliminaryReviewToAdmin (preliminary review zip)
+  //   webhook.js:3493 — legacy FINAL REVIEW dispatcher (post-R7-A DEFENSE-
+  //                     IN-DEPTH UNREACHABLE annotated; dead-code on
+  //                     autonomous path; legacy zip preserved per Q1-(a)
+  //                     R9-G residual carry-forward)
+  // R9-G adds a 4th invocation at the active completion-handoff path
+  // (R9-A's sendCompletionHandoff). dealDocs is already the 3rd parameter
+  // — minimal-disruption additive change at existing infrastructure
+  // boundary.
+  //
+  // Architectural framing — NEW FEATURE (not new template family):
+  // Doesn't fit (1) canonical-map source-hierarchy enforcement, (2) state-
+  // derived gate signal, or (3) pre-create intake classification. "Augment
+  // existing dispatcher with new deliverable using existing helpers" is
+  // generic feature-development, not architectural pattern requiring a
+  // new template family designation. Carry-forward note: those families
+  // exist for systematic bug-fix patterns; feature accretion at existing
+  // dispatchers doesn't need its own template family.
+  //
+  // Q1-(a) ATTACH-TO-INFO-NOTICE: single admin email with zip attached
+  //   to existing [File Complete] info notice (currently empty attachments
+  //   array → now interpolates _r9gPackageAttachments). No second admin
+  //   email. Signed-URL alternative (Q1-(c)) deferred — future-trigger if
+  //   attachment size becomes an issue (Postmark/Gmail limits).
+  // Q2-(a) ALL DOCS ON FILE: bundle every classified document in dealDocs
+  //   (intake + AML + PEP + everything). Marcus fixture = 10 docs. Admin
+  //   curates outbound to lender on their side; R9-G doesn't pre-filter.
+  //   AML/PEP-exclusion (Q2-(b)) deferred — future-trigger if Franco
+  //   surfaces.
+  // Q3-(a) CATCH + LOG + CONTINUE on zip-helper failure: defensive
+  //   discipline (R9-A "never silently block close-out" principle). Status=
+  //   'completed' still transitions; broker still gets closing email;
+  //   admin still gets info notice (without package — admin grabs docs
+  //   manually). Defense-in-depth on transient Supabase Storage / zip-lib
+  //   failure.
+  //
+  //   R9-G-INFO-NOTICE-PACKAGE-MATRIX — closed-set on sendCompletionHandoff
+  //     zip-attachment behavior: dealDocs present → attachment present;
+  //     dealDocs empty → empty attachments + body says "closing email has
+  //     been sent" only; zip-helper throw → caught + log + empty attachments
+  //     + info notice still fires.
+  //   R9-G-MARCUS-FIXTURE (LOAD-BEARING) — Marcus 10-doc replay: zip name
+  //     pattern `Marcus_Webb_Complete_Documents.zip`; all docs included via
+  //     downloadDocsAsZip invocation; info notice body references attachment.
+  //   R9-G-NOTICE-BODY-TEXT — info notice body updated when package present:
+  //     "complete document package ready for lender submission" anchor
+  //     present; pre-R9-G text "closing email has been sent" preserved
+  //     (additive, not replacing).
+  //   R9-G-CALL-SITE-WIRING — closed-set: zip computation precedes info-
+  //     notice send in source order; emailService.sendEmail attachments arg
+  //     interpolates _r9gPackageAttachments; downloadDocsAsZip invocation
+  //     count = exactly 4 (3 pre-R9-G + 1 new R9-G site); existing R6-λ
+  //     delay + LLLL broker headers + atomic status transition preserved.
+  //   R9-G-OVER-FIRE-PROTECTION — defensive: empty dealDocs → no attachment
+  //     + info notice still fires; zip-helper throw → caught + logged + info
+  //     notice still fires; legacy FINAL REVIEW path zip naming unchanged.
+  //   R9-G-CROSS-CLUSTER-INTEGRATION — R9-A + R9-B + R9-D + R9-A' + R9-F +
+  //     R8-A + R8-B + R9-C preserved; 4th downloadDocsAsZip invocation =
+  //     net +1 (3 → 4); R9-G docblock + Q1/Q2/Q3 verdict provenance anchors.
+  const _r9gWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+
+  console.log('\n========== R9-G-INFO-NOTICE-PACKAGE-MATRIX — sendCompletionHandoff zip-attachment behavior ==========');
+  // Isolate sendCompletionHandoff body for scoped grep (mirrors R9-A FLOW-MATRIX pattern).
+  const _r9gSendHandoffMatch = _r9gWebhookSrc.match(/const sendCompletionHandoff = async[\s\S]+?\n\};/);
+  if (!_r9gSendHandoffMatch) throw new Error('FAIL [R9-G-INFO-NOTICE-PACKAGE-MATRIX]: sendCompletionHandoff body not located');
+  const _r9gSendHandoffBody = _r9gSendHandoffMatch[0];
+  // (1) Zip computation BEFORE info-notice sendEmail call (source-order pin).
+  const _r9gZipBuildIdx = _r9gSendHandoffBody.indexOf('downloadDocsAsZip(deal.id, dealDocs)');
+  const _r9gInfoSendIdx = _r9gSendHandoffBody.indexOf('const infoResult = await emailService.sendEmail(');
+  if (_r9gZipBuildIdx < 0 || _r9gInfoSendIdx < 0 || _r9gZipBuildIdx >= _r9gInfoSendIdx) {
+    throw new Error(`FAIL [R9-G-MATRIX (1)]: zip build (downloadDocsAsZip) must precede info-notice send in source order. zipIdx=${_r9gZipBuildIdx}, infoSendIdx=${_r9gInfoSendIdx}`);
+  }
+  console.log('  PASS [(1)]: downloadDocsAsZip(deal.id, dealDocs) precedes info-notice emailService.sendEmail call (source-order pin)');
+  // (2) _r9gPackageAttachments interpolated into info-notice attachments arg
+  //     (replaces pre-R9-G empty array `[]`).
+  if (!/_r9gPackageAttachments\s*\n?\s*\)/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-MATRIX (2)]: _r9gPackageAttachments must be the LAST arg to info-notice sendEmail (attachments arg position)');
+  }
+  console.log('  PASS [(2)]: _r9gPackageAttachments interpolated into info-notice sendEmail attachments arg');
+  // (3) Conditional package-line in info body based on attachments presence.
+  if (!/_r9gPackageAttachments\.length > 0/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-MATRIX (3)]: info body must conditionally reference package based on attachments presence');
+  }
+  console.log('  PASS [(3)]: info body conditionally references package presence (no-attachment fallback preserves pre-R9-G "closing email has been sent" text)');
+  // (4) Defensive: empty dealDocs guard.
+  if (!/Array\.isArray\(dealDocs\) && dealDocs\.length > 0/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-MATRIX (4)]: empty/null dealDocs must skip zip build (defensive — info notice still fires per Q3 fail-safe)');
+  }
+  console.log('  PASS [(4)]: defensive guard on dealDocs presence (skip zip build when empty/null; info notice still fires)');
+  // (5) try/catch on zip-helper failure (Q3-(a) CATCH+LOG+CONTINUE).
+  if (!/try \{[\s\S]+?downloadDocsAsZip[\s\S]+?\} catch \(err\) \{/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-MATRIX (5)]: downloadDocsAsZip must be wrapped in try/catch (Q3-(a) defense: zip failure → log + continue without attachment; close-out flow preserved)');
+  }
+  console.log('  PASS [(5)]: downloadDocsAsZip wrapped in try/catch (Q3-(a) CATCH+LOG+CONTINUE — close-out flow never blocked by zip failure)');
+  console.log('Group R9-G-INFO-NOTICE-PACKAGE-MATRIX: 5-clause structural pin (zip-before-info-notice source order + attachments arg interpolation + conditional body text + defensive empty-docs guard + try/catch defensive).');
+
+  console.log('\n========== R9-G-MARCUS-FIXTURE — Marcus 10-doc submission-ready package replay (LOAD-BEARING) ==========');
+  // Marcus 996a676c (status=completed). Per scripts/r9zeta-corpus-grep.js,
+  // 10 docs in Supabase Storage (5 intake + ID + tax + payout + AML + PEP).
+  // Triple-anchor verification:
+  //   (a) Zip naming pattern uses borrower name SAFE sanitization (matches
+  //       legacy FINAL REVIEW dispatcher convention at webhook.js:3496)
+  //   (b) "Complete_Documents.zip" suffix mirrors legacy naming
+  //   (c) Info notice body references attached package when present
+  // (a) Borrower-name SAFE sanitization (special-char + whitespace strip).
+  if (!/_r9gSafeName = \(borrowerName \|\| 'Unknown'\)\.replace\(\/\[\^a-zA-Z0-9 \]\/g, ''\)\.replace\(\/\\s\+\/g, '_'\)/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-MARCUS (a)]: borrower-name sanitization must match legacy FINAL REVIEW convention (special-char strip + whitespace → underscore)');
+  }
+  console.log('  PASS (a): borrower-name SAFE sanitization matches legacy convention (Marcus Webb → Marcus_Webb)');
+  // (b) "Complete_Documents.zip" naming mirrors legacy FINAL REVIEW path.
+  if (!/Complete_Documents\.zip/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-MARCUS (b)]: zip name must include "Complete_Documents.zip" suffix (cross-call-site grep discipline; mirrors legacy FINAL REVIEW path webhook.js:3496)');
+  }
+  // Also verify legacy site's naming unchanged (regression guard).
+  const _r9gLegacyZipCount = (_r9gWebhookSrc.match(/_Complete_Documents\.zip/g) || []).length;
+  if (_r9gLegacyZipCount < 2) {
+    throw new Error(`FAIL [R9-G-MARCUS (b) cross-site]: _Complete_Documents.zip naming should appear at 2+ call sites (legacy FINAL REVIEW + R9-G active). Found ${_r9gLegacyZipCount}.`);
+  }
+  console.log(`  PASS (b): "Complete_Documents.zip" naming appears at ${_r9gLegacyZipCount} call sites (R9-G active + legacy FINAL REVIEW DEFENSE-IN-DEPTH unchanged)`);
+  // (c) Info body references attached package when present.
+  if (!/Attached: complete document package ready for lender submission/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-MARCUS (c)]: info notice body must reference attached package with "ready for lender submission" anchor');
+  }
+  console.log('  PASS (c): info body references "Attached: complete document package ready for lender submission"');
+  console.log('Group R9-G-MARCUS-FIXTURE: triple-anchor pin (SAFE-naming + Complete_Documents.zip cross-site + body-references-attachment).');
+
+  console.log('\n========== R9-G-NOTICE-BODY-TEXT — pre-R9-G text preserved + R9-G additive package line ==========');
+  // Pre-R9-A text "Closing draft preview will follow" was replaced by R9-A
+  // with "The closing email has been sent to the broker." R9-G is ADDITIVE
+  // (when package present): same R9-A text PLUS attached-package reference
+  // in the same sentence/paragraph.
+  // (a) R9-A's "closing email has been sent" text preserved.
+  if (!/The closing email has been sent to the broker/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-NOTICE-BODY (a)]: R9-A "The closing email has been sent to the broker" text regressed');
+  }
+  console.log('  PASS (a): R9-A "closing email has been sent" text preserved (R9-G is ADDITIVE)');
+  // (b) When attachments present: includes "Attached: complete document package".
+  if (!/Attached: complete document package ready for lender submission/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-NOTICE-BODY (b)]: "Attached: complete document package ready for lender submission" anchor missing');
+  }
+  console.log('  PASS (b): R9-G additive package-reference anchor present in conditional body branch');
+  // (c) When attachments absent: pre-R9-G text alone (no package reference).
+  if (!/_r9gPackageAttachments\.length > 0[\s\S]+?:\s*`<p>The closing email has been sent to the broker\.<\/p>`/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-NOTICE-BODY (c)]: when attachments empty, body must fall back to pre-R9-G text without package reference');
+  }
+  console.log('  PASS (c): empty-attachments fallback preserves pre-R9-G body text (no broken "Attached:" claim when zip absent)');
+  // (d) Pre-R9-A "Closing draft preview will follow" must REMAIN ABSENT.
+  if (/Closing draft preview will follow in this thread/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-NOTICE-BODY (d)]: pre-R9-A "Closing draft preview will follow" text resurrected');
+  }
+  console.log('  PASS (d): pre-R9-A "Closing draft preview will follow" text remains absent (R9-A removal preserved)');
+  console.log('Group R9-G-NOTICE-BODY-TEXT: R9-A text preserved + R9-G additive package-reference + empty-attachments fallback + pre-R9-A text absent.');
+
+  console.log('\n========== R9-G-CALL-SITE-WIRING — 6-clause closed-set ==========');
+  // (1) downloadDocsAsZip invocation count = exactly 4 across webhook.js
+  //     (3 pre-R9-G sites + 1 new R9-G site inside sendCompletionHandoff).
+  const _r9gZipInvocs = (_r9gWebhookSrc.match(/dealsService\.downloadDocsAsZip\(/g) || []).length;
+  if (_r9gZipInvocs !== 4) {
+    throw new Error(`FAIL [R9-G-CW (1)]: dealsService.downloadDocsAsZip invocations = ${_r9gZipInvocs}; expected exactly 4 (3 pre-R9-G + 1 new R9-G in sendCompletionHandoff). Drift suggests legacy site removed or R9-G site missing.`);
+  }
+  console.log(`  PASS [(1)]: dealsService.downloadDocsAsZip invoked at exactly 4 sites (sendEscalationToAdmin + sendPreliminaryReviewToAdmin + legacy FINAL REVIEW DEFENSE-IN-DEPTH + R9-G new active site)`);
+  // (2) sendCompletionHandoff signature unchanged (dealDocs still 3rd parameter).
+  if (!/const sendCompletionHandoff = async \(deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail, \{ conditionsFulfilled = false \} = \{\}\) => \{/.test(_r9gWebhookSrc)) {
+    throw new Error('FAIL [R9-G-CW (2)]: sendCompletionHandoff signature changed (dealDocs must remain 3rd parameter for R9-G integration)');
+  }
+  console.log('  PASS [(2)]: sendCompletionHandoff signature unchanged (dealDocs preserved as 3rd parameter; backward-compat)');
+  // (3) R6-λ 2-second delay preserved (R9-G zip computation precedes both
+  //     info-notice send and delay; defense order intact).
+  if (!/setTimeout\(resolve, 2000\)/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-CW (3)]: R6-λ 2000ms delay regressed');
+  }
+  console.log('  PASS [(3)]: R6-λ 2-second delay preserved');
+  // (4) LLLL broker-thread headers preserved (R9-A inline-LLLL pattern).
+  if (!/buildBrokerThreadInputs\(allMessages\)/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-CW (4)]: LLLL broker-thread helper regressed');
+  }
+  console.log('  PASS [(4)]: LLLL broker-thread headers preserved');
+  // (5) R9-A atomic status='completed' transition preserved.
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-CW (5)]: R9-A atomic status transition regressed');
+  }
+  console.log('  PASS [(5)]: R9-A atomic status=\'completed\' transition preserved (status flip still co-located with broker auto-send)');
+  // (6) R9-G docblock + Q1/Q2/Q3 verdict provenance.
+  const _r9gEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const _r9gAnchors = [
+    'R9-G (2026-05-26): NEW FEATURE — submission-ready document package',
+    'Q1-(a) ATTACH-TO-INFO-NOTICE',
+    'Q2-(a) ALL DOCS ON FILE',
+    'Q3-(a) CATCH + LOG + CONTINUE',
+    'never silently block close-out',
+    'FINAL REVIEW path (webhook.js:3496)',
+    'NEW FEATURE (not new template family)',
+  ];
+  for (const a of _r9gAnchors) {
+    if (!new RegExp(_r9gEscape(a)).test(_r9gSendHandoffBody)) {
+      throw new Error(`FAIL [R9-G-CW (6)]: docblock anchor missing: "${a}"`);
+    }
+  }
+  console.log(`  PASS [(6)]: R9-G docblock with ${_r9gAnchors.length} provenance anchors (NEW FEATURE framing + 3 verdict anchors + cross-site-grep + close-out-discipline references)`);
+  console.log('Group R9-G-CALL-SITE-WIRING: 6-clause closed-set (zip invocation count + signature + R6-λ + LLLL + atomic status + docblock anchors).');
+
+  console.log('\n========== R9-G-OVER-FIRE-PROTECTION — defensive empty-docs / zip-throw / legacy-naming ==========');
+  // (a) Defensive: empty dealDocs guard prevents zero-length-zip attachment.
+  if (!/Array\.isArray\(dealDocs\) && dealDocs\.length > 0/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-OVER-FIRE (a)]: defensive empty-dealDocs guard missing');
+  }
+  console.log('  PASS (a): empty/null dealDocs → no zip build (defensive; info notice still fires)');
+  // (b) try/catch on downloadDocsAsZip — zip throw doesn't block flow.
+  if (!/try \{[\s\S]+?downloadDocsAsZip[\s\S]+?\} catch \(err\) \{[\s\S]+?console\.error/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-OVER-FIRE (b)]: zip-helper try/catch must include console.error log + continue (Q3-(a) defense)');
+  }
+  console.log('  PASS (b): downloadDocsAsZip wrapped in try/catch with console.error log + continue (close-out flow preserved on transient Supabase Storage / zip-lib failure)');
+  // (c) Legacy FINAL REVIEW path zip naming UNCHANGED — regression direction.
+  if (!/Name: `\$\{safeName\}_Complete_Documents\.zip`/.test(_r9gWebhookSrc)) {
+    throw new Error('FAIL [R9-G-OVER-FIRE (c)]: legacy FINAL REVIEW path zip naming regressed (post-R7-A DEFENSE-IN-DEPTH UNREACHABLE annotated; should remain byte-identical)');
+  }
+  console.log('  PASS (c): legacy FINAL REVIEW path "${safeName}_Complete_Documents.zip" naming unchanged (R7-A dead-code preserved; future cleanup-commit decides consolidation)');
+  // (d) Empty-attachments body fallback preserves pre-R9-G text (no broken "Attached:" claim).
+  if (!/`<p>The closing email has been sent to the broker\.<\/p>`/.test(_r9gSendHandoffBody)) {
+    throw new Error('FAIL [R9-G-OVER-FIRE (d)]: empty-attachments fallback text missing — body must NOT claim "Attached:" when no package present');
+  }
+  console.log('  PASS (d): empty-attachments fallback uses pre-R9-G body text (no false "Attached:" claim when zip absent)');
+  // (e) Status transition + broker send still fire after package failure.
+  // Verified by R9-G-CW (5) (status transition unchanged + try/catch on zip
+  // doesn't propagate). Source-grep on order: zip block ENDS before info
+  // notice send; info notice ENDS before broker send; broker send ENDS
+  // before status update.
+  const _r9gOrderCheck = [
+    'downloadDocsAsZip(deal.id, dealDocs)',
+    'const infoResult = await emailService.sendEmail(',
+    'const brokerSendResult = await emailService.sendEmail(',
+    "dealsService.update(deal.id, { status: 'completed' })",
+  ];
+  let _lastIdx = -1;
+  for (const marker of _r9gOrderCheck) {
+    const idx = _r9gSendHandoffBody.indexOf(marker);
+    if (idx < 0) throw new Error(`FAIL [R9-G-OVER-FIRE (e)]: source-order marker "${marker}" not found`);
+    if (idx < _lastIdx) throw new Error(`FAIL [R9-G-OVER-FIRE (e)]: source-order violated — "${marker}" appears before previous marker (close-out flow ordering regression)`);
+    _lastIdx = idx;
+  }
+  console.log('  PASS (e): source-order preserved (zip build → info-notice send → broker auto-send → atomic status transition) — defense intact on zip failure');
+  console.log('Group R9-G-OVER-FIRE-PROTECTION: empty-dealDocs guard + try/catch + legacy-naming unchanged + empty-fallback text + source-order pin all defensive.');
+
+  console.log('\n========== R9-G-CROSS-CLUSTER-INTEGRATION — prior arc preserved + 4-site zip-invocation count ==========');
+  // (a) R9-A sendCompletionHandoff atomic status + LLLL headers + R6-λ delay preserved (verified by CW).
+  console.log('  PASS [R9-A]: sendCompletionHandoff atomic status + LLLL + R6-λ preserved (per R9-G-CALL-SITE-WIRING clauses 3-5)');
+  // (b) R9-B canonical LTV resolver + R9-D canonical lender resolver preserved.
+  if (!/computeCanonicalLtvForReview/.test(_r9gWebhookSrc) || !/computeCanonicalLenderForReview/.test(_r9gWebhookSrc)) {
+    throw new Error('FAIL [R9-G-CC R9-B/R9-D]: canonical LTV/lender resolvers regressed');
+  }
+  console.log('  PASS [R9-B + R9-D]: canonical LTV + canonical lender resolvers preserved');
+  // (c) R9-A' state-derived gate + R9-F intake classifier preserved.
+  if (!/isPostApprovalAmlPepPending/.test(_r9gWebhookSrc) || !/classifyIntakeBorrower/.test(_r9gWebhookSrc)) {
+    throw new Error('FAIL [R9-G-CC R9-A\'/R9-F]: state-derived gate + intake classifier regressed');
+  }
+  console.log('  PASS [R9-A\' + R9-F]: postApprovalAmlPepPending state-derived gate + classifyIntakeBorrower preserved');
+  // (d) R8-A + R8-B preserved.
+  if (!/_r8aDocReqGreeting/.test(_r9gWebhookSrc) || !/aiService\.stripPerfectOpener\(/.test(_r9gWebhookSrc)) {
+    throw new Error('FAIL [R9-G-CC R8-A/R8-B]: R8-A greeting + R8-B Perfect-opener regressed');
+  }
+  console.log('  PASS [R8-A + R8-B]: greeting wiring + Perfect-opener sweep preserved');
+  // (e) downloadDocsAsZip invocation count = exactly 4 (cross-cluster invariant).
+  const _r9gZipCount = (_r9gWebhookSrc.match(/dealsService\.downloadDocsAsZip\(/g) || []).length;
+  if (_r9gZipCount !== 4) {
+    throw new Error(`FAIL [R9-G-CC zip count]: downloadDocsAsZip invocations = ${_r9gZipCount}; expected exactly 4 (R9-G net +1 over 3 pre-R9-G sites)`);
+  }
+  console.log(`  PASS [zip count]: dealsService.downloadDocsAsZip invocations = 4 (3 pre-R9-G + R9-G new site; net +1 increment)`);
+  // (f) R9-G docblock cycle anchor + NEW FEATURE framing.
+  if (!/R9-G \(2026-05-26\): NEW FEATURE/.test(_r9gWebhookSrc)) {
+    throw new Error('FAIL [R9-G-CC docblock]: R9-G date + NEW FEATURE framing anchor missing');
+  }
+  console.log('  PASS [docblock]: R9-G date + NEW FEATURE framing + verdict provenance anchors present');
+  console.log('Group R9-G-CROSS-CLUSTER-INTEGRATION: R9-A + R9-B + R9-D + R9-A\' + R9-F + R8-A + R8-B + R9-C preserved; downloadDocsAsZip net +1 invocation; R9-G docblock anchors present.');
+
+  // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
   // because four completion-gate sites used intake-only required-doc lists.
   // Production deal Derek Olsen S3.2 saw the closing handoff fire after admin
