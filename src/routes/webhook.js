@@ -834,6 +834,61 @@ const computeCanonicalLtvForReview = (canonicalMap) => {
   };
 };
 
+// R9-D (2026-05-26): canonical existing-mortgage lender resolver for the
+// generateLeadSummary Exit Strategy narrative override block. Same
+// architectural shape as R9-B's computeCanonicalLtvForReview — wraps
+// canonical_map at the consumer boundary; reads from the FILTERED
+// canonical_map (R6-γ filterCanonicalLenderForPayoutOnly already applied
+// upstream) so the lender attribution is mortgage_statement-sourced only.
+//
+// Empirical root (Marcus S2 996a676c retest):
+//   Document corpus scan: Scotiabank appears 13+ times across loan_application
+//   + PNW + credit_bureau (HISTORICAL — broker had Scotiabank mortgage, has
+//   since refinanced to RBC); RBC only in payout statement (4 mentions) + email
+//   body (broker stated). Vienna's preliminary review Exit Strategy section
+//   emitted "his current Scotiabank mortgage matures in October 2027" —
+//   majority-document-weight hallucination absent explicit source-hierarchy
+//   instruction at the narrative-prompt input. R6-γ filter is correctly
+//   applied at Deal Snapshot consumer boundary but generateLeadSummary's
+//   prompt context feeds raw dealSummary + raw document texts to Claude.
+//
+// 4th cycle on canonical-map source-hierarchy enforcement architectural
+// template (carry-forward principle):
+//   R6-γ: filter lender at canonical_map consumer boundary (Deal Snapshot)
+//   R6-α: filter requested_loan_amount source-hierarchy at canonical_map consumer
+//   R9-B: DETERMINISTIC LTV override at narrative-prompt input (consumer-side
+//         filter + prompt block both consume the FILTERED canonical_map for
+//         no-drift)
+//   R9-D: DETERMINISTIC lender override at narrative-prompt input (this commit)
+//
+// Per Q1-(a) NARROW + Q2-(a) FULL ANTI-SOURCE + Q3-(a) PRESERVE UUU FLAGGING
+// CARVE-OUT verdict:
+//   - returns { value: 'RBC', source: <payout filename> } when filtered
+//     canonical_map has mortgage_statement-sourced lender tuple
+//   - returns null when no payout-statement-sourced lender (1st mortgage
+//     clean deal / no existing mortgage / R6-γ-stripped all non-payout)
+//   - downstream prompt block conditionally injected; null → no block,
+//     pre-R9-D LLM behavior preserved on out-of-scope shapes
+//   - UUU cross-source discrepancy detection is PRESERVED (Q3-(a) carve-out
+//     in block content); R9-D enforces OUTPUT discipline on factual lender
+//     statements, not DETECTION discipline on discrepancy flagging
+const computeCanonicalLenderForReview = (canonicalMap) => {
+  const tuples = (canonicalMap && canonicalMap.existing_first_mortgage_lender) || [];
+  if (tuples.length === 0) return null;
+  // R6-γ filter has already stripped non-mortgage_statement-sourced tuples
+  // at the caller boundary (_bFilteredCanonicalMap). Take the first tuple's
+  // value. If multiple payout statements exist for the same deal (rare —
+  // refinance-in-flight), the canonical-map tuple-ordering reflects extract
+  // order; first wins (same semantic as R9-B canonical LTV resolver +
+  // R6-γ rendering).
+  const first = tuples.find(t => t && t.value);
+  if (!first) return null;
+  return {
+    value: first.value,
+    source: first.source || null,
+  };
+};
+
 const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv, options = {}) => {
   // LTV ≤ 80% confirmed — send Franco preliminary review with docs
   console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco${options.isUpdate ? ' (updated)' : ''}`);
@@ -917,13 +972,19 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // emit a blank LTV in the subject; out-of-scope shapes preserved).
   const _r9bCanonicalLtv = computeCanonicalLtvForReview(_bFilteredCanonicalMap);
 
+  // R9-D (2026-05-26): canonical existing-mortgage lender for Exit Strategy
+  // narrative override block. Reads from the same FILTERED canonical_map as
+  // R9-B (R6-γ filter applied upstream); no drift between Deal Snapshot
+  // lender attribution and Exit Strategy lender claim.
+  const _r9dCanonicalLender = computeCanonicalLenderForReview(_bFilteredCanonicalMap);
+
   let leadSummary = await aiService.generateLeadSummary(
     dealSummary,
     ownershipType,
     dealDocs,
     missingDocs,
     labeledMessages,
-    { noSnapshot: true, canonicalLtvOverride: _r9bCanonicalLtv }
+    { noSnapshot: true, canonicalLtvOverride: _r9bCanonicalLtv, canonicalLenderOverride: _r9dCanonicalLender }
   );
   // Post-Claude: strip any residual Vienna-emitted Snapshot block + prepend the JS canonical Snapshot.
   const _snapStrip = aiService.stripVienna_DealSnapshot(leadSummary);
@@ -3220,4 +3281,6 @@ module.exports.__test__ = {
   computeAdminBanner,
   // R9-B (2026-05-26): canonical LTV resolver (combined preferred, standalone fallback)
   computeCanonicalLtvForReview,
+  // R9-D (2026-05-26): canonical existing-mortgage lender resolver (R6-γ filtered)
+  computeCanonicalLenderForReview,
 };

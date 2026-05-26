@@ -13330,10 +13330,16 @@ Franco Maione`;
   }
   console.log('  PASS [(2)]: computeCanonicalLtvForReview invoked inside sendPreliminaryReviewToAdmin with filtered canonical_map (consistency with Deal Snapshot)');
   // (3) generateLeadSummary opts accept canonicalLtvOverride.
-  if (!/canonicalLtvOverride = null \} = opts/.test(_r9bAiSrc)) {
+  // R9-D (2026-05-26) bounded widening: regex relaxed from requiring `}` to
+  // immediately follow `canonicalLtvOverride = null` (was last opt pre-R9-D)
+  // to allowing additional opts to follow (R9-D adds canonicalLenderOverride
+  // = null sibling opt). R9-B invariant (canonicalLtvOverride destructured
+  // from opts) PRESERVED; only the closing-brace adjacency changed.
+  // Same precedent as R9-A's R5A-STATUS-TRANSITION proximity widening 200→2000.
+  if (!/canonicalLtvOverride = null/.test(_r9bAiSrc)) {
     throw new Error('FAIL [R9-B-CW (3)]: generateLeadSummary opts must destructure canonicalLtvOverride = null from opts');
   }
-  console.log('  PASS [(3)]: generateLeadSummary opts destructure canonicalLtvOverride');
+  console.log('  PASS [(3)]: generateLeadSummary opts destructure canonicalLtvOverride (R9-D bounded widening: sibling opts allowed to follow before closing brace)');
   // (4) Subject line uses canonical-preferred fallback chain.
   if (!/const _r9bSubjectLtv = _r9bCanonicalLtv \? _r9bCanonicalLtv\.value : ltv;/.test(_r9bSendPrelimBody)) {
     throw new Error('FAIL [R9-B-CW (4)]: subject line must use canonical-preferred fallback chain (_r9bCanonicalLtv ? .value : ltv)');
@@ -13694,6 +13700,345 @@ Franco Maione`;
   }
   console.log('  PASS [docblock provenance]: R9-C date + Q3-(a) verdict anchors present');
   console.log('Group R9-C-CROSS-CLUSTER-INTEGRATION: R6-δ with-province + R6-δ informal + R9-A + R9-B + R8-A + R8-B + R9-C docblock all preserved.');
+
+  // ════════════════════════════════════════════════════════════════
+  // R9 CLUSTER D — Exit Strategy lender hallucination
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R9-D. Empirical root
+  // (scripts/r9delta-corpus-grep.js — Marcus S2 996a676c retest):
+  //
+  // Marcus Exit Strategy emitted "his current Scotiabank mortgage matures in
+  // October 2027" when broker stated "Existing mortgage: RBC" + submitted
+  // RBC_Payout_Statement_Marcus_Webb.pdf. Document corpus scan revealed:
+  //   loan_application: 7 "Scotiabank" mentions (page-3 annotation)
+  //   PNW_Statement:    6 "Scotiabank" mentions (same refs as loan app)
+  //   credit_bureau:    2 "Scotiabank" mentions ("Scotiabank Mortgage" + LOC)
+  //   payout statement: 0 Scotiabank / 4 "RBC" mentions ("RBC Royal Bank")
+  //   email body:       0 Scotiabank / 1 "RBC" per inbound
+  // Not pure confabulation — majority-document-weight hallucination (13 vs 4)
+  // absent explicit source-hierarchy instruction at narrative-prompt input.
+  // Per R6-γ canonical principle: payout statement is authoritative for the
+  // borrower's CURRENT existing mortgage lender (loan app + PNW + credit
+  // bureau are HISTORICAL — broker had Scotiabank, refinanced to RBC, docs
+  // weren't updated).
+  //
+  // R6-γ filterCanonicalLenderForPayoutOnly was correctly applied at the
+  // Deal Snapshot consumer boundary (4 invocations in webhook.js — all
+  // renderDealSnapshot sites). But generateLeadSummary's prompt context
+  // feeds raw dealSummary + raw document texts to Claude — no R6-γ filter
+  // at the narrative-prompt input. R9-D adds the override block at that
+  // boundary (mirrors R9-B canonical LTV pattern).
+  //
+  // 4th cycle on canonical-map source-hierarchy enforcement architectural
+  // template:
+  //   R6-γ: filter lender at canonical_map consumer boundary (Deal Snapshot)
+  //   R6-α: filter requested_loan_amount source-hierarchy at consumer
+  //   R9-B: DETERMINISTIC LTV override at narrative-prompt input
+  //   R9-D: DETERMINISTIC lender override at narrative-prompt input (this commit)
+  //
+  // Q1 (a) NARROW SCOPE: generateLeadSummary lender override only.
+  //   Exit Strategy is the load-bearing surface per Franco's bug report.
+  //   Other generators not extended pre-empirical-surfacing.
+  // Q2 (a) FULL ANTI-SOURCE WITH HISTORICAL CARVE-OUT: explicit refutation of
+  //   "loan_application / PNW / credit_bureau may show different lender —
+  //   those are HISTORICAL". Numerical asymmetry (13 vs 4) is exactly why
+  //   the LLM picks Scotiabank — majority document weight wins absent
+  //   explicit source-hierarchy instruction.
+  // Q3 (a) PRESERVE UUU FLAGGING CARVE-OUT: override constrains FACTUAL
+  //   "current lender" statements (Exit Strategy / Loan Purpose / Borrower
+  //   Overview); UUU cross-source discrepancy detection in Risk Factors is
+  //   preserved (Franco needs that cross-source divergence signal).
+  //
+  //   R9-D-LENDER-RESOLVER-MATRIX — closed-set on computeCanonicalLenderForReview:
+  //     returns lender from filtered canonical_map when mortgage_statement-
+  //     sourced tuple exists; returns null on empty / null / 1st-mortgage-
+  //     clean / no-payout-source defensive cases.
+  //   R9-D-MARCUS-FIXTURE (LOAD-BEARING) — triple-anchor:
+  //     (a) resolver returns "RBC" from Marcus's filtered canonical_map shape;
+  //     (b) override block renders with anti-source language + UUU carve-out;
+  //     (c) FILTERED canonical_map consumption (R6-γ + R9-B precedent — same
+  //         source-hierarchy filter as Deal Snapshot, no drift between
+  //         Snapshot lender attribution and Exit Strategy lender claim).
+  //   R9-D-OVERRIDE-BLOCK-ANCHORS — block contains: explicit anti-source
+  //     refutation listing loan_application / PNW / credit_bureau by name;
+  //     R6-γ source-hierarchy attribution; UUU discrepancy-flagging carve-out
+  //     anchor; "DO NOT use any other lender name" anti-source pattern.
+  //   R9-D-CALL-SITE-WIRING — 5-clause closed-set (helper defined + exported +
+  //     invoked with filtered canonical_map + opts threaded + conditional
+  //     injection on non-null).
+  //   R9-D-OVER-FIRE-PROTECTION — clean 1st mortgage (no payout statement
+  //     source) → null; empty/null canonical_map → null; no
+  //     existing_first_mortgage_lender tuples → null; tuple with no value → null.
+  //   R9-D-CROSS-CLUSTER-INTEGRATION — R6-γ filter pipeline preserved +
+  //     R9-B canonical LTV override preserved + R9-A/R9-C/R8-A/R8-B preserved
+  //     + R9-D docblock provenance anchors.
+  const _r9dWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _r9dAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const { computeCanonicalLenderForReview: _r9dResolve } = require('./src/routes/webhook').__test__;
+
+  console.log('\n========== R9-D-LENDER-RESOLVER-MATRIX — computeCanonicalLenderForReview truth-table ==========');
+  const _r9dResolverCases = [
+    {
+      label: 'Marcus shape: payout-source tuple present → returns "RBC"',
+      input: {
+        existing_first_mortgage_lender: [
+          { value: 'RBC', source: 'RBC_Payout_Statement_Marcus_Webb.pdf', classification: 'mortgage_statement' },
+        ],
+      },
+      expected: { value: 'RBC', source: 'RBC_Payout_Statement_Marcus_Webb.pdf' },
+    },
+    {
+      label: 'Single tuple no source (defensive): returns value with source null',
+      input: {
+        existing_first_mortgage_lender: [
+          { value: 'TD', source: null, classification: 'mortgage_statement' },
+        ],
+      },
+      expected: { value: 'TD', source: null },
+    },
+    {
+      label: 'Multi-tuple post-R6-γ filter: takes first valid value (refinance-in-flight)',
+      input: {
+        existing_first_mortgage_lender: [
+          { value: 'RBC', source: 'RBC_Payout_2026.pdf', classification: 'mortgage_statement' },
+          { value: 'Scotiabank', source: 'Old_Scotia_Payout_2024.pdf', classification: 'mortgage_statement' },
+        ],
+      },
+      expected: { value: 'RBC', source: 'RBC_Payout_2026.pdf' },
+    },
+    {
+      label: 'Empty array (1st-mortgage clean deal): null',
+      input: { existing_first_mortgage_lender: [] },
+      expected: null,
+    },
+    {
+      label: 'Missing field: null',
+      input: {},
+      expected: null,
+    },
+    {
+      label: 'Null canonical_map: null',
+      input: null,
+      expected: null,
+    },
+    {
+      label: 'Undefined canonical_map: null',
+      input: undefined,
+      expected: null,
+    },
+    {
+      label: 'Tuple with null value (defensive): null',
+      input: {
+        existing_first_mortgage_lender: [{ value: null, source: 'x.pdf', classification: 'mortgage_statement' }],
+      },
+      expected: null,
+    },
+  ];
+  let _r9dResolverFails = 0;
+  for (const tc of _r9dResolverCases) {
+    const got = _r9dResolve(tc.input);
+    let pass = true;
+    let reason = '';
+    if (tc.expected === null) {
+      if (got !== null) { pass = false; reason = `expected null, got ${JSON.stringify(got)}`; }
+    } else {
+      if (!got) { pass = false; reason = `expected ${JSON.stringify(tc.expected)}, got null`; }
+      else {
+        if (got.value !== tc.expected.value) { pass = false; reason = `value expected=${tc.expected.value}, got=${got.value}`; }
+        if (got.source !== tc.expected.source) { pass = false; reason += `; source expected=${tc.expected.source}, got=${got.source}`; }
+      }
+    }
+    if (!pass) { _r9dResolverFails++; console.log(`  FAIL [${tc.label}]: ${reason}`); }
+    else console.log(`  PASS [${tc.label}]${got ? ` → ${got.value}` : ' → null'}`);
+  }
+  if (_r9dResolverFails > 0) throw new Error(`FAIL [R9-D-LENDER-RESOLVER-MATRIX]: ${_r9dResolverFails}/${_r9dResolverCases.length} cases failed.`);
+  console.log(`Group R9-D-LENDER-RESOLVER-MATRIX: ${_r9dResolverCases.length}/${_r9dResolverCases.length} cases pass (positive + defensive + multi-tuple + over-fire negatives).`);
+
+  console.log('\n========== R9-D-MARCUS-FIXTURE — Marcus retest Exit Strategy hallucination closure (LOAD-BEARING) ==========');
+  // Marcus 996a676c filtered canonical_map state (post-R6-γ filter):
+  //   existing_first_mortgage_lender: [{value:'RBC', source:'RBC_Payout_Statement_Marcus_Webb.pdf', classification:'mortgage_statement'}]
+  // Pre-R9-D: Vienna's Exit Strategy emitted "Scotiabank" (13+ refs from
+  // loan_application + PNW + credit_bureau majority weight). Post-R9-D:
+  // override block forces canonical "RBC" + UUU carve-out preserves
+  // cross-source discrepancy flagging.
+  // Triple-anchor verification (carry-forward from R8-A/R8-B/R9-A/R9-B/R9-C):
+  const _r9dMarcusFilteredMap = {
+    existing_first_mortgage_lender: [
+      { value: 'RBC', source: 'RBC_Payout_Statement_Marcus_Webb.pdf', classification: 'mortgage_statement' },
+    ],
+  };
+  // (a) Resolver returns "RBC" from Marcus's filtered canonical_map shape.
+  const _r9dMarcusResolved = _r9dResolve(_r9dMarcusFilteredMap);
+  if (!_r9dMarcusResolved || _r9dMarcusResolved.value !== 'RBC') {
+    throw new Error(`FAIL [R9-D-MARCUS (a)]: resolver expected {value: 'RBC'}, got ${JSON.stringify(_r9dMarcusResolved)}`);
+  }
+  console.log('  PASS (a): computeCanonicalLenderForReview(Marcus filtered canonical_map) → {value: "RBC", source: "RBC_Payout_Statement_Marcus_Webb.pdf"}');
+  // (b) Override block renders with anti-source language + UUU carve-out.
+  if (!/CRITICAL — CANONICAL EXISTING MORTGAGE LENDER \(R9-D JS-deterministic/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-MARCUS (b)]: R9-D override block header missing in ai.js generateLeadSummary');
+  }
+  if (!/DO NOT use any other lender name from the document corpus for the borrower's current existing mortgage/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-MARCUS (b)]: override block must contain explicit anti-source "DO NOT use any other lender name" anchor (Q2-(a) FULL ANTI-SOURCE)');
+  }
+  if (!/loan_application \/ pnw_statement \/ credit_report \/ credit_bureau show a different lender/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-MARCUS (b)]: override block must explicitly name competing source documents (loan_application + PNW + credit_bureau) per Q2-(a) full anti-source verdict');
+  }
+  if (!/those are HISTORICAL records/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-MARCUS (b)]: override block must contain HISTORICAL-records-carve-out (refinance-history anchor)');
+  }
+  console.log('  PASS (b): override block contains anti-source language + historical-records carve-out + competing-source naming (Q2-(a) FULL ANTI-SOURCE)');
+  // (c) FILTERED canonical_map consumption — R6-γ + R9-B precedent.
+  const _r9dSendPrelim = _r9dWebhookSrc.match(/const sendPreliminaryReviewToAdmin = async[\s\S]+?\n\};/);
+  if (!_r9dSendPrelim) throw new Error('FAIL [R9-D-MARCUS (c)]: sendPreliminaryReviewToAdmin body not located');
+  const _r9dSendPrelimBody = _r9dSendPrelim[0];
+  if (!/const _r9dCanonicalLender = computeCanonicalLenderForReview\(_bFilteredCanonicalMap\)/.test(_r9dSendPrelimBody)) {
+    throw new Error('FAIL [R9-D-MARCUS (c)]: computeCanonicalLenderForReview must be invoked with _bFilteredCanonicalMap (same filtered map as Deal Snapshot + R9-B — no drift across surfaces)');
+  }
+  console.log('  PASS (c): computeCanonicalLenderForReview invoked with _bFilteredCanonicalMap (R6-γ + R9-B precedent — same source-hierarchy filter as Deal Snapshot)');
+  console.log('Group R9-D-MARCUS-FIXTURE: Marcus retest Exit Strategy lender hallucination structurally closed (RBC canonical authoritative; historical Scotiabank refs refuted via anti-source language).');
+
+  console.log('\n========== R9-D-OVERRIDE-BLOCK-ANCHORS — anti-source + UUU carve-out anchors ==========');
+  // Block must contain ALL load-bearing anchors per Q2-(a) full anti-source +
+  // Q3-(a) UUU carve-out verdicts.
+  const _r9dRequiredAnchors = [
+    { anchor: 'CANONICAL EXISTING MORTGAGE LENDER', label: 'R9-D block header' },
+    { anchor: 'JS-deterministic, USE THIS, NOT raw document scans', label: 'R6-α "DETERMINISTIC USE THIS" pattern' },
+    { anchor: 'R6-γ source-hierarchy', label: 'R6-γ source-hierarchy provenance' },
+    { anchor: 'authoritative for the CURRENT lender', label: 'payout-statement-authoritative principle' },
+    { anchor: 'Use this for all FACTUAL lender references in Exit Strategy', label: 'factual-only constraint (Exit Strategy primary surface)' },
+    { anchor: 'DO NOT use any other lender name', label: 'anti-source instruction (Q2-(a))' },
+    { anchor: 'loan_application \\/ pnw_statement \\/ credit_report \\/ credit_bureau', label: 'competing-source enumeration (Q2-(a))' },
+    { anchor: 'HISTORICAL records', label: 'historical-doc carve-out (refinance-history explanation)' },
+    { anchor: 'broker documentation may not be updated', label: 'why-divergence-occurs explanation' },
+    { anchor: 'CARVE-OUT — preserve UUU cross-source discrepancy flagging', label: 'Q3-(a) UUU FLAGGING preservation' },
+    { anchor: 'cross-source discrepancy DETECTION is preserved', label: 'detection-vs-output discipline distinction' },
+    { anchor: 'important risk information for the underwriter', label: 'Franco-needs-this signal' },
+  ];
+  for (const { anchor, label } of _r9dRequiredAnchors) {
+    if (!new RegExp(anchor).test(_r9dAiSrc)) {
+      throw new Error(`FAIL [R9-D-OVERRIDE-BLOCK-ANCHORS]: missing anchor "${anchor}" (${label})`);
+    }
+    console.log(`  PASS [${label}]: anchor present`);
+  }
+  console.log(`Group R9-D-OVERRIDE-BLOCK-ANCHORS: ${_r9dRequiredAnchors.length}/${_r9dRequiredAnchors.length} load-bearing anchors present (Q2-(a) anti-source + Q3-(a) UUU carve-out fully wired).`);
+
+  console.log('\n========== R9-D-CALL-SITE-WIRING — 5-clause closed-set ==========');
+  // (1) Helper defined + exported via __test__.
+  if (!/const computeCanonicalLenderForReview = \(canonicalMap\) =>/.test(_r9dWebhookSrc)) {
+    throw new Error('FAIL [R9-D-CW (1)]: computeCanonicalLenderForReview helper definition missing from webhook.js');
+  }
+  if (!/computeCanonicalLenderForReview,?/.test(_r9dWebhookSrc.slice(_r9dWebhookSrc.indexOf('module.exports.__test__')))) {
+    throw new Error('FAIL [R9-D-CW (1)]: computeCanonicalLenderForReview must be exported via __test__');
+  }
+  console.log('  PASS [(1)]: computeCanonicalLenderForReview defined + exported via __test__');
+  // (2) Invoked with filtered canonical_map (R6-γ source-hierarchy consistency).
+  if (!/const _r9dCanonicalLender = computeCanonicalLenderForReview\(_bFilteredCanonicalMap\)/.test(_r9dSendPrelimBody)) {
+    throw new Error('FAIL [R9-D-CW (2)]: computeCanonicalLenderForReview must be invoked with _bFilteredCanonicalMap (R6-γ filter applied upstream — consistency with Deal Snapshot + R9-B)');
+  }
+  console.log('  PASS [(2)]: invoked with _bFilteredCanonicalMap (R6-γ + R9-B precedent — no drift across surfaces)');
+  // (3) generateLeadSummary opts destructure canonicalLenderOverride.
+  if (!/canonicalLenderOverride = null \} = opts/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-CW (3)]: generateLeadSummary opts must destructure canonicalLenderOverride = null');
+  }
+  console.log('  PASS [(3)]: generateLeadSummary opts destructure canonicalLenderOverride');
+  // (4) Opt threaded from caller.
+  if (!/canonicalLenderOverride: _r9dCanonicalLender/.test(_r9dSendPrelimBody)) {
+    throw new Error('FAIL [R9-D-CW (4)]: generateLeadSummary call site must thread canonicalLenderOverride: _r9dCanonicalLender opt');
+  }
+  console.log('  PASS [(4)]: opt threaded from sendPreliminaryReviewToAdmin to generateLeadSummary');
+  // (5) Override block conditional on opt non-null.
+  if (!/if \(canonicalLenderOverride && canonicalLenderOverride\.value\)/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-CW (5)]: override block must be conditionally injected only when canonicalLenderOverride is non-null with non-null value');
+  }
+  console.log('  PASS [(5)]: override block conditional injection (defensive — empty/null opt → no block, pre-R9-D behavior preserved)');
+  console.log('Group R9-D-CALL-SITE-WIRING: 5-clause closed-set (helper + invocation with filtered map + opts destructure + opt threading + conditional injection).');
+
+  console.log('\n========== R9-D-OVER-FIRE-PROTECTION — defensive null cases ==========');
+  // (a) 1st-mortgage clean deal — existing_first_mortgage_lender=[] → null
+  //     (no override block injected → pre-R9-D behavior preserved on 1st
+  //     mortgages where no existing mortgage lender exists).
+  const _r9d1stMortgage = _r9dResolve({ existing_first_mortgage_lender: [] });
+  if (_r9d1stMortgage !== null) {
+    throw new Error(`FAIL [R9-D-OVER-FIRE (a)]: 1st-mortgage clean deal (existing_first_mortgage_lender=[]) → must return null. Got ${JSON.stringify(_r9d1stMortgage)}`);
+  }
+  console.log('  PASS (a): 1st-mortgage clean deal (existing=[]) → null (no override block on 1st mortgages — pre-R9-D behavior preserved)');
+  // (b) Missing field → null.
+  if (_r9dResolve({}) !== null) {
+    throw new Error('FAIL [R9-D-OVER-FIRE (b)]: missing field must return null');
+  }
+  console.log('  PASS (b): missing field → null');
+  // (c) Null/undefined map → null.
+  if (_r9dResolve(null) !== null || _r9dResolve(undefined) !== null) {
+    throw new Error('FAIL [R9-D-OVER-FIRE (c)]: null/undefined map must return null');
+  }
+  console.log('  PASS (c): null/undefined canonical_map → null');
+  // (d) Defensive: null-value tuple → null.
+  const _r9dNullVal = _r9dResolve({
+    existing_first_mortgage_lender: [{ value: null, source: 'x.pdf', classification: 'mortgage_statement' }],
+  });
+  if (_r9dNullVal !== null) {
+    throw new Error(`FAIL [R9-D-OVER-FIRE (d)]: null-value tuple must return null. Got ${JSON.stringify(_r9dNullVal)}`);
+  }
+  console.log('  PASS (d): tuple with null value → null (defensive)');
+  // (e) Override block ABSENT in ai.js prompt when opt null at runtime.
+  //     Verify the conditional guard prevents block injection.
+  if (!/if \(canonicalLenderOverride && canonicalLenderOverride\.value\) \{/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-OVER-FIRE (e)]: conditional guard `if (canonicalLenderOverride && .value)` missing — defensive null → no block injection');
+  }
+  console.log('  PASS (e): conditional guard `if (canonicalLenderOverride && .value)` ensures no block when resolver returns null');
+  console.log('Group R9-D-OVER-FIRE-PROTECTION: 1st-mortgage clean deal + null map + null-value tuple + conditional injection guard all defensive.');
+
+  console.log('\n========== R9-D-CROSS-CLUSTER-INTEGRATION — prior arc preserved ==========');
+  // (a) R6-γ filterCanonicalLenderForPayoutOnly preserved at the upstream
+  //     consumer boundary (R9-D depends on this filter being applied to the
+  //     canonical_map before computeCanonicalLenderForReview reads it).
+  const _r6gFilterInvocs = (_r9dWebhookSrc.match(/filterCanonicalLenderForPayoutOnly/g) || []).length;
+  if (_r6gFilterInvocs < 4) {
+    throw new Error(`FAIL [R9-D-CC R6-γ]: filterCanonicalLenderForPayoutOnly invocations = ${_r6gFilterInvocs}; expected >= 4 (Deal Snapshot consumer sites). R9-D depends on this filter being upstream of computeCanonicalLenderForReview.`);
+  }
+  console.log(`  PASS [R6-γ]: filterCanonicalLenderForPayoutOnly preserved at ${_r6gFilterInvocs} consumer sites`);
+  // (b) R9-B canonical LTV resolver preserved.
+  if (!/computeCanonicalLtvForReview/.test(_r9dWebhookSrc)) {
+    throw new Error('FAIL [R9-D-CC R9-B]: computeCanonicalLtvForReview regressed');
+  }
+  console.log('  PASS [R9-B]: canonical LTV resolver preserved (sibling override pattern)');
+  // (c) Both R9-B + R9-D override blocks interpolated in generateLeadSummary prompt.
+  if (!/r9bCanonicalLtvOverrideBlock/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-CC R9-B block]: R9-B canonical LTV override block missing from ai.js');
+  }
+  if (!/r9dCanonicalLenderOverrideBlock/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-CC R9-D block]: R9-D canonical lender override block missing from ai.js');
+  }
+  if (!/\$\{r9bCanonicalLtvOverrideBlock\}\$\{r9dCanonicalLenderOverrideBlock\}/.test(_r9dAiSrc)) {
+    throw new Error('FAIL [R9-D-CC block interpolation order]: both override blocks must be interpolated consecutively (R9-B then R9-D) in generateLeadSummary prompt');
+  }
+  console.log('  PASS [R9-B + R9-D blocks]: both interpolated consecutively in generateLeadSummary prompt');
+  // (d) R9-A sendCompletionHandoff atomic status preserved.
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9dWebhookSrc)) {
+    throw new Error('FAIL [R9-D-CC R9-A]: sendCompletionHandoff atomic status regressed');
+  }
+  console.log('  PASS [R9-A]: sendCompletionHandoff atomic status preserved');
+  // (e) R9-C extractor extension preserved (both branches with inlineCityOnlyM).
+  const _r9dCfSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/canonical-fields.js'), 'utf8');
+  const _r9cPatternCount = (_r9dCfSrc.match(/inlineCityOnlyM/g) || []).length;
+  if (_r9cPatternCount < 2) {
+    throw new Error(`FAIL [R9-D-CC R9-C]: R9-C inlineCityOnlyM declarations = ${_r9cPatternCount}; expected >= 2 (both branches symmetric)`);
+  }
+  console.log(`  PASS [R9-C]: R9-C extractor extension preserved at ${_r9cPatternCount} sites`);
+  // (f) R8-A + R8-B preserved.
+  if (!/_r8aDocReqGreeting/.test(_r9dWebhookSrc) || !/aiService\.stripPerfectOpener\(/.test(_r9dWebhookSrc)) {
+    throw new Error('FAIL [R9-D-CC R8-A/R8-B]: greeting wiring OR Perfect-opener sweep regressed');
+  }
+  console.log('  PASS [R8-A + R8-B]: greeting wiring + Perfect-opener sweep preserved');
+  // (g) R9-D docblock provenance + Q1/Q2/Q3 verdict anchors.
+  if (!/R9-D \(2026-05-26\)/.test(_r9dWebhookSrc)) {
+    throw new Error('FAIL [R9-D-CC docblock]: R9-D docblock annotation anchor missing from webhook.js');
+  }
+  if (!/Q1-\(a\) NARROW/.test(_r9dWebhookSrc) || !/Q2-\(a\) FULL ANTI-SOURCE/.test(_r9dWebhookSrc) || !/Q3-\(a\) (?:PRESERVE UUU FLAGGING|UUU)/.test(_r9dWebhookSrc)) {
+    throw new Error('FAIL [R9-D-CC docblock]: Q1/Q2/Q3 verdict provenance anchors missing from R9-D helper docblock');
+  }
+  console.log('  PASS [docblock provenance]: R9-D date + Q1/Q2/Q3 verdict anchors present');
+  console.log('Group R9-D-CROSS-CLUSTER-INTEGRATION: R6-γ filter pipeline + R9-B canonical LTV + R9-A + R9-C + R8-A + R8-B + R9-D docblock all preserved.');
 
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask
@@ -18567,10 +18912,19 @@ Jordan`;
     throw new Error(`FAIL [Group UUU hedge sub-rule]: expected 3 occurrences (one per site: INITIAL, broker response, lead summary), got ${uuuHedgeMatches}`);
   }
   console.log(`  PASS [Group UUU hedge sub-rule]: HEDGED NUMERIC ESTIMATES rule present in all 3 sites (${uuuHedgeMatches}/3)`);
-  if (uuuCategoricalMatches !== 3) {
-    throw new Error(`FAIL [Group UUU categorical sub-rule]: expected 3 occurrences, got ${uuuCategoricalMatches}`);
+  // R9-D (2026-05-26) bounded widening: lower bound preserved at 3 (UUU
+  // rule present in all 3 prompt sites — INITIAL, broker response, lead
+  // summary). Allows ≥3 to permit cross-references from other override
+  // blocks (R9-D's canonical lender override carve-out references "UUU
+  // CATEGORICAL/PURPOSE MISMATCHES MUST FLAG" to preserve discrepancy-
+  // flagging discipline per Q3-(a) verdict). UUU invariant (rule in all 3
+  // sites) PRESERVED; only the upper bound widened to permit carve-out
+  // cross-references. Same precedent as R9-A's R5A-COMPLETION-SOLE-PATH
+  // widening (1 → 2 setters with no-orphaned-paths invariant preserved).
+  if (uuuCategoricalMatches < 3) {
+    throw new Error(`FAIL [Group UUU categorical sub-rule]: expected >= 3 occurrences (rule present in all 3 prompt sites; R9-D bounded widening allows additional carve-out references), got ${uuuCategoricalMatches}`);
   }
-  console.log(`  PASS [Group UUU categorical sub-rule]: CATEGORICAL/PURPOSE MISMATCHES MUST FLAG rule present in all 3 sites (${uuuCategoricalMatches}/3)`);
+  console.log(`  PASS [Group UUU categorical sub-rule]: CATEGORICAL/PURPOSE MISMATCHES MUST FLAG rule present in >=3 sites (${uuuCategoricalMatches} occurrences — 3 prompt-rule sites + R9-D carve-out cross-reference; R9-D bounded widening preserves UUU invariant)`);
 
   // Hedge marker list completeness (Q1-UUU per Franco's response: includes
   // "in the neighborhood of" and "ballpark"; excludes "more or less").

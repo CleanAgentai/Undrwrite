@@ -2618,7 +2618,22 @@ Classification guidance:
     //   Empirical root: Marcus S2 996a676c (72.8% LLM vs 60.7% JS canonical) +
     //   Derek S3 df33cdbf (62.4% LLM vs 61.8% JS canonical). See
     //   computeCanonicalLtvForReview in webhook.js for resolver shape.
-    const { noSnapshot = false, canonicalLtvOverride = null } = opts;
+    // R9-D (2026-05-26):
+    //   canonicalLenderOverride: { value, source } | null
+    //   When provided, prompt includes a "DETERMINISTIC, USE THIS" override
+    //   block for the existing-mortgage lender (Exit Strategy / Loan Purpose /
+    //   Borrower Overview narrative). Full anti-source language per Q2-(a) —
+    //   explicit refutation of competing sources (loan_application / PNW /
+    //   credit_bureau may show historical lender; payout statement is
+    //   authoritative for CURRENT lender per R6-γ source-hierarchy).
+    //   UUU discrepancy-flagging carve-out per Q3-(a) — Risk Factors cross-
+    //   source discrepancy detection is preserved (R9-D enforces OUTPUT
+    //   discipline on factual statements, not DETECTION discipline).
+    //   Empirical root: Marcus S2 996a676c "Scotiabank" hallucination
+    //   (loan_application + PNW + credit_bureau cite Scotiabank historically;
+    //   RBC_Payout_Statement is authoritative for current lender = RBC).
+    //   See computeCanonicalLenderForReview in webhook.js for resolver shape.
+    const { noSnapshot = false, canonicalLtvOverride = null, canonicalLenderOverride = null } = opts;
     try {
       // Build document text sections from extracted data
       const docSections = documents
@@ -2665,12 +2680,35 @@ ${componentLines}
 - CARVE-OUT — hypothetical/conditional LTV references in narrative are allowed (e.g., "if combined LTV exceeded 80% we'd require additional collateral", "the lender's threshold is typically 75%"). The constraint applies to FACTUAL LTV statements about THIS deal's actual value — those must use ${canonicalLtvOverride.value}%.`;
       }
 
+      // R9-D (2026-05-26): canonical existing-mortgage lender override block.
+      // Empirical root: Marcus S2 996a676c — Scotiabank appears 13+ times across
+      // loan_application + PNW + credit_bureau (HISTORICAL sources reflecting
+      // prior mortgage); RBC only in payout statement (4 mentions) +  email
+      // body (broker stated). Vienna's Exit Strategy emitted "his current
+      // Scotiabank mortgage matures in October 2027" — majority-document-weight
+      // hallucination. Q2-(a) FULL ANTI-SOURCE explicitly refutes the competing
+      // historical sources; Q3-(a) PRESERVE UUU FLAGGING carves out discrepancy
+      // detection (cross-source divergence still flags in Risk Factors).
+      let r9dCanonicalLenderOverrideBlock = '';
+      if (canonicalLenderOverride && canonicalLenderOverride.value) {
+        const lenderSource = canonicalLenderOverride.source
+          ? ` (source: ${canonicalLenderOverride.source})`
+          : '';
+        r9dCanonicalLenderOverrideBlock = `
+
+CRITICAL — CANONICAL EXISTING MORTGAGE LENDER (R9-D JS-deterministic, USE THIS, NOT raw document scans):
+- Existing first mortgage lender: ${canonicalLenderOverride.value}${lenderSource} — confirmed via mortgage payout statement per R6-γ source-hierarchy (payout statement is authoritative for the borrower's CURRENT existing mortgage lender).
+- Use this for all FACTUAL lender references in Exit Strategy, Loan Purpose, Borrower Overview, Collateral & Valuation, Financial Snapshot, and any narrative claim about the borrower's CURRENT existing mortgage lender.
+- DO NOT use any other lender name from the document corpus for the borrower's current existing mortgage, even if loan_application / pnw_statement / credit_report / credit_bureau show a different lender — those are HISTORICAL records (may reflect a PRIOR mortgage that the borrower has since refinanced out of; broker documentation may not be updated). The payout statement is authoritative for the CURRENT lender per R6-γ source-hierarchy.
+- CARVE-OUT — preserve UUU cross-source discrepancy flagging discipline (per existing prompt rule at "CATEGORICAL/PURPOSE MISMATCHES MUST FLAG"): if loan_application / pnw_statement / credit_bureau lender DIFFERS from the payout-statement lender, you MUST flag the cross-source discrepancy explicitly in Risk Factors (e.g., "Loan application and PNW reference Scotiabank as the existing mortgage holder; payout statement is from RBC — needs clarification on refinance history"). The constraint above applies ONLY to FACTUAL "current lender" statements in narrative; cross-source discrepancy DETECTION is preserved and important risk information for the underwriter.`;
+      }
+
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.${r9bCanonicalLtvOverrideBlock}
+          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.${r9bCanonicalLtvOverrideBlock}${r9dCanonicalLenderOverrideBlock}
 
 Your job is to read ALL available information — the deal summary, every extracted document, and the overall file — and produce a structured, lender-ready lead summary.
 
