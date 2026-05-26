@@ -2608,7 +2608,17 @@ Classification guidance:
     //   noSnapshot: true → JS will prepend the canonical Deal Snapshot block; Vienna's
     //     prompt is instructed to OMIT Section 1 and start narrative at Section 2.
     //     Pure JS injection (symmetric with broker-side discrepancy section).
-    const { noSnapshot = false } = opts;
+    // R9-B (2026-05-26):
+    //   canonicalLtvOverride: { value, kind: 'combined'|'standalone', components: {...} } | null
+    //   When provided, prompt includes an R6-α-style "DETERMINISTIC, USE THIS"
+    //   override block forbidding the LLM from emitting extracted_data.ltv_percent
+    //   in narrative LTV claims (Risk Factors / Deal Rating / etc.). Full
+    //   expansion per Q3-(a) — surfaces the computation breakdown so narrative
+    //   descriptions stay grounded against canonical numerator/denominator.
+    //   Empirical root: Marcus S2 996a676c (72.8% LLM vs 60.7% JS canonical) +
+    //   Derek S3 df33cdbf (62.4% LLM vs 61.8% JS canonical). See
+    //   computeCanonicalLtvForReview in webhook.js for resolver shape.
+    const { noSnapshot = false, canonicalLtvOverride = null } = opts;
     try {
       // Build document text sections from extracted data
       const docSections = documents
@@ -2626,12 +2636,41 @@ Classification guidance:
       // with the prompt rule below.
       const inboundSenderLabel = dealSummary?.broker_name || dealSummary?.sender_name || 'Broker';
 
+      // R9-B (2026-05-26): canonical LTV override block. Inserted between
+      // FORMAT instructions and SECTION 1 — Claude reads this BEFORE writing
+      // any narrative LTV claim. Full expansion per Q3-(a) — gives Claude the
+      // numerator/denominator components so narrative breakdowns stay grounded
+      // against canonical values, not extracted_data.ltv_percent. Hypothetical/
+      // conditional LTV mentions in narrative ("if LTV exceeded 80% we'd
+      // require X") are carved out — only factual LTV claims about THIS deal's
+      // actual value are constrained.
+      let r9bCanonicalLtvOverrideBlock = '';
+      if (canonicalLtvOverride && canonicalLtvOverride.value != null) {
+        const fmt = n => '$' + Math.round(n).toLocaleString('en-US');
+        const kindLabel = canonicalLtvOverride.kind === 'combined' ? 'Combined' : 'Standalone';
+        const computation = canonicalLtvOverride.kind === 'combined'
+          ? `(${fmt(canonicalLtvOverride.components.existing)} + ${fmt(canonicalLtvOverride.components.requested)}) / ${fmt(canonicalLtvOverride.components.market)}`
+          : `${fmt(canonicalLtvOverride.components.requested)} / ${fmt(canonicalLtvOverride.components.market)}`;
+        const componentLines = canonicalLtvOverride.kind === 'combined'
+          ? `  - existing first mortgage balance: ${fmt(canonicalLtvOverride.components.existing)}\n  - requested loan amount: ${fmt(canonicalLtvOverride.components.requested)}\n  - subject property market value: ${fmt(canonicalLtvOverride.components.market)}`
+          : `  - requested loan amount: ${fmt(canonicalLtvOverride.components.requested)}\n  - subject property market value: ${fmt(canonicalLtvOverride.components.market)}`;
+        r9bCanonicalLtvOverrideBlock = `
+
+CRITICAL — CANONICAL LTV OVERRIDE (R9-B JS-deterministic, USE THIS, NOT extracted_data.ltv_percent):
+- ${kindLabel} LTV: ${canonicalLtvOverride.value}% — computed by JS as ${computation}
+- This is the AUTHORITATIVE LTV for all references in Risk Factors, Deal Rating, Loan Purpose, Collateral & Valuation, Financial Snapshot, and any narrative LTV claim about THIS deal's actual value.
+- Components (use these exact values if you reference the breakdown in narrative):
+${componentLines}
+- DO NOT use any other LTV value, even if the DEAL SUMMARY JSON below shows a different "ltv_percent" field — that field is extraction-derived from one specific document source and may diverge from this canonical computation. The canonical value above is the JS-resolved authority per dEngine.computeCombinedLtv source-hierarchy.
+- CARVE-OUT — hypothetical/conditional LTV references in narrative are allowed (e.g., "if combined LTV exceeded 80% we'd require additional collateral", "the lender's threshold is typically 75%"). The constraint applies to FACTUAL LTV statements about THIS deal's actual value — those must use ${canonicalLtvOverride.value}%.`;
+      }
+
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.
+          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.${r9bCanonicalLtvOverrideBlock}
 
 Your job is to read ALL available information — the deal summary, every extracted document, and the overall file — and produce a structured, lender-ready lead summary.
 

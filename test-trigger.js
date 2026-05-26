@@ -7534,8 +7534,16 @@ Lender:
   }
   // Also pin: the new runDiscrepancyDetectionAggregated call site is followed by the
   // existing strip+prepend (downstream pipeline unchanged).
-  if (!/runDiscrepancyDetectionAggregated[\s\S]{0,2000}stripVienna_DealSnapshot/.test(_b1WebhookSrc)) {
-    throw new Error('FAIL [B1-NO-DOWNSTREAM-LEAK]: runDiscrepancyDetectionAggregated must precede stripVienna_DealSnapshot in webhook.js (downstream pipeline order).');
+  // R9-B (2026-05-26) bounded widening: proximity gate widened from 2000 to
+  // 3000 chars to accommodate R9-B canonical LTV resolver insertion between
+  // runDiscrepancyDetectionAggregated and stripVienna_DealSnapshot
+  // (~1500 chars of computeCanonicalLtvForReview invocation + docblock +
+  // generateLeadSummary opts threading). B-1 invariant (aggregated detection
+  // precedes Snapshot strip+prepend in source order) PRESERVED — only
+  // intervening code volume increased. Same precedent as R9-A's
+  // R5A-STATUS-TRANSITION proximity widening 200→2000.
+  if (!/runDiscrepancyDetectionAggregated[\s\S]{0,3000}stripVienna_DealSnapshot/.test(_b1WebhookSrc)) {
+    throw new Error('FAIL [B1-NO-DOWNSTREAM-LEAK]: runDiscrepancyDetectionAggregated must precede stripVienna_DealSnapshot in webhook.js (downstream pipeline order; R9-B proximity widened to 3000 chars).');
   }
   console.log('  PASS: stripVienna_DealSnapshot + prependDealSnapshot pipeline intact.');
   console.log('  PASS: aggregated detection call precedes Snapshot strip+prepend (downstream pipeline order preserved).');
@@ -13070,6 +13078,354 @@ Franco Maione`;
   }
   console.log('  PASS [R8-B]: stripPerfectOpener post-gen sweep call sites preserved');
   console.log('Group R9-A-CROSS-CLUSTER-INTEGRATION: R6-λ + LLLL + R6-κ + R5-B-3/CCCC + R8-A + R8-B all preserved post-R9-A.');
+
+  // ════════════════════════════════════════════════════════════════
+  // R9 CLUSTER B — LTV inconsistency Deal Snapshot vs subject/risk-factors
+  // ════════════════════════════════════════════════════════════════
+  // Six verification groups for R9-B. Empirical root (Marcus S2 996a676c +
+  // Derek S3 df33cdbf retest fixtures):
+  //   Marcus: extracted_data.ltv_percent=72.8 (LLM) vs JS canonical 60.7%
+  //     ($318k + $95k) / $680k. Source-divergence: LLM picked existing=$400k
+  //     from RBC payout statement; JS canonical_map picked existing=$318k per
+  //     source-hierarchy in existing_first_mortgage_balance.
+  //   Derek: extracted_data.ltv_percent=62.4 (LLM) vs JS canonical 61.8%
+  //     ($341k + $110k) / $730k. Same root mechanism.
+  // Subject line + Risk Factors + Deal Rating all emitted the LLM-derived
+  // figure; Deal Snapshot block (JS-prepended) emitted the canonical figure.
+  // Franco-observable contradiction within the same admin email.
+  //
+  // Q1 (a) NARROW SCOPE: Subject line override + generateLeadSummary prompt
+  //   override block (R6-α "DETERMINISTIC, USE THIS" pattern). No post-gen
+  //   sweep this cycle — narrative LTV mentions can be legitimate
+  //   hypothetical/conditional comparisons; sweep would over-fire. Defer to
+  //   future-trigger if Franco retest shows post-R9-B narrative still emits
+  //   non-canonical LTV (R8-B stripPerfectOpener empirical-prompt-failure
+  //   precedent).
+  // Q2 (a) COMBINED PREFERRED, STANDALONE FALLBACK: Single LTV value per
+  //   deal. Combined LTV preferred when computable (2nd mortgage shape via
+  //   dEngine.computeCombinedLtv); standalone fallback when combined null
+  //   (1st-mortgage clean deal — existing_first_mortgage_balance empty,
+  //   Linda Okafor shape). LLM ltv arg as defense-in-depth last-resort.
+  // Q3 (a) FULL EXPANSION: Override block includes computation breakdown
+  //   ($X + $Y) / $Z with component values listed. Grounds narrative
+  //   descriptions against canonical numerator/denominator; prevents Claude
+  //   from hallucinating different component figures.
+  //
+  // Defended residual NOT in R9-B scope: upstream source-divergence root in
+  //   existing_first_mortgage_balance canonical_map (which document source
+  //   is authoritative — RBC payout statement or loan-app/email-body).
+  //   R9-B treats JS canonical as authoritative output per orchestrator
+  //   framing; ratifying upstream source selection is a separate cycle
+  //   (R9-B-prime) if Franco surfaces.
+  //
+  //   R9-B-CANONICAL-OVERRIDE-MATRIX — closed-set on computeCanonicalLtvForReview:
+  //     combined preferred; standalone fallback when combined null; null
+  //     when neither computable.
+  //   R9-B-MARCUS-FIXTURE (LOAD-BEARING) — triple-anchor on Marcus retest:
+  //     (a) computeCombinedLtv → 60.7 from canonical_map with $318k existing;
+  //     (b) computeCanonicalLtvForReview returns {value: 60.7, kind: 'combined'};
+  //     (c) override block renders full expansion ($318k + $95k) / $680k.
+  //   R9-B-DEREK-FIXTURE (LOAD-BEARING) — same triple-anchor on Derek:
+  //     canonical=61.8; resolver kind='combined'; override block renders
+  //     full expansion ($341k + $110k) / $730k.
+  //   R9-B-CALL-SITE-WIRING — 5-clause closed-set: helper defined + invoked
+  //     in sendPreliminaryReviewToAdmin + generateLeadSummary opts accept
+  //     canonicalLtvOverride + subject uses canonical-preferred chain +
+  //     override block conditional on opt provided.
+  //   R9-B-OVER-FIRE-PROTECTION — 1st-mortgage clean deal → standalone
+  //     fallback (not null); missing inputs → null → subject falls back to
+  //     LLM ltv arg (defense-in-depth); defensive on null/undefined opts.
+  //   R9-B-CROSS-CLUSTER-INTEGRATION — R6-α + R6-γ filter pipeline +
+  //     B Commit 2 JS prepend + R9-A sendCompletionHandoff + R8-A + R8-B
+  //     all preserved.
+  const _r9bWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _r9bAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const { computeCanonicalLtvForReview: _r9bResolve } = require('./src/routes/webhook').__test__;
+  const _r9bDEngine = require('./src/services/discrepancy-engine');
+
+  console.log('\n========== R9-B-CANONICAL-OVERRIDE-MATRIX — computeCanonicalLtvForReview truth-table ==========');
+  const _r9bResolverCases = [
+    {
+      label: 'Combined LTV: 2nd mortgage with all 3 (existing + loan + market) → combined preferred',
+      input: {
+        existing_first_mortgage_balance: [{ value: 318000, source: 'loan_application' }],
+        requested_loan_amount: [{ value: 95000, source: 'loan_application' }],
+        subject_property_market_value: [{ value: 680000, source: 'appraisal' }],
+      },
+      expectedKind: 'combined',
+      expectedValue: 60.7,
+      expectedComponents: { existing: 318000, requested: 95000, market: 680000 },
+    },
+    {
+      label: 'Combined LTV: Derek shape ($341k + $110k) / $730k → 61.8%',
+      input: {
+        existing_first_mortgage_balance: [{ value: 341000, source: 'loan_application' }],
+        requested_loan_amount: [{ value: 110000, source: 'loan_application' }],
+        subject_property_market_value: [{ value: 730000, source: 'appraisal' }],
+      },
+      expectedKind: 'combined',
+      expectedValue: 61.8,
+    },
+    {
+      label: 'Standalone fallback: 1st mortgage clean deal (existing empty) → standalone',
+      input: {
+        existing_first_mortgage_balance: [],
+        requested_loan_amount: [{ value: 250000, source: 'loan_application' }],
+        subject_property_market_value: [{ value: 500000, source: 'appraisal' }],
+      },
+      expectedKind: 'standalone',
+      expectedValue: 50.0,
+      expectedComponents: { requested: 250000, market: 500000 },
+    },
+    {
+      label: 'Null: no loan amount → null',
+      input: {
+        existing_first_mortgage_balance: [],
+        requested_loan_amount: [],
+        subject_property_market_value: [{ value: 500000, source: 'appraisal' }],
+      },
+      expectedKind: null,
+      expectedValue: null,
+    },
+    {
+      label: 'Null: no market value → null',
+      input: {
+        existing_first_mortgage_balance: [],
+        requested_loan_amount: [{ value: 250000, source: 'loan_application' }],
+        subject_property_market_value: [],
+      },
+      expectedKind: null,
+      expectedValue: null,
+    },
+    {
+      label: 'Null: market value 0 (defensive) → null',
+      input: {
+        existing_first_mortgage_balance: [],
+        requested_loan_amount: [{ value: 250000, source: 'loan_application' }],
+        subject_property_market_value: [{ value: 0, source: 'appraisal' }],
+      },
+      expectedKind: null,
+      expectedValue: null,
+    },
+    {
+      label: 'Defensive: null canonicalMap → null',
+      input: null,
+      expectedKind: null,
+      expectedValue: null,
+    },
+    {
+      label: 'Defensive: empty canonicalMap → null',
+      input: {},
+      expectedKind: null,
+      expectedValue: null,
+    },
+  ];
+  let _r9bResolverFails = 0;
+  for (const tc of _r9bResolverCases) {
+    const result = _r9bResolve(tc.input);
+    let pass = true;
+    let reason = '';
+    if (tc.expectedKind === null) {
+      if (result !== null) { pass = false; reason = `expected null, got ${JSON.stringify(result)}`; }
+    } else {
+      if (!result) { pass = false; reason = `expected ${tc.expectedKind} non-null, got null`; }
+      else {
+        if (result.kind !== tc.expectedKind) { pass = false; reason = `kind expected=${tc.expectedKind}, got=${result.kind}`; }
+        if (Math.abs(result.value - tc.expectedValue) > 0.05) { pass = false; reason += `; value expected=${tc.expectedValue}, got=${result.value}`; }
+        if (tc.expectedComponents) {
+          for (const k of Object.keys(tc.expectedComponents)) {
+            if (result.components?.[k] !== tc.expectedComponents[k]) {
+              pass = false; reason += `; component.${k} expected=${tc.expectedComponents[k]}, got=${result.components?.[k]}`;
+            }
+          }
+        }
+      }
+    }
+    if (!pass) { _r9bResolverFails++; console.log(`  FAIL [${tc.label}]: ${reason}`); }
+    else console.log(`  PASS [${tc.label}]${result ? ` → kind=${result.kind}, value=${result.value}` : ' → null'}`);
+  }
+  if (_r9bResolverFails > 0) throw new Error(`FAIL [R9-B-CANONICAL-OVERRIDE-MATRIX]: ${_r9bResolverFails}/${_r9bResolverCases.length} cases failed.`);
+  console.log(`Group R9-B-CANONICAL-OVERRIDE-MATRIX: ${_r9bResolverCases.length}/${_r9bResolverCases.length} cases pass (combined preferred + standalone fallback + null defensive).`);
+
+  console.log('\n========== R9-B-MARCUS-FIXTURE — Marcus retest LTV inconsistency closure (LOAD-BEARING) ==========');
+  // Marcus 996a676c (status=completed). Pre-R9-B: Deal Snapshot showed 60.7%
+  // canonical; subject + Risk Factors + Deal Rating showed 72.8% (LLM
+  // hallucination from existing=$400k RBC payout). Triple-anchor:
+  //   (a) computeCombinedLtv directly returns 60.7 from canonical_map shape
+  //   (b) computeCanonicalLtvForReview returns {value: 60.7, kind: 'combined'}
+  //   (c) override block renders full expansion ($318k + $95k) / $680k
+  const _r9bMarcusCanonicalMap = {
+    existing_first_mortgage_balance: [{ value: 318000, source: 'loan_application' }],
+    requested_loan_amount: [{ value: 95000, source: 'loan_application' }],
+    subject_property_market_value: [{ value: 680000, source: 'appraisal' }],
+  };
+  // (a) computeCombinedLtv direct
+  const _r9bMarcusCombined = _r9bDEngine.computeCombinedLtv(_r9bMarcusCanonicalMap);
+  if (!_r9bMarcusCombined || Math.abs(_r9bMarcusCombined.combined_ltv_percent - 60.7) > 0.05) {
+    throw new Error(`FAIL [R9-B-MARCUS (a)]: computeCombinedLtv expected 60.7, got ${JSON.stringify(_r9bMarcusCombined)}`);
+  }
+  console.log('  PASS (a): computeCombinedLtv directly returns 60.7 from Marcus canonical_map shape ($318k existing + $95k loan / $680k market)');
+  // (b) computeCanonicalLtvForReview wrapper
+  const _r9bMarcusResolved = _r9bResolve(_r9bMarcusCanonicalMap);
+  if (!_r9bMarcusResolved || _r9bMarcusResolved.kind !== 'combined' || Math.abs(_r9bMarcusResolved.value - 60.7) > 0.05) {
+    throw new Error(`FAIL [R9-B-MARCUS (b)]: computeCanonicalLtvForReview expected {kind: combined, value: 60.7}, got ${JSON.stringify(_r9bMarcusResolved)}`);
+  }
+  console.log('  PASS (b): computeCanonicalLtvForReview returns {kind: combined, value: 60.7} on Marcus canonical_map');
+  // (c) Override block renders full expansion with component values.
+  // Source-grep the override block construction in ai.js + verify it includes
+  // both the formatted computation expression AND component lines.
+  if (!/CRITICAL — CANONICAL LTV OVERRIDE \(R9-B JS-deterministic/.test(_r9bAiSrc)) {
+    throw new Error('FAIL [R9-B-MARCUS (c)]: R9-B canonical LTV override block header missing in ai.js generateLeadSummary');
+  }
+  if (!/computed by JS as \$\{computation\}/.test(_r9bAiSrc)) {
+    throw new Error('FAIL [R9-B-MARCUS (c)]: override block must include "computed by JS as ${computation}" — full expansion per Q3-(a)');
+  }
+  if (!/existing first mortgage balance/i.test(_r9bAiSrc) || !/requested loan amount/i.test(_r9bAiSrc) || !/subject property market value/i.test(_r9bAiSrc)) {
+    throw new Error('FAIL [R9-B-MARCUS (c)]: override block must list component values (existing + requested + market) per Q3-(a) full expansion');
+  }
+  console.log('  PASS (c): override block renders full expansion (computation expression + component values) per Q3-(a)');
+  console.log('Group R9-B-MARCUS-FIXTURE: Marcus retest LTV inconsistency structurally closed (60.7% canonical authoritative across Snapshot + subject + narrative).');
+
+  console.log('\n========== R9-B-DEREK-FIXTURE — Derek retest LTV inconsistency closure (LOAD-BEARING) ==========');
+  // Derek df33cdbf (status=active). Pre-R9-B: Deal Snapshot 61.8% canonical;
+  // subject + Deal Rating 62.4% (LLM hallucination from slightly-different
+  // existing balance source). Same triple-anchor as Marcus.
+  const _r9bDerekCanonicalMap = {
+    existing_first_mortgage_balance: [{ value: 341000, source: 'loan_application' }],
+    requested_loan_amount: [{ value: 110000, source: 'loan_application' }],
+    subject_property_market_value: [{ value: 730000, source: 'appraisal' }],
+  };
+  const _r9bDerekCombined = _r9bDEngine.computeCombinedLtv(_r9bDerekCanonicalMap);
+  if (!_r9bDerekCombined || Math.abs(_r9bDerekCombined.combined_ltv_percent - 61.8) > 0.05) {
+    throw new Error(`FAIL [R9-B-DEREK (a)]: computeCombinedLtv expected 61.8, got ${JSON.stringify(_r9bDerekCombined)}`);
+  }
+  console.log('  PASS (a): computeCombinedLtv directly returns 61.8 from Derek canonical_map shape ($341k existing + $110k loan / $730k market)');
+  const _r9bDerekResolved = _r9bResolve(_r9bDerekCanonicalMap);
+  if (!_r9bDerekResolved || _r9bDerekResolved.kind !== 'combined' || Math.abs(_r9bDerekResolved.value - 61.8) > 0.05) {
+    throw new Error(`FAIL [R9-B-DEREK (b)]: computeCanonicalLtvForReview expected {kind: combined, value: 61.8}, got ${JSON.stringify(_r9bDerekResolved)}`);
+  }
+  console.log('  PASS (b): computeCanonicalLtvForReview returns {kind: combined, value: 61.8} on Derek canonical_map');
+  // (c) Override block hallucination-prevention: verify "DO NOT use any other LTV value" anchor present.
+  if (!/DO NOT use any other LTV value, even if the DEAL SUMMARY JSON below shows a different "ltv_percent"/.test(_r9bAiSrc)) {
+    throw new Error('FAIL [R9-B-DEREK (c)]: override block must explicitly forbid using extracted_data.ltv_percent — hallucination-prevention anchor missing');
+  }
+  console.log('  PASS (c): override block includes explicit "DO NOT use ltv_percent" hallucination-prevention anchor');
+  console.log('Group R9-B-DEREK-FIXTURE: Derek retest LTV inconsistency structurally closed (61.8% canonical authoritative).');
+
+  console.log('\n========== R9-B-CALL-SITE-WIRING — 5-clause closed-set ==========');
+  // (1) computeCanonicalLtvForReview defined in webhook.js + exported via __test__.
+  if (!/const computeCanonicalLtvForReview = \(canonicalMap\) =>/.test(_r9bWebhookSrc)) {
+    throw new Error('FAIL [R9-B-CW (1)]: computeCanonicalLtvForReview helper definition missing from webhook.js');
+  }
+  if (!/computeCanonicalLtvForReview,?/.test(_r9bWebhookSrc.slice(_r9bWebhookSrc.indexOf('module.exports.__test__')))) {
+    throw new Error('FAIL [R9-B-CW (1)]: computeCanonicalLtvForReview must be exported via __test__ for harness verification');
+  }
+  console.log('  PASS [(1)]: computeCanonicalLtvForReview defined + exported via __test__');
+  // (2) Invoked inside sendPreliminaryReviewToAdmin.
+  const _r9bSendPrelim = _r9bWebhookSrc.match(/const sendPreliminaryReviewToAdmin = async[\s\S]+?\n\};/);
+  if (!_r9bSendPrelim) throw new Error('FAIL [R9-B-CW (2)]: sendPreliminaryReviewToAdmin function body not located');
+  const _r9bSendPrelimBody = _r9bSendPrelim[0];
+  if (!/const _r9bCanonicalLtv = computeCanonicalLtvForReview\(_bFilteredCanonicalMap\)/.test(_r9bSendPrelimBody)) {
+    throw new Error('FAIL [R9-B-CW (2)]: computeCanonicalLtvForReview must be invoked inside sendPreliminaryReviewToAdmin with the FILTERED canonical_map (same source-hierarchy as Deal Snapshot)');
+  }
+  console.log('  PASS [(2)]: computeCanonicalLtvForReview invoked inside sendPreliminaryReviewToAdmin with filtered canonical_map (consistency with Deal Snapshot)');
+  // (3) generateLeadSummary opts accept canonicalLtvOverride.
+  if (!/canonicalLtvOverride = null \} = opts/.test(_r9bAiSrc)) {
+    throw new Error('FAIL [R9-B-CW (3)]: generateLeadSummary opts must destructure canonicalLtvOverride = null from opts');
+  }
+  console.log('  PASS [(3)]: generateLeadSummary opts destructure canonicalLtvOverride');
+  // (4) Subject line uses canonical-preferred fallback chain.
+  if (!/const _r9bSubjectLtv = _r9bCanonicalLtv \? _r9bCanonicalLtv\.value : ltv;/.test(_r9bSendPrelimBody)) {
+    throw new Error('FAIL [R9-B-CW (4)]: subject line must use canonical-preferred fallback chain (_r9bCanonicalLtv ? .value : ltv)');
+  }
+  if (!/\$\{_r9bSubjectLtv\}% LTV/.test(_r9bSendPrelimBody)) {
+    throw new Error('FAIL [R9-B-CW (4)]: subject template must interpolate ${_r9bSubjectLtv}% LTV (not the legacy ${ltv}% LTV)');
+  }
+  console.log('  PASS [(4)]: subject line uses canonical-preferred chain with LLM ltv fallback');
+  // (5) Override block conditional on opt provided (defensive when null).
+  if (!/if \(canonicalLtvOverride && canonicalLtvOverride\.value != null\)/.test(_r9bAiSrc)) {
+    throw new Error('FAIL [R9-B-CW (5)]: override block must be conditionally injected only when canonicalLtvOverride is non-null with non-null value');
+  }
+  console.log('  PASS [(5)]: override block conditional injection (defensive — empty/null opt → no block)');
+  console.log('Group R9-B-CALL-SITE-WIRING: 5-clause closed-set (helper definition + invocation site + opts accept + subject fallback chain + conditional injection).');
+
+  console.log('\n========== R9-B-OVER-FIRE-PROTECTION — 1st-mortgage clean deal + missing-inputs defensive ==========');
+  // (a) 1st-mortgage clean deal — existing_first_mortgage_balance=[] → standalone fallback fires (NOT null).
+  const _r9b1stMortgage = _r9bResolve({
+    existing_first_mortgage_balance: [],
+    requested_loan_amount: [{ value: 200000, source: 'loan_application' }],
+    subject_property_market_value: [{ value: 800000, source: 'appraisal' }],
+  });
+  if (!_r9b1stMortgage || _r9b1stMortgage.kind !== 'standalone' || Math.abs(_r9b1stMortgage.value - 25.0) > 0.05) {
+    throw new Error(`FAIL [R9-B-OVER-FIRE (a)]: 1st-mortgage clean deal must fall back to standalone LTV (not null). Got ${JSON.stringify(_r9b1stMortgage)}`);
+  }
+  console.log('  PASS (a): 1st-mortgage clean deal (existing=[]) → standalone fallback fires (kind=standalone, value=25.0)');
+  // (b) Missing loan amount → null → subject would fall back to LLM ltv arg.
+  const _r9bNoLoan = _r9bResolve({
+    existing_first_mortgage_balance: [],
+    requested_loan_amount: [],
+    subject_property_market_value: [{ value: 500000, source: 'appraisal' }],
+  });
+  if (_r9bNoLoan !== null) {
+    throw new Error(`FAIL [R9-B-OVER-FIRE (b)]: missing loan amount must return null (subject falls back to LLM ltv per defense-in-depth). Got ${JSON.stringify(_r9bNoLoan)}`);
+  }
+  console.log('  PASS (b): missing loan amount → null → subject falls back to LLM ltv arg (defense-in-depth)');
+  // (c) Defensive: null + undefined opts to resolver.
+  if (_r9bResolve(null) !== null || _r9bResolve(undefined) !== null) {
+    throw new Error('FAIL [R9-B-OVER-FIRE (c)]: resolver must defensive-null on null/undefined canonicalMap inputs');
+  }
+  console.log('  PASS (c): defensive-null on null/undefined canonicalMap inputs');
+  // (d) Subject-line fallback chain when canonical null — LLM ltv arg preserved as last-resort.
+  if (!/const _r9bSubjectLtv = _r9bCanonicalLtv \? _r9bCanonicalLtv\.value : ltv;/.test(_r9bWebhookSrc)) {
+    throw new Error('FAIL [R9-B-OVER-FIRE (d)]: subject line must preserve LLM ltv arg as defense-in-depth fallback when canonical null');
+  }
+  console.log('  PASS (d): subject line preserves LLM ltv arg as defense-in-depth fallback (pre-R9-B behavior on out-of-scope shapes)');
+  console.log('Group R9-B-OVER-FIRE-PROTECTION: 1st-mortgage standalone fallback + missing-inputs null + defensive opts + subject fallback chain.');
+
+  console.log('\n========== R9-B-CROSS-CLUSTER-INTEGRATION — prior arc preserved ==========');
+  // (a) R6-α/R6-γ canonical-map filter pipeline preserved (Marcus retest's Deal
+  //     Snapshot relied on filterCanonicalLoanAmountForDocAuthoritative +
+  //     filterCanonicalLenderForPayoutOnly; R9-B threads through the same
+  //     filtered canonical_map for the LTV resolver, ensuring consistency).
+  if (!/_bFilteredCanonicalMap = dEngine\.filterCanonicalLoanAmountForDocAuthoritative/.test(_r9bSendPrelimBody)) {
+    throw new Error('FAIL [R9-B-CC R6-α/γ]: filterCanonicalLoanAmountForDocAuthoritative filter must compose into _bFilteredCanonicalMap');
+  }
+  if (!/dEngine\.filterCanonicalLenderForPayoutOnly\(_bDetectAdmin\.canonical_map\)/.test(_r9bSendPrelimBody)) {
+    throw new Error('FAIL [R9-B-CC R6-α/γ]: filterCanonicalLenderForPayoutOnly filter must compose into _bFilteredCanonicalMap');
+  }
+  console.log('  PASS [R6-α/γ]: canonical_map filter pipeline preserved (R9-B uses same filtered map as Deal Snapshot — no drift)');
+  // (b) B Commit 2 JS prepend preserved — renderDealSnapshot still called with the filtered map.
+  if (!/dEngine\.renderDealSnapshot\(\s*_bFilteredCanonicalMap/.test(_r9bSendPrelimBody)) {
+    throw new Error('FAIL [R9-B-CC B Commit 2]: renderDealSnapshot must still be invoked with filtered canonical_map (Deal Snapshot JS prepend untouched)');
+  }
+  console.log('  PASS [B Commit 2]: renderDealSnapshot still invoked with filtered canonical_map (Snapshot JS-prepend untouched)');
+  // (c) R9-A sendCompletionHandoff atomic status preserved.
+  if (!/dealsService\.update\(deal\.id,\s*\{\s*status:\s*'completed'\s*\}\)/.test(_r9bWebhookSrc)) {
+    throw new Error('FAIL [R9-B-CC R9-A]: sendCompletionHandoff atomic status=\'completed\' transition regressed');
+  }
+  console.log('  PASS [R9-A]: sendCompletionHandoff atomic status transition preserved');
+  // (d) R8-A admin-reply greeting wiring preserved.
+  if (!/_r8aDocReqGreeting/.test(_r9bWebhookSrc) || !/_r8aRejectionGreeting/.test(_r9bWebhookSrc)) {
+    throw new Error('FAIL [R9-B-CC R8-A]: R8-A greeting wiring anchors regressed');
+  }
+  console.log('  PASS [R8-A]: greeting wiring at admin-reply branches preserved');
+  // (e) R8-B stripPerfectOpener post-gen sweep preserved.
+  if (!/aiService\.stripPerfectOpener\(/.test(_r9bWebhookSrc)) {
+    throw new Error('FAIL [R9-B-CC R8-B]: stripPerfectOpener post-gen sweep regressed');
+  }
+  console.log('  PASS [R8-B]: stripPerfectOpener post-gen sweep preserved');
+  // (f) R9-B docblock empirical-root + verdict anchors present.
+  if (!/R9-B \(2026-05-26\)/.test(_r9bWebhookSrc)) {
+    throw new Error('FAIL [R9-B-CC docblock]: R9-B docblock annotation anchor missing from webhook.js');
+  }
+  if (!/Q1 \(a\) NARROW/.test(_r9bWebhookSrc) || !/Q2 \(a\) COMBINED PREFERRED/.test(_r9bWebhookSrc) || !/Q3 \(a\) FULL EXPANSION/.test(_r9bWebhookSrc)) {
+    // Q-verdict anchors are in the helper docblock — check across full src
+    if (!/Q1 \(a\) NARROW/.test(_r9bWebhookSrc) || !/Q2 \(a\) COMBINED PREFERRED/.test(_r9bWebhookSrc) || !/Q3 \(a\) FULL EXPANSION/.test(_r9bWebhookSrc)) {
+      throw new Error('FAIL [R9-B-CC docblock]: Q1/Q2/Q3 verdict provenance anchors missing from docblock');
+    }
+  }
+  console.log('  PASS [docblock provenance]: R9-B date + Q1/Q2/Q3 verdict anchors present in computeCanonicalLtvForReview docblock');
+  console.log('Group R9-B-CROSS-CLUSTER-INTEGRATION: R6-α/γ + B Commit 2 + R9-A + R8-A + R8-B + R9-B docblock provenance all preserved.');
 
   // ════════════════════════════════════════════════════════════════
   // Pre-SSS the closing-handoff path bypassed JJJ's post-approval AML/PEP ask

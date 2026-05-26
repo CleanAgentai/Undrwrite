@@ -778,6 +778,62 @@ const computeAdminBanner = ({ clarificationPending, missingDocs, deal }) => {
   };
 };
 
+// R9-B (2026-05-26): canonical LTV resolver for preliminary review surfaces
+// (subject line + generateLeadSummary prompt override). Wraps dEngine's
+// computeCombinedLtv with a standalone fallback so the canonical LTV is
+// always computed JS-side from canonical_map (not the LLM's ltv_percent
+// extraction).
+//
+// Empirical root (Marcus S2 996a676c + Derek S3 df33cdbf retest):
+//   Marcus extracted_data.ltv_percent=72.8 (LLM) vs JS canonical 60.7%
+//     ($318k + $95k) / $680k. LLM picked existing=$400k from RBC payout
+//     statement; JS canonical_map picked existing=$318k per source-
+//     hierarchy in existing_first_mortgage_balance.
+//   Derek extracted_data.ltv_percent=62.4 (LLM) vs JS canonical 61.8%
+//     ($341k + $110k) / $730k. Same root mechanism.
+//
+// Per Q1 (a) NARROW + Q2 (a) COMBINED PREFERRED, STANDALONE FALLBACK
+// + Q3 (a) FULL EXPANSION verdict:
+//   - combined LTV preferred when computable (2nd mortgage, existing
+//     balance + loan + market all present in canonical_map)
+//   - standalone fallback (loan / market * 100) when combined null
+//     (1st mortgage / clean first-mortgage shape — existing_first_
+//     mortgage_balance absent per dEngine.computeCombinedLtv null return)
+//   - return null when neither computable (defensive — caller falls back
+//     to LLM-derived ltv arg, preserving pre-R9-B behavior on out-of-
+//     scope shapes)
+//
+// Defended residual NOT in R9-B scope: the upstream source-divergence root
+// in existing_first_mortgage_balance canonical_map (RBC payout vs loan-app/
+// email-body source-hierarchy selection). R9-B treats JS canonical as
+// authoritative output per orchestrator framing; ratifying upstream source
+// selection is a separate cycle (R9-B-prime) if Franco surfaces.
+const computeCanonicalLtvForReview = (canonicalMap) => {
+  const combined = dEngine.computeCombinedLtv(canonicalMap);
+  if (combined) {
+    return {
+      value: combined.combined_ltv_percent,
+      kind: 'combined',
+      components: combined.components,
+    };
+  }
+  // Standalone fallback — loan / market * 100. Captures 1st-mortgage clean
+  // deals where existing_first_mortgage_balance is empty (Linda Okafor-shape
+  // per dEngine.computeCombinedLtv docblock).
+  const loans = (canonicalMap && canonicalMap.requested_loan_amount) || [];
+  const values = (canonicalMap && canonicalMap.subject_property_market_value) || [];
+  if (loans.length === 0 || values.length === 0) return null;
+  const requested = loans[0].value;
+  const market = values[0].value;
+  if (!Number.isFinite(requested) || !Number.isFinite(market) || market <= 0) return null;
+  const ltv = Math.round((requested / market) * 100 * 10) / 10;
+  return {
+    value: ltv,
+    kind: 'standalone',
+    components: { requested, market },
+  };
+};
+
 const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv, options = {}) => {
   // LTV ≤ 80% confirmed — send Franco preliminary review with docs
   console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco${options.isUpdate ? ' (updated)' : ''}`);
@@ -838,15 +894,28 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // R6-α (2026-05-21): composed outside R6-γ — strip email_body
   // requested_loan_amount tuples when loan_application is on file. Derek S3
   // dce308c8 source-mis-attribution-inversion fix.
+  // R9-B (2026-05-26): extract the filtered canonical_map so the canonical
+  // LTV computed below uses IDENTICAL source-hierarchy to what the Deal
+  // Snapshot displays — no drift between Snapshot "Combined LTV" row and
+  // subject-line / narrative override.
+  const _bFilteredCanonicalMap = dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+    dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map)
+  );
   const _bSnapshotHtml = dEngine.renderDealSnapshot(
-    dEngine.filterCanonicalLoanAmountForDocAuthoritative(
-      dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map)
-    ),
+    _bFilteredCanonicalMap,
     {
       ownershipType,
       isCommercial: !!_bDetectAdmin.commercial,
     }
   );
+
+  // R9-B (2026-05-26): canonical LTV for subject-line override + prompt
+  // override block. Combined LTV preferred (Q2-(a)); standalone fallback
+  // when combined null (1st-mortgage clean deal). When BOTH null
+  // (incomplete extraction defensive case), the subject falls back to the
+  // LLM-derived `ltv` arg per pre-R9-B behavior (defense-in-depth — never
+  // emit a blank LTV in the subject; out-of-scope shapes preserved).
+  const _r9bCanonicalLtv = computeCanonicalLtvForReview(_bFilteredCanonicalMap);
 
   let leadSummary = await aiService.generateLeadSummary(
     dealSummary,
@@ -854,7 +923,7 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     dealDocs,
     missingDocs,
     labeledMessages,
-    { noSnapshot: true }
+    { noSnapshot: true, canonicalLtvOverride: _r9bCanonicalLtv }
   );
   // Post-Claude: strip any residual Vienna-emitted Snapshot block + prepend the JS canonical Snapshot.
   const _snapStrip = aiService.stripVienna_DealSnapshot(leadSummary);
@@ -902,7 +971,15 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // Cluster E's planned post-gen sweep: JS owns the rule, not Claude.
   const enforcedLeadSummary = aiService.enforceReviewBanner(leadSummary, bannerText);
   const subjectPrefix = options.isUpdate ? '[UPDATED] ' : '';
-  const subject = `${subjectPrefix}ACTION REQUIRED: ${subjectStatus} Review — ${borrowerName} — ${ltv}% LTV`;
+  // R9-B (2026-05-26): canonical LTV preferred over LLM-derived ltv arg for
+  // subject line consistency with Deal Snapshot block. Marcus retest
+  // 996a676c showed subject="72.8% LTV" (LLM) while Snapshot showed "60.7%"
+  // (JS canonical) — Franco observed the contradiction. Post-R9-B subject
+  // uses _r9bCanonicalLtv when computable; falls back to LLM ltv arg when
+  // canonical null (incomplete extraction — defense-in-depth preserves
+  // pre-R9-B behavior on out-of-scope shapes; never emits blank LTV).
+  const _r9bSubjectLtv = _r9bCanonicalLtv ? _r9bCanonicalLtv.value : ltv;
+  const subject = `${subjectPrefix}ACTION REQUIRED: ${subjectStatus} Review — ${borrowerName} — ${_r9bSubjectLtv}% LTV`;
   const reviewResult = await emailService.sendEmail(
     config.adminEmail,
     subject,
@@ -3141,4 +3218,6 @@ module.exports.__test__ = {
   extractDeclineReason,
   // R4-Bucket-B (D-extension): admin banner trichotomy + isPostApproval gate
   computeAdminBanner,
+  // R9-B (2026-05-26): canonical LTV resolver (combined preferred, standalone fallback)
+  computeCanonicalLtvForReview,
 };
