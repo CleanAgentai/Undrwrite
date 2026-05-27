@@ -216,13 +216,19 @@ const renderDiscrepancySection = (discrepancySet) => {
 //   (a) a canonical_map object — prefer canonical_map.subject_property_city +
 //       canonical_map.subject_property_province tuples populated by R6-δ's
 //       extractFromEmailBody (informal "X property at <street>" pattern +
-//       inline "<street>, City, Prov, postal" pattern). Province may be
-//       null on the informal-pattern path (Q3-verdict residual — no
-//       city→province lookup table).
+//       inline "<street>, City, Prov, postal" pattern).
 //   (b) a normalized-address string — legacy contract; regex-parses the
 //       embedded ", City, Prov" or " City Prov" trailing portion.
 // Backward-compat: existing string callers continue to work; new
 // renderDealSnapshot wiring passes the canonical_map first.
+// R10-D (2026-05-27): R6-δ deferred-residual CLOSED — pre-R10-D this docblock
+// flagged "Province may be null on the informal-pattern path (Q3-verdict
+// residual — no city→province lookup table)." canonical-fields.js now pushes
+// inferred province tuples via inferProvinceFromAddressSignals (postal-FSA
+// primary, city-name fallback) when no doc-source province tuple exists.
+// canonical_map.subject_property_province is now populated for the
+// informal-pattern path; 'TBD' fallback below only fires when neither postal
+// nor city signal yields a recognized province (edge cases only).
 const deriveCityProvince = (input) => {
   if (!input) return null;
   // (a) canonical_map shape — has subject_property_city array OR fallback to

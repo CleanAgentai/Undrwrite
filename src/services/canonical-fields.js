@@ -956,6 +956,104 @@ const parseBrokerInitialIntent = (messageBody) => {
   return intents;
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// R10-D (2026-05-27) — Province inference from postal_code + city signals.
+// 6th cluster in 1st template family (canonical-map source-hierarchy
+// enforcement; precedents R6-γ + R6-α + R9-B + R9-D + R10-G).
+//
+// Closes R6-δ docblock's explicit deferred residual at discrepancy-engine.js
+// (pre-R10-D): "Province may be null on the informal-pattern path (Q3-verdict
+// residual — no city→province lookup table)." Empirically across Round-6,
+// 3 of 4 deals had postal_code populated + city populated + province tuple
+// EMPTY → Snapshot rendered "City / Province: Calgary / TBD". R10-D fills
+// the gap via deterministic postal-FSA + city-name lookup.
+//
+// Architectural source-hierarchy ordering for subject_property_province:
+//   doc-source tuples (R6-δ inline extractor "Calgary, AB" pattern)
+//   > province_inferred_from_postal (Canada Post FSA first-letter lookup)
+//   > province_inferred_from_city (top-15 major-city lookup; defense-in-depth)
+//
+// Push logic in extractCanonicalFields uses empty-list guard: R10-D inferred
+// tuples ONLY push when subject_property_province is empty post-doc-pushes.
+// Doc-source-wins discipline preserved (Ethan regression-prevention).
+//
+// Carry-forward: code-docblock deferred-residual flagging discipline (R6-δ
+// precedent that enabled this R10-D closure). When future cycles defer
+// scope, document the deferred-residual IN CODE with explicit pointer to
+// closure conditions. Commit-body-only deferrals require commit-history
+// archaeology and tend to accumulate as PERSISTENT-from-earlier-rounds bugs.
+//
+// Defended residual (deferred per Q3-sub-(a) verdict, flagged here per the
+// methodology learning above): X-prefix postal-code precision. X0A-X0G is
+// Nunavut (NU); X1-X9 is Northwest Territories (NT). R10-D maps X→NT
+// universally (over-coverage; harmless since NU broker submissions are
+// empirically zero). Future-trigger closure condition: if a Nunavut deal
+// surfaces with X0A-X0G postal and "TBD" province issue, extend X branch
+// with X0[A-G]→NU specificity.
+
+// Canada Post FSA first-letter → province standard (Q3-(a) FULL 18-entry).
+// Static reference; Canada Post hasn't added new provinces in living memory.
+// Unassigned letters (D, F, I, O, Q, U, W, Z) return null via missing-key
+// lookup. Verified: Calgary (T1-T3), Edmonton (T5-T6), Toronto (M), Vancouver
+// (V), Montreal (H), Ottawa (K), Winnipeg (R), Halifax (B), etc.
+const FSA_LETTER_TO_PROVINCE = {
+  A: 'NL', // Newfoundland & Labrador
+  B: 'NS', // Nova Scotia
+  C: 'PE', // Prince Edward Island
+  E: 'NB', // New Brunswick
+  G: 'QC', H: 'QC', J: 'QC',  // Quebec (eastern / Montreal / western)
+  K: 'ON', L: 'ON', M: 'ON', N: 'ON', P: 'ON',  // Ontario (east / central / Toronto / SW / north)
+  R: 'MB', // Manitoba
+  S: 'SK', // Saskatchewan
+  T: 'AB', // Alberta
+  V: 'BC', // British Columbia
+  X: 'NT', // NT default (X0A-X0G NU precision deferred per Q3-sub-a verdict)
+  Y: 'YT', // Yukon
+};
+
+// Q4-(a) minimal top-15 Canadian-city lookup as defense-in-depth fallback
+// when postal absent. Empirically every Round-6 deal has postal_code → city
+// fallback rare-fires. Expand on Stage 2 evidence per R8-B empirical-
+// evidence-required discipline. Case-insensitive matching; multi-word
+// cities (Quebec City) supported via lowercase key.
+const CITY_TO_PROVINCE = {
+  'calgary': 'AB', 'edmonton': 'AB',
+  'toronto': 'ON', 'ottawa': 'ON', 'hamilton': 'ON', 'mississauga': 'ON', 'london': 'ON',
+  'vancouver': 'BC', 'victoria': 'BC',
+  'montreal': 'QC', 'gatineau': 'QC', 'quebec city': 'QC',
+  'winnipeg': 'MB',
+  'halifax': 'NS',
+  'saskatoon': 'SK', 'regina': 'SK',
+};
+
+// Pure helper: infer province from postal + city signals. Postal-FSA
+// primary (deterministic 100% Round-6 coverage); city-name fallback
+// (defense-in-depth). Returns null when neither signal yields a recognized
+// mapping. Source field in return value documents which signal fired.
+const inferProvinceFromAddressSignals = (city, postal) => {
+  // Postal-FSA primary
+  if (postal && typeof postal === 'string') {
+    const firstLetter = postal.trim().toUpperCase()[0];
+    if (firstLetter && FSA_LETTER_TO_PROVINCE[firstLetter]) {
+      return {
+        value: FSA_LETTER_TO_PROVINCE[firstLetter],
+        source: 'province_inferred_from_postal',
+      };
+    }
+  }
+  // City-name fallback
+  if (city && typeof city === 'string') {
+    const key = city.trim().toLowerCase();
+    if (CITY_TO_PROVINCE[key]) {
+      return {
+        value: CITY_TO_PROVINCE[key],
+        source: 'province_inferred_from_city',
+      };
+    }
+  }
+  return null;
+};
+
 // ─── Top-level: extract everything per submission ───
 
 // R5 Cluster B Sub-root 1 (2026-05-21): opts.preExtractedEmailFields
@@ -1120,6 +1218,26 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     // bounded scope (Page-2 annotation anchor only).
   }
 
+  // R10-D (2026-05-27): province inference from postal_code + city signals.
+  // Empty-list guard preserves doc-source-wins discipline (R6-δ inline
+  // extractor + future doc-source province tuples still authoritative).
+  // Closes R6-δ docblock's explicit deferred residual (city→province lookup
+  // table). 6th cluster in 1st template family. Pushed BEFORE R10-G broker
+  // block so broker explicit correction would still override if needed
+  // (broker_correction unshifts to [0]; inferred sits below in hierarchy).
+  if (!map.subject_property_province || map.subject_property_province.length === 0) {
+    const cityTuple = (map.subject_property_city || [])[0];
+    const postalTuple = (map.subject_property_postal_code || [])[0];
+    const inferred = inferProvinceFromAddressSignals(cityTuple?.value, postalTuple?.value);
+    if (inferred) {
+      map.subject_property_province.push({
+        value: inferred.value,
+        source: inferred.source,
+        classification: inferred.source,
+      });
+    }
+  }
+
   // R10-G (2026-05-27): Broker-source push (broker_correction +
   // broker_initial_intent). Per Q2-sub-b verdict, broker_correction has
   // highest priority universally; broker_initial_intent has higher priority
@@ -1221,6 +1339,12 @@ module.exports = {
   parseBrokerInitialIntent,
   resolveCanonicalIntentValue,
   extractPurposeFromLoanApplication,
+  // R10-D (2026-05-27): province inference helpers + FSA/city lookup
+  // tables. 6th cluster in 1st template family (canonical-map source-
+  // hierarchy enforcement). Closes R6-δ deferred-residual.
+  inferProvinceFromAddressSignals,
+  FSA_LETTER_TO_PROVINCE,
+  CITY_TO_PROVINCE,
   extractFromLoanApplication,
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,
