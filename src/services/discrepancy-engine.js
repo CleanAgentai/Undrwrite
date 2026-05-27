@@ -327,6 +327,66 @@ const computeCombinedLtv = (canonicalMap) => {
   const market = values[0].value;
   if (!Number.isFinite(existing) || !Number.isFinite(requested) || !Number.isFinite(market)) return null;
   if (market <= 0) return null;
+
+  // R11-B-3 (2026-05-27): refinance LTV math carve-out. Consumes R11-A's
+  // transaction_type canonical field. For refinance, the existing first
+  // mortgage is BEING PAID OUT at closing — it's not additive leverage.
+  // Combined LTV = standalone LTV (new mortgage IS the 1st position).
+  //
+  // Empirical anchor: Marcus Webb 8c404ae0 — broker stated "refinancing
+  // his existing RBC first mortgage — the RBC will be paid out at closing."
+  // Pre-R11-B-3 math: ($400k RBC + $408k requested) / $680k = 118.8%
+  // (additive — wrong for refinance). Even with R11-B-2 correcting balance
+  // source to mortgage_statement, the additive math still produces
+  // structurally wrong combined LTV.
+  // Post-R11-B-3 math: $408k / $680k = 60.0% (refinance-correct — existing
+  // 1st paid out, new mortgage IS the 1st position; combined = standalone).
+  //
+  // LENDER MATCH MODES (mirrors R11-A inferMortgagePositionFromExistingBalance):
+  //   (1) STRICT — broker rawPhrase names lender matching mortgage_statement
+  //       source canonical lender. Tolerant of spelling variants via existing
+  //       LENDER_SYNONYMS canonicalization (R6-γ + R9-D + R11-A).
+  //   (2) IMPLICIT SINGLE-LENDER — broker says refinance WITHOUT naming
+  //       lender AND mortgage_statement source has exactly ONE unique
+  //       canonical lender → match by structural inference.
+  //
+  // Edge case preserved: refinance + new 2nd compound transaction (broker
+  // refinancing existing 1st AND adding new 2nd) — covered by broker_
+  // correction "2nd" mortgage_position tuple at canonical-map level
+  // (R11-A's broker_correction suppression of derived signal handles this
+  // separately).
+  //
+  // Backwards-compat: non-refinance transactions (transaction_type=null
+  // OR transaction_type='2nd_mortgage' OR transaction_type='purchase')
+  // get existing additive math preserved.
+  const txnTypeTuples = (canonicalMap && canonicalMap.transaction_type) || [];
+  const refinanceTuple = txnTypeTuples.find(t => t && t.value === 'refinance');
+  if (refinanceTuple) {
+    const payoutLenderTuples = (canonicalMap.existing_first_mortgage_lender || [])
+      .filter(t => t && t.classification === 'mortgage_statement' && t.value);
+    const payoutLenderCanonicals = Array.from(new Set(
+      payoutLenderTuples.map(t => cf.normalizeLender(t.value)).filter(Boolean),
+    ));
+    const refinanceLenderInPhrase = cf.findLenderInWindow(refinanceTuple.rawPhrase || '');
+    const strictMatch = refinanceLenderInPhrase && payoutLenderCanonicals.includes(refinanceLenderInPhrase);
+    const implicitMatch = !refinanceLenderInPhrase && payoutLenderCanonicals.length === 1;
+    if (strictMatch || implicitMatch) {
+      // Refinance pays out existing 1st at closing → combined LTV = standalone LTV
+      const standalone = (requested / market) * 100;
+      return {
+        combined_ltv_percent: Math.round(standalone * 10) / 10,
+        components: {
+          existing: 0, // refinance: existing first being paid out, treated as 0 for combined-LTV math
+          requested,
+          market,
+          existing_source: 'refinance-paid-out',
+          existing_lender: null,
+          transaction_type: 'refinance',
+        },
+      };
+    }
+  }
+
   const combined = ((existing + requested) / market) * 100;
   return {
     combined_ltv_percent: Math.round(combined * 10) / 10,
@@ -597,12 +657,41 @@ const formatCanonicalFieldsForPrompt = (canonicalMap) => {
 const filterCanonicalLenderForPayoutOnly = (canonicalMap) => {
   if (!canonicalMap) return canonicalMap;
   const isPayoutSource = (t) => t?.classification === 'mortgage_statement';
+  // R11-B-2 (2026-05-27): balance source-hierarchy filter extension.
+  // Pre-R11-B-2 R6-γ stripped lender attribution from non-payout sources
+  // but KEPT balance tuples (with lender_canonical nulled). Gap: when
+  // mortgage_statement source present, computeCombinedLtv picked
+  // balances[0] which was often the FIRST-pushed credit_bureau tuple
+  // (per-doc loop ordering), causing combined LTV to use the wrong
+  // (historical / closed-account) balance.
+  //
+  // Empirical anchor: Marcus Webb 8c404ae0 — canonical_map had
+  // existing_first_mortgage_balance = [$318k credit_bureau Scotia,
+  // $400k mortgage_statement RBC]. computeCombinedLtv used $318k Scotia
+  // (the historical closed-account balance from credit bureau) instead
+  // of $400k RBC (the actual current first mortgage from payout statement).
+  // Prelim Combined LTV row rendered "106.8% — ($318,000 + $408,000) /
+  // $680,000" — wrong source.
+  //
+  // R11-B-2 extension: when mortgage_statement source PRESENT, strip
+  // non-payout balance tuples ENTIRELY (not just null lender). Payout
+  // statement is authoritative for current existing mortgage balance.
+  //
+  // Edge case preserved (clean first-mortgage, Linda-shape): when NO
+  // mortgage_statement source exists, credit_bureau/pnw balance retained
+  // with lender_canonical nulled (R6-γ legacy behavior). Preserves R6-γ's
+  // existing behavior on clean first-mortgage deals where no payout
+  // statement applies.
+  const balanceTuples = canonicalMap.existing_first_mortgage_balance || [];
+  const hasMortgageStatementBalance = balanceTuples.some(t => t?.classification === 'mortgage_statement');
   return {
     ...canonicalMap,
     existing_first_mortgage_lender: (canonicalMap.existing_first_mortgage_lender || []).filter(isPayoutSource),
-    existing_first_mortgage_balance: (canonicalMap.existing_first_mortgage_balance || []).map((t) =>
-      isPayoutSource(t) ? t : { ...t, lender_canonical: null }
-    ),
+    existing_first_mortgage_balance: hasMortgageStatementBalance
+      // R11-B-2: mortgage_statement source present → strip non-payout balance tuples entirely
+      ? balanceTuples.filter(isPayoutSource)
+      // R6-γ legacy: clean first-mortgage edge case (no mortgage_statement) → keep balance, null lender
+      : balanceTuples.map((t) => ({ ...t, lender_canonical: null })),
   };
 };
 

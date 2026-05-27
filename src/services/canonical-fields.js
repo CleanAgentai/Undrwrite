@@ -1682,6 +1682,59 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     }
   }
 
+  // R11-B-1 Layer 1 (2026-05-27): canonical-map suppression of loan_application
+  // requested_loan_amount tuple when broker-authoritative source contradicts
+  // by >30%. Empirical anchor: Marcus Webb 8c404ae0 blank Union Lending
+  // template emits $95k loan_application tuple (AcroForm annotation default
+  // value) while broker_initial_intent stated $408k — 77% delta. Without
+  // suppression, computeDiscrepancySet sees BOTH tuples → discrepancy_set
+  // flags as cross-source mismatch → Vienna LLM cites "loan application
+  // requests $95k" in Risk Factors narrative.
+  //
+  // ARCHITECTURAL FAMILY — 1st template family extension (canonical-map
+  // source-hierarchy enforcement). Same pattern as R11-A's broker_correction
+  // suppression of derived mortgage_position signal at canonical-map level
+  // (M5 reorder + suppression). When broker is authoritative AND doc-source
+  // contradicts substantially (>30%), the doc-source is suspect (likely
+  // template-default AcroForm annotation, not real broker-filled data).
+  //
+  // THRESHOLD CALIBRATION (R10-D code-docblock discipline) — 30% delta is
+  // initial empirical anchor (Marcus 77%). Tunable per closure condition:
+  // if production surfaces legitimate small-delta cases (broker stated
+  // $408k + loan_app filled $410k = 0.5% delta) being incorrectly
+  // suppressed OR larger legitimate disagreements (>30%) being preserved
+  // when they shouldn't, recalibrate threshold.
+  //
+  // PRESERVATION — small-delta disagreements (≤30%) preserved per the
+  // existing R10-G consumer-site filter (filterCanonicalLoanAmountForDocAuthoritative
+  // strips loan_app from Snapshot context when broker source present);
+  // canonical-map level keeps both tuples for audit transparency. R11-B-1
+  // Layer 1 only fires on LARGE deltas — empirical signal of template-
+  // default-not-real-data.
+  const loanAmountTuples = map.requested_loan_amount || [];
+  const hasBrokerSourceAmount = loanAmountTuples.some(t =>
+    t && (t.classification === 'broker_correction' || t.classification === 'broker_initial_intent'));
+  if (hasBrokerSourceAmount) {
+    const brokerTuple = loanAmountTuples.find(t =>
+      t.classification === 'broker_correction' || t.classification === 'broker_initial_intent');
+    const brokerValue = brokerTuple?.value;
+    if (Number.isFinite(brokerValue) && brokerValue > 0) {
+      const filtered = loanAmountTuples.filter(t => {
+        if (!t || t.classification !== 'loan_application') return true;
+        const docValue = t.value;
+        if (!Number.isFinite(docValue) || docValue <= 0) return true;
+        const delta = Math.abs(brokerValue - docValue);
+        const maxValue = Math.max(brokerValue, docValue);
+        const deltaPct = delta / maxValue;
+        // Suppress loan_application tuple when delta > 30% (suspect template-default)
+        return deltaPct <= 0.30;
+      });
+      if (filtered.length !== loanAmountTuples.length) {
+        map.requested_loan_amount = filtered;
+      }
+    }
+  }
+
   return map;
 };
 
@@ -1708,6 +1761,82 @@ const resolveCanonicalIntentValue = (canonicalMap, field) => {
 const tokenizeNameForCompare = (name) => (name || '').trim().split(/\s+/)
   .map(t => t.toLowerCase().replace(/[.,]/g, ''))
   .filter(t => t.length > 0);
+
+// ════════════════════════════════════════════════════════════════════
+// R11-B-1 Layer 2 (2026-05-27): sanitizeLoanAppDocTextForLLM
+// ════════════════════════════════════════════════════════════════════
+// LLM-prompt-context consumer-side filter — sibling to consumer-side
+// filtering at the Snapshot-renderer boundary (R6-γ + R10-E + R10-G filter
+// chain). NEW SUB-PATTERN within 1st template family.
+//
+// EMPIRICAL ANCHOR — Marcus Webb 8c404ae0: blank Union Lending loan_app
+// template contains AcroForm annotation values extracted as `[Page N
+// annotation]` markers in the doc text (e.g., `[Page 1 annotation] 95,000`
+// + `[Page 1 annotation] Debt consolidation and home renovation` + 7
+// Scotiabank placeholder mentions inside annotation markers). When this
+// raw doc text is interpolated into Vienna's LLM prompt context at
+// generateLeadSummary docSections (ai.js:3103), the LLM reads template
+// defaults as if they're filled-in broker data and emits cross-source
+// discrepancies in Risk Factors narrative ("loan application requests
+// $95,000... loan application shows existing Scotiabank mortgage").
+//
+// CONDITIONAL SANITIZATION — annotations stripped ONLY when canonical_map
+// has broker-authoritative source for requested_loan_amount (broker_
+// correction OR broker_initial_intent). Without broker source: annotations
+// PRESERVED (R10-E Patricia parity — loan_application annotations contain
+// real broker-filled data in legitimate cases like "Second Mortgage"
+// position assertion). The presence of broker source signals that
+// loan_application data is suspect / template-default.
+//
+// IMMUTABILITY — returns new documents array; doesn't mutate input.
+//
+// SCOPE — strips `[Page N annotation][^\n]*\n?` markers + their per-line
+// content. Each annotation line typically contains annotation-emitted
+// content only (template default values). Plain text on different lines
+// preserved. R10-E's extractFromLoanApplication runs on the ORIGINAL text
+// during canonical_map construction (BEFORE sanitization); only LLM-prompt
+// consumer sees the sanitized version. Canonical extraction parity
+// preserved.
+//
+// DEFERRED RESIDUAL (per R10-D code-docblock discipline):
+//   - LLM-prompt-context sanitization at OTHER call sites (generate-
+//     BrokerResponse, processInitialEmail) deferred per asymmetric-gate
+//     discipline (R10-F 12th carry-forward). R11-B scope limits to
+//     sendPreliminaryReviewToAdmin (Marcus empirical anchor — the
+//     production prelim where Bug 2 surfaced). Other call sites may need
+//     parallel sanitization. Closure condition: Franco surfaces empirical
+//     instances of LLM-narrative misattribution at other generators.
+//   - Deeper blank-template fingerprint detection (template-schema-level
+//     identification): deferred unless this regex-level sanitization
+//     doesn't close empirical surface. Closure condition: Marcus retest
+//     post-R11-B still shows LLM misattribution despite annotation strip.
+const PAGE_ANNOTATION_LINE_RE = /\[Page\s*\d+\s*annotation\][^\n]*\n?/gi;
+const sanitizeLoanAppDocTextForLLM = (documents, canonicalMap) => {
+  if (!Array.isArray(documents)) return documents;
+  // Determine if canonical_map has broker-authoritative source for
+  // requested_loan_amount. If absent, return docs unchanged (Patricia
+  // R10-E parity preserved).
+  const loanAmountTuples = (canonicalMap && canonicalMap.requested_loan_amount) || [];
+  const hasBrokerSource = loanAmountTuples.some(t =>
+    t && (t.classification === 'broker_correction' || t.classification === 'broker_initial_intent'));
+  if (!hasBrokerSource) return documents;
+  // Sanitize loan_application docs only; other classifications unchanged.
+  return documents.map(d => {
+    if (!d || d.classification !== 'loan_application') return d;
+    const originalText = d.extracted_data?.text || '';
+    if (!PAGE_ANNOTATION_LINE_RE.test(originalText)) return d;
+    // Reset regex lastIndex (test() with /g flag advances it)
+    PAGE_ANNOTATION_LINE_RE.lastIndex = 0;
+    const sanitizedText = originalText.replace(PAGE_ANNOTATION_LINE_RE, '');
+    return {
+      ...d,
+      extracted_data: {
+        ...d.extracted_data,
+        text: sanitizedText,
+      },
+    };
+  });
+};
 
 module.exports = {
   LENDER_SYNONYMS,
@@ -1752,4 +1881,9 @@ module.exports = {
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,
   tokenizeNameForCompare,
+  // R11-B-1 Layer 2 (2026-05-27): LLM-prompt-context consumer-side filter
+  // for loan_application doc text — strips [Page N annotation] markers
+  // when canonical_map has broker-authoritative source for
+  // requested_loan_amount.
+  sanitizeLoanAppDocTextForLLM,
 };

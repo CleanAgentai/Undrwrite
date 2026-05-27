@@ -1348,10 +1348,27 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       }
     : null;
 
+  // R11-B-1 Layer 2 (2026-05-27): LLM-prompt-context consumer-side filter.
+  // Sanitize loan_application doc text (strip [Page N annotation] markers)
+  // when canonical_map has broker-authoritative source for requested_loan_
+  // amount. Closes empirically-close-loop discipline (15th methodology
+  // carry-forward): Marcus Bug 2 surfaced in admin-facing prelim narrative
+  // even though R10-G machinery correctly filtered loan_app from Snapshot.
+  // Root cause: Vienna's LLM read loan_app doc text directly at
+  // ai.js:3103 docSections + emitted "$95k from loan_application" + 7
+  // Scotiabank misattributions from AcroForm annotation markers in the
+  // blank Union Lending template. Layer 2 sanitization closes the LLM-
+  // prompt-context surface — sibling to Snapshot-renderer consumer filter
+  // (R6-γ + R10-E + R10-G). NEW SUB-PATTERN within 1st template family.
+  //
+  // Conditional sanitization preserves R10-E Patricia parity — annotations
+  // only stripped when broker source is authoritative (signals template-
+  // default vs broker-filled).
+  const _r11bSanitizedDealDocs = cFields.sanitizeLoanAppDocTextForLLM(dealDocs, _bDetectAdmin.canonical_map);
   let leadSummary = await aiService.generateLeadSummary(
     dealSummary,
     ownershipType,
-    dealDocs,
+    _r11bSanitizedDealDocs,
     missingDocs,
     labeledMessages,
     {
