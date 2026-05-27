@@ -1831,6 +1831,39 @@ router.post('/inbound', async (req, res) => {
 
       const borrowerSubject = `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`;
 
+      // R10-H (2026-05-27) — admin-handoff broker-facing-draft sweep helper.
+      // Closes Bug 7-5 EMPIRICAL-CALL-SITE gap surfaced during R10-H execute:
+      // the Ethan deal c95f3a20 outbound 2026-05-27T03:09:14 emitted "I'll
+      // be in touch shortly with an update once we've had a chance to review
+      // everything." via the under_review→approved partial branch (generate-
+      // DocumentRequestEmail → saveDraftAndPreview), but enforceNoRoutingLeak
+      // + stripPerfectOpener were NOT invoked on this code path. M2's 5 new
+      // sweep patterns would have been dead code without this widening.
+      //
+      // Scope: applies to ALL Claude-generated broker-facing drafts that
+      // route through saveDraftAndPreview at admin-handoff post-approval
+      // paths — doc-request (ltv_escalated + under_review branches),
+      // rejection (both branches), conditions (both branches), completion.
+      // EXCLUDED: REPLACE path (L2038) where admin's verbatim text is
+      // routed to broker — admin-dictated content carve-out per ai.js:1097.
+      // INCLUDED with intent: revisedEmail (L2051) — Claude-derived,
+      // not pure admin content; same sweep eligibility as other Claude-gen.
+      //
+      // Composes enforceNoRoutingLeak (Cluster E + R4-C.3 + R5-C + R6-η +
+      // R10-H) and stripPerfectOpener (R8-B) in single-pass cascade per
+      // R5-C-CASCADE-COMPOSITION precedent.
+      const sweepBrokerFacingDraft = (html) => {
+        if (!html || typeof html !== 'string') return html;
+        let out = html;
+        const _eSweep = aiService.enforceNoRoutingLeak(out);
+        out = _eSweep.swept;
+        if (_eSweep.sweptAny) console.log(`R10-H: routing-leak sweep substituted phrasing in admin-handoff draft (deal ${existingDeal.id})`);
+        const _r8bSweep = aiService.stripPerfectOpener(out);
+        out = _r8bSweep.swept;
+        if (_r8bSweep.sweptAny) console.log(`R10-H: "Perfect"-opener sweep neutralized opener in admin-handoff draft (deal ${existingDeal.id})`);
+        return out;
+      };
+
       // Helper: save draft and send preview to Franco (replies in same thread).
       // Hoisted above the draft-review branch (Bug B) so the EDIT path can route
       // revised drafts back through the same preview cycle rather than auto-sending.
@@ -2048,7 +2081,7 @@ ${draftEmail}
             editInstructions,
             existingDeal.extracted_data
           );
-          await saveDraftAndPreview(revisedEmail, existingDeal.draft_subject, existingDeal.draft_action);
+          await saveDraftAndPreview(sweepBrokerFacingDraft(revisedEmail), existingDeal.draft_subject, existingDeal.draft_action);
         }
         return;
       }
@@ -2109,7 +2142,7 @@ ${draftEmail}
             dealMessages,
             { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim, isPostApproval: true, greetingFirstName: _r8aDocReqGreeting }
           );
-          await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
+          await saveDraftAndPreview(sweepBrokerFacingDraft(docRequestEmail), borrowerSubject, 'approval_doc_request');
           // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at
           // precedents. Stamp only when AML/PEP was actually included in the
           // consolidated request (Q1 verdict — semantic alignment).
@@ -2135,11 +2168,11 @@ ${draftEmail}
             sender_type: existingDeal.extracted_data?.sender_type,
           });
           const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason, { greetingFirstName: _r8aRejectionGreeting });
-          await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
+          await saveDraftAndPreview(sweepBrokerFacingDraft(rejectionEmail), borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes — generating draft response');
           const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message, dealMessages);
-          await saveDraftAndPreview(polishedEmail, borrowerSubject, 'conditions');
+          await saveDraftAndPreview(sweepBrokerFacingDraft(polishedEmail), borrowerSubject, 'conditions');
         }
       } else if (existingDeal.status === 'under_review') {
         const { intent, message } = await aiService.parseAdminReply(email.textBody);
@@ -2179,7 +2212,7 @@ ${draftEmail}
             console.log('Final approval by admin — all docs received, generating completion email');
             // Group I: pass docs-on-file so the closing email can't fabricate receipt of a doc not actually saved.
             const completionEmail = await aiService.generateCompletionEmail(existingDeal.extracted_data, dealMessages, existingDocs);
-            await saveDraftAndPreview(completionEmail, borrowerSubject, 'approval_completed');
+            await saveDraftAndPreview(sweepBrokerFacingDraft(completionEmail), borrowerSubject, 'approval_completed');
           } else {
             // PRELIMINARY APPROVAL — still missing docs, generate doc request
             console.log('Preliminary approval by admin — generating draft doc request for remaining items');
@@ -2210,7 +2243,7 @@ ${draftEmail}
               dealMessages,
               { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial, isPostApproval: true, greetingFirstName: _r8aDocReqGreetingPartial }
             );
-            await saveDraftAndPreview(docRequestEmail, borrowerSubject, 'approval_doc_request');
+            await saveDraftAndPreview(sweepBrokerFacingDraft(docRequestEmail), borrowerSubject, 'approval_doc_request');
             // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at.
             if (_kAmlPepAskedPartial && !existingDeal.aml_pep_requested_at) {
               const _kStampedAtPartial = new Date().toISOString();
@@ -2232,11 +2265,11 @@ ${draftEmail}
             sender_type: existingDeal.extracted_data?.sender_type,
           });
           const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason, { greetingFirstName: _r8aRejectionGreetingUR });
-          await saveDraftAndPreview(rejectionEmail, borrowerSubject, 'rejection');
+          await saveDraftAndPreview(sweepBrokerFacingDraft(rejectionEmail), borrowerSubject, 'rejection');
         } else {
           console.log('Admin sent conditions/notes for under_review deal — generating draft');
           const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message, dealMessages);
-          await saveDraftAndPreview(polishedEmail, borrowerSubject, 'conditions');
+          await saveDraftAndPreview(sweepBrokerFacingDraft(polishedEmail), borrowerSubject, 'conditions');
         }
       } else {
         console.log(`Admin replied to deal in status ${existingDeal.status} — no escalation action taken`);

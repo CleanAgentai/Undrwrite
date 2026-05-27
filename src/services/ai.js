@@ -1259,6 +1259,83 @@ const ROUTING_LEAK_PATTERNS = [
   // a clean sentence.
   { match: /\bto\s+complete\s+the\s+file\s+before\s+funding,?\s*/gi,
     replace: '' },
+  // ── R10-H Cluster (2026-05-27) ──────────────────────────────────────────
+  // Internal-review-process tail-extension family. Franco-reported Bug 7-5
+  // (R10 round): Ethan deal c95f3a20 outbound 2026-05-27T03:11:28 emitted
+  //   "I'll be in touch shortly with an update once we've had a chance to
+  //    review everything."
+  // The allowed-phrasing instruction at ai.js:~1934 explicitly authorized
+  // "I'll be in touch shortly with an update" — but Claude extended it with
+  // a review-tail that re-introduced the internal-workflow-language leak
+  // Franco's R5-C rule banned. Same RES4-shape methodology as R5-C / R6-η —
+  // pattern-only extension, no new call sites, cascade-composed with R5-C
+  // and R6-η above. Prompt-side ban subsection added inline at the
+  // "Allowed phrasing" instruction; this sweep is the deterministic backstop.
+  //
+  // LINEAGE — 5-cluster "Broker-facing prompt-and-sweep language discipline"
+  // family: R5-C (R5 consolidated batch), R6-η (R6 workflow-language widening),
+  // R8-B (Perfect-opener post-gen sweep — hybrid family-membership per
+  // R9-A' precedent: opener-discipline AND prompt-and-sweep cluster),
+  // R9-A' (forwarding-language extension), R10-H (review-tail extensions).
+  //
+  // DEFINING TRIAD: (1) prompt-side discipline (explicit ban subsection in
+  // the relevant instruction), (2) post-gen sweep machinery (deterministic
+  // JS-side backstop independent of model adherence), (3) cost-asymmetric
+  // design (false-positive strip = low-cost prose cleanup; false-negative
+  // leak = high-cost broker confusion + Franco re-report).
+  //
+  // CROSS-CLUSTER-CASCADE-DISCIPLINE (load-bearing — pinned in R10-H-CROSS-
+  // CLUSTER-INTEGRATION mini-harness): R5-C-a above strips the trailing
+  // "I'll be in touch (shortly) with an update" phrase to ".". When the
+  // Ethan-shape leak appears as "I'll be in touch shortly with an update
+  // once we've had a chance to review everything." in the SAME paragraph,
+  // R5-C-a runs first (lower array index) leaving ".once we've had a
+  // chance to review everything." as R10-H-*'s input. R10-H-* patterns:
+  //   (1) Use leading [.,]?\s* (NOT ,?\s*) to consume the orphan period
+  //       from R5-C-a OR an original comma-prefix when R5-C-a doesn't fire.
+  //   (2) Replacement is "" (empty), NOT "." — the original sentence
+  //       terminator is preserved by NOT consuming it in the match (no
+  //       trailing [.,!?]? in the pattern). This avoids the ".." artifact
+  //       that would result from "." + "." in cascade.
+  // Result of Ethan-verbatim full-cascade: R5-C-a strips "I'll be in touch
+  // shortly with an update" → "."; R10-H-a strips ".once we've had a chance
+  // to review everything" → "" (orphan period consumed, trailing period
+  // survives) → final "<p>.</p>" — bare-period paragraph, minor visual
+  // artifact, no leak. Future cleanup pass can collapse "<p>\.</p>".
+  //
+  // R10-H-a — empirical anchor. "...once we've had a chance to review
+  // (everything|the file|the docs)" — verbatim Ethan out shape. Optional
+  // review-object group (everything / the file / the docs / the documents).
+  { match: /[.,]?\s*once\s+we'?ve\s+had\s+a\s+chance\s+to\s+review(?:\s+(?:everything|the\s+(?:file|docs?|documents)))?\b/gi,
+    replace: '' },
+  // R10-H-b — past-tense "...once we've reviewed" / "...after we've reviewed".
+  // CANONICAL VARIANT not yet empirically observed in production corpus.
+  // Closure condition: Stage 2 production-replay confirms pattern fires when
+  // shape appears (no Franco report needed — this is a model-paraphrase
+  // canonical variant of R10-H-a, same leak semantics).
+  { match: /[.,]?\s*(?:once|after)\s+we(?:'?ve|\s+have)\s+reviewed(?:\s+(?:everything|the\s+(?:file|docs?|documents)))?\b/gi,
+    replace: '' },
+  // R10-H-c — "...once the team has reviewed" / "...once our team reviews"
+  // (third-person team-attribution variant).
+  // CANONICAL VARIANT not yet empirically observed. Closure same as R10-H-b.
+  { match: /[.,]?\s*(?:once|after)\s+(?:the\s+team|our\s+team)\s+(?:has\s+reviewed|reviews|has\s+had\s+a\s+chance\s+to\s+review)(?:\s+(?:everything|the\s+(?:file|docs?|documents)))?\b/gi,
+    replace: '' },
+  // R10-H-d — "...after (our) internal review" — abstract-noun variant.
+  // CANONICAL VARIANT not yet empirically observed. Closure same as R10-H-b.
+  // PARTIAL-STRIP DISCIPLINE (pinned per R10-H-SWEEP-PATTERN-MATRIX): when
+  // pattern appears as "...once internal review is complete." the regex
+  // strips "once internal review" leaving "is complete." dangling. Minor
+  // grammar artifact accepted — leak content removed (the internal-stage
+  // reference), residual fragment is a sentence shard, not a leak. The
+  // alternative (extend the pattern to consume trailing "is complete" and
+  // adjacent phrasings) over-couples to one specific tail shape.
+  { match: /[.,]?\s*(?:after|once)\s+(?:our\s+)?internal\s+review\b/gi,
+    replace: '' },
+  // R10-H-e — "...once we complete our review" / "...once we have completed
+  // (our|the) review" — explicit-completion variant.
+  // CANONICAL VARIANT not yet empirically observed. Closure same as R10-H-b.
+  { match: /[.,]?\s*(?:once|after)\s+we\s+(?:complete|have\s+completed)\s+(?:our|the)\s+review\b/gi,
+    replace: '' },
 ];
 
 const enforceNoRoutingLeak = (html) => {
@@ -1932,6 +2009,13 @@ ${dealStatus === 'under_review' || dealStatus === 'ltv_escalated' ? `
 CRITICAL — STATE-AWARE FORWARDING LANGUAGE (deal status is '${dealStatus}', file already sent to admin):
 - The forwarding has already happened. NEVER use future-tense forwarding language: no "I'll send this to Franco", no "I'll get this over for review", no "I'll forward this", no "I'll route this internally", no "I'll pass this along", no "I'll send it for review", no "I'll send this over". Saying you'll do something you've already done is misleading and creates false trust with the broker.
 - Allowed phrasing for next-step communication while review is in flight: "the file is currently being reviewed", "I'll be in touch shortly with an update", "thanks for sending those through — I've added them to the file" (DO NOT specify "the file under review" or any other internal-routing reference; just "the file").
+- R10-H (2026-05-27) — DO NOT extend allowed phrases with internal-review-process tails. The following tail-extensions are FORBIDDEN (they re-introduce the internal-workflow-language leak Franco's R5 rule banned):
+  - "...once we've had a chance to review (everything|the file|the docs)"
+  - "...once we've reviewed" / "...after we've reviewed"
+  - "...once the team has reviewed" / "...once our team reviews"
+  - "...after (our) internal review"
+  - "...once we complete our review"
+  Acceptable: "I'll be in touch shortly with an update." STOP THERE — do NOT explain what triggers the update.
 - DO NOT promise a timeline or specific outcome. Vienna does not control review pacing.
 ` : ''}
 
