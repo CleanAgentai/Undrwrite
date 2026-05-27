@@ -739,6 +739,96 @@ const injectElevatedLtvBandCallout = (html, ltvBand, ltvValue) => {
   return callout + '\n\n' + out;
 };
 
+// ══════════════════════════════════════════════════════════════════════════
+// R10-I (2026-05-27): composeBrokerLenderPackageEmail
+// ══════════════════════════════════════════════════════════════════════════
+// JS-deterministic broker-facing closing email for sendCompletionHandoff.
+// Closes Bug 6-? + 7-6 (Franco R10 Round-6 Scenarios 6+7): broker received
+// generic "file is complete and submitted" close-out with NO structured
+// deal summary and NO document attachments. Empirical anchor: Ethan
+// Broussard c95f3a20 msg[10] + Kevin Tran 30d1e798 msg[10] — identical
+// generic close-out shape; broker has no portable artifact to forward to
+// lenders.
+//
+// MVP SHAPE (Option 1 per plan-first ratification): HTML deal summary in
+// body (broker can copy-paste into lender outreach) + R9-G zip attachment
+// (broker forwards complete document package). PDF alternative deferred
+// per R8-B empirical-evidence-required discipline; closure condition is
+// Franco Stage 2 retest evidence indicating PDF-format preference.
+//
+// REASONING — workflow-friendly: HTML in body lets broker customize per-
+// lender messaging before forwarding (the typical broker workflow). Lower
+// risk surface: no new PDF write-mode infrastructure introduction during
+// close-out cycle (Section 4.2b acceptance-gate risk discipline). 100%
+// existing-infrastructure reuse: renderDealSnapshot + downloadDocsAsZip
+// + selectGreetingFirstName + existing email-attachment plumbing.
+//
+// ARCHITECTURAL FAMILY — Dedicated-generator-bypass sub-pattern
+// (R10-C 13th methodology carry-forward, 2nd instance). JS-deterministic
+// broker-facing composition replaces Claude-generated narrative path
+// (generateCompletionEmail). Reasoning: canonical-data-derived content
+// beats narrative-judgment content for Claude probabilistic risk; R10-C-1
+// established the precedent for high-LTV bypass, R10-I extends to
+// completion-handoff lender-package composition.
+//
+// NEW-FEATURE EXISTING-INFRASTRUCTURE REUSE DISCIPLINE (continuation of
+// R9-G framing precedent): wire existing helpers at existing dispatcher
+// boundary rather than introduce new infrastructure. R10-I assembles:
+//   - renderDealSnapshot (discrepancy-engine.js) — JS-deterministic
+//     Snapshot HTML from canonical_map
+//   - selectGreetingFirstName (lib/greeting.js) — broker greeting target
+//   - downloadDocsAsZip via _r9gPackageAttachments (R9-G; already built
+//     for admin email at L1551; wire-extension to broker email at L1631)
+//   - existing email-attachment plumbing (emailService.sendEmail)
+// No new dependencies. Acceptance-gate risk surface minimized.
+//
+// DEFENSIVE — when packageAttached=false (R9-G zip-build failure per
+// Q3-(a) catch-log-continue at sendCompletionHandoff), the attachment-
+// mention line is omitted. Snapshot + summary still ship — broker has
+// the deal-summary artifact even without docs (admin grabs docs manually
+// per R9-G's existing failure-mode UX).
+//
+// DEFERRED RESIDUALS (per R10-D code-docblock discipline):
+//   1. PDF deal-summary alternative — closure: Franco Stage 2 evidence
+//      indicating PDF-format preference vs HTML body
+//   2. Branding / cover page polish — visual polish deferred per
+//      Franco product-design call
+//   3. Lender match-fit narrative — different feature; out-of-scope
+//   4. Hosted-link delivery (signed-URL) — out-of-scope; flagged for
+//      future iteration if broker workflow surfaces need
+//   5. generateCompletionEmail Claude generator preservation — not called
+//      from sendCompletionHandoff post-R10-I; closure: remove if Stage 2
+//      confirms unused
+const composeBrokerLenderPackageEmail = ({
+  borrowerName,
+  brokerGreetingName,
+  snapshotHtml,
+  packageAttached,
+  borrowerSafeName,
+} = {}) => {
+  // Greeting — broker first name preferred; "there" fallback for
+  // helper-null cases (anti-collision per selectGreetingFirstName chain).
+  const greeting = brokerGreetingName ? `Hi ${brokerGreetingName},` : 'Hi there,';
+  const borrowerLabel = borrowerName || 'the borrower';
+  // Lead-in — frames the artifact for broker forwarding workflow.
+  const leadIn = `<p>${borrowerLabel}'s file is complete. Below is the deal summary — feel free to copy this into your lender outreach. The complete document package is attached.</p>`;
+  // Snapshot — JS-deterministic Deal Snapshot HTML from canonical_map
+  // (passed in by caller; produced by discrepancy-engine.renderDealSnapshot).
+  const snapshot = snapshotHtml || '';
+  // Attachment-mention — defensive: omits line when packageAttached=false
+  // (R9-G zip-build failure path; broker still gets summary artifact).
+  const safeName = (borrowerSafeName || (borrowerName || 'Borrower').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_'));
+  const attachmentLine = packageAttached
+    ? `<p><strong>Attached:</strong> ${safeName}_Complete_Documents.zip — all submitted documents bundled for lender forwarding.</p>`
+    : '';
+  // Franco-pointer — matches the existing generateCompletionEmail exit
+  // pattern (R9-A close-out language preserved for broker continuity).
+  const closingPointer = `<p>If you have questions, contact Franco at franco@privatemortgagelink.com.</p>`;
+  // Signoff — Vienna / Private Mortgage Link (existing convention).
+  const signoff = `<p>Vienna<br>\nPrivate Mortgage Link</p>`;
+  return `<p>${greeting}</p>\n${leadIn}\n${snapshot}\n${attachmentLine}\n${closingPointer}\n${signoff}`;
+};
+
 // ──────────────────────────────────────────────────────────────────────────
 // R4-Bucket-C.6 — Documents Included section JS render (R4-S1 Grace)
 // ──────────────────────────────────────────────────────────────────────────
@@ -4267,6 +4357,9 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // R10-C-2 (2026-05-27): elevated-LTV-band callout injector for 75-80%
   // manual-review band per Schedule A Stage 1 spec.
   injectElevatedLtvBandCallout,
+  // R10-I (2026-05-27): broker-facing lender-package composer for
+  // sendCompletionHandoff close-out.
+  composeBrokerLenderPackageEmail,
   // Cluster E — broker-facing routing-leak post-gen sweep.
   enforceNoRoutingLeak,
   ROUTING_LEAK_PATTERNS,
