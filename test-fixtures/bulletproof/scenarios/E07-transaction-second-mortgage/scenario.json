@@ -1,0 +1,11 @@
+{
+  "id": "E07",
+  "name": "transaction-second-mortgage",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "M2", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.MP", "F1.TT"],
+  "bugHint": "M",
+  "anchor": "R4-RESIDUAL-1 combined-LTV escalation",
+  "rationale": "Second mortgage scenario: existing first mortgage ($380k with Scotia) + new second mortgage request ($120k). Combined LTV ($500k against $720k property) = 69%. F1.MP='2nd mortgage' + F1.TT='2nd Mortgage'. Tests R4-RESIDUAL-1 combined-LTV computation (standalone LTV of new mortgage is 17%; combined is 69%) and second-mortgage canonical-map shape.",
+  "notes": "Single-event sequence. Tests second-mortgage-specific math + canonical_map structure."
+}

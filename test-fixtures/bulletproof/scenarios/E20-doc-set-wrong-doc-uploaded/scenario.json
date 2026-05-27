@@ -1,0 +1,11 @@
+{
+  "id": "E20",
+  "name": "doc-set-wrong-doc-uploaded",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "WD", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.DH"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #5 (wrong-doc-uploaded escalation policy)",
+  "rationale": "Broker uploads document with mismatched filename + content. E.g., attaches 'MortgageStatement_Webb.pdf' but the PDF content is actually a loan application form (filename routes to mortgage_statement classification per deals.js classifyDocument, but content text doesn't match). Layer 3: does Vienna detect filename-vs-content mismatch + escalate, or does filename-classification dominate? Product-design item.",
+  "notes": "Single-event sequence. Fixture deliberately constructs filename-content mismatch."
+}

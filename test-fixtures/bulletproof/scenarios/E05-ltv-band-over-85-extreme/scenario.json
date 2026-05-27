@@ -1,0 +1,11 @@
+{
+  "id": "E05",
+  "name": "ltv-band-over-85-extreme",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": ">85", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.AC"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #14 (LTV >85% — decline outright vs escalate)",
+  "rationale": "Refinance at 92% LTV (above all current band thresholds). Layer 3 product-design item: does Vienna (a) decline at intake with policy-out-of-band message, (b) escalate to admin for manual exception review, (c) treat same as F4.HL >80% path. Likely Franco-co-decision (business policy on LTV ceiling).",
+  "notes": "Single-event sequence. LIKELY FRANCO-INPUT-REQUIRED: LTV ceiling policy is co-owned with Franco's lender-relationship judgments."
+}

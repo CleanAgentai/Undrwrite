@@ -1,0 +1,11 @@
+{
+  "id": "E03",
+  "name": "ltv-band-75-80-elevated",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F4.EL"],
+  "bugHint": "L",
+  "anchor": "R10-C-2 (elevated band 75-80% callout)",
+  "rationale": "Refinance at 78% LTV (within R10-C-2 elevated band). F4.EL injectElevatedLtvBandCallout fires; admin-prelim Risk Factors includes 75-80% callout. Distinct from D03 input shape (same hint but Group E dimensional attribution).",
+  "notes": "Single-event sequence. Pair with E01/E02/E04/E05 for full LTV-band-axis coverage."
+}

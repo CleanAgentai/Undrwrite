@@ -1,0 +1,11 @@
+{
+  "id": "E17",
+  "name": "doc-quality-ocr-degraded",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "OC", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 multi-field"],
+  "bugHint": "M",
+  "anchor": "Doc quality axis: OCR-degraded scanned document",
+  "rationale": "loan_application doc text simulates OCR degradation: character substitutions common in OCR (O→0, l→1, S→5, B→8, etc.). E.g., 'Lo4n Amount: $28O,OOO' instead of 'Loan Amount: $280,000'. F1.LA + F1.PV canonical extractors must handle OCR-style noise OR escalate. Tests LLM-extraction robustness on degraded docs.",
+  "notes": "Single-event sequence. OCR simulation via character-level substitution in pdfSynth extraText — crude representation of scanned-PDF degradation since synthesizing actual image-based PDFs without text layer is out of scope."
+}

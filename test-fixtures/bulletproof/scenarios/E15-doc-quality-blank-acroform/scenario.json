@@ -1,0 +1,11 @@
+{
+  "id": "E15",
+  "name": "doc-quality-blank-acroform",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "BT", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F3.AH"],
+  "bugHint": "M",
+  "anchor": "Doc quality axis: blank AcroForm template uploaded",
+  "rationale": "Broker uploads the blank loan application template PDF without filling any fields (common error — broker forwards the form to borrower for filling but accidentally re-attaches blank version when submitting). pdf-parse extracts form-label text only; no canonical-field values present. Expected: Vienna detects empty intake content + escalates to broker or admin handoff.",
+  "notes": "Single-event sequence. Fixture copies the actual blank forms/Loan Application Form (1).pdf template — exactly what a broker uploading a blank form would send."
+}

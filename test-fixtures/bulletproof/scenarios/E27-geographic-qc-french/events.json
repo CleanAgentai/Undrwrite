@@ -1,0 +1,35 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Sarah Chen (Montréal)",
+      "TextBody": "Hi Franco,\n\nRefi for Sarah Chen on propriété à 1855 Avenue Papineau, Montréal, QC H2K 4L7.\n\nValeur évaluée: $580,000\nHypothèque existante: Desjardins, solde $245,000\nMontant du prêt demandé: $320,000\nRatio prêt-valeur: 55%\n\nDossier complet ci-joint. Borrower has communication preference in French; admin-facing comms can be in English.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "E27-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "DemandePret_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "ReleveDuHypotheque_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Evaluation_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  }
+]

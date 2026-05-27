@@ -1,0 +1,11 @@
+{
+  "id": "E12",
+  "name": "borrower-non-spousal-joint",
+  "group": "E",
+  "dimensions": { "BC": "NJ", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 aggregation"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #7 (non-spousal joint aggregation rules)",
+  "rationale": "Two unrelated co-applicants on refi (e.g., siblings, business partners, investor + occupant). Distinct from spousal joint in: tax filing separately, separate NOAs, distinct credit profiles, separate liabilities, potentially separate property-share allocation. Layer 3: does canonical_map / underwriting treat non-spousal joint identically to spousal joint, or are there distinct aggregation rules (separate income, combined LTV, etc.)? LIKELY FRANCO-INPUT-REQUIRED: aggregation policy intersects with broker-workflow expectations.",
+  "notes": "Single-event sequence. Layer 3 item; co-applicants are siblings (David Okafor + Jennifer Tran assumed sibling-like — fictional)."
+}

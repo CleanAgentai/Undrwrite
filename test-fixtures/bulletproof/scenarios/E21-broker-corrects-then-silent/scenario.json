@@ -1,0 +1,11 @@
+{
+  "id": "E21",
+  "name": "broker-corrects-then-silent",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "S", "GE": "ON" },
+  "families": ["F1.LA", "F4.CH"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #6 (broker silent timing — corrects then never confirms)",
+  "rationale": "Broker submits intake + makes correction. Vienna asks clarification on the correction. Broker goes silent (no reply). After threshold time, F4.CH chase email should fire requesting confirmation. Layer 3: timing threshold + chase content. LIKELY FRANCO-INPUT-REQUIRED.",
+  "notes": "Two-event sequence (intake + correction); replay harness drives chase-cron forward to trigger F4.CH."
+}

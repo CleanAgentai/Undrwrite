@@ -1,0 +1,11 @@
+{
+  "id": "E29",
+  "name": "geographic-nl",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "NL" },
+  "families": ["F1.PC"],
+  "bugHint": "M",
+  "anchor": "R10-D FSA-letter-to-province (A-prefix → NL)",
+  "rationale": "Newfoundland property; postal A1C 1A4 (A-prefix FSA = NL per FSA_LETTER_TO_PROVINCE map). F1.PC canonical-map resolves city/province from postal letter. Tests R10-D coverage for NL — distinct from NB but same regex/lookup family.",
+  "notes": "Single-event sequence. NL is the rarest provincial coverage; pair with E28 (NB) for under-represented-province pair."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "E19",
+  "name": "doc-set-missing-many",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "MN", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.DH"],
+  "bugHint": "M",
+  "anchor": "Doc set axis: missing-many (intake email + 1 doc)",
+  "rationale": "Broker sends minimal intake — email + loan_application only. No mortgage_statement, no appraisal, no NOA, no income docs. Vienna's intake_asked_items flow should detect multiple missing required docs + send comprehensive ask-list to broker. Tests escalation when most-of-package is missing.",
+  "notes": "Single-event sequence. Distinct from E18 (missing-1) by quantity — tests batch-ask vs single-ask escalation shape."
+}

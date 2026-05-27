@@ -1,0 +1,30 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Construction loan — David Okafor",
+      "TextBody": "Hi Franco,\n\nConstruction loan for David Okafor on bare-land lot at 52 Winston Churchill Boulevard, Mississauga, ON L5M 4Y1.\n\nLand value (current): $280,000\nConstruction cost: $620,000 (4-draw schedule)\nProjected completion value: $900,000\nLoan amount: $620,000\nLTV-to-completion: 69%\n\nBuilder: Okafor Construction (borrower is owner-builder; 12 years building experience).\n\nKnow Vienna's typical flow is for completed-property mortgages — let me know if construction is in-scope or if we should route differently.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "E10-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Okafor.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "Appraisal_Okafor.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "id": "E06",
+  "name": "transaction-purchase",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "P", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "M",
+  "anchor": "TT-axis: purchase LTV math diverges from refi",
+  "rationale": "Purchase at 65% LTV — purchase-specific math: no existing mortgage; down_payment = property_value - loan_amount. No mortgage_statement applies. Tests purchase-vs-refi divergence in canonical-map handling: missing first_mortgage_balance is expected (not escalated) when TT=P, unlike refi where it's a flag.",
+  "notes": "Single-event sequence. Distinct from refi-baseline: no mortgage_statement attached because none exists for a purchase."
+}

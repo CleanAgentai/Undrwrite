@@ -1,0 +1,11 @@
+{
+  "id": "E02",
+  "name": "ltv-band-50-75-standard",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": [],
+  "bugHint": "L",
+  "anchor": "LTV-band axis: standard 50-75% control",
+  "rationale": "Refinance at 65% LTV (standard underwriting band). No band-specific generator fires; standard prelim review path. Control case for typical refi scenario covering the bulk of Vienna's underwriting volume.",
+  "notes": "Single-event sequence. Functionally similar to C03/D02; assertion focus on LTV-band-axis dimensional attribution."
+}

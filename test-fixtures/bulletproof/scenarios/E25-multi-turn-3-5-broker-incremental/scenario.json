@@ -1,0 +1,11 @@
+{
+  "id": "E25",
+  "name": "multi-turn-3-5-broker-incremental",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "M", "GE": "ON" },
+  "families": ["F1 multi-field", "F3.BR"],
+  "bugHint": "M",
+  "anchor": "R10-G push machinery (multi-turn broker incremental info)",
+  "rationale": "Broker provides intake with partial info; subsequent turns add missing canonical fields incrementally (e.g., NOA in turn 2, postal correction in turn 3, lender clarification in turn 4). F3.BR routes each turn; R10-G push integrates each addition into canonical_map. Tests multi-turn canonical-map evolution.",
+  "notes": "Four-event sequence: intake + 3 incremental updates over 5 days."
+}

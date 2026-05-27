@@ -1,0 +1,11 @@
+{
+  "id": "E01",
+  "name": "ltv-band-under-50",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "<50", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.AC"],
+  "bugHint": "L",
+  "anchor": "LTV-band axis: under-50% control",
+  "rationale": "Refinance at 40% LTV (low-risk band). F2.AC awaiting_collateral OFF; F4.HL high-LTV ask NOT fired; F4.EL elevated-band callout NOT fired. Clean control case for the LTV-band axis lower end. Pair with E02-E05 to span the band coverage.",
+  "notes": "Single-event sequence. Validates negative-assertion shape for all LTV-band-triggered behaviors at the low end."
+}

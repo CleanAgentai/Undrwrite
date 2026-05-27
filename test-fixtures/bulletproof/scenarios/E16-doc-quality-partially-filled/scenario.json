@@ -1,0 +1,11 @@
+{
+  "id": "E16",
+  "name": "doc-quality-partially-filled",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "PT", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA", "F2.DH"],
+  "bugHint": "M",
+  "anchor": "Doc quality axis: partially-filled loan application",
+  "rationale": "loan_application doc has most fields filled but omits annual_income + credit_score. Broker email provides loan_amount + property_value + refi context. F1.LA + F1.PV resolve via doc-tier. F1.AI + F1.CS canonical fields have no source. Tests partial-doc extraction + missing-field cascade.",
+  "notes": "Single-event sequence. Stresses LLM-extraction graceful-degradation on incomplete docs."
+}

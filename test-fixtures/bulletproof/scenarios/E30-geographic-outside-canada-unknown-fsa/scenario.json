@@ -1,0 +1,11 @@
+{
+  "id": "E30",
+  "name": "geographic-outside-canada-unknown-fsa",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "??" },
+  "families": ["F1.PC"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #13 (outside-Canada / unknown FSA handling)",
+  "rationale": "Property outside Canada (US address; e.g., Bellingham WA, just south of BC border). No Canadian FSA postal code; uses US ZIP code format '98225'. F1.PC canonical-map expects Canadian FSA pattern. Layer 3: does Vienna decline outright (out-of-jurisdiction), flag for admin handoff, or attempt to process anyway? LIKELY OUT-OF-SCOPE rather than under-specified — Private Mortgage Link is Canadian-jurisdiction.",
+  "notes": "Single-event sequence. Likely out-of-scope decline; Phase 4.5 confirms whether explicit out-of-scope decline messaging exists or needs to be built."
+}

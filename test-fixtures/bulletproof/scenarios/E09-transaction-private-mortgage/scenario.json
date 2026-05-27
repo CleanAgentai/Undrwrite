@@ -1,0 +1,11 @@
+{
+  "id": "E09",
+  "name": "transaction-private-mortgage",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "PV", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #4 (private mortgage specific handling)",
+  "rationale": "Private mortgage scenario (Vienna's name suggests private-mortgage focus, but the canonical_map structure treats all mortgages uniformly). Borrower being placed with private lender — TT='Private Mortgage'. Layer 3: are private mortgages differentiated in canonical_map / workflow / risk-classification, or treated identically to bank-lender refis? Product-design item.",
+  "notes": "Single-event sequence. PML = Private Mortgage Link is the product name; the system was built for private deals primarily. Confirm vs spec in Phase 4."
+}

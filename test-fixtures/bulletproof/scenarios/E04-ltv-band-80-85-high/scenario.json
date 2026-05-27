@@ -1,0 +1,11 @@
+{
+  "id": "E04",
+  "name": "ltv-band-80-85-high",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "80-85", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F4.HL", "F2.AC"],
+  "bugHint": "L",
+  "anchor": "R10-C-1 high-LTV ask + F2.AC awaiting_collateral",
+  "rationale": "Refinance at 83% LTV. F4.HL dedicated collateral-ask generator fires; F2.AC awaiting_collateral state activated. Standard prelim path bypassed in favor of minimal-ask. Same input-shape family as D01/B06 but Group E dimensional-axis attribution.",
+  "notes": "Single-event sequence. Pair with E05 for above-band coverage."
+}

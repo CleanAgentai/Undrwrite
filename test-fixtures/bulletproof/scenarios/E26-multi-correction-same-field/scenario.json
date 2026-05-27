@@ -1,0 +1,11 @@
+{
+  "id": "E26",
+  "name": "multi-correction-same-field",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA", "F3.BR"],
+  "bugHint": "M",
+  "anchor": "Multi-correction same field across days (vs C07 minutes-apart race)",
+  "rationale": "Broker re-corrects same field (loan_amount) across multiple days at deliberate intervals (intake $260k → correction-1 $290k → correction-2 $275k → correction-3 $285k). Distinct from C07 race-condition (minutes-apart): E26 tests intentional iteration over multiple days. F1.LA canonical-map should resolve to latest correction tier.",
+  "notes": "Four-event sequence. Distinct from C07 by inter-correction spacing (days vs minutes)."
+}

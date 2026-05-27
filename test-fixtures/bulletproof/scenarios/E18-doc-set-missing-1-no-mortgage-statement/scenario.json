@@ -1,0 +1,11 @@
+{
+  "id": "E18",
+  "name": "doc-set-missing-1-no-mortgage-statement",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "M1", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.FB", "F2.DH"],
+  "bugHint": "M",
+  "anchor": "Doc set axis: missing-1 (refi without mortgage_statement)",
+  "rationale": "Refinance scenario where mortgage_statement is NOT attached. Vienna's intake_asked_items flow should detect missing required doc + ask broker to forward. F1.FB falls back to loan_app source (per A33). F2.DH should not activate (no discrepancy, just missing source).",
+  "notes": "Single-event sequence. Tests intake-doc-detection flow for the canonical required-docs set."
+}

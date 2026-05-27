@@ -1,0 +1,11 @@
+{
+  "id": "E13",
+  "name": "borrower-cosigner-guarantor",
+  "group": "E",
+  "dimensions": { "BC": "CG", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 aggregation"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #8 (cosigner/guarantor distinction from joint)",
+  "rationale": "Primary borrower with cosigner/guarantor (e.g., parent guaranteeing adult child's mortgage; cosigner not on title, only on the loan note). Distinct from joint: cosigner has financial obligation but typically no title interest. Layer 3: does Vienna's canonical_map distinguish cosigner from co-applicant? If primary's qualifying-income alone is insufficient, does cosigner income aggregate per cosigner-specific rules? Likely FRANCO-INPUT-REQUIRED: cosigner policy intersects lender-relationship expectations.",
+  "notes": "Single-event sequence. Marcus Webb primary; Patricia Webb (mother) as cosigner-only. Fixture surfaces the cosigner distinction; spec resolves canonical_map shape."
+}

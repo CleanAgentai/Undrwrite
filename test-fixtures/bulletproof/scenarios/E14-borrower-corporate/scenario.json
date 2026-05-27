@@ -1,0 +1,11 @@
+{
+  "id": "E14",
+  "name": "borrower-corporate",
+  "group": "E",
+  "dimensions": { "BC": "CO", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 aggregation"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #1 (corporate borrower canonical_map shape)",
+  "rationale": "Corporation as borrower (e.g., holding company refinancing investment property). Vienna has no precedent for corporate-borrower canonical_map shape. Fixture uses existing borrower_name field with corporate entity name + extraText documenting corporate-specific attributes (incorporation jurisdiction, directors/officers, beneficial owners for AML/PEP). Layer 3: does canonical_map need new fields (incorporation_jurisdiction, beneficial_owners[], directors[]) or can existing fields accommodate? ARCHITECTURE-AMENDMENT-RISK item per Porter framing.",
+  "notes": "Single-event sequence. Fixture uses existing canonical fields with corporate-style content; Layer 3 spec authoring + potential Phase 1 matrix amendment if existing fields insufficient. ARCHITECTURE-AMENDMENT-SIGNAL surfaced via Phase 5 triage."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "E28",
+  "name": "geographic-nb",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "NB" },
+  "families": ["F1.PC"],
+  "bugHint": "M",
+  "anchor": "R10-D FSA-letter-to-province (E-prefix → NB)",
+  "rationale": "New Brunswick property; postal E3B 5C2 (E-prefix FSA = NB per FSA_LETTER_TO_PROVINCE map). F1.PC canonical-map resolves city/province from postal letter. Tests R10-D FSA-letter-to-province extension coverage for NB.",
+  "notes": "Single-event sequence. Pair with E29 (NL) for non-ON-non-QC geographic coverage."
+}

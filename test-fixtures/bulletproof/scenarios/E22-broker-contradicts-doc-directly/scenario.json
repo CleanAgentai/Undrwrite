@@ -1,0 +1,11 @@
+{
+  "id": "E22",
+  "name": "broker-contradicts-doc-directly",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CT", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA", "F2.DH"],
+  "bugHint": "M",
+  "anchor": "R11-B anchor (broker direct contradiction)",
+  "rationale": "At intake (not post-intake correction), broker email asserts loan_amount $325k while attached loan_application doc shows $185k — direct contradiction in single message. F1.LA canonical-map captures both with broker_initial_intent vs docs source tiers; F2.DH discrepancyHold should activate at intake (no broker_correction tier involved). Distinct from A08 (broker_correction discrepancy) — here broker contradicts within single intake message.",
+  "notes": "Single-event sequence. BW=CT (contradict, not CR correct) is the distinguishing axis from A08."
+}

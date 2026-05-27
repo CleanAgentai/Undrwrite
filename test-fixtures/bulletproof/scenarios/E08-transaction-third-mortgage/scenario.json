@@ -1,0 +1,11 @@
+{
+  "id": "E08",
+  "name": "transaction-third-mortgage",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "M3", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.MP", "F1.TT"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #2 (3rd mortgage support)",
+  "rationale": "Third mortgage scenario: existing 1st ($380k Scotia) + existing 2nd ($85k private) + new 3rd mortgage request ($50k). Vienna's canonical fields support mortgage_position string-valued, but 3rd-mortgage support across the broader pipeline (combined-LTV math with TWO existing mortgages; risk classification at 3rd position) is undefined. Layer 3 product-design — does Vienna support 3rd mortgages, or is this out-of-scope?",
+  "notes": "Single-event sequence. Fixture uses existing canonical fields (mortgage_position='3rd mortgage', existingFirstMortgageBalance for 1st only; 2nd mortgage info in extraText). Architecture-amendment risk: if 2nd-mortgage-balance needs canonical field, surface as matrix amendment."
+}

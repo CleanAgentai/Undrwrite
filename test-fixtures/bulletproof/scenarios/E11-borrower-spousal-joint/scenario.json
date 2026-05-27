@@ -1,0 +1,11 @@
+{
+  "id": "E11",
+  "name": "borrower-spousal-joint",
+  "group": "E",
+  "dimensions": { "BC": "SJ", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 aggregation"],
+  "bugHint": "H",
+  "anchor": "Borrower-count axis: spousal joint (under-tested area per Phase 1)",
+  "rationale": "Married couple co-applying on refinance: Marcus Anthony Webb + Patricia Webb (spouse). loan_application doc shows both names with combined income. F1 canonical-map borrower-aggregation: does borrower_name canonical field hold 'Marcus Anthony Webb and Patricia Webb' as single string, or are there per-applicant fields? Tests joint-applicant handling for under-tested area. Existing canonical fields likely accommodate via string concatenation; may surface aggregation gaps in Phase 5.",
+  "notes": "Single-event sequence. Fixture uses concatenated names in borrower_name field; Vienna's response will reveal whether canonical_map gracefully handles spousal joint or needs explicit aggregation field."
+}

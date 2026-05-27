@@ -1,0 +1,11 @@
+{
+  "id": "E24",
+  "name": "broker-reasks-for-clarification",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "RA", "CV": "M", "GE": "ON" },
+  "families": ["F4.CH"],
+  "bugHint": "M",
+  "anchor": "Broker re-asks Vienna for clarification (multi-turn re-engagement)",
+  "rationale": "After Vienna's prelim review, broker replies with a clarifying question (e.g., 'what's needed for AML/PEP confirmation?' or 'what rate-spread are we looking at?'). Tests Vienna's response to clarification-questions vs corrections vs new-info — multi-turn conversational re-engagement.",
+  "notes": "Two-event sequence: intake + broker clarification question."
+}

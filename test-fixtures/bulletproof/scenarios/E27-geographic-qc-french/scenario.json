@@ -1,0 +1,11 @@
+{
+  "id": "E27",
+  "name": "geographic-qc-french",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "QC" },
+  "families": ["F1.PC", "F1.AD"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #22 (QC French-language name/address handling)",
+  "rationale": "QC scenario with French-language address content (e.g., 'Avenue Papineau' street name, 'Montréal' city with accent). H-prefix postal code (Quebec FSA letter mapping). Per Porter framing: fixture-realism question is whether to model French content as Vienna would receive (raw French) or pre-translate. Decision: RAW FRENCH — that's what brokers in Quebec would actually send. Vienna's English-language extractors per session memory; this fixture surfaces French-handling gap. Layer 3 product-design + LIKELY ARCHITECTURE-AMENDMENT signal if Vienna requires French-language support across canonical_map fields.",
+  "notes": "Single-event sequence with French content (Montréal, Avenue Papineau, accented characters). Phase 5 triage to confirm: does Vienna extract French addresses cleanly, or surface as a gap?"
+}

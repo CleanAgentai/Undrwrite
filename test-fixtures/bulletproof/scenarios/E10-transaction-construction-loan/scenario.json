@@ -1,0 +1,11 @@
+{
+  "id": "E10",
+  "name": "transaction-construction-loan",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "CN", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #3 (construction loan support)",
+  "rationale": "Construction loan scenario: financing the building of a new property. Construction draws are draw-against-progress, not single-disbursement. Vienna's canonical_map treats loan as single-amount; construction loans have draw schedule, completion timeline, progress inspection requirements not modeled. Layer 3: does Vienna support construction loans or are they explicit out-of-scope? Architecture-amendment risk: if construction-loan support requires NEW canonical fields (draw_schedule, completion_date, lender_inspection_required), surface as Phase 1 matrix amendment.",
+  "notes": "Single-event sequence. Fixture uses existing canonical fields with construction-loan content; PRODUCT-DESIGN item flags whether canonical_map needs amendment."
+}

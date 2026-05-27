@@ -1,0 +1,11 @@
+{
+  "id": "E23",
+  "name": "broker-silent-on-callout",
+  "group": "E",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "S", "GE": "ON" },
+  "families": ["F4.CH"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #6 (broker silent on Vienna's discrepancy callout — escalation timing)",
+  "rationale": "Vienna sends prelim review with discrepancy callout (e.g., postal-code Risk Factors or elevated-LTV callout). Broker doesn't reply. After threshold, F4.CH chase email should fire (or admin handoff). Layer 3: silent-after-callout timing thresholds + chase content. LIKELY FRANCO-INPUT-REQUIRED.",
+  "notes": "Single-event intake. Replay harness drives chase-cron forward; this fixture supplies the silent-after-prelim setup."
+}
