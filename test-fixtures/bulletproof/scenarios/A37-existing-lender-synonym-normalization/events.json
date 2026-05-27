@@ -1,0 +1,52 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Marcus Webb",
+      "TextBody": "Hi Franco,\n\nRefi for Marcus Webb. RBC first mortgage, balance $225k per attached payout.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A37-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 90000000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Refinance — Marcus Webb",
+      "TextBody": "Just to keep naming consistent across the file — please use \"Royal Bank\" in the prelim review (matches lender's preferred branding for the consumer-facing communications). Same entity as RBC / Royal Bank of Canada in the docs.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A37-correction@bulletproof.synthetic",
+      "Date": "2026-05-16T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "id": "A33",
+  "name": "first-mortgage-balance-loan-app-fallback",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "M1", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.FB"],
+  "bugHint": "M",
+  "anchor": "F1.FB fallback: loan_app when no mortgage_statement",
+  "rationale": "Broker omits first_mortgage_balance. mortgage_statement doc is NOT attached (DS=M1). loan_application doc shows $225,000. F1.FB canonical-map falls back to loan_app source when mortgage_statement absent. Tests next-tier fallback within docs tier when authoritative source missing.",
+  "notes": "Single-event sequence. Missing mortgage_statement; loan_app source becomes authoritative for F1.FB."
+}

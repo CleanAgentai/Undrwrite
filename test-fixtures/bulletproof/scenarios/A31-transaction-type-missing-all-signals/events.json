@@ -1,0 +1,30 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jason@mercerbrokerage.example.com",
+      "FromName": "Jason Mercer",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Submission — Patricia Simmons",
+      "TextBody": "Hi Franco,\n\nNew submission for Patricia Simmons at 287 Glencairn Avenue, Toronto, ON M5N 1V3. Loan amount $460,000.\n\nJason Mercer\nMercer Mortgage Group\nLic. #M12001505",
+      "HtmlBody": null,
+      "MessageID": "A31-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T13:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "Appraisal_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Purchase — Marcus Webb",
+      "TextBody": "Hi Franco,\n\nMarcus Webb is buying property at 1142 Tory Road NW, Edmonton, AB T6R 2K8. Loan amount $280,000.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A28-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 86400000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Purchase — Marcus Webb",
+      "TextBody": "Correction — this is actually a refinance, not a purchase. Marcus Webb already owns the property at 1142 Tory Road NW, Edmonton, AB T6R 2K8; we're refinancing the existing first mortgage with Royal Bank of Canada (balance $225k from the attached statement). Sorry for the confusion — please treat as refinance.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A28-correction@bulletproof.synthetic",
+      "Date": "2026-05-16T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

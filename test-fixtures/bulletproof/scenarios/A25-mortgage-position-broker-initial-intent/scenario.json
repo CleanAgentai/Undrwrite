@@ -1,0 +1,11 @@
+{
+  "id": "A25",
+  "name": "mortgage-position-broker-initial-intent",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.MP"],
+  "bugHint": "L",
+  "anchor": "F1.MP source-hierarchy: broker_initial_intent tier",
+  "rationale": "Broker intake explicitly states 'first mortgage refinance'. loan_application doc agrees ('1st mortgage'). No correction. F1.MP canonical-map resolves via broker_initial_intent tier. Tests next-tier-down resolution when broker_correction is empty.",
+  "notes": "Single-event sequence. Mirror of A02 (LA broker_initial_intent) for mortgage_position field."
+}

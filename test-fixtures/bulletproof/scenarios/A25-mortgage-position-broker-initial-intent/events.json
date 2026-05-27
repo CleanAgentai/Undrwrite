@@ -1,0 +1,35 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Sarah Chen",
+      "TextBody": "Hi Franco,\n\nFirst mortgage refinance for Sarah Chen. 4421 Kingsway, Vancouver, BC V5R 5T7. Loan amount $525,000; existing first mortgage Bank of Montreal balance $410,000.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "A25-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  }
+]

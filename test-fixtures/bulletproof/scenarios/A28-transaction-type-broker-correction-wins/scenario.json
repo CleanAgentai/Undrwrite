@@ -1,0 +1,11 @@
+{
+  "id": "A28",
+  "name": "transaction-type-broker-correction-wins",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "M",
+  "anchor": "R11-A transaction_type inferential canonical field",
+  "rationale": "Broker initial intake states transaction_type 'purchase' (mentions 'buying property'). loan_application doc shows 'purchase'. Broker subsequently corrects to 'refinance' (clarified the deal is actually a refi, broker initial framing was wrong). F1.TT first inferential canonical field per R11-A; canonical-map resolves to broker_correction tier ('refinance'). Tests broker_correction overriding initial_intent for inferential field.",
+  "notes": "Two-event sequence. R11-A anchor — first inferential canonical field with explicit source-hierarchy."
+}

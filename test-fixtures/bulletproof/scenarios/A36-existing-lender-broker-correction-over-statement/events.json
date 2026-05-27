@@ -1,0 +1,52 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jason@mercerbrokerage.example.com",
+      "FromName": "Jason Mercer",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Sarah Chen",
+      "TextBody": "Hi Franco,\n\nRefi for Sarah Chen, Scotiabank first mortgage.\n\nJason Mercer\nMercer Mortgage Group\nLic. #M12001505",
+      "HtmlBody": null,
+      "MessageID": "A36-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 90000000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "jason@mercerbrokerage.example.com",
+      "FromName": "Jason Mercer",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Refinance — Sarah Chen",
+      "TextBody": "Lender clarification — the actual lender of record is Scotia Mortgage Corporation (subsidiary), even though the payout statement is on Scotiabank letterhead. Use Scotia Mortgage Corporation in the file. Same payout terms; just a naming clean-up.\n\nJason Mercer\nMercer Mortgage Group\nLic. #M12001505",
+      "HtmlBody": null,
+      "MessageID": "A36-correction@bulletproof.synthetic",
+      "Date": "2026-05-16T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

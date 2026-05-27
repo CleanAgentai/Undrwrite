@@ -1,0 +1,11 @@
+{
+  "id": "A31",
+  "name": "transaction-type-missing-all-signals",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "M1", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #15 (transaction_type missing-source fallback)",
+  "rationale": "Broker email mentions submission but no transaction_type signal. loan_application omits transaction_type field. No mortgage_statement attached (DS=M1) — removes inference path. F1.TT has zero signal across all tiers. Expected behavior UNDEFINED — possibilities: (a) default to refinance (most common), (b) flag-as-missing, (c) admin escalation. Layer 3 product-design item.",
+  "notes": "Single-event sequence. Distinct from A30 (which has mortgage_statement inference path); A31 has no inference path at all. Layer 3 pending_product_decision."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "A34",
+  "name": "first-mortgage-balance-broker-correction-over-statement",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.FB"],
+  "bugHint": "M",
+  "anchor": "F1.FB broker_correction tier vs mortgage_statement tier",
+  "rationale": "mortgage_statement doc shows $225,000 (current per statement validity date). Broker correction asserts balance is now $222,500 (borrower made an unscheduled payment after the statement date). F1.FB canonical-map resolves to broker_correction tier — broker_correction overrides docs tier even when docs tier is mortgage_statement (authoritative within docs). Tests cross-tier precedence: broker > docs always, regardless of doc authority within docs tier.",
+  "notes": "Two-event sequence. Distinct from A32 (intra-docs tier resolution) — A34 tests cross-tier broker > docs precedence."
+}

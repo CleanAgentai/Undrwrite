@@ -1,0 +1,11 @@
+{
+  "id": "A27",
+  "name": "mortgage-position-ambiguous-no-signal",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.MP"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #16 (mortgage_position ambiguous signal)",
+  "rationale": "Broker email mentions refinance but does NOT state mortgage_position. loan_application doc has empty mortgage_position field. No mortgage_statement attached. No lender match available for R10-G inference. F1.MP has zero signal. Expected behavior is UNDEFINED — possibilities: (a) default to 1st mortgage, (b) flag-as-missing + escalate to broker, (c) hold for admin. Layer 3 product-design item.",
+  "notes": "Single-event sequence. Distinct from A26 (which has inference path via lender+balance); A27 has no inference path. Layer 3 pending_product_decision."
+}

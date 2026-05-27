@@ -1,0 +1,11 @@
+{
+  "id": "A40",
+  "name": "borrower-contact-broker-correction-wins",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.CT"],
+  "bugHint": "L",
+  "anchor": "F1.CT source-hierarchy: broker_correction tier (borrower contact)",
+  "rationale": "Broker initial intake states borrower_phone '780-555-0142' and email 'marcus.webb@example.com'. loan_application doc shows older phone '780-555-0099'. Broker correction asserts the older phone is stale; use '780-555-0142'. F1.CT canonical-map resolves to broker_correction tier for borrower_phone field. Tests F1.CT contact-field source-hierarchy analogously to A01 (LA broker_correction).",
+  "notes": "Two-event sequence. Borrower contact information includes phone + email — broker is authoritative for current contact info."
+}

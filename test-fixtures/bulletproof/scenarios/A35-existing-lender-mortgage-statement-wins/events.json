@@ -1,0 +1,35 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Patricia Simmons",
+      "TextBody": "Hi Franco,\n\nRefi for Patricia Simmons at 287 Glencairn Avenue, Toronto, ON M5N 1V3. Payout statement attached.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "A35-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  }
+]

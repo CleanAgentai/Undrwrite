@@ -1,0 +1,11 @@
+{
+  "id": "A32",
+  "name": "first-mortgage-balance-mortgage-statement-wins",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.FB"],
+  "bugHint": "L",
+  "anchor": "R11-B-2 (filterCanonicalLenderForPayoutOnly — balance source-hierarchy)",
+  "rationale": "Broker email omits first_mortgage_balance. loan_application doc shows $220,000 (older). mortgage_statement doc shows $225,000 (current payout). F1.FB canonical-map prefers mortgage_statement source per R11-B-2 (mortgage_statement is authoritative for balance + payoff values). Tests doc-source-hierarchy within F1.FB resolution.",
+  "notes": "Single-event sequence. Broker silent on balance; cross-doc source-tier resolution within docs tier."
+}

@@ -1,0 +1,52 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Marcus Webb",
+      "TextBody": "Hi Franco,\n\nRefi for Marcus Webb. Property 1142 Tory Road NW, Edmonton, AB T6R 2K8, $120k requested. Existing first mortgage Royal Bank of Canada balance $280k.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A24-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 86400000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Refinance — Marcus Webb",
+      "TextBody": "Quick clarification — this is actually a 2nd mortgage* (we're keeping the existing first with Royal Bank of Canada in place; the $120k is being added behind). Mortgage position: 2nd mortgage*.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A24-correction@bulletproof.synthetic",
+      "Date": "2026-05-16T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

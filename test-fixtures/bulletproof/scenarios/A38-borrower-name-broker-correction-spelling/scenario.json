@@ -1,0 +1,11 @@
+{
+  "id": "A38",
+  "name": "borrower-name-broker-correction-spelling",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.BN"],
+  "bugHint": "L",
+  "anchor": "F1.BN source-hierarchy: broker_correction tier",
+  "rationale": "loan_application doc shows borrower_name 'Marcus Web' (typo missing second 'b'). Broker correction asserts 'Marcus Webb' (correct spelling). F1.BN canonical-map resolves to broker_correction tier. Tests broker authority over doc-source spelling errors for borrower-name field.",
+  "notes": "Two-event sequence. Spelling-error correction — common real-world pattern."
+}

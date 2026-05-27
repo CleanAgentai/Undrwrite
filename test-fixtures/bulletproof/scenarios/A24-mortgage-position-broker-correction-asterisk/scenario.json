@@ -1,0 +1,11 @@
+{
+  "id": "A24",
+  "name": "mortgage-position-broker-correction-asterisk",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.MP"],
+  "bugHint": "M",
+  "anchor": "R11-A asterisk-tolerance parser scope",
+  "rationale": "Broker correction asserts mortgage_position as '2nd mortgage*' (asterisk-suffix, common broker-shorthand for 'noting this changed'). F1.MP parser must tolerate asterisk suffix per R11-A regex scope extension. loan_application doc shows '1st mortgage'. F1.MP canonical-map resolves to broker_correction tier ('2nd mortgage') despite asterisk noise.",
+  "notes": "Two-event sequence. R11-A anchor; tests broker-shorthand parser robustness."
+}

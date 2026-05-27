@@ -1,0 +1,11 @@
+{
+  "id": "A26",
+  "name": "mortgage-position-inferred-balance-lender-match",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.MP", "F1.EL", "F1.FB"],
+  "bugHint": "H",
+  "anchor": "R10-G + R11-A refinance carve-out (inferMortgagePositionFromExistingBalance)",
+  "rationale": "Broker email mentions refinance + lender (RBC) but does NOT state mortgage_position. mortgage_statement doc shows RBC as existing lender with $225k balance. loan_application doc lender_name matches RBC. F1.MP inference path: when broker_correction + broker_initial_intent are empty AND transaction_type='refinance' AND existing-mortgage-lender matches across sources, infer mortgage_position from balance presence (R10-G + R11-A refinance carve-out). Tests cross-field inference for missing canonical field.",
+  "notes": "Single-event sequence. Cross-family inference scenario — F1.MP value derived from F1.EL + F1.FB co-presence + TT context."
+}

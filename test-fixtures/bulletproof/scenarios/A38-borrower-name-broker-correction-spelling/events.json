@@ -1,0 +1,52 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Marcus Web",
+      "TextBody": "Hi Franco,\n\nRefi for Marcus Web. 1142 Tory Road NW, Edmonton, AB T6R 2K8, $280k.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A38-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 86400000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "fmaione@unionfinancialcorp.com",
+      "FromName": "Franco Maione",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Refinance — Marcus Web",
+      "TextBody": "Quick typo fix — borrower's name is Marcus Webb (two b's), not \"Marcus Web\" as I had it in the loan app and earlier emails. The docs all show the typo too; I'll get them corrected and re-sent but please use the correct spelling in any outbound communications.\n\nFranco Maione\nLENDING & INVESTMENT SPECIALIST\n102, 10446 122 Street NW\nEdmonton, AB, T5N 1M3\nOFFICE.  780-244-4769\nCELL.  780-975-3339\nEMAIL.  fmaione@unionfinancialcorp.com",
+      "HtmlBody": null,
+      "MessageID": "A38-correction@bulletproof.synthetic",
+      "Date": "2026-05-16T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

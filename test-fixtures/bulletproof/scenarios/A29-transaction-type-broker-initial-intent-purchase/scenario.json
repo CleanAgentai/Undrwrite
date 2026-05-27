@@ -1,0 +1,11 @@
+{
+  "id": "A29",
+  "name": "transaction-type-broker-initial-intent-purchase",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "P", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "L",
+  "anchor": "F1.TT source-hierarchy: broker_initial_intent (purchase variant)",
+  "rationale": "Broker intake explicitly identifies the deal as a purchase. loan_application doc shows 'Purchase'. No correction. F1.TT canonical-map resolves via broker_initial_intent tier; TT=P drives downstream purchase-specific behavior (LTV math, doc requirements). Tests F1.TT in purchase variant — distinct from refi-baseline scenarios.",
+  "notes": "Single-event sequence. Same shape as A02 but for TT field with TT=P."
+}

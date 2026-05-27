@@ -1,0 +1,11 @@
+{
+  "id": "A37",
+  "name": "existing-lender-synonym-normalization",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.EL"],
+  "bugHint": "M",
+  "anchor": "F1.EL lender-synonym normalization (LENDER_SYNONYMS in canonical-fields.js)",
+  "rationale": "Broker uses 'RBC' (informal) in intake. loan_application doc has 'Royal Bank of Canada'. mortgage_statement doc has 'RBC Royal Bank'. Broker correction uses 'Royal Bank'. F1.EL canonical-map must normalize all four synonyms (RBC / Royal Bank of Canada / RBC Royal Bank / Royal Bank) to a single canonical lender entity per LENDER_SYNONYMS map. Tests synonym-resolution that all variants resolve to same canonical value.",
+  "notes": "Two-event sequence with 4 lender-name variants across sources. Tests LENDER_SYNONYMS lookup robustness."
+}

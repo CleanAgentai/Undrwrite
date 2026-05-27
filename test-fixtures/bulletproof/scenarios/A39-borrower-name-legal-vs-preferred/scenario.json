@@ -1,0 +1,11 @@
+{
+  "id": "A39",
+  "name": "borrower-name-legal-vs-preferred",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.BN"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #9 (legal vs preferred name precedence)",
+  "rationale": "loan_application doc shows borrower_name legal: 'Marcus Anthony Webb'. Broker uses preferred name in email + correction: 'Marcus Webb' (drops middle name). F1.BN canonical-map encounters legal vs preferred name divergence. Layer 3 product-design: which is authoritative for canonical_map? Legal (matches title/payout docs) or preferred (matches broker-facing comms)? Possibilities: (a) legal always, (b) preferred for comms + legal for legal docs (two-field model), (c) broker_correction always wins.",
+  "notes": "Two-event sequence. Layer 3 #9 product-design item."
+}

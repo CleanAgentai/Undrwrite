@@ -1,0 +1,11 @@
+{
+  "id": "A36",
+  "name": "existing-lender-broker-correction-over-statement",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.EL"],
+  "bugHint": "M",
+  "anchor": "F1.EL broker_correction tier vs mortgage_statement tier",
+  "rationale": "mortgage_statement doc shows 'Scotiabank'. Broker corrects to clarify the lender is actually 'Scotia Mortgage Corporation' (subsidiary entity holding the actual mortgage; statement was issued by parent). F1.EL canonical-map resolves to broker_correction tier despite mortgage_statement being authoritative within docs tier. Tests cross-tier precedence for lender field.",
+  "notes": "Two-event sequence. Sibling to A34 — A36 tests broker_correction > mortgage_statement for lender field."
+}

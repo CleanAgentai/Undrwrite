@@ -1,0 +1,11 @@
+{
+  "id": "A35",
+  "name": "existing-lender-mortgage-statement-wins",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.EL"],
+  "bugHint": "L",
+  "anchor": "R11-B-2 (filterCanonicalLenderForPayoutOnly — lender source-hierarchy)",
+  "rationale": "Broker email omits existing_mortgage_lender. loan_application doc shows 'Scotia' (broker-shorthand). mortgage_statement doc shows 'Scotiabank' (formal name). F1.EL canonical-map prefers mortgage_statement source per R11-B-2 (lender field is authoritative on mortgage_statement). Tests doc-source-hierarchy for lender field analogous to A32 for balance field.",
+  "notes": "Single-event sequence. Sibling to A32 — both anchor on R11-B-2 filterCanonicalLenderForPayoutOnly; A32 = balance axis, A35 = lender axis."
+}

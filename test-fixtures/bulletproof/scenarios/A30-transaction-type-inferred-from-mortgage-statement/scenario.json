@@ -1,0 +1,11 @@
+{
+  "id": "A30",
+  "name": "transaction-type-inferred-from-mortgage-statement",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "M",
+  "anchor": "F1.TT inference: docs-derived (mortgage_statement presence + refi keywords)",
+  "rationale": "Broker email mentions submission but does NOT explicitly say 'refinance' or 'purchase'. mortgage_statement doc is attached (signals existing-mortgage context). loan_application doc has empty transaction_type field. F1.TT inferential canonical field — must derive from doc signals (mortgage_statement attachment + 'payout/discharge' keywords). Expected: infer 'refinance'.",
+  "notes": "Single-event sequence. Inferential resolution path — TT not explicitly stated anywhere but mortgage_statement presence implies refi."
+}
