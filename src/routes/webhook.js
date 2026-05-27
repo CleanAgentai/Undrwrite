@@ -1417,6 +1417,25 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     leadSummary = aiService.injectElevatedLtvBandCallout(leadSummary, _r10cPrelimBand, _r10cPrelimEffectiveLtv);
     console.log(`R10-C-2: elevated LTV band (${_r10cPrelimEffectiveLtv}%) — admin prelim callout injected (Schedule A Stage 1 manual-review band).`);
   }
+  // R11-C (2026-05-27): postal-code discrepancy callout. Sibling to R10-C-2
+  // — 2nd instance of JS-INJECTED ADMIN RISK FACTORS CALLOUT sub-pattern
+  // within 1st template family. Closes Franco Round 7 Bug 4: postal-code
+  // discrepancy was inlined into Property Address row pre-R11-C; now
+  // surfaced via JS-deterministic Risk Factors callout (admin-visibility
+  // guaranteed per empirically-close-loop discipline — 15th methodology
+  // carry-forward). Marcus Webb 8c404ae0 empirical: Vienna's LLM-narrative
+  // did NOT flag postal-code in Risk Factors (LLM probabilistic; flagged
+  // lender/balance/loan-amount but NOT postal). JS-deterministic callout
+  // guarantees admin visibility. Reads postal tuples from the SAME filtered
+  // canonical_map driving Snapshot rendering (R6-γ + R10-E + R10-G + R11-B
+  // filter chain) — no drift between Property Address row + callout source
+  // attribution.
+  const _r11cPostalTuples = _bFilteredCanonicalMap.subject_property_postal_code || [];
+  const _r11cDistinctPostals = new Set(_r11cPostalTuples.map(t => t?.value).filter(Boolean));
+  if (_r11cDistinctPostals.size > 1) {
+    leadSummary = aiService.injectPostalCodeDiscrepancyCallout(leadSummary, _r11cPostalTuples);
+    console.log(`R11-C: postal-code discrepancy (${Array.from(_r11cDistinctPostals).join(' / ')}) — admin prelim callout injected.`);
+  }
   // R4-Bucket-C.6 (Grace 5f8e4921 T4 fix): strip Claude's Documents Included
   // section + inject JS-rendered authoritative one. Claude probabilistically
   // dropped items from Section 9 (Grace lost T4 from [RECEIVED] + gov_id +

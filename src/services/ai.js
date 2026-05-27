@@ -740,6 +740,103 @@ const injectElevatedLtvBandCallout = (html, ltvBand, ltvValue) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════
+// R11-C (2026-05-27): injectPostalCodeDiscrepancyCallout
+// ══════════════════════════════════════════════════════════════════════════
+// SIBLING to R10-C-2's injectElevatedLtvBandCallout. JS-deterministic admin
+// Risk Factors callout for postal-code discrepancy. Triggered by canonical-
+// map state where subject_property_postal_code has 2+ distinct values.
+//
+// EMPIRICAL ANCHOR — Marcus Webb 8c404ae0: canonical_map.subject_property_
+// postal_code has 3 tuples with 2 distinct values (T6R3K2 from email_body +
+// appraisal; T6R0S4 from RBC payout statement). Pre-R11-C this was inlined
+// into the Property Address row as " — postal codes differ: T6R3K2 (per
+// email body) / T6R0S4 (per RBC Payout Statement Marcus Webb)". Franco
+// Round 7 retest Bug 4: "If Vienna flags a postal code discrepancy, it
+// should do so in the discrepancies or risk factors section — not appended
+// to the property address field. The address field should contain only the
+// clean street address."
+//
+// R11-C two-mechanism fix:
+//   M1 (discrepancy-engine.js renderDealSnapshot): Property Address row
+//      strips the inline postal suffix; renders ONLY the clean street
+//      address.
+//   M2 (this helper): JS-deterministic Risk Factors callout injected at
+//      the prelim render pipeline. Marker-pattern idempotent for [UPDATED]
+//      prelim re-renders.
+//
+// EMPIRICALLY-CLOSE-LOOP DISCIPLINE (15th methodology carry-forward, R11-B):
+// Without this admin-side Risk Factors callout, stripping the inline
+// suffix alone would leave Franco with NO postal-code visibility on the
+// admin prelim. Empirical: Vienna's LLM-generated Risk Factors narrative
+// for Marcus did NOT cite the postal-code discrepancy (LLM probabilistic;
+// flagged lender/balance/loan-amount but NOT postal). R8-B empirical-
+// evidence-required discipline justifies JS-deterministic admin callout.
+//
+// ARCHITECTURAL FAMILY — Sub-pattern within 1st template family
+// (canonical-map source-hierarchy enforcement). JS-INJECTED ADMIN RISK
+// FACTORS CALLOUT pattern lineage:
+//   R10-C-2 injectElevatedLtvBandCallout (75-80% LTV band) — 1st instance
+//   R11-C injectPostalCodeDiscrepancyCallout (multi-postal discrepancy) — 2nd instance
+// Pattern definition: JS-deterministic helper composing admin-visible
+// callout at prelim render pipeline, inserted AFTER Deal Snapshot block,
+// BEFORE Claude's narrative sections. Triggered by canonical-map state
+// that LLM-probabilistic narrative may not reliably surface. Marker-
+// pattern idempotent. Defense against LLM-probabilistic admin visibility
+// gaps. Promotion to its own sub-pattern within 1st family deferred until
+// 3+ instances per session convention.
+//
+// BROKER-FACING SURFACE UNCHANGED — broker-facing discrepancy section
+// already handles postal-code via existing renderDiscrepancyBullet +
+// FIELD_DISPLAY_NAMES.subject_property_postal_code. R11-C is admin-side
+// scoped only.
+const POSTAL_CODE_DISCREPANCY_CALLOUT_MARKER = 'R11-C-POSTAL-CODE-DISCREPANCY-CALLOUT';
+const POSTAL_CODE_DISCREPANCY_CALLOUT_PATTERN = new RegExp(
+  `<p[^>]*data-marker="${POSTAL_CODE_DISCREPANCY_CALLOUT_MARKER}"[^>]*>[\\s\\S]*?<\\/p>\\s*`,
+  'gi',
+);
+const injectPostalCodeDiscrepancyCallout = (html, postalTuples) => {
+  if (!html || typeof html !== 'string') return html;
+  if (!Array.isArray(postalTuples) || postalTuples.length === 0) return html;
+  // Aggregate distinct values + their source labels (multi-source merge).
+  // Same source-label formatting as legacy inline-suffix logic for
+  // archaeology continuity: strip .pdf, replace underscores with spaces,
+  // preserve "email body" as-is.
+  const distinctByValue = new Map();
+  for (const t of postalTuples) {
+    if (!t || t.value == null) continue;
+    const sourceLabel = (t.source || '')
+      .replace(/\.pdf$/i, '')
+      .replace(/_/g, ' ');
+    if (distinctByValue.has(t.value)) {
+      const existing = distinctByValue.get(t.value);
+      if (!existing.sources.includes(sourceLabel)) existing.sources.push(sourceLabel);
+    } else {
+      distinctByValue.set(t.value, { value: t.value, sources: [sourceLabel] });
+    }
+  }
+  if (distinctByValue.size <= 1) return html; // single-value: no discrepancy → no callout
+  // Strip prior callout (idempotence) before injecting.
+  let out = html.replace(POSTAL_CODE_DISCREPANCY_CALLOUT_PATTERN, '');
+  const valueLabels = Array.from(distinctByValue.values())
+    .map(d => `${d.value} (per ${d.sources.join(', ')})`)
+    .join(' / ');
+  const callout = `<p data-marker="${POSTAL_CODE_DISCREPANCY_CALLOUT_MARKER}"><strong>Postal Code Discrepancy:</strong> ${valueLabels} — needs clarification.</p>`;
+  // Inject AFTER the Deal Snapshot block when present (sibling to R10-C-2
+  // callout placement convention).
+  const snapshotBlockMatch = out.match(/<h2[^>]*>\s*Deal Snapshot\s*<\/h2>[\s\S]*?(?=<h2|<hr|$)/i);
+  if (snapshotBlockMatch) {
+    const insertAt = snapshotBlockMatch.index + snapshotBlockMatch[0].length;
+    return out.slice(0, insertAt) + '\n' + callout + '\n' + out.slice(insertAt);
+  }
+  // Fallback: prepend (or insert after FILE STATUS if present)
+  const fileStatusM = out.match(/^(\s*<p>\s*<strong>\s*FILE STATUS[^<]*<\/strong>[^<]*<\/p>\s*)/i);
+  if (fileStatusM) {
+    return fileStatusM[1] + callout + '\n\n' + out.slice(fileStatusM[0].length);
+  }
+  return callout + '\n\n' + out;
+};
+
+// ══════════════════════════════════════════════════════════════════════════
 // R10-I (2026-05-27): composeBrokerLenderPackageEmail
 // ══════════════════════════════════════════════════════════════════════════
 // JS-deterministic broker-facing closing email for sendCompletionHandoff.
@@ -4357,6 +4454,11 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // R10-C-2 (2026-05-27): elevated-LTV-band callout injector for 75-80%
   // manual-review band per Schedule A Stage 1 spec.
   injectElevatedLtvBandCallout,
+  // R11-C (2026-05-27): postal-code discrepancy callout injector. Sibling
+  // to R10-C-2 — 2nd instance of JS-INJECTED ADMIN RISK FACTORS CALLOUT
+  // sub-pattern. JS-deterministic backstop for empirically-probabilistic
+  // LLM narrative postal-code visibility gap.
+  injectPostalCodeDiscrepancyCallout,
   // R10-I (2026-05-27): broker-facing lender-package composer for
   // sendCompletionHandoff close-out.
   composeBrokerLenderPackageEmail,

@@ -479,29 +479,42 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
   const { ownershipType = null, isCommercial = false } = opts;
   const lines = [];
 
-  // Property Address row — when subject_property_postal_code has multi-value
-  // (a real discrepancy), surface postal disambiguation inline so admin sees
-  // BOTH postals in the Snapshot block (transparency requirement for the
-  // calibration-gated case — postal IS objective and broker-facing, but admin
-  // also needs to see the conflict on the structured admin-review surface).
-  const postalTuples = canonicalMap.subject_property_postal_code || [];
-  const distinctPostals = [];
-  for (const t of postalTuples) {
-    if (t.value != null && !distinctPostals.some(d => d.value === t.value)) {
-      distinctPostals.push({ value: t.value, source: t.source });
-    }
-  }
-  if (distinctPostals.length > 1) {
-    // Multi-postal: render Property Address row + postal-disambiguation suffix.
-    const baseRow = renderSnapshotRow('Property Address', canonicalMap.subject_property_address);
-    const postalSuffix = distinctPostals.map(d =>
-      `${d.value} (per ${d.source.replace(/\.pdf$/i, '').replace(/_/g, ' ').replace('email body', 'email body')})`
-    ).join(' / ');
-    // Inject postal suffix into the Property Address row (before closing </p>)
-    lines.push(baseRow.replace(/<\/p>$/, ` — postal codes differ: ${postalSuffix}</p>`));
-  } else {
-    lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address));
-  }
+  // Property Address row — clean street address only.
+  //
+  // R11-C (2026-05-27) DESIGN INTENT CHANGE — Franco Round 7 retest Bug 4:
+  // "If Vienna flags a postal code discrepancy, it should do so in the
+  // discrepancies or risk factors section — not appended to the property
+  // address field. The address field should contain only the clean street
+  // address."
+  //
+  // Pre-R11-C this row inlined postal disambiguation when subject_property_
+  // postal_code had multi-value:
+  //   <p><strong>Property Address:</strong> 1142 tory road nw — postal codes
+  //     differ: T6R3K2 (per email body) / T6R0S4 (per RBC Payout Statement
+  //     Marcus Webb)</p>
+  // Original docblock framed this as "transparency requirement for the
+  // calibration-gated case — admin also needs to see the conflict on the
+  // structured admin-review surface." Empirical signal from Marcus Webb
+  // 8c404ae0 retest contradicts this design choice — Franco wants the
+  // Property Address field clean.
+  //
+  // R11-C admin-visibility replacement: JS-deterministic injection of a
+  // Risk Factors callout at the prelim render pipeline (see ai.js
+  // injectPostalCodeDiscrepancyCallout — sibling to R10-C-2's
+  // injectElevatedLtvBandCallout). EMPIRICALLY-CLOSE-LOOP DISCIPLINE
+  // (15th methodology carry-forward) applied: Vienna's LLM-generated
+  // narrative did NOT flag the postal-code discrepancy in Marcus's
+  // production prelim (LLM cited lender/balance/loan-amount discrepancies
+  // but NOT postal). JS-deterministic callout guarantees admin visibility;
+  // pure LLM-narrative reliance would be probabilistic per R8-B.
+  //
+  // BROKER-FACING SURFACE UNCHANGED — broker-facing discrepancy section
+  // already handles postal-code via existing renderDiscrepancyBullet +
+  // FIELD_DISPLAY_NAMES.subject_property_postal_code ('the postal code').
+  // filterBrokerFacing does NOT include postal-code in MARKET_DELTA_FIELDS
+  // → broker-facing surface renders postal-code clarification when
+  // multi-value. R11-C is admin-side scoped only.
+  lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address));
 
   // City / Province — R6-δ two-tier: prefer canonical_map.subject_property_city
   // + subject_property_province tuples (populated by extractFromEmailBody's
