@@ -1,0 +1,11 @@
+{
+  "id": "D04",
+  "name": "postal-code-callout",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F4.PC", "F1.PC"],
+  "bugHint": "L",
+  "anchor": "R11-C M2 (injectPostalCodeDiscrepancyCallout)",
+  "rationale": "Cross-doc postal-code discrepancy: loan_application doc shows T6R 2K8 while appraisal shows T6R 2K9 for the same Subject Property Address. F1.PC source-hierarchy captures both values with distinct source classifications; F4.PC injectPostalCodeDiscrepancyCallout fires injecting Risk Factors callout in admin prelim. Property Address row in Snapshot is street-address-only (postal stripped per R11-C M1).",
+  "notes": "Single-event sequence. Per Porter framing #3 Phase 4: assert F4.PC callout text injected in admin email + assert Snapshot row does NOT contain inline postal suffix (R11-C M1)."
+}

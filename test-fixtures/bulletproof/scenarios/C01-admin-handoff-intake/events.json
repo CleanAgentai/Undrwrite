@@ -1,0 +1,19 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "admin@privatemortgagelink.com",
+      "FromName": "Admin",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Draft Email Preview — Marcus Webb",
+      "TextBody": "Vienna,\n\nThe draft for Marcus Webb looks good. Send as-is once the broker confirms NOA. Property at 1142 Tory Road NW, Edmonton, AB T6R 2K8.\n\nAdmin",
+      "HtmlBody": null,
+      "MessageID": "C01-admin-msg@bulletproof.synthetic",
+      "Date": "2026-05-15T09:30:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

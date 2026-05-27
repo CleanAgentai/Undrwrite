@@ -1,0 +1,20 @@
+{
+  "id": "B01",
+  "name": "discrepancyHold-active-major-loan-amount",
+  "group": "B",
+  "dimensions": {
+    "BC": "S",
+    "TT": "R",
+    "LTV": "50-75",
+    "DQ": "CL",
+    "DS": "CM",
+    "BW": "CR",
+    "CV": "MC",
+    "GE": "ON"
+  },
+  "families": ["F2.DH", "F1.LA"],
+  "bugHint": "L",
+  "anchor": "R10-F + R11-B-1",
+  "rationale": "Broker initial intake includes loan_application doc showing requested_loan_amount $95,000. Broker subsequently corrects to $280,000 via reply email (>30% discrepancy from doc). Canonical-map suppresses loan_app source (R11-B-1 Layer 1); discrepancyHold ACTIVATES; preliminary-review email is NOT auto-sent (R10-F symmetric coverage). Expected behavior: deal held for admin review with discrepancy flagged in Risk Factors.",
+  "notes": "Two-event sequence. Initial intake + correction. Tests both canonical-map source-hierarchy suppression (F1.LA) and state-derived gate signal (F2.DH discrepancyHold ACTIVE)."
+}

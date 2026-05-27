@@ -1,0 +1,11 @@
+{
+  "id": "C05",
+  "name": "broker-correction-unknown-field",
+  "group": "C",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "M", "GE": "ON" },
+  "families": ["F3.BR"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #20 (broker correction on unknown/unparsed field — graceful ignore?)",
+  "rationale": "Broker reply with a field that is NOT in Vienna's canonical_map taxonomy (e.g., 'Amortization period: 25 years'). F3.BR classifies as broker_correction; correction parser attempts to extract; field is unrecognized. Expected behavior is UNDEFINED — possibilities include: (a) gracefully ignore unknown field while still processing recognized fields in same message, (b) log + flag for admin attention, (c) error/crash. Layer 3 product-design item — DECISIONS-NEEDED.md entry.",
+  "notes": "Two-event sequence. Layer 3 item: this scenario will surface a pending_product_decision in Phase 4 spec rather than self-confirming Layer 2 spec."
+}

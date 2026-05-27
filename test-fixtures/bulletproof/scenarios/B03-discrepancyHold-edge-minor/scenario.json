@@ -1,0 +1,11 @@
+{
+  "id": "B03",
+  "name": "discrepancyHold-edge-minor",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F2.DH"],
+  "bugHint": "M",
+  "anchor": "R10-F asymmetric-gate edge",
+  "rationale": "Broker correction adjusts loan_application doc value by a small percentage (<30% threshold). loan_app: $280,000; broker correction: $290,000 (3.6% delta). F2.DH discrepancyHold should remain OFF because delta is below threshold; preliminary-review email auto-fires; broker correction is the authoritative source via R10-G push but not flagged as major discrepancy. Edge-case probe for R10-F asymmetric-gate threshold semantics.",
+  "notes": "Two-event sequence. Distinguishes minor (no hold) from major (hold) discrepancy — pair with B01 to bracket threshold behavior."
+}

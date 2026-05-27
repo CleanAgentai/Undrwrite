@@ -1,0 +1,35 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Sarah Chen",
+      "TextBody": "Hi Franco,\n\nClean refinance submission for Sarah Chen.\n\nProperty: 4421 Kingsway, Vancouver, BC V5R 5T7\nProperty value (appraised): $850,000\nExisting first mortgage: CIBC, balance $410,000\nLoan amount requested: $525,000\nLTV: approximately 62%\n\nFull package attached.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "B02-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T08:45:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  }
+]

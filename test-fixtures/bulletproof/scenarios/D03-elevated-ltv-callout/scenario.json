@@ -1,0 +1,11 @@
+{
+  "id": "D03",
+  "name": "elevated-ltv-callout",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F4.EL"],
+  "bugHint": "L",
+  "anchor": "R10-C-2 (75-80% elevated band callout)",
+  "rationale": "Refinance at 78% LTV (within 75-80% elevated band). F4.EL injectElevatedLtvBandCallout fires; admin-prelim Risk Factors section includes 75-80% band callout. Tests the elevated-band callout injection per R10-C-2. Distinct from D01 high-LTV bypass (>80%): D03 is admin-callout injection, NOT broker-facing generator bypass.",
+  "notes": "Single-event sequence. Per Porter framing #3 Phase 4: F4.EL callout injection is the assertion target; verify callout TEXT is present in admin Risk Factors section + verify broker-facing path is STANDARD (not bypassed)."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "D06",
+  "name": "r10h-sweep-draft-preview",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "M", "GE": "ON" },
+  "families": ["F4.SW"],
+  "bugHint": "M",
+  "anchor": "R10-H (sweepBrokerFacingDraft at saveDraftAndPreview sites)",
+  "rationale": "Broker correction triggers Vienna to compose a draft preview email; F4.SW sweepBrokerFacingDraft must strip internal-review-tail patterns (mock-data signatures, internal-note artifacts) from the broker-facing draft. Tests that the sweep is APPLIED at saveDraftAndPreview call sites (per R10-H expansion to 8 sites). Without sweep, internal-review-tail content would leak to broker.",
+  "notes": "Two-event sequence — intake + broker correction. Sweep applies on the draft-preview admin email generated after the correction. Assertion focus: broker-facing draft is clean of internal-review-tail patterns."
+}

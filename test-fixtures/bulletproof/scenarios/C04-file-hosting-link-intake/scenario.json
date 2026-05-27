@@ -1,0 +1,11 @@
+{
+  "id": "C04",
+  "name": "file-hosting-link-intake",
+  "group": "C",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F3.FL", "F2.FH"],
+  "bugHint": "M",
+  "anchor": "F3.FL classification + F2.FH gate (sibling to B10)",
+  "rationale": "Broker intake includes file-hosting link instead of inline attachments. F3.FL pre-create intake classification routes to file-hosting-link path; F2.FH state-derived gate marks Vienna as paused per-deal. Distinct from B10: C04 asserts F3.FL classification routing; B10 asserts F2.FH gate state. Pair to cover the link-submission detection from both axes.",
+  "notes": "Single-event sequence. Different broker/borrower from B10 to permit cross-scenario assertion attribution. Uses wetransfer-style URL pattern (vs file.io in B10) to vary the link-shape coverage."
+}

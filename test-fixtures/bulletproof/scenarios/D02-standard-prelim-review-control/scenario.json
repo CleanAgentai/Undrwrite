@@ -1,0 +1,11 @@
+{
+  "id": "D02",
+  "name": "standard-prelim-review-control",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": [],
+  "bugHint": "L",
+  "anchor": "Standard generator control path (no dedicated-generator-bypass)",
+  "rationale": "Clean intake at standard LTV (62%); no high-LTV trigger; no postal discrepancy; no admin handoff. Standard prelim-review generator fires; broker-facing email contains the standard Snapshot + Risk Factors + Franco-pointer structure. Control case — verifies that dedicated-generator-bypass paths are NOT taken when their trigger conditions are absent.",
+  "notes": "Single-event sequence. Per Porter framing #3 Phase 4 assertion-shape: standard generator path should be the assertion in Group D control — bypass paths' negative tests vs all D02 control."
+}

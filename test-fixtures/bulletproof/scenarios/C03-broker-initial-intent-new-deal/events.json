@@ -1,0 +1,40 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jason@mercerbrokerage.example.com",
+      "FromName": "Jason Mercer",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Patricia Simmons",
+      "TextBody": "Hi Franco,\n\nNew refinance opportunity for Patricia Simmons.\n\nProperty: 287 Glencairn Avenue, Toronto, ON M5N 1V3\nProperty value (appraised): $920,000\nExisting first mortgage: Scotiabank, balance $380,000\nLoan amount requested: $460,000 (refinance pull-out)\nLTV: approximately 50%\n\nBorrower: Patricia Simmons, senior planner at Stantec for 8 years. Recent NOA attached.\n\nI've attached the complete package: loan application, mortgage statement, appraisal, and NOA.\n\nThanks,\nJason Mercer\nMercer Mortgage Group\nLic. #M12001505",
+      "HtmlBody": null,
+      "MessageID": "C03-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T09:30:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        },
+        {
+          "Name": "NOA_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/noa.pdf"
+        }
+      ]
+    }
+  }
+]

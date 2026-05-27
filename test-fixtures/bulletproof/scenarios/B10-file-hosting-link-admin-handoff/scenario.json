@@ -1,0 +1,11 @@
+{
+  "id": "B10",
+  "name": "file-hosting-link-admin-handoff",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.FH", "F3.FL"],
+  "bugHint": "M",
+  "anchor": "ADMIN-HANDOFF LINK-SUBMISSION (recent commit 86605a9)",
+  "rationale": "Broker intake includes a file-hosting URL (file.io / wetransfer / similar) instead of inline PDF attachments. F2.FH file-hosting-link detection gate fires; F3.FL intake classification routes to admin handoff; Vienna is paused per-deal pending human download + manual review. Tests the link-submission detection + Vienna-pause behavior.",
+  "notes": "Single-event sequence. No attached PDFs; only the broker text body containing the file-hosting URL."
+}

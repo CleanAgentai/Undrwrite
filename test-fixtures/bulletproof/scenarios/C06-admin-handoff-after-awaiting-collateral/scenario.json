@@ -1,0 +1,11 @@
+{
+  "id": "C06",
+  "name": "admin-handoff-after-awaiting-collateral",
+  "group": "C",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "80-85", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "M", "GE": "ON" },
+  "families": ["F3.AH", "F2.AC"],
+  "bugHint": "M",
+  "anchor": "F3.AH × F2.AC state interaction",
+  "rationale": "High-LTV intake triggers F2.AC awaiting_collateral state. Admin then sends admin-direction message (e.g., approval to proceed despite high LTV with manual exception). Tests F3.AH classification when deal is mid-state at awaiting_collateral — admin route should override standard collateral-wait behavior, NOT require collateral_offered to exit state.",
+  "notes": "Two-event sequence. Tests interaction between F3.AH intake classification and F2.AC state machine — a cross-family path."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "C02",
+  "name": "broker-correction-existing-thread",
+  "group": "C",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "M", "GE": "ON" },
+  "families": ["F3.BR"],
+  "bugHint": "L",
+  "anchor": "F3.BR broker-correction routing baseline",
+  "rationale": "Broker reply to existing deal thread containing a field correction. F3.BR intake classification routes to broker-correction handler; thread is reconstructed via MessageID continuity; correction is integrated into canonical_map via R10-G push. Tests the broker-correction routing branch independently of discrepancy magnitude (unlike B01 which tests F2.DH gate; C02 isolates F3.BR routing).",
+  "notes": "Two-event sequence — intake then correction. Correction is a routine field update (broker provides additional context); no discrepancy with docs."
+}

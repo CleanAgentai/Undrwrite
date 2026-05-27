@@ -1,0 +1,11 @@
+{
+  "id": "D08",
+  "name": "admin-sig-leak-prevention",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F4.SL"],
+  "bugHint": "L",
+  "anchor": "R5-C-a (mock-data / admin-sig leak prevention)",
+  "rationale": "Clean intake; standard prelim review draft generated. F4.SL sweep ensures broker-facing outbound emails do NOT contain Vienna's internal admin signatures, mock-data markers, or test-fixture artifacts (e.g., 'Vienna' boilerplate signoffs leaking from generator templates, mock placeholder values like 'XXX-XXX-XXXX'). Negative-assertion scenario: verify these patterns are ABSENT in outbound.",
+  "notes": "Single-event sequence. F4.SL is well-trodden well-anchored singleton in matrix per Phase 1 — assertion-thoroughness compensates for single-scenario coverage."
+}

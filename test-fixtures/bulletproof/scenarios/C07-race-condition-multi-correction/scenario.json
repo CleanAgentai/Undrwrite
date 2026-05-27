@@ -1,0 +1,11 @@
+{
+  "id": "C07",
+  "name": "race-condition-multi-correction",
+  "group": "C",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F3.BR", "F1.LA"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #21 (multiple correction emails within minutes — last-write-wins?)",
+  "rationale": "Broker sends initial intake, then within minutes sends two consecutive corrections to the same field (loan_amount). Three corrections of the same field arrive rapidly. F3.BR routes each as broker_correction; F1.LA canonical_map must resolve final value. Expected behavior is UNDEFINED — possibilities include: (a) last-write-wins (most recent correction is authoritative), (b) reject after N corrections within window (rate limiting), (c) flag for admin disambiguation. Layer 3 product-design item.",
+  "notes": "Three-event sequence: intake + correction-1 (loan_amount → $X) + correction-2 (loan_amount → $Y) within an hour. Phase 4 spec: pending_product_decision for the resolution semantic."
+}

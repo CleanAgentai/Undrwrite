@@ -1,0 +1,11 @@
+{
+  "id": "D09",
+  "name": "chase-email-after-silence",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "M1", "BW": "SL", "CV": "S", "GE": "ON" },
+  "families": ["F4.CH"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #6 (broker silent — timing threshold for escalation)",
+  "rationale": "Initial broker intake with incomplete documents (missing NOA). Vienna asks for the missing doc. Broker goes silent — no follow-up for N days. F4.CH chase email generator must fire after threshold timing; chase email content is broker-facing minimal-ask shape. Layer 3 item — TIMING THRESHOLD is product-design decision; once decided, F4.CH content shape can be Layer 2 asserted.",
+  "notes": "Single-event sequence at fixture level. Phase 5 replay harness drives chase-cron forward with synthetic timestamps to trigger F4.CH after broker silence. Layer 3 timing threshold = pending_product_decision in Phase 4."
+}

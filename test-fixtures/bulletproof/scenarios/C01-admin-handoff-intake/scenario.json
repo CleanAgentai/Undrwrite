@@ -1,0 +1,11 @@
+{
+  "id": "C01",
+  "name": "admin-handoff-intake",
+  "group": "C",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F3.AH"],
+  "bugHint": "L",
+  "anchor": "F3.AH well-trodden anchor",
+  "rationale": "Inbound message matches admin-direction signal (subject pattern matching adminReply.js ADMIN_REPLY_SUBJECT_RE / ADMIN_FACING_SUBJECT_RE conventions). F3.AH intake classification routes to admin handler path; broker_initial_intent path is BYPASSED. Tests intake classification fork at admin-direction signal recognition.",
+  "notes": "Single-event sequence. Reply-shape subject to mimic admin-direction signal pattern. Phase 4 spec note: this scenario will validate WHICH subject patterns trigger admin-route — the assertion should test the routing branch, not the regex itself."
+}

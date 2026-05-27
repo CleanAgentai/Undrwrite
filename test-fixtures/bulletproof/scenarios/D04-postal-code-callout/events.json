@@ -1,0 +1,35 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Marcus Webb",
+      "TextBody": "Hi Franco,\n\nRefi for Marcus Webb. Property at 1142 Tory Road NW, Edmonton, AB.\n\nLoan amount: $280,000\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "D04-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:30:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  }
+]

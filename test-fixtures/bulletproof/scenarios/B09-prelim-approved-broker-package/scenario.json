@@ -1,0 +1,11 @@
+{
+  "id": "B09",
+  "name": "prelim-approved-broker-package",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "M", "GE": "ON" },
+  "families": ["F2.PA", "F4.BP"],
+  "bugHint": "M",
+  "anchor": "R10-I (per 2026-05-11-prelim-approved-at migration)",
+  "rationale": "Clean intake + admin reply approving the prelim review. F2.PA prelim_approved_at timestamp set; F4.BP broker-package composer fires; broker receives formatted lender package email with attachments (composeBrokerLenderPackageEmail). Tests the post-prelim broker-package handoff flow.",
+  "notes": "Two-event sequence: intake + admin approval reply. Phase 4 assertion-shape note: F2.PA gate firing + F4.BP package content shape are TWO distinct assertions."
+}

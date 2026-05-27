@@ -1,0 +1,11 @@
+{
+  "id": "D05",
+  "name": "broker-package-composer",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "M", "GE": "ON" },
+  "families": ["F4.BP", "F2.PA"],
+  "bugHint": "M",
+  "anchor": "R10-I (composeBrokerLenderPackageEmail)",
+  "rationale": "Clean intake → admin approves prelim → F4.BP broker-package composer fires (composeBrokerLenderPackageEmail). Broker receives HTML email with greeting + lead-in + Snapshot + attachment-listing + Franco-pointer + signoff structure; attachments include R9-G deal package zip. Distinct from B09 which asserts F2.PA gate firing; D05 asserts F4.BP composer CONTENT (per Porter framing #3 two-assertion discipline).",
+  "notes": "Two-event sequence — intake + admin approval. Assertion focus: broker-package email STRUCTURE and CONTENT, including attachment-list + Franco-pointer + R10-H sweep applied."
+}

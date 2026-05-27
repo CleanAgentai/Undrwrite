@@ -1,0 +1,11 @@
+{
+  "id": "B08",
+  "name": "aml-pep-requested-gate",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.AP"],
+  "bugHint": "M",
+  "anchor": "F2.AP post-prelim AML/PEP gate (per 2026-05-21-aml-pep-requested-at migration)",
+  "rationale": "Clean intake + complete docs + status='active' progresses past F2.PD preliminary-review. Once prelim is approved by admin, F2.AP aml_pep_requested_at gate fires — Vienna sends AML/PEP documentation request to broker. Tests the post-prelim AML/PEP request issuance.",
+  "notes": "Single-event intake. Phase 4 spec note: F2.AP is well-trodden anchor with single scenario coverage per matrix design; assertion-thoroughness compensates."
+}

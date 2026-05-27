@@ -1,0 +1,11 @@
+{
+  "id": "B07",
+  "name": "awaiting-collateral-exits",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "80-85", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "M", "GE": "ON" },
+  "families": ["F2.AC"],
+  "bugHint": "M",
+  "anchor": "F2.AC exit path",
+  "rationale": "High-LTV intake triggers F2.AC awaiting_collateral state (per B06). Broker follows up in a subsequent event providing collateral details (specific asset offered as additional security). F2.AC should transition back to active; collateral_offered timestamp set. Tests the exit path of the state-derived gate.",
+  "notes": "Two-event sequence. Intake at LTV>80% + collateral-offer follow-up. Distinguishes exit semantics from entry (B06) semantics."
+}

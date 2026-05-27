@@ -1,0 +1,57 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jason@mercerbrokerage.example.com",
+      "FromName": "Jason Mercer",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Patricia Simmons",
+      "TextBody": "Hi Franco,\n\nRefi for Patricia Simmons. Full package attached.\n\nProperty: 287 Glencairn Avenue, Toronto, ON M5N 1V3\nLoan amount: $460,000 (LTV 50%)\n\nJason Mercer\nMercer Mortgage Group\nLic. #M12001505",
+      "HtmlBody": null,
+      "MessageID": "D05-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        },
+        {
+          "Name": "NOA_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/noa.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 86400000,
+    "kind": "broker_followup",
+    "postmark": {
+      "From": "admin@privatemortgagelink.com",
+      "FromName": "Admin",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: ACTION REQUIRED: PRELIMINARY Review — Patricia Simmons",
+      "TextBody": "Approved — proceed to broker package. Terms: 5.95% / 2 yr / $460,000 / 50% LTV. Send the formatted package to Jason Mercer.\n\nAdmin",
+      "HtmlBody": null,
+      "MessageID": "D05-admin-approve@bulletproof.synthetic",
+      "Date": "2026-05-17T14:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

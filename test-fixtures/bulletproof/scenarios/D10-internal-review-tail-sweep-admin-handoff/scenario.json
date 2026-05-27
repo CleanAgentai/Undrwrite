@@ -1,0 +1,11 @@
+{
+  "id": "D10",
+  "name": "internal-review-tail-sweep-admin-handoff",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "M", "GE": "ON" },
+  "families": ["F4.SW", "F3.AH"],
+  "bugHint": "M",
+  "anchor": "R10-H scope expansion to admin-handoff path",
+  "rationale": "Admin-handoff path triggers a broker-facing draft (e.g., admin-approved outbound). F4.SW sweep must apply at this saveDraftAndPreview call site (R10-H expansion confirmed 8 sites including admin-handoff path). Without sweep, admin-handoff broker-facing drafts could leak internal-review-tail patterns. Cross-family interaction: F3.AH × F4.SW.",
+  "notes": "Two-event sequence — intake + admin handoff message. Assertion focus: broker-facing draft generated via admin-handoff path is clean of internal-review-tail markers."
+}

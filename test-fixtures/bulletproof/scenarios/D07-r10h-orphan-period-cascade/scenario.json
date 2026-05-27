@@ -1,0 +1,11 @@
+{
+  "id": "D07",
+  "name": "r10h-orphan-period-cascade",
+  "group": "D",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "M", "GE": "ON" },
+  "families": ["F4.SW"],
+  "bugHint": "M",
+  "anchor": "R5-C-a + R10-H (orphan-period cascade artifact)",
+  "rationale": "Broker correction email contains phrasing patterns that previously caused R5-C-a + R10-H sweep to produce '<p>..</p>' orphan-period cascade in the draft preview. Specifically: a sentence ending with internal-review-tail marker followed by leading-comma/period pattern. F4.SW sweep must consume the orphan period AND not leave trailing terminator. Tests the specific regex anchoring fix from R10-H bugfix cycle.",
+  "notes": "Two-event sequence — intake + correction containing the orphan-period-triggering phrasing. Assertion focus: draft preview HTML does NOT contain '<p>..</p>' artifact + does NOT contain dangling period."
+}

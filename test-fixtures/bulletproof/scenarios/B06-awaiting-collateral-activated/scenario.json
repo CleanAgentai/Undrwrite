@@ -1,0 +1,11 @@
+{
+  "id": "B06",
+  "name": "awaiting-collateral-activated",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "80-85", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.AC", "F4.HL"],
+  "bugHint": "L",
+  "anchor": "R10-C-1 state-transition probe",
+  "rationale": "Refinance with LTV >80% triggers F2.AC state transition: workflow_state transitions from active → awaiting_collateral. Distinct from D01 (which asserts F4.HL generator content); B06 asserts the state transition itself. Pair B06 + D01 to fully characterize the high-LTV path: state + generator-content.",
+  "notes": "Single-event sequence. Different borrower from D01 to permit cross-cluster assertion attribution."
+}

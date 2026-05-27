@@ -1,0 +1,11 @@
+{
+  "id": "B02",
+  "name": "discrepancyHold-off-clean",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.DH"],
+  "bugHint": "L",
+  "anchor": "F2.DH off-path control",
+  "rationale": "Clean intake with broker email loan amount matching loan_application doc loan amount exactly. No cross-source discrepancy. F2.DH discrepancyHold should remain OFF; preliminary-review email auto-fires. Control case for the discrepancyHold gate axis.",
+  "notes": "Single-event sequence. Pair with B01 (active) and B03 (edge) to cover F2.DH on/edge/off triplet."
+}

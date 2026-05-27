@@ -1,0 +1,11 @@
+{
+  "id": "B04",
+  "name": "preliminary-dispatch-fires",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F2.PD"],
+  "bugHint": "L",
+  "anchor": "F2.PD prelim-dispatch positive path",
+  "rationale": "Complete document set (loan_app + mortgage_statement + appraisal + NOA), clean broker workflow, no discrepancy, status='active'. F2.PD preliminary-all-docs-in dispatch gate fires; preliminary-review email auto-routes to admin. Positive control for the gate firing condition.",
+  "notes": "Single-event sequence. Same input shape as C03 but assertion focus is F2.PD gate firing (not F3.BI classification)."
+}

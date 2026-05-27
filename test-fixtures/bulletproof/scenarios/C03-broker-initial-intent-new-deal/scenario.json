@@ -1,0 +1,20 @@
+{
+  "id": "C03",
+  "name": "broker-initial-intent-new-deal",
+  "group": "C",
+  "dimensions": {
+    "BC": "S",
+    "TT": "R",
+    "LTV": "50-75",
+    "DQ": "CL",
+    "DS": "CM",
+    "BW": "CL",
+    "CV": "1",
+    "GE": "ON"
+  },
+  "families": ["F3.BI"],
+  "bugHint": "L",
+  "anchor": "intake-classification baseline",
+  "rationale": "First-touch intake from broker on new deal. Complete document package (loan_application + mortgage_statement + appraisal + NOA). No prior thread. No corrections. Clean intake path through F3.BI broker_initial_intent classification. Expected behavior: deal created with status='active'; preliminary-review email auto-fires to admin after canonical-map extraction completes; no discrepancyHold; no dedicated-generator-bypass.",
+  "notes": "Single-event sequence. Baseline scenario for control case across the matrix — F3.BI well-trodden anchor."
+}

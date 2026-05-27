@@ -1,0 +1,11 @@
+{
+  "id": "B05",
+  "name": "preliminary-dispatch-suppressed-by-hold",
+  "group": "B",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F2.PD", "F2.DH"],
+  "bugHint": "M",
+  "anchor": "R10-F symmetric coverage",
+  "rationale": "Complete document set AND major broker-vs-doc discrepancy (>30%). F2.DH discrepancyHold ACTIVATES; F2.PD preliminary-all-docs-in dispatch is SUPPRESSED despite complete docs. Tests R10-F symmetric-gate restoration: prelim dispatch should not fire when discrepancyHold is active.",
+  "notes": "Two-event sequence with major discrepancy. Pair with B01 (which tests F2.DH activation in isolation) and B04 (which tests F2.PD positive path) — B05 is the interaction test."
+}
