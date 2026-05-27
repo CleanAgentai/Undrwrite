@@ -871,9 +871,41 @@ const extractDeclineReason = (adminMessage) => {
 // theoretically reachable via pre-CCCC defense-in-depth write-failure
 // recovery (vanishingly rare and arguably unreachable). See annotation at
 // the FINAL REVIEW dispatcher consumer block.
-const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved }) => {
+//
+// R10-F (2026-05-27) — ASYMMETRIC-GATE EMPIRICAL DISCIPLINE. Patricia Simmons
+// deal a0caddfb (Bug 5-3): mortgage_position discrepancy (1st-via-email vs
+// 2nd-via-loan-app + derived-balance) detected at msg[2] all-docs-in turn.
+// Initial-submission gate at L2894-2911 correctly held under discrepancy
+// (R5-B-2 wired the gate there); active-branch gate at L3637-3646 wired
+// _b2HoldActive ONLY into willReview (one of TWO prelim-trigger paths).
+// 'preliminary-all-docs-in' R7-A dispatch (this function's all-docs branch)
+// was the orthogonal trigger NOT covered by the gate — when allDocsIn=true
+// + hasExitStrategy=true, R7-A dispatch returned 'preliminary-all-docs-in'
+// regardless of discrepancy state, broker reply was suppressed at L3689,
+// PRELIM fired to admin, broker never asked. R10-F closes by adding the
+// discrepancyHold parameter (gate symmetry across both trigger paths).
+//
+// 2nd template family (state-derived gate signal) — NEW sub-pattern of
+// trigger-path-coverage extension (vs the prior sub-pattern of new state
+// flag). Lineage: BBBB, JJJJ, SSS + R10-F. Defining shape preserved:
+// pre-computed JS signal + threaded through gate predicate + short-circuit
+// return null on hold. R10-F's sub-pattern innovation: extending coverage
+// of an EXISTING gate signal to a previously-uncovered trigger path.
+//
+// DEFERRED RESIDUAL (per R10-D code-docblock discipline) — Under_review path
+// parallel-gate symmetry: decideReviewDispatch at L3221 has its own dispatch
+// logic for the under_review state. R10-F empirical-grounding did NOT
+// surface a production fixture where the under_review path fires prelim
+// with brokerFacingDiscrepancyCount > 0. Closure condition: trigger when
+// empirical fixture surfaces under_review path firing prelim/completion-
+// handoff with brokerFacingDiscrepancyCount > 0 → audit decideReviewDispatch
+// for parallel-gate symmetry.
+//
+// BACKWARDS-COMPAT — discrepancyHold defaults to undefined → falsy → no
+// behavior change at any legacy call site that doesn't pass the parameter.
+const computeCompletionDispatch = ({ deal, summary, classifications, willGoToCollateralCheck, willReview, identityClashUnresolved, discrepancyHold }) => {
   if (deal?.status !== 'active') return null;
-  if (willGoToCollateralCheck || willReview || identityClashUnresolved) return null;
+  if (willGoToCollateralCheck || willReview || identityClashUnresolved || discrepancyHold) return null;
   const required = allRequiredForCompletion(isPurchaseFromSummary(summary));
   const allDocsIn = required.every(req => isDocRequirementSatisfied(req, classifications || []));
   const hasExitStrategy = !!summary?.exit_strategy;
@@ -2234,6 +2266,18 @@ ${draftEmail}
               borrower_name: existingDeal.extracted_data?.borrower_name,
               sender_type: existingDeal.extracted_data?.sender_type,
             });
+            // R10-F (2026-05-27) DEFERRED RESIDUAL — post-approval doc-request
+            // discrepancy injection. This path does NOT run the discrepancy
+            // strip+inject pipeline (which only runs at the active-branch
+            // generateBrokerResponse call site at L3520-3523). R10-F's gate
+            // fix at computeCompletionDispatch + L3660 prevents this path from
+            // being reached with an unresolved-discrepancy state — broker must
+            // resolve the discrepancy first (held at active branch), THEN
+            // prelim fires on the resolved state, THEN admin can approve,
+            // THEN this path executes. Closure condition: trigger when
+            // empirical fixture surfaces a broker-confirmed-resolved deal
+            // where admin still wants the discrepancy-history surfaced in
+            // the post-approval doc request.
             const docRequestEmail = await aiService.generateDocumentRequestEmail(
               existingDeal.extracted_data,
               existingDeal.ownership_type,
@@ -3664,6 +3708,11 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           willGoToCollateralCheck,
           willReview,
           identityClashUnresolved,
+          // R10-F (2026-05-27): asymmetric-gate symmetry restoration.
+          // _b2HoldActive already gates willReview at L3646. Without this
+          // line, the 'preliminary-all-docs-in' R7-A dispatch path would
+          // still fire when discrepancy is detected — Patricia Bug 5-3.
+          discrepancyHold: _b2HoldActive,
         });
         // R7-A (2026-05-22): 'preliminary-all-docs-in' fires sendPreliminaryReviewToAdmin
         // when prelim_approved_at=null + all docs in. Franco S14-Bug-1 fix —
