@@ -539,15 +539,17 @@ const classifyIntakeBorrower = (input, opts = {}) => {
   // in admin-as-borrower + no-human-name override branches below. opts.emailBody
   // is the broker email body (email.textBody at webhook call site); when null/
   // undefined, no override path fires (preserves pre-R10-A behavior for any
-  // legacy single-arg callers). aiService.parseBrokerFirstNameFromSignature
-  // (R8-A) is the reused pure helper — anchors on `Lic. #` signature marker;
-  // returns null when no broker signal OR when signature first-token is
-  // "franco" (admin-name filter built in at ai.js:886). Non-null return = high-
-  // confidence broker self-identification → structurally invalidates admin-as-
-  // borrower / no-human-name false-positive class. See R10-A docblock in
-  // test-trigger.js for the Donna Blackwood + Jerome Osei Round-6 fixtures.
+  // legacy single-arg callers). R10-B (2026-05-27) replaced the direct R8-A
+  // parseBrokerFirstNameFromSignature call with the parseBrokerFirstName
+  // resolver-chain wrapper: body-prose self-ID ("My name is X from Y") is
+  // PRIMARY (canonical Round-6 fixture shape across all 4 brokers); signature
+  // anchor (Lic. # marker) is FALLBACK for non-canonical bodies. Returns null
+  // when no broker signal OR when first-token is "franco" / common-word /
+  // company-suffix-shaped (filters in shared _validateBrokerFirstNameCapture).
+  // Non-null return = high-confidence broker self-identification → structurally
+  // invalidates admin-as-borrower / no-human-name false-positive class.
   const _r10aBodySignal = opts.emailBody
-    ? aiService.parseBrokerFirstNameFromSignature(opts.emailBody)
+    ? aiService.parseBrokerFirstName(opts.emailBody)
     : null;
 
   // 1. admin-as-borrower: first-token matches ADMIN_FIRST_NAME ("Franco") + no broker_name set.
@@ -2520,9 +2522,11 @@ No deal record was created. If this was a legitimate broker submission, please r
           await dealsService.update(deal.id, { admin_controlled: true });
           // (b) Send broker LINK_SUBMISSION_HOLDING acknowledgment (JS-rendered,
           //     no Claude — deterministic, no fabrication surface). Broker-name
-          //     personalized via C.7's parseBrokerFirstNameFromSignature; falls
-          //     back to "Hi there!" on null (C.7's safe-failure direction).
-          const _ahBrokerFirstName = aiService.parseBrokerFirstNameFromSignature(email.textBody);
+          //     personalized via R10-B parseBrokerFirstName resolver chain
+          //     (body-prose primary, R8-A signature fallback); falls back to
+          //     "Hi there!" on null. R10-B upgrade from C.7/R8-A signature-only
+          //     path closes the Round-6 Donna/Jerome/Simone/Harpreet shapes.
+          const _ahBrokerFirstName = aiService.parseBrokerFirstName(email.textBody);
           const _ahGreeting = _ahBrokerFirstName ? `Hi ${_ahBrokerFirstName},` : 'Hi there,';
           const _ahHoldingBody = `<p>${_ahGreeting}</p>
 <p>Thanks for the submission — got your email. Someone from our team will review the file and be in touch shortly.</p>
@@ -2617,14 +2621,15 @@ No deal record was created. If this was a legitimate broker submission, please r
         console.log('Passing', email.attachments.length, 'attachments for analysis');
         if (initialFromCollision) console.log('From-header collides with admin first name — instructing generic greeting');
         // R4-Bucket-C.7 (S4 Marcus 1f1e7ac4): deterministic broker-signature
-        // first-name parse BEFORE Claude. RFC-footer-strip kills the proxy-
-        // shadow root cause (Franco's "-- Franco Maione Founder at VIMA Real
-        // Broker..." footer below the sig delimiter is stripped before the
-        // name extractor sees it). When parser succeeds, processInitialEmail
-        // uses the name deterministically. When parser returns null (signature
-        // shape outside scope), generic "Hi there!" fallback fires — same as
-        // pre-fix behavior, safe failure direction.
-        const _c7ParsedBrokerName = aiService.parseBrokerFirstNameFromSignature(email.textBody);
+        // first-name parse BEFORE Claude. R10-B (2026-05-27) upgrade: uses
+        // parseBrokerFirstName resolver chain (body-prose self-ID "My name
+        // is X from Y" primary; R8-A signature anchor fallback). RFC-footer-
+        // strip + admin-name filter + company-suffix filter + common-word
+        // filter all live inside the shared validator. When resolver returns
+        // non-null, processInitialEmail uses the name deterministically. When
+        // resolver returns null, generic "Hi there!" fallback fires — same
+        // safe failure direction.
+        const _c7ParsedBrokerName = aiService.parseBrokerFirstName(email.textBody);
         if (_c7ParsedBrokerName) {
           console.log(`C.7: signature parser extracted broker first name "${_c7ParsedBrokerName}" — passing to processInitialEmail for deterministic greeting`);
         }
@@ -3278,7 +3283,12 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
             borrower_name: existingDeal.extracted_data?.borrower_name,
             sender_type: existingDeal.extracted_data?.sender_type,
           });
-          const _r5dParsedFromSig = aiService.parseBrokerFirstNameFromSignature(email.textBody);
+          // R10-B (2026-05-27): upgraded to parseBrokerFirstName resolver
+          // chain (body-prose primary, signature fallback). Variable name
+          // retains "_r5dParsedFromSig" for source-pin compatibility with
+          // R5-D-B tests; the underlying resolution is now broader than
+          // signature-only.
+          const _r5dParsedFromSig = aiService.parseBrokerFirstName(email.textBody);
           const _r5dFromCollision = firstNameMatchesAdmin(email.fromName);
 
           const _r5dIntakeRes = await aiService.processInitialEmail(

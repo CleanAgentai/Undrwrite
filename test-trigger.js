@@ -24751,24 +24751,40 @@ Meridian Mortgage Group Lic. #MB552934`;
     else throw new Error(`FAIL [${label}]`);
   };
 
-  // Synthetic Donna / Jerome fixtures (Franco Round-6 bug-report shapes;
-  // actual bodies not retrievable from DB since silent-dropped)
-  const _r10aDonnaBody = `Hi Franco,
+  // R10-B (2026-05-27): Donna / Jerome fixtures CORRECTED to match production
+  // 3-line signature shape (Name / Company / Lic.# on separate lines).
+  // Pre-R10-B (initial R10-A ship): synthetic fixtures had Lic.# on same line
+  // as company ("Pemberton Lending Inc. Lic. #MB668374"), making "Donna
+  // Blackwood" the preceding-line capture — false confidence. Production
+  // shape is 3-line (Donna deal 45bd01df / Jerome deal a0caddfb verified via
+  // R10-B-PRODUCTION-FIXTURE-VERIFICATION). With corrected fixtures, R10-A
+  // signature-anchor alone fails (R10-A regression discovery); R10-B body-
+  // prose primary path catches both via "My name is X from Y" intro.
+  //
+  // Methodology carry-forward (R10-B): synthetic-fixture-only Stage 1 evidence
+  // is structurally weaker pre-production-observation. Future cycles inherit
+  // R10-B-PRODUCTION-FIXTURE-VERIFICATION discipline (mini-harness live-DB
+  // replay) as canonical Stage 1.5 evidence.
+  const _r10aDonnaBody = `Hi,
 
-I'm Donna Blackwood from Pemberton Lending Inc. Lic. #MB668374. I have a client looking for a $250,000 second mortgage on her property at 88 Harvest Hills Blvd NE, Calgary, AB T3K 4G9.
+My name is Donna Blackwood from Pemberton Lending Inc. (Lic. #MB668374).
+I'd like to submit a new file for review.
 
-Please find the loan application + credit bureau attached.
+Please advise on next steps.
 
 Donna Blackwood
-Pemberton Lending Inc. Lic. #MB668374`;
-  const _r10aJeromeBody = `Hello Franco,
+Pemberton Lending Inc.
+Lic. #MB668374`;
+  const _r10aJeromeBody = `Hi,
 
-I'm Jerome Osei from Clearpath Mortgage Partners (Lic. #MB779485). Client referral for Patricia Simmons — looking for first mortgage refinance, $385K.
+My name is Jerome Osei from Clearpath Mortgage Partners (Lic. #MB779485).
+I'd like to submit a new file for your review.
 
-Documents attached.
+Please let me know what else is needed.
 
 Jerome Osei
-Clearpath Mortgage Partners Lic. #MB779485`;
+Clearpath Mortgage Partners
+Lic. #MB779485`;
   const _r10aAdminProxyBody = `Hi,\n\nPlease review.\n\nFranco Maione\nVIMA Real Broker Lic. #MB000`;
 
   // ─── R10-A-BODY-SIGNAL-OVERRIDE-MATRIX ───
@@ -24903,6 +24919,202 @@ Clearpath Mortgage Partners Lic. #MB779485`;
   _r10aExpect('(j) classifyIntakeBorrower exported', /^\s+classifyIntakeBorrower,?\s*$/m.test(_r10aWebhookSrc));
 
   console.log(`\n========== R10-A groups: ${_r10aPass} PASS ==========`);
+
+  // ════════════════════════════════════════════════════════════════
+  // R10-B — body-prose extractor + Round-6 greeting-bug fix
+  // ════════════════════════════════════════════════════════════════
+  // Root cause (Franco Round 6 Scenarios 4-7, 4 instances):
+  //   Bug 4-1: "Hi Pemberton!" (Donna Blackwood deal)
+  //   Bug 5-1: "Hi Clearpath!" (Jerome Osei deal)
+  //   Bug 6-1: "Hi Valleyview!" (Simone Beaumont deal)
+  //   Bug 7-1: "Hi Please!" (Harpreet Gill deal)
+  //
+  // Empirical-grounding discovered R10-A REGRESSED parseBrokerFirstNameFromSignature
+  // on production 3-line signature shape (Name / Company / Lic.# separate lines).
+  // R10-A's matchAll + last-to-first iteration captures the company line as
+  // preceding-line of Lic.# → returns "Pemberton" / "Clearpath" / "Valleyview".
+  // Harpreet shape (1-line sig) captures "Please advise on next steps." as
+  // preceding line → returns "Please". My R10-A mini-harness fixtures had the
+  // wrong shape (2-line) and gave false confidence — methodology-learning
+  // anchor for synthetic-vs-production validation discipline.
+  //
+  // R10-B fix mechanism:
+  //   - Extract _validateBrokerFirstNameCapture as module-level shared
+  //     validator (pure-helper extraction discipline: R9-E + R9-F + R9-F'
+  //     precedent)
+  //   - Add Q3 common-word filter (Please/Thank/Looking/etc.) + Q4 company-
+  //     suffix line-end filter (Inc/LLC/Ltd/Corp/Lending/Mortgage/Partners/
+  //     Group/etc.) to validator
+  //   - Add parseBrokerFirstNameFromBodyProse — canonical "My name is X
+  //     from Y" / "I'm X from Y" / "This is X writing" extractor with
+  //     from/with/at/writing terminator preventing Y-capture
+  //   - Add parseBrokerFirstName wrapper: body-prose primary, signature
+  //     fallback
+  //   - Update 4 webhook.js call sites to use parseBrokerFirstName wrapper
+  //   - Keep R10-A matchAll enhancement (body-prose pre-empts; signature
+  //     fallback gracefully handles non-canonical bodies)
+  //
+  // Eight verification groups (mini-harness 62/62 PASS — canonical at
+  // scripts/r10b-mini-harness.js; group 6 production-fixture-replay is
+  // mini-harness-only due to live-Supabase dependency):
+  //   (1) R10-B-BODY-PROSE-MATRIX — 15+ truth-table cases
+  //   (2) R10-B-SHARED-VALIDATOR-MATRIX — 10 validator-filter cases
+  //   (3) R10-B-RESOLVER-CHAIN — 9 wrapper resolver cases
+  //   (4) R10-B-WIRE-SITE — 7 source-pin anchors
+  //   (5) R10-B-R8-A-REGRESSION — 5 legacy R8-A fixture preservation
+  //   (6) R10-B-PRODUCTION-FIXTURE-VERIFICATION — 4 Round-6 live-DB replays (MINI-HARNESS ONLY)
+  //   (7) R10-B-R10A-FIXTURE-CORRECTION — 2 corrected synthetic fixtures
+  //   (8) R10-B-CROSS-CLUSTER-INTEGRATION — 10 anchor preservation pins
+  //
+  // Architectural family: continuation of R8-A/R10-A broker-name-extraction
+  // subsystem (Q7 verdict). NOT a new template family yet.
+
+  console.log('\n========== R10-B — body-prose extractor + Round-6 greeting fix ==========');
+
+  const _r10bAiSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/services/ai.js'), 'utf8');
+  const _r10bWebhookSrc = require('fs').readFileSync(require('path').join(__dirname, 'src/routes/webhook.js'), 'utf8');
+  const _r10bAi = require('./src/services/ai');
+  const { parseBrokerFirstNameFromBodyProse: _r10bBody, parseBrokerFirstNameFromSignature: _r10bSig, parseBrokerFirstName: _r10bWrap } = _r10bAi;
+
+  let _r10bPass = 0;
+  const _r10bExpect = (label, cond) => {
+    if (cond) { console.log(`  PASS ${label}`); _r10bPass++; }
+    else throw new Error(`FAIL [${label}]`);
+  };
+
+  // ─── R10-B-BODY-PROSE-MATRIX ───
+  console.log('\n--- R10-B-BODY-PROSE-MATRIX ---');
+  _r10bExpect('(a) Donna "My name is Donna Blackwood from Pemberton Lending Inc."',
+    _r10bBody("My name is Donna Blackwood from Pemberton Lending Inc.") === 'Donna');
+  _r10bExpect('(b) Jerome "My name is Jerome Osei from Clearpath Mortgage Partners"',
+    _r10bBody("My name is Jerome Osei from Clearpath Mortgage Partners") === 'Jerome');
+  _r10bExpect('(c) Simone "My name is Simone Beaumont from Valleyview Mortgage Corp"',
+    _r10bBody("My name is Simone Beaumont from Valleyview Mortgage Corp") === 'Simone');
+  _r10bExpect('(d) Harpreet "My name is Harpreet Gill from Silverstream Mortgage Group"',
+    _r10bBody("My name is Harpreet Gill from Silverstream Mortgage Group") === 'Harpreet');
+  _r10bExpect("(e) Eric \"I'm Eric Johansson with Willow Creek Mortgage Group\"",
+    _r10bBody("Hi, I'm Eric Johansson with Willow Creek Mortgage Group") === 'Eric');
+  _r10bExpect("(f) Nadia \"I'm Nadia Petrov with Eastview Mortgage Group\"",
+    _r10bBody("Hi, I'm Nadia Petrov with Eastview Mortgage Group") === 'Nadia');
+  _r10bExpect('(g) "This is Jane Smith writing on behalf of..."',
+    _r10bBody("This is Jane Smith writing on behalf of my client.") === 'Jane');
+  _r10bExpect('(h) bare "My name is Donna Blackwood,"',
+    _r10bBody("Hi, My name is Donna Blackwood, broker.") === 'Donna');
+  _r10bExpect("(i) bare \"I'm Marcus.\"", _r10bBody("Hi, I'm Marcus.") === 'Marcus');
+  _r10bExpect('(j) null → null', _r10bBody(null) === null);
+  _r10bExpect('(k) empty → null', _r10bBody('') === null);
+  _r10bExpect('(l) no intro → null', _r10bBody("Just a quick note about the file.") === null);
+  _r10bExpect('(m) "My name is Franco from VIMA" → null (admin filter)',
+    _r10bBody("My name is Franco from VIMA Real Broker") === null);
+  _r10bExpect("(n) \"I'm Please writing...\" → null (common-word filter)",
+    _r10bBody("Hi, I'm Please writing about something") === null);
+
+  // ─── R10-B-SHARED-VALIDATOR-MATRIX (via signature path with crafted bodies) ───
+  console.log('\n--- R10-B-SHARED-VALIDATOR-MATRIX ---');
+  const _r10bValidCase = (label, precedingLine, expected) => {
+    const body = `${precedingLine}\nSome firm Lic. #MB123456`;
+    _r10bExpect(label, _r10bSig(body) === expected);
+  };
+  _r10bValidCase('(a) "Pemberton Lending Inc." → null (company-suffix line-end)', 'Pemberton Lending Inc.', null);
+  _r10bValidCase('(b) "Clearpath Mortgage Partners" → null', 'Clearpath Mortgage Partners', null);
+  _r10bValidCase('(c) "Valleyview Mortgage Corp" → null', 'Valleyview Mortgage Corp', null);
+  _r10bValidCase('(d) "Please advise on next steps." → null (common-word starter)', 'Please advise on next steps.', null);
+  _r10bValidCase('(e) "Thanks for the help" → null', 'Thanks for the help', null);
+  _r10bValidCase('(f) "Looking forward to hearing back" → null', 'Looking forward to hearing back', null);
+  _r10bValidCase('(g) "Mr Smith" → null (title-prefix)', 'Mr Smith', null);
+  _r10bValidCase('(h) "Hi Franco," → null (greeting + admin)', 'Hi Franco,', null);
+  _r10bValidCase('(i) "Franco Maione" → null (admin filter)', 'Franco Maione', null);
+  _r10bValidCase('(j) "Donna Blackwood" → "Donna" (legit name)', 'Donna Blackwood', 'Donna');
+
+  // ─── R10-B-RESOLVER-CHAIN ───
+  console.log('\n--- R10-B-RESOLVER-CHAIN ---');
+  const _r10bDonna3 = `Hi,\n\nMy name is Donna Blackwood from Pemberton Lending Inc. (Lic. #MB668374).\n\nDonna Blackwood\nPemberton Lending Inc.\nLic. #MB668374`;
+  const _r10bHarpreet1 = `Hi,\n\nMy name is Harpreet Gill from Silverstream Mortgage Group (Lic. #MB991607).\n\nPlease advise on next steps.\n\nHarpreet Gill Silverstream Mortgage Group Lic. #MB991607`;
+  _r10bExpect('(a) Donna 3-line shape → "Donna"', _r10bWrap(_r10bDonna3) === 'Donna');
+  _r10bExpect('(b) Harpreet 1-line shape → "Harpreet"', _r10bWrap(_r10bHarpreet1) === 'Harpreet');
+  _r10bExpect('(c) Eric legacy R8-A → "Eric"',
+    _r10bWrap(`Hi, I'm Eric Johansson with Willow Creek Mortgage Group (Lic. #MB884572).\n\nEric Johansson\n\nWillow Creek Mortgage Group Lic. #MB884572\n\n-- \n\nFranco Maione\n`) === 'Eric');
+  _r10bExpect('(d) Marcus legacy R8-A (sig-only) → "Natalie"',
+    _r10bWrap(`*Natalie Bergman*\n\nSummit Financial Group Lic. #MB338764\n\n-- \n\nFranco Maione\n`) === 'Natalie');
+  _r10bExpect('(e) admin-name body + sig → null (both filtered)',
+    _r10bWrap(`Hi, My name is Franco from VIMA.\n\nFranco Maione\nVIMA Real Broker Lic. #MB000`) === null);
+  _r10bExpect('(f) no signal → null', _r10bWrap(`Just a quick note.\n\nThanks.`) === null);
+  _r10bExpect('(g) null → null', _r10bWrap(null) === null);
+  _r10bExpect('(h) empty → null', _r10bWrap('') === null);
+
+  // ─── R10-B-WIRE-SITE ───
+  console.log('\n--- R10-B-WIRE-SITE ---');
+  _r10bExpect('(a) R10-A body-signal override uses parseBrokerFirstName',
+    /_r10aBodySignal = opts\.emailBody\s*\?\s*aiService\.parseBrokerFirstName\(opts\.emailBody\)/.test(_r10bWebhookSrc));
+  _r10bExpect('(b) _c7ParsedBrokerName uses parseBrokerFirstName',
+    /_c7ParsedBrokerName = aiService\.parseBrokerFirstName\(email\.textBody\)/.test(_r10bWebhookSrc));
+  _r10bExpect('(c) _ahBrokerFirstName uses parseBrokerFirstName',
+    /_ahBrokerFirstName = aiService\.parseBrokerFirstName\(email\.textBody\)/.test(_r10bWebhookSrc));
+  _r10bExpect('(d) _r5dParsedFromSig uses parseBrokerFirstName',
+    /_r5dParsedFromSig = aiService\.parseBrokerFirstName\(email\.textBody\)/.test(_r10bWebhookSrc));
+  _r10bExpect('(e) parseBrokerFirstName exported',
+    /^\s+parseBrokerFirstName,\s*$/m.test(_r10bAiSrc));
+  _r10bExpect('(f) parseBrokerFirstNameFromBodyProse exported',
+    /^\s+parseBrokerFirstNameFromBodyProse,\s*$/m.test(_r10bAiSrc));
+  _r10bExpect('(g) parseBrokerFirstNameFromSignature export preserved (R8-A compat)',
+    /^\s+parseBrokerFirstNameFromSignature,\s*$/m.test(_r10bAiSrc));
+
+  // ─── R10-B-R8-A-REGRESSION ───
+  console.log('\n--- R10-B-R8-A-REGRESSION ---');
+  _r10bExpect('(a) Eric → "Eric"',
+    _r10bSig(`Hi, I'm Eric Johansson with Willow Creek Mortgage Group (Lic. #MB884572).\n\nEric Johansson\n\nWillow Creek Mortgage Group Lic. #MB884572\n\n-- \n\nFranco Maione\n`) === 'Eric');
+  _r10bExpect('(b) Marcus → "Natalie"',
+    _r10bSig(`*Natalie Bergman*\n\nSummit Financial Group Lic. #MB338764\n\n-- \n\nFranco Maione\n`) === 'Natalie');
+  _r10bExpect('(c) Nadia → "Nadia"',
+    _r10bSig(`Hi, I'm Nadia Petrov with Eastview Mortgage Group, Lic. #MB440996.\n\nNadia Petrov | Eastview Mortgage Group | Lic. #MB440996 -- Franco Maione`) === 'Nadia');
+  _r10bExpect('(d) Sophie → "Sophie"',
+    _r10bSig(`Hi, I'm Sophie Delacroix with Landmark Mortgage Corp (Lic. #MB221043).\n\nSophie Delacroix\n\nLandmark Mortgage Corp Lic. #MB221043`) === 'Sophie');
+  _r10bExpect('(e) Marcus Fitzpatrick → "Marcus"',
+    _r10bSig(`I'm Marcus Fitzpatrick with Bluepoint Mortgage Partners (Lic. #MB562034).\n\nMarcus Fitzpatrick\n\nBluepoint Mortgage Partners Lic. #MB562034`) === 'Marcus');
+
+  // ─── R10-B-R10A-FIXTURE-CORRECTION ───
+  console.log('\n--- R10-B-R10A-FIXTURE-CORRECTION ---');
+  // R10-A's _r10aDonnaBody / _r10aJeromeBody were CORRECTED above to 3-line
+  // production shape. Verify the corrected fixtures still yield correct
+  // first-names via R10-B parseBrokerFirstName.
+  _r10bExpect('(a) corrected R10-A Donna fixture (3-line) → "Donna"',
+    _r10bWrap(_r10aDonnaBody) === 'Donna');
+  _r10bExpect('(b) corrected R10-A Jerome fixture (3-line) → "Jerome"',
+    _r10bWrap(_r10aJeromeBody) === 'Jerome');
+
+  // ─── R10-B-CROSS-CLUSTER-INTEGRATION ───
+  console.log('\n--- R10-B-CROSS-CLUSTER-INTEGRATION ---');
+  _r10bExpect('(a) parseBrokerFirstNameFromSignature signature unchanged',
+    /const parseBrokerFirstNameFromSignature = \(emailBody\) =>/.test(_r10bAiSrc));
+  _r10bExpect('(b) R10-A matchAll + last-to-first iteration preserved',
+    /precedingMatches = \[\.\.\.beforeFooter\.matchAll/.test(_r10bAiSrc)
+    && /for \(let i = precedingMatches\.length - 1; i >= 0; i--\)/.test(_r10bAiSrc));
+  _r10bExpect('(c) R10-A classifier body-signal override preserved + upgraded to parseBrokerFirstName',
+    /_r10aBodySignal[\s\S]{0,200}parseBrokerFirstName/.test(_r10bWebhookSrc));
+  _r10bExpect('(d) R9-F classifyIntakeBorrower categories preserved',
+    /return 'reject:admin-as-borrower'/.test(_r10bWebhookSrc)
+    && /return 'reject:system-sender'/.test(_r10bWebhookSrc)
+    && /return 'reject:no-human-name'/.test(_r10bWebhookSrc));
+  _r10bExpect('(e) R9-F\' findExistingDealForBorrower wire preserved',
+    /dealsService\.findExistingDealForBorrower/.test(_r10bWebhookSrc));
+  _r10bExpect('(f) R9-E startCron factory preserved', (() => {
+    const cs = require('fs').readFileSync(require('path').join(__dirname, 'src/cron/dailySummary.js'), 'utf8');
+    return /const startCron = \(\) =>/.test(cs);
+  })());
+  _r10bExpect('(g) selectGreetingFirstName + extractFirstName unchanged', (() => {
+    const gs = require('fs').readFileSync(require('path').join(__dirname, 'src/lib/greeting.js'), 'utf8');
+    return /const extractFirstName = \(full\) =>/.test(gs) && /const selectGreetingFirstName = /.test(gs);
+  })());
+  _r10bExpect('(h) module.exports preserved on ai.js + webhook.js',
+    /module\.exports = \{[\s\S]*?parseBrokerFirstName[\s\S]*?\};?/.test(_r10bAiSrc)
+    && /module\.exports = router/.test(_r10bWebhookSrc));
+  _r10bExpect('(i) Inline validateCapture removed (extracted to shared)',
+    !/const validateCapture = \(rawCapture\) =>/.test(_r10bAiSrc));
+  _r10bExpect('(j) _validateBrokerFirstNameCapture defined module-level',
+    /const _validateBrokerFirstNameCapture = \(rawCapture\) =>/.test(_r10bAiSrc));
+
+  console.log(`\n========== R10-B groups: ${_r10bPass} PASS ==========`);
+  console.log('(Group 6 R10-B-PRODUCTION-FIXTURE-VERIFICATION lives in scripts/r10b-mini-harness.js — live-Supabase dependency)');
 
   console.log('\n────────────────────────────────────────');
   console.log('HARNESS COMPLETE — all checks passed');

@@ -814,6 +814,126 @@ const stripAndInjectDocumentsIncluded = (html, documents, missingDocs) => {
 // Scope-lock: parser anchors on `Lic. #` — strongest broker-signature
 // marker in the corpus. Signatures without it (rare) → parser returns
 // null → generic fallback. Conservative residual logged in commit body.
+// R10-B (2026-05-27): shared validator for broker first-name candidates.
+// Extracted from parseBrokerFirstNameFromSignature's inline validateCapture
+// (R8-A) to module-level scope so parseBrokerFirstNameFromBodyProse (R10-B
+// sibling extractor) can reuse without duplication. Same pure-helper
+// extraction discipline as R9-E shouldFireDailySummaryNow / R9-F
+// classifyIntakeBorrower / R9-F' decideExistingDealMatch — single-
+// responsibility validator usable across multiple extraction sources.
+//
+// R10-B additions to the R8-A validator baseline:
+//   - Company-suffix line-ending filter (Q4): rejects captures where the
+//     FULL nameLine ends with a recognized company-suffix token (Inc / LLC /
+//     Ltd / Corp / Lending / Mortgage / Partners / Group / Brokers /
+//     Financial / Capital / Realty / Holdings / Solutions / Services / Co).
+//     Empirically calibrated against Round-6 production captures:
+//       "Pemberton Lending Inc."   → null (Donna case)
+//       "Clearpath Mortgage Partners" → null (Jerome case)
+//       "Valleyview Mortgage Corp"  → null (Simone case)
+//     Robust to "Inc." vs "Inc" variations via \.?\s*$ pattern.
+//   - Common-word / imperative-starter filter (Q3): rejects first-token in
+//     {Please, Thank, Thanks, Looking, Hoping, Trying, Re, Fwd}. Empirically
+//     calibrated against the Harpreet shape where the line preceding the
+//     signature was "Please advise on next steps." Tight empirically-observed
+//     list per Q3 verdict; expand only if Stage 2 surfaces additional cases
+//     (same R8-B empirical-evidence-required discipline).
+const _validateBrokerFirstNameCapture = (rawCapture) => {
+  if (!rawCapture) return null;
+  let nameLine = rawCapture.replace(/^\s*\*+/, '').replace(/\*+\s*$/, '').trim();
+  // R8-A: strip pipe-delimited firm/license portions. Nadia shape gives
+  // "Nadia Petrov | Eastview Mortgage Group |" after asterisk-strip;
+  // pipe-split + take leading portion → "Nadia Petrov" → 2 tokens.
+  nameLine = nameLine.split('|')[0].trim();
+  // R10-B Q4: company-suffix line-ending filter. Catches the Round-6
+  // production captures where R10-A's matchAll picked the company line
+  // ("Pemberton Lending Inc." / "Clearpath Mortgage Partners" /
+  // "Valleyview Mortgage Corp"). Anchored at end-of-line; case-insensitive;
+  // tolerant of trailing punctuation + whitespace.
+  if (/\b(Inc\.?|LLC|Ltd\.?|Corp\.?|LLP|Lending|Mortgage|Partners|Group|Brokers?|Financial|Capital|Realty|Holdings|Solutions|Services|Co\.?)\s*$/i.test(nameLine)) {
+    return null;
+  }
+  const tokens = nameLine.split(/\s+/);
+  if (tokens.length === 0 || tokens.length > 5) return null;
+  const firstToken = tokens[0];
+  if (!/^[A-Z][a-z]+$/.test(firstToken)) return null;
+  if (/^(Mr|Mrs|Ms|Dr|Sir|Madam|Mortgage|Broker|Senior|Junior|Lender|Underwriter|Manager|Officer)$/i.test(firstToken)) return null;
+  // R8-A: greeting-word filter. Defensive reject for capture lines that
+  // are actually email body openers ("Hi Vienna, ..."), not signature
+  // names. No legitimate first-name in the broker corpus matches these
+  // greeting words.
+  if (/^(Hi|Hello|Hey|Dear|Greetings)$/i.test(firstToken)) return null;
+  // R10-B Q3: common-word / imperative-starter filter. Empirically
+  // calibrated against Harpreet shape where preceding line was "Please
+  // advise on next steps." (passed Title-Case + non-greeting + non-Franco
+  // pre-R10-B). Tight list; expand only on Stage 2 empirical evidence.
+  if (/^(Please|Thank|Thanks|Looking|Hoping|Trying|Re|Fwd)$/i.test(firstToken)) return null;
+  // Never extract admin's own first name (defense-in-depth — collision
+  // cases should fall back to generic rather than echo admin name).
+  if (firstToken.toLowerCase() === 'franco') return null;
+  return firstToken;
+};
+
+// R10-B (2026-05-27): body-prose self-identification extractor. Canonical
+// shape across all 4 Round-6 production fixtures (Donna / Jerome / Simone /
+// Harpreet) is "My name is X from Y" on line 3 of the inbound body. This
+// is the strongest broker-self-ID signal available pre-AI; runs as primary
+// in the parseBrokerFirstName resolver chain (signature-anchor R8-A path
+// becomes fallback for non-canonical shapes).
+//
+// Pattern coverage (Q2):
+//   - "My name is X from Y" / "My name is X with Y" / "My name is X at Y"
+//   - "I'm X from Y" / "I'm X with Y" / "I'm X at Y"
+//   - "This is X writing" / "This is X from Y" / "This is X with Y" / "This is X at Y"
+//   - bare "My name is X," / "My name is X."
+//   - bare "I'm X," / "I'm X."
+//
+// X captured as 1-3 Title-Case tokens; from/with/at/writing terminator
+// prevents Y-capture (the canonical Round-6 false-positive case where R10-A
+// signature-anchor captured "Pemberton" / "Clearpath" / "Valleyview" instead
+// of the broker's actual first-name). First match wins; validated through
+// _validateBrokerFirstNameCapture (shared filters: company-suffix line-end,
+// common-word starter, greeting-word, title-prefix, admin-name).
+//
+// Architectural family: continuation of R8-A/R10-A broker-name-extraction
+// subsystem (Q7 verdict). NOT a new template family designation yet — wait
+// for pattern recurrence across multiple distinct surfaces before promoting
+// "JS-side pre-AI signal extraction" to 4th family.
+const parseBrokerFirstNameFromBodyProse = (emailBody) => {
+  if (!emailBody || typeof emailBody !== 'string') return null;
+  const intros = [
+    /\bMy name is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:from|with|at)\b/,
+    /\bI[''']?m\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:from|with|at)\b/,
+    /\bThis is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:from|with|writing|at)\b/,
+    /\bMy name is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*[,.]/,
+    /\bI[''']?m\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*[,.]/,
+  ];
+  for (const re of intros) {
+    const m = emailBody.match(re);
+    if (m && m[1]) {
+      const result = _validateBrokerFirstNameCapture(m[1]);
+      if (result) return result;
+    }
+  }
+  return null;
+};
+
+// R10-B (2026-05-27): resolver-chain wrapper. Body-prose primary (R10-B);
+// signature-anchor fallback (R8-A + R10-A matchAll enhancement). Two-layer
+// chain handles the empirical signal hierarchy:
+//   - Body-prose self-ID ("My name is X from Y") is the strongest signal
+//     when present (canonical Round-6 fixture shape across all 4 brokers)
+//   - Signature anchor (Lic. # marker) is the fallback for non-canonical
+//     bodies (no self-ID intro, or non-matching intro shape)
+// Single entry point for callers (webhook.js R10-A classifier override +
+// _c7ParsedBrokerName computation feeding processInitialEmail). When future
+// extraction sources emerge (e.g., subject line, In-Reply-To header), they
+// plug into this wrapper without modifying existing extractors.
+const parseBrokerFirstName = (emailBody) => {
+  return parseBrokerFirstNameFromBodyProse(emailBody)
+      || parseBrokerFirstNameFromSignature(emailBody);
+};
+
 const parseBrokerFirstNameFromSignature = (emailBody) => {
   if (!emailBody || typeof emailBody !== 'string') return null;
   // 1) Strip RFC sig delimiter footer ("\n-- \n" and everything after).
@@ -861,31 +981,11 @@ const parseBrokerFirstNameFromSignature = (emailBody) => {
   // Eastview Mortgage Group," — 8 tokens, fails 5-cap). Now: (a) is tried;
   // if its capture fails validation (token count, Title-Case check, etc.),
   // we FALL THROUGH to (b)'s last-Lic. capture rather than returning null.
-  const validateCapture = (rawCapture) => {
-    if (!rawCapture) return null;
-    let nameLine = rawCapture.replace(/^\s*\*+/, '').replace(/\*+\s*$/, '').trim();
-    // R8-A: strip pipe-delimited firm/license portions. Nadia shape gives
-    // "Nadia Petrov | Eastview Mortgage Group |" after asterisk-strip;
-    // pipe-split + take leading portion → "Nadia Petrov" → 2 tokens.
-    nameLine = nameLine.split('|')[0].trim();
-    const tokens = nameLine.split(/\s+/);
-    if (tokens.length === 0 || tokens.length > 5) return null;
-    const firstToken = tokens[0];
-    if (!/^[A-Z][a-z]+$/.test(firstToken)) return null;
-    if (/^(Mr|Mrs|Ms|Dr|Sir|Madam|Mortgage|Broker|Senior|Junior|Lender|Underwriter|Manager|Officer)$/i.test(firstToken)) return null;
-    // R8-A: greeting-word filter. Defensive reject for capture lines that
-    // are actually email body openers ("Hi Vienna, ..."), not signature
-    // names. Pre-R8-A this could leak through when precedingMatch grabbed
-    // the email's opening line (Lic.# on Line N, no name above; opener on
-    // Line 1) — "Hi" passes Title-Case + token-count + title-prefix +
-    // not-franco. No legitimate first-name in the broker corpus matches
-    // these greeting words.
-    if (/^(Hi|Hello|Hey|Dear|Greetings)$/i.test(firstToken)) return null;
-    // Never extract admin's own first name (defense-in-depth — collision
-    // cases should fall back to generic rather than echo admin name).
-    if (firstToken.toLowerCase() === 'franco') return null;
-    return firstToken;
-  };
+  // R10-B (2026-05-27): inline validateCapture extracted to module-level
+  // _validateBrokerFirstNameCapture (above) for cross-extractor reuse with
+  // parseBrokerFirstNameFromBodyProse. Filter behavior identical to R8-A
+  // baseline PLUS R10-B additions (company-suffix line-end + common-word
+  // starter). See _validateBrokerFirstNameCapture docblock for details.
 
   // (a) Preceding-line shape — try LAST occurrence first, fall back to earlier.
   //
@@ -910,7 +1010,7 @@ const parseBrokerFirstNameFromSignature = (emailBody) => {
   // Last-match = first-match in those cases; truth table behavior unchanged.
   const precedingMatches = [...beforeFooter.matchAll(/([^\n]+)\n+[^\n]*Lic\.\s*#/gi)];
   for (let i = precedingMatches.length - 1; i >= 0; i--) {
-    const result = validateCapture(precedingMatches[i][1]);
+    const result = _validateBrokerFirstNameCapture(precedingMatches[i][1]);
     if (result) return result;
   }
 
@@ -928,7 +1028,7 @@ const parseBrokerFirstNameFromSignature = (emailBody) => {
   // Iterate from last to first (canonical sig is at body end).
   for (let i = sameLineMatches.length - 1; i >= 0; i--) {
     if (!sameLineMatches[i][1].includes('|')) continue;
-    const result = validateCapture(sameLineMatches[i][1]);
+    const result = _validateBrokerFirstNameCapture(sameLineMatches[i][1]);
     if (result) return result;
   }
 
@@ -3827,6 +3927,11 @@ ${JSON.stringify(summaryData, null, 2)}`,
   DOCUMENTS_INCLUDED_BLOCK_PATTERN,
   // R4-Bucket-C.7 — broker-signature first-name parser (Marcus collision fix)
   parseBrokerFirstNameFromSignature,
+  // R10-B (2026-05-27): body-prose self-ID extractor + resolver-chain
+  // wrapper. parseBrokerFirstName is the canonical entry point for callers;
+  // FromSignature + FromBodyProse exported for direct testing + harness use.
+  parseBrokerFirstNameFromBodyProse,
+  parseBrokerFirstName,
   // R6-ζ (2026-05-21) — shared forbidden-non-sequitur-openers prompt block
   // (both generateDocumentRequestEmail + generateBrokerResponse call this
   // helper; closed-set assertion in harness pins invocation count = 2).
