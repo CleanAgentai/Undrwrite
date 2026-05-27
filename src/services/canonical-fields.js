@@ -911,6 +911,77 @@ const parseBrokerCorrections = (messageBody) => {
     }
   }
 
+  // R11-A (2026-05-27): mortgage_position correction patterns.
+  // Empirical anchor: Marcus Webb 8c404ae0 broker confirmation
+  // "this is a first mortgage (1st position). Marcus is refinancing his
+  // existing RBC first mortgage — the RBC will be paid out at closing."
+  // Strip asterisks first (Marcus's broker used *1st* emphasis variant
+  // in re-confirmation inbound).
+  const asteriskStripped = messageBody.replace(/\*/g, '');
+  const positionPatterns = [
+    // "this is a first/second/third mortgage" / "this is a 1st mortgage"
+    /\bthis\s+is\s+(?:a |the )?(first|second|third|1st|2nd|3rd)\s+mortgage\b/i,
+    // "first/second/third position" / "1st position"
+    /\b(?:in\s+(?:the\s+)?)?(first|second|third|1st|2nd|3rd)\s+position\b/i,
+    // "mortgage position is a/the first/1st"
+    /\b(?:mortgage\s+)?position\s+is\s+(?:a |the )?(first|second|third|1st|2nd|3rd)\b/i,
+    // "the mortgage position is *1st*" (asterisk stripped above already)
+    // "*1st*" emphasis (post-asterisk-strip becomes "1st" — caught above
+    // by other patterns when in context)
+  ];
+  for (const re of positionPatterns) {
+    const m = asteriskStripped.match(re);
+    if (m) {
+      const raw = m[1].toLowerCase();
+      let value = null;
+      if (/^(first|1st)$/.test(raw)) value = '1st';
+      else if (/^(second|2nd)$/.test(raw)) value = '2nd';
+      else if (/^(third|3rd)$/.test(raw)) value = '3rd';
+      if (value) {
+        corrections.push({
+          field: 'mortgage_position',
+          value,
+          source: 'broker_correction',
+          rawPhrase: m[0],
+        });
+        break;
+      }
+    }
+  }
+
+  // R11-A (2026-05-27): transaction_type correction patterns.
+  // Detects broker's assertion of transaction structure (refinance / purchase /
+  // 2nd_mortgage). Independent of mortgage_position — broker can assert
+  // transaction_type without explicitly stating position (and vice versa).
+  // Patterns cover Marcus's "refinancing his existing RBC first mortgage" +
+  // "this is a refinance" + similar variants.
+  const transactionTypePatterns = [
+    // "refinancing his/her/their/the/an existing X mortgage"
+    { re: /\brefinanc(?:e|ing)\s+(?:his|her|their|the|this|an?|my|our)?\s*(?:existing\s+)?(?:[A-Z][A-Za-z]*\s+)?(?:first |1st )?mortgage\b/i, value: 'refinance' },
+    // "this is a refinance"
+    { re: /\bthis\s+is\s+(?:a |the )?refinance\b/i, value: 'refinance' },
+    // "first mortgage refinance" / "refinance to pay out existing X"
+    { re: /\b(?:first\s+|1st\s+)?mortgage\s+refinance\b/i, value: 'refinance' },
+    /* purchase patterns */
+    { re: /\bpurchas(?:e|ing)\s+(?:this\s+|the\s+|a\s+|an\s+|new\s+|the\s+new\s+)?(?:home|property|house|condo)\b/i, value: 'purchase' },
+    { re: /\bthis\s+is\s+(?:a |the )?purchase\b/i, value: 'purchase' },
+    /* second-mortgage patterns */
+    { re: /\bsecond\s+mortgage\s+application\b/i, value: '2nd_mortgage' },
+    { re: /\bthis\s+is\s+(?:a |the )?(?:second|2nd)\s+mortgage\b/i, value: '2nd_mortgage' },
+  ];
+  for (const { re, value } of transactionTypePatterns) {
+    const m = asteriskStripped.match(re);
+    if (m) {
+      corrections.push({
+        field: 'transaction_type',
+        value,
+        source: 'broker_correction',
+        rawPhrase: m[0],
+      });
+      break;
+    }
+  }
+
   return corrections;
 };
 
@@ -950,6 +1021,73 @@ const parseBrokerInitialIntent = (messageBody) => {
       if (purpose.length >= 3 && purpose.length <= 100) {
         intents.push({ field: 'purpose', value: purpose, source: 'broker_initial_intent', rawPhrase: purposeM[0] });
       }
+    }
+  }
+
+  // R11-A (2026-05-27): mortgage_position initial-intent patterns.
+  // Symmetric coverage of parseBrokerCorrections position patterns for the
+  // first-inbound case (broker states position in initial submission email).
+  // Empirical anchor: Marcus Webb msg[0] "Loan Request: First mortgage
+  // refinance — $408,000 — refinancing" — implicit "first mortgage" position
+  // assertion in the loan-request line.
+  const asteriskStripped = messageBody.replace(/\*/g, '');
+  // Check the Loan Request line specifically — implicit position assertion
+  // from "First mortgage refinance" / "Second mortgage" framing.
+  const loanRequestPositionM = asteriskStripped.match(/\bLoan\s+Request\s*:?\s*[^\n]*?\b(first|second|third|1st|2nd|3rd)\s+mortgage\b/i);
+  if (loanRequestPositionM) {
+    const raw = loanRequestPositionM[1].toLowerCase();
+    let value = null;
+    if (/^(first|1st)$/.test(raw)) value = '1st';
+    else if (/^(second|2nd)$/.test(raw)) value = '2nd';
+    else if (/^(third|3rd)$/.test(raw)) value = '3rd';
+    if (value) {
+      intents.push({ field: 'mortgage_position', value, source: 'broker_initial_intent', rawPhrase: loanRequestPositionM[0] });
+    }
+  }
+  // Fallback: explicit position statement anywhere in body (sibling to
+  // parseBrokerCorrections position patterns; first-inbound caller).
+  if (!intents.find(i => i.field === 'mortgage_position')) {
+    const positionPatterns = [
+      /\bthis\s+is\s+(?:a |the )?(first|second|third|1st|2nd|3rd)\s+mortgage\b/i,
+      /\b(?:in\s+(?:the\s+)?)?(first|second|third|1st|2nd|3rd)\s+position\b/i,
+      /\b(?:mortgage\s+)?position\s+is\s+(?:a |the )?(first|second|third|1st|2nd|3rd)\b/i,
+    ];
+    for (const re of positionPatterns) {
+      const m = asteriskStripped.match(re);
+      if (m) {
+        const raw = m[1].toLowerCase();
+        let value = null;
+        if (/^(first|1st)$/.test(raw)) value = '1st';
+        else if (/^(second|2nd)$/.test(raw)) value = '2nd';
+        else if (/^(third|3rd)$/.test(raw)) value = '3rd';
+        if (value) {
+          intents.push({ field: 'mortgage_position', value, source: 'broker_initial_intent', rawPhrase: m[0] });
+          break;
+        }
+      }
+    }
+  }
+
+  // R11-A (2026-05-27): transaction_type initial-intent patterns.
+  // Sibling to parseBrokerCorrections transaction_type extraction; covers
+  // broker's first-inbound transaction-structure assertion. Empirical
+  // anchor: Marcus "Loan Request: First mortgage refinance — $408,000 —
+  // refinancing" pushes transaction_type='refinance'.
+  const transactionTypePatterns = [
+    { re: /\brefinanc(?:e|ing)\s+(?:his|her|their|the|this|an?|my|our)?\s*(?:existing\s+)?(?:[A-Z][A-Za-z]*\s+)?(?:first |1st )?mortgage\b/i, value: 'refinance' },
+    { re: /\bthis\s+is\s+(?:a |the )?refinance\b/i, value: 'refinance' },
+    { re: /\b(?:first\s+|1st\s+)?mortgage\s+refinance\b/i, value: 'refinance' },
+    { re: /\brefinancing\b/i, value: 'refinance' },
+    { re: /\bpurchas(?:e|ing)\s+(?:this\s+|the\s+|a\s+|an\s+|new\s+|the\s+new\s+)?(?:home|property|house|condo)\b/i, value: 'purchase' },
+    { re: /\bthis\s+is\s+(?:a |the )?purchase\b/i, value: 'purchase' },
+    { re: /\bsecond\s+mortgage\s+application\b/i, value: '2nd_mortgage' },
+    { re: /\bthis\s+is\s+(?:a |the )?(?:second|2nd)\s+mortgage\b/i, value: '2nd_mortgage' },
+  ];
+  for (const { re, value } of transactionTypePatterns) {
+    const m = asteriskStripped.match(re);
+    if (m) {
+      intents.push({ field: 'transaction_type', value, source: 'broker_initial_intent', rawPhrase: m[0] });
+      break;
     }
   }
 
@@ -1141,14 +1279,75 @@ const extractMortgagePositionFromLoanApplication = (doc) => {
 //
 // 3rd-mortgage future-trigger flagged in docblock above; currently returns
 // "2nd" universally when balance > 0.
+//
+// R11-A (2026-05-27): refinance carve-out. When transaction_type='refinance'
+// AND existing_first_mortgage_lender (mortgage_statement source) matches a
+// lender named in the broker's refinance assertion (broker_correction or
+// broker_initial_intent rawPhrase for transaction_type), the derived "2nd"
+// signal is SUPPRESSED — the existing first mortgage is being paid out at
+// closing, the new mortgage takes 1st position. Empirical anchor: Marcus
+// Webb 8c404ae0 "refinancing his existing RBC first mortgage — the RBC will
+// be paid out at closing."
+//
+// Lender-match has TWO modes (both tolerant of spelling variants via the
+// existing LENDER_SYNONYMS canonicalization infrastructure — R6-γ + R9-D):
+//
+//   (1) STRICT — broker_correction / broker_initial_intent rawPhrase
+//       explicitly names a lender that matches the mortgage_statement-source
+//       canonical lender. Example: Marcus inbound[1] "refinancing his existing
+//       RBC first mortgage" → findLenderInWindow returns 'RBC' → matches
+//       mortgage_statement source canonical 'RBC' → match.
+//
+//   (2) IMPLICIT SINGLE-LENDER — when broker says refinance WITHOUT naming
+//       a lender AND mortgage_statement source has exactly ONE unique
+//       canonical lender, that lender is by inference the one being paid
+//       off. Example: Marcus inbound[0] "First mortgage refinance —
+//       $408,000 — refinancing" + RBC payout statement attached → implicit
+//       match (single mortgage_statement lender = RBC; broker's refinance
+//       targets the single existing mortgage by structural necessity).
+//       Closes the UX gap where the first-turn broker submission with
+//       explicit refinance intent would otherwise trigger a discrepancy
+//       question Vienna shouldn't need to ask.
+//
+// Defensive: when broker_correction lacks lender name AND mortgage_statement
+// source has MULTIPLE lenders OR ZERO lenders, neither match mode fires →
+// derived signal still pushes → discrepancy detected → broker asked. Once
+// broker resolves with broker_correction (which suppresses derived per the
+// canonical-map-level suppression at extractCanonicalFields), discrepancy
+// resolves on the next turn.
+//
+// Compound transaction (refinance + new 2nd) preserved: lender-match is
+// conditional. If broker refinances RBC AND adds a NEW 2nd, broker_correction
+// for mortgage_position would explicitly say "2nd" → broker_correction
+// suppression at extractCanonicalFields strips derived anyway.
 const inferMortgagePositionFromExistingBalance = (canonicalMap) => {
   if (!canonicalMap) return null;
   const balances = canonicalMap.existing_first_mortgage_balance || [];
   const hasNonZero = balances.some(t => t && Number.isFinite(t.value) && t.value > 0);
-  if (hasNonZero) {
-    return { value: '2nd', source: 'mortgage_position_inferred_from_existing_balance' };
+  if (!hasNonZero) return null;
+
+  // R11-A refinance carve-out
+  const txnTypeTuples = canonicalMap.transaction_type || [];
+  const refinanceTuple = txnTypeTuples.find(t => t && t.value === 'refinance');
+  if (refinanceTuple) {
+    const payoutLenderTuples = (canonicalMap.existing_first_mortgage_lender || [])
+      .filter(t => t && t.classification === 'mortgage_statement' && t.value);
+    const payoutLenderCanonicals = Array.from(new Set(
+      payoutLenderTuples.map(t => normalizeLender(t.value)).filter(Boolean),
+    ));
+    // Mode 1 — strict: broker rawPhrase names a lender matching payout source
+    const refinanceLenderInPhrase = findLenderInWindow(refinanceTuple.rawPhrase || '');
+    if (refinanceLenderInPhrase && payoutLenderCanonicals.includes(refinanceLenderInPhrase)) {
+      return null; // Strict lender match → suppress derived (refinance pays out existing 1st)
+    }
+    // Mode 2 — implicit single-lender: broker says refinance without naming
+    // lender, but mortgage_statement source has exactly one canonical lender
+    if (!refinanceLenderInPhrase && payoutLenderCanonicals.length === 1) {
+      return null; // Implicit match → suppress derived
+    }
   }
-  return null;
+
+  return { value: '2nd', source: 'mortgage_position_inferred_from_existing_balance' };
 };
 
 // ─── Top-level: extract everything per submission ───
@@ -1188,6 +1387,29 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     // Purpose of Mortgage field). Source-hierarchy resolution per Q2-sub-b:
     // broker_correction > broker_initial_intent > documents > generic email_body.
     purpose: [],
+    // R11-A (2026-05-27): transaction_type — first INFERENTIAL canonical
+    // field (signal-derived from multi-source semantic interpretation rather
+    // than direct extraction). Values: 'refinance' | 'purchase' |
+    // '2nd_mortgage' | '3rd_mortgage' | null (undetermined). Sources:
+    //   broker_correction (parser detects "refinancing existing X mortgage"
+    //     / "this is a refinance" / etc. in subsequent inbounds)
+    //   broker_initial_intent (same parser on first-inbound loan-request
+    //     line)
+    //   loan_application (purpose field from AcroForm; future: when
+    //     extractor surfaces purpose-as-transaction-type semantic)
+    // Consumed by inferMortgagePositionFromExistingBalance (refinance
+    // carve-out — suppresses derived "2nd" signal when refinance + existing
+    // lender match) AND R11-B computeCombinedLtv (refinance LTV math —
+    // existing first being paid off, not additive).
+    //
+    // ARCHITECTURAL INNOVATION (worth pinning) — first inferential canonical
+    // field at HIGHER semantic layer than R10-E's mortgage_position_inferred
+    // _from_existing_balance + R10-D's province_inferred_from_postal/city.
+    // 1st-family extension via NEW sub-pattern. Promotion to its own
+    // template family deferred until 3+ inferential fields establish the
+    // lineage empirically (sibling future candidates: property_use_type,
+    // collateral_type, loan_program).
+    transaction_type: [],
   };
 
   const push = (field, value, source, extra = {}) => {
@@ -1346,25 +1568,6 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     }
   }
 
-  // R10-E (2026-05-27): mortgage_position derived signal from existing_first_
-  // mortgage_balance > 0 logical constraint. OBJECTIVE-field signal sitting
-  // BELOW loan_application doc-source in hierarchy (filter at consumer site
-  // picks loan_application if present; falls back to derived signal; falls
-  // back to email_body). Push happens AFTER all doc pushes (so balance tuples
-  // populated) and BEFORE R10-G broker block (so broker_correction unshift
-  // to [0] still wins universally if broker explicitly corrects position).
-  // 7th cluster in 1st template family. Closes Patricia Snapshot vs Risk
-  // Factors self-contradiction (canonical_map now has docs/derived tuples
-  // outranking broker's incorrect "first mortgage" email statement).
-  const inferredMortgagePos = inferMortgagePositionFromExistingBalance(map);
-  if (inferredMortgagePos) {
-    map.mortgage_position.push({
-      value: inferredMortgagePos.value,
-      source: inferredMortgagePos.source,
-      classification: inferredMortgagePos.source,
-    });
-  }
-
   // R10-G (2026-05-27): Broker-source push (broker_correction +
   // broker_initial_intent). Per Q2-sub-b verdict, broker_correction has
   // highest priority universally; broker_initial_intent has higher priority
@@ -1375,40 +1578,107 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   // formatValue + computeCombinedLtv) naturally see the broker value first.
   // resolveCanonicalForIntent (helper below) does explicit filter at
   // consumer-site boundary for Snapshot rendering + override block injection.
-  const INTENT_FIELDS = new Set(['requested_loan_amount', 'purpose']);
-  if (Array.isArray(opts.brokerCorrections)) {
-    for (const c of opts.brokerCorrections) {
-      if (!c || !c.field || !map[c.field]) continue;
-      map[c.field].unshift({
-        value: c.value,
-        source: 'broker_correction',
-        classification: 'broker_correction',
-        rawPhrase: c.rawPhrase || '',
+  //
+  // R11-A (2026-05-27): non-aggregated detection wiring — when caller
+  // doesn't supply opts.brokerCorrections / opts.brokerInitialIntent,
+  // parse current-turn emailBody and push tuples. This bridges the active-
+  // branch detection at webhook.js:3477 (uses extractCanonicalFields, NOT
+  // extractCanonicalFieldsAggregated) to broker_correction visibility.
+  // Load-bearing for keeping Q1-D detection-symmetry fix deferred — without
+  // this wiring, broker confirmations from the current-turn inbound would
+  // not reach canonical_map → discrepancyHold gate wouldn't release →
+  // broker corrections ignored repeatedly (R11-A empirical: Marcus's
+  // outbounds 1 + 3 asked the SAME discrepancy verbatim).
+  //
+  // R11-A extends INTENT_FIELDS to include transaction_type (intent-shape:
+  // broker asserts transaction structure; doc-source AcroForm purpose can
+  // also fill but broker's stated intent ranks higher per R10-G framing).
+  // mortgage_position stays OBJECTIVE (broker correction wins universally
+  // per R10-E hierarchy when explicitly stated, but absent broker_correction
+  // doc-source remains authoritative).
+  const INTENT_FIELDS = new Set(['requested_loan_amount', 'purpose', 'transaction_type']);
+  // R11-A: derive brokerCorrections + brokerInitialIntent from current-turn
+  // emailBody when caller didn't supply them. Backwards-compat: existing
+  // aggregated caller (extractCanonicalFieldsAggregated) passes both arrays
+  // and the local computation is skipped.
+  const brokerCorrections = Array.isArray(opts.brokerCorrections)
+    ? opts.brokerCorrections
+    : (emailBody ? parseBrokerCorrections(emailBody) : []);
+  const brokerInitialIntent = Array.isArray(opts.brokerInitialIntent)
+    ? opts.brokerInitialIntent
+    : (emailBody ? parseBrokerInitialIntent(emailBody) : []);
+  for (const c of brokerCorrections) {
+    if (!c || !c.field || !map[c.field]) continue;
+    map[c.field].unshift({
+      value: c.value,
+      source: 'broker_correction',
+      classification: 'broker_correction',
+      rawPhrase: c.rawPhrase || '',
+    });
+  }
+  for (const i of brokerInitialIntent) {
+    if (!i || !i.field || !map[i.field]) continue;
+    if (INTENT_FIELDS.has(i.field)) {
+      // For intent fields: insert AFTER any broker_correction, BEFORE docs.
+      const correctionIdx = map[i.field].findIndex(t => t.classification === 'broker_correction');
+      const insertAt = correctionIdx === -1 ? 0 : correctionIdx + 1;
+      map[i.field].splice(insertAt, 0, {
+        value: i.value,
+        source: 'broker_initial_intent',
+        classification: 'broker_initial_intent',
+        rawPhrase: i.rawPhrase || '',
+      });
+    } else {
+      // For objective fields: append (docs already win).
+      map[i.field].push({
+        value: i.value,
+        source: 'broker_initial_intent',
+        classification: 'broker_initial_intent',
+        rawPhrase: i.rawPhrase || '',
       });
     }
   }
-  if (Array.isArray(opts.brokerInitialIntent)) {
-    for (const i of opts.brokerInitialIntent) {
-      if (!i || !i.field || !map[i.field]) continue;
-      if (INTENT_FIELDS.has(i.field)) {
-        // For intent fields: insert AFTER any broker_correction, BEFORE docs.
-        const correctionIdx = map[i.field].findIndex(t => t.classification === 'broker_correction');
-        const insertAt = correctionIdx === -1 ? 0 : correctionIdx + 1;
-        map[i.field].splice(insertAt, 0, {
-          value: i.value,
-          source: 'broker_initial_intent',
-          classification: 'broker_initial_intent',
-          rawPhrase: i.rawPhrase || '',
-        });
-      } else {
-        // For objective fields: append (docs already win).
-        map[i.field].push({
-          value: i.value,
-          source: 'broker_initial_intent',
-          classification: 'broker_initial_intent',
-          rawPhrase: i.rawPhrase || '',
-        });
-      }
+
+  // R10-E (2026-05-27): mortgage_position derived signal from existing_first_
+  // mortgage_balance > 0 logical constraint. OBJECTIVE-field signal sitting
+  // BELOW loan_application doc-source in hierarchy (filter at consumer site
+  // picks loan_application if present; falls back to derived signal; falls
+  // back to email_body). 7th cluster in 1st template family. Closes Patricia
+  // Snapshot vs Risk Factors self-contradiction (canonical_map now has
+  // docs/derived tuples outranking broker's incorrect "first mortgage"
+  // email statement).
+  //
+  // R11-A (2026-05-27) REORDERING: inferMortgagePosition now runs AFTER
+  // broker-source push (was: BEFORE). Reason — refinance carve-out checks
+  // canonical_map.transaction_type tuples (populated by broker push) AND
+  // mortgage_position broker_correction presence (also from broker push).
+  // Reordering preserves R10-E source-hierarchy semantic (broker_correction
+  // > docs > derived > email_body) and correctly suppresses derived push
+  // at canonical_map level when broker has explicitly resolved the position
+  // OR when transaction_type='refinance' + lender match indicates refinance
+  // semantic supersedes existing-balance-based inference.
+  //
+  // CANONICAL-MAP-LEVEL SUPPRESSION RATIONALE — computeDiscrepancySet
+  // operates on the unfiltered canonical_map. Without canonical-map-level
+  // suppression (only consumer-site filtering), broker_correction "1st" +
+  // derived "2nd" would still produce a 2-group discrepancy → discrepancy-
+  // Hold gate would hold → broker re-asked despite explicit resolution.
+  // R11-A's load-bearing fix: suppress derived signal at canonical-map
+  // construction when (a) broker_correction for mortgage_position present
+  // OR (b) refinance carve-out fires.
+  const inferredMortgagePos = inferMortgagePositionFromExistingBalance(map);
+  if (inferredMortgagePos) {
+    // R11-A: skip derived push if broker_correction for mortgage_position
+    // already present (broker explicitly resolved — derived is redundant /
+    // potentially contradictory).
+    const hasBrokerCorrectionPosition = (map.mortgage_position || [])
+      .some(t => t && t.classification === 'broker_correction');
+    if (!hasBrokerCorrectionPosition) {
+      map.mortgage_position.push({
+        value: inferredMortgagePos.value,
+        source: inferredMortgagePos.source,
+        classification: inferredMortgagePos.source,
+      });
     }
   }
 

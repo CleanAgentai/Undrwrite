@@ -129,12 +129,18 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
   // Source-string structural anchors
   expect('(c) extractMortgagePositionFromLoanApplication invoked in loan_application branch',
     /extractMortgagePositionFromLoanApplication\(doc\)/.test(_cfSrc));
-  expect('(d) inferMortgagePositionFromExistingBalance invoked after R10-D, before R10-G broker block',
+  // R11-A (2026-05-27) REORDER: inferMortgagePositionFromExistingBalance now
+  // invoked AFTER R10-G broker block (was: before). The reorder is load-bearing
+  // for R11-A's refinance carve-out (carve-out reads canonical_map.transaction_
+  // type which is populated by broker push) AND the canonical-map-level
+  // broker_correction suppression check. R10-E's call-site existence invariant
+  // is preserved; only the relative ordering changed.
+  expect('(d) inferMortgagePositionFromExistingBalance invoked after R10-D AND after R10-G broker block (R11-A reorder)',
     (() => {
       const inferIdx = _cfSrc.indexOf('inferMortgagePositionFromExistingBalance(map)');
       const r10dIdx = _cfSrc.indexOf('inferProvinceFromAddressSignals(cityTuple');
       const brokerIdx = _cfSrc.indexOf('Array.isArray(opts.brokerCorrections)');
-      return r10dIdx >= 0 && inferIdx > r10dIdx && inferIdx < brokerIdx;
+      return r10dIdx >= 0 && inferIdx > r10dIdx && inferIdx > brokerIdx;
     })());
   expect('(e) push uses mortgage_position_inferred_from_existing_balance classification',
     /classification: inferredMortgagePos\.source/.test(_cfSrc));
@@ -333,12 +339,16 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
     /classifyIntakeBorrower/.test(_whSrc));
   expect('(h) R10-E filter composes with R6-γ + R6-α + R10-G in wire site',
     /filterCanonicalMortgagePositionForObjectiveAuthoritative[\s\S]*?filterCanonicalPurposeForBrokerAuthoritative[\s\S]*?filterCanonicalLoanAmountForDocAuthoritative[\s\S]*?filterCanonicalLenderForPayoutOnly/.test(_whSrc));
-  expect('(i) push ordering: R10-E derived signal AFTER R10-D province + BEFORE R10-G broker block',
+  // R11-A (2026-05-27) REORDER: R10-E derived signal call site moved AFTER
+  // R10-G broker block (was: BEFORE). Refinance carve-out + broker_correction
+  // suppression check require canonical_map.transaction_type + mortgage_
+  // position broker_correction tuples populated by broker push.
+  expect('(i) push ordering: R10-E derived signal AFTER R10-D province AND AFTER R10-G broker block (R11-A reorder)',
     (() => {
       const r10dIdx = _cfSrc.indexOf('inferProvinceFromAddressSignals(cityTuple');
       const r10eIdx = _cfSrc.indexOf('inferMortgagePositionFromExistingBalance(map)');
       const r10gBrokerIdx = _cfSrc.indexOf('Array.isArray(opts.brokerCorrections)');
-      return r10dIdx >= 0 && r10eIdx > r10dIdx && r10eIdx < r10gBrokerIdx;
+      return r10dIdx >= 0 && r10eIdx > r10dIdx && r10eIdx > r10gBrokerIdx;
     })());
   expect('(j) module.exports of canonical-fields.js includes all R10-E helpers',
     /extractMortgagePositionFromLoanApplication/.test(_cfSrc)
