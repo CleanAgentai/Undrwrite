@@ -691,6 +691,54 @@ const prependDealSnapshot = (html, snapshotHtml) => {
   return snapshotHtml + '\n\n' + html;
 };
 
+// R10-C-2 (2026-05-27): inject elevated-LTV-band callout into admin-facing
+// prelim leadSummary. Closes contract Schedule A Stage 1 75-80% manual-review
+// band gap at MVP level — admin reviewer sees the band classification surfaced
+// as a JS-deterministic callout (defense-in-depth vs Claude prompt
+// dependency).
+//
+// SHAPE — single-paragraph callout in same style as Risk Factors / Deal
+// Snapshot scaffolding. Injects AFTER the Deal Snapshot block (which is JS-
+// authoritative per Cluster B Commit 2b), so the reading order is:
+//   [JS Snapshot] → [JS R10-C-2 Elevated LTV Band callout] → [Claude's
+//    Risk Factors / Loan Purpose / etc.]
+//
+// FIRES ONLY for ltvBand === 'elevated_75_80'. 'over_80' deals don't reach
+// this site (they bypass prelim entirely via the awaiting_collateral state).
+// 'standard' deals fall through unchanged.
+//
+// IDEMPOTENT — if the callout marker is already present (e.g., on an
+// [UPDATED] prelim re-render), strip the prior callout before re-injecting
+// to avoid duplication.
+const ELEVATED_LTV_BAND_CALLOUT_MARKER = 'R10-C-2-ELEVATED-LTV-BAND-CALLOUT';
+const ELEVATED_LTV_BAND_CALLOUT_PATTERN = new RegExp(
+  `<p[^>]*data-marker="${ELEVATED_LTV_BAND_CALLOUT_MARKER}"[^>]*>[\\s\\S]*?<\\/p>\\s*`,
+  'gi',
+);
+const injectElevatedLtvBandCallout = (html, ltvBand, ltvValue) => {
+  if (!html || typeof html !== 'string') return html;
+  if (ltvBand !== 'elevated_75_80') return html;
+  // Strip prior callout (idempotence) before injecting.
+  let out = html.replace(ELEVATED_LTV_BAND_CALLOUT_PATTERN, '');
+  const ltvLabel = (ltvValue != null && Number.isFinite(ltvValue))
+    ? `${ltvValue}%`
+    : '75-80%';
+  const callout = `<p data-marker="${ELEVATED_LTV_BAND_CALLOUT_MARKER}"><strong>Elevated LTV Band (Manual Review):</strong> LTV ${ltvLabel} falls in the 75-80% elevated band per Schedule A Stage 1 spec — this prelim warrants a manual-review pass before proceeding.</p>`;
+  // Inject AFTER the Deal Snapshot block when present; otherwise prepend to
+  // the leadSummary body. Detection mirrors prependDealSnapshot's heuristic.
+  const snapshotBlockMatch = out.match(/<h2[^>]*>\s*Deal Snapshot\s*<\/h2>[\s\S]*?(?=<h2|<hr|$)/i);
+  if (snapshotBlockMatch) {
+    const insertAt = snapshotBlockMatch.index + snapshotBlockMatch[0].length;
+    return out.slice(0, insertAt) + '\n' + callout + '\n' + out.slice(insertAt);
+  }
+  // Fallback: prepend (or insert after FILE STATUS if present)
+  const fileStatusM = out.match(/^(\s*<p>\s*<strong>\s*FILE STATUS[^<]*<\/strong>[^<]*<\/p>\s*)/i);
+  if (fileStatusM) {
+    return fileStatusM[1] + callout + '\n\n' + out.slice(fileStatusM[0].length);
+  }
+  return callout + '\n\n' + out;
+};
+
 // ──────────────────────────────────────────────────────────────────────────
 // R4-Bucket-C.6 — Documents Included section JS render (R4-S1 Grace)
 // ──────────────────────────────────────────────────────────────────────────
@@ -1636,6 +1684,69 @@ module.exports = {
         return { welcomeEmail, dealSummary };
       }
       // No JS-side clash → existing Claude flow unchanged (byte-identical to prior behavior).
+
+      // ─── R10-C-1 (2026-05-27): high-LTV (>80%) dedicated-generator bypass ───
+      // Empirical anchor: Ryan/Donna combined-applicant deal 45bd01df.
+      // 3 broker-facing outbounds across 2 generator paths (this function's
+      // welcomeEmail + 2x generateBrokerResponse responseEmail) all bypassed
+      // the HIGH LTV prompt instruction (ai.js:120-124) and asked for intake
+      // documents instead of the collateral question.
+      //
+      // ARCHITECTURE — Broker-facing prompt-and-sweep language discipline
+      // (R10-H 5-cluster family) extended with dedicated-generator-bypass
+      // sub-pattern (S15-E precedent shape). R8-B empirical-evidence-required
+      // threshold met (3+ outbounds across 2+ generators).
+      //
+      // ORDERING — runs AFTER S15-E identity-clash check (which runs first
+      // per HHH precedent) and BEFORE the Claude call (canonical-map-derived
+      // LTV computed pre-Claude — dealSummary.ltv_percent isn't available
+      // yet at this point since Claude hasn't run). Match Schedule A Stage 1
+      // contract band classification: 'over_80' → dedicated collateral-ask
+      // bypass; lower bands fall through to the existing Claude path with
+      // the band signal threaded as a prompt context hint (handled
+      // downstream by callers).
+      // Late-require to avoid module-load-time circular dep (ai.js ↔
+      // canonical-fields ↔ discrepancy-engine — same pattern as discrepancy-
+      // engine.js:31 late-requiring ai.js for S15-E).
+      const _r10cCf = require('./canonical-fields');
+      const _r10cDe = require('./discrepancy-engine');
+      const _r10cCanonicalMap = _r10cCf.extractCanonicalFields(emailBody, savedDocs, { emailSubject });
+      const _r10cCombined = _r10cDe.computeCombinedLtv(_r10cCanonicalMap);
+      const _r10cCombinedLtv = _r10cCombined ? _r10cCombined.combined_ltv_percent : null;
+      // Pre-Claude standalone LTV — requested / market_value when both are
+      // single-valued in canonical_map.
+      const _r10cMarketTuples = _r10cCanonicalMap.subject_property_market_value || [];
+      const _r10cRequestedTuples = _r10cCanonicalMap.requested_loan_amount || [];
+      const _r10cMarketVal = _r10cMarketTuples[0]?.value;
+      const _r10cRequestedVal = _r10cRequestedTuples[0]?.value;
+      const _r10cStandaloneLtv = (Number.isFinite(_r10cMarketVal) && _r10cMarketVal > 0
+        && Number.isFinite(_r10cRequestedVal))
+        ? Number(((_r10cRequestedVal / _r10cMarketVal) * 100).toFixed(1))
+        : null;
+      const _r10cBand = _r10cDe.computeLtvBand({
+        standaloneLtv: _r10cStandaloneLtv,
+        combinedLtv: _r10cCombinedLtv,
+      });
+      if (_r10cBand === 'over_80') {
+        const _r10cBorrowerName = extractBorrowerFromEmailBody(emailBody)
+          || extractBorrowerFromEmailSubject(emailSubject)
+          || 'the borrower';
+        const _r10cEffectiveLtv = (_r10cCombinedLtv != null) ? _r10cCombinedLtv : _r10cStandaloneLtv;
+        console.log(`R10-C-1: high-LTV (>80%) dedicated-generator bypass — combinedLtv=${_r10cCombinedLtv}, standaloneLtv=${_r10cStandaloneLtv}, effective=${_r10cEffectiveLtv}, band='${_r10cBand}'. Routing to generateHighLtvCollateralAsk.`);
+        const _r10cDealSummary = {
+          sender_type: 'broker',
+          sender_name: senderName,
+          broker_name: senderName,
+          borrower_name: _r10cBorrowerName,
+          ltv_percent: _r10cEffectiveLtv,
+          ltv_band: 'over_80',
+          collateral_offered: false,
+          key_risks_or_notes: `High LTV detected (${_r10cEffectiveLtv}%) — broker asked about additional collateral via R10-C-1 dedicated-generator bypass. Awaiting broker response on collateral.`,
+          summary: `High-LTV deal (${_r10cEffectiveLtv}%) — collateral question sent to broker; awaiting response before doc-collection workflow proceeds.`,
+        };
+        const welcomeEmail = await module.exports.generateHighLtvCollateralAsk(_r10cDealSummary, effectiveGreetingFirstName);
+        return { welcomeEmail, dealSummary: _r10cDealSummary };
+      }
 
       const content = await buildContentBlocks(attachments, savedDocs);
 
@@ -3505,6 +3616,97 @@ ${emailBody}`,
     }
   },
 
+  // ════════════════════════════════════════════════════════════════
+  // R10-C-1 (2026-05-27): generateHighLtvCollateralAsk — dedicated
+  // minimal-ask for the high-LTV (>80%) collateral-question workflow.
+  // ════════════════════════════════════════════════════════════════
+  // Routed-to by webhook.js when JS-side LTV-band detection
+  // (computeLtvBand → 'over_80') fires AND collateral_offered=false.
+  // Empirical anchor: Ryan/Donna combined-applicant deal 45bd01df —
+  // 3 broker-facing outbounds across 2 generator paths (process-
+  // InitialEmail welcomeEmail + 2x generateBrokerResponse) all
+  // bypassed the HIGH LTV prompt instruction at ai.js:120-124 +
+  // ai.js:2052-2059 and asked for intake documents instead of the
+  // collateral question.
+  //
+  // ARCHITECTURAL FAMILY — Broker-facing prompt-and-sweep language
+  // discipline (R10-H 5-cluster formalization). R10-C adds the
+  // dedicated-generator-bypass sub-pattern as the family's THIRD
+  // enforcement mechanism alongside:
+  //   (1) post-gen sweep (R5-C / R6-η / R10-H ROUTING_LEAK_PATTERNS)
+  //   (2) post-gen rewrite (R8-B Shape-A/B/B1/B2 stripPerfectOpener)
+  //   (3) dedicated-generator-bypass (S15-E + R10-C — this function)
+  // All three are deterministic JS-side backstops for empirically-
+  // stubborn Claude leak surfaces.
+  //
+  // R8-B EMPIRICAL-EVIDENCE-REQUIRED THRESHOLD MET — 3+ outbounds
+  // across 2+ generators bypassing verbatim prompt instruction
+  // (canonical threshold from R8-B's 3-month "Perfect" opener
+  // leakage corpus). Prompt-only mitigation insufficient; dedicated
+  // generator separates Claude's accumulation context for "welcome
+  // email" / "intake doc-request" semantics from the collateral-ask
+  // task — same architectural reasoning as S15-E identity-clash.
+  //
+  // DEFERRED RESIDUAL (per R10-D discipline) — strict-rejection
+  // at ≥80% (auto-reject without collateral-ask) is NOT implemented.
+  // Current MVP preserves the existing soft-rejection front-door
+  // workflow (broker may offer additional collateral to bring
+  // effective LTV down → status flips back to active via existing
+  // parseCollateralReply machinery). Closure condition: Franco
+  // surfaces production case where he wanted auto-rejection at
+  // ≥80% without the collateral question. Contract Schedule A
+  // Stage 1 spec literal interpretation (80%+ rejection) deferred
+  // pending product-design conversation with Franco.
+  generateHighLtvCollateralAsk: async (dealSummary, greetingFirstName = null) => {
+    try {
+      const firstName = greetingFirstName
+        || (dealSummary?.sender_name || '').split(/\s+/)[0]
+        || null;
+      const greeting = firstName ? `Hi ${firstName}!` : 'Hi there!';
+      const borrowerName = dealSummary?.borrower_name || 'the borrower';
+      const ltvPercent = dealSummary?.ltv_percent;
+      const ltvDescriptor = (ltvPercent && Number.isFinite(ltvPercent))
+        ? `at approximately ${ltvPercent}%`
+        : 'above our usual 80% threshold';
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 320,
+        messages: [{
+          role: 'user',
+          content: `You are Vienna, the lead underwriter at Private Mortgage Link. Write a single short collateral-question email to a mortgage broker.
+
+CONTEXT — a high-LTV (>80%) situation has been detected on this deal:
+- Borrower: ${borrowerName}
+- LTV: ${ltvDescriptor}
+- This is outside our usual 80% LTV threshold and requires Franco's review before we can proceed with the standard intake document collection.
+
+YOUR ENTIRE TASK — write ONLY the collateral-question email, nothing else:
+- Greet the broker with: "${greeting}"
+- Acknowledge directly that the LTV ${ltvDescriptor} is outside our usual 80% threshold. Be honest about it — no hedging, no "approximately" qualifiers if the LTV is given.
+- Ask the SINGLE question: is there any additional collateral the borrower can include to bring the combined LTV down? Give concrete examples: "a second piece of real estate, an investment property, a vacation home with equity, or another asset that could be used as security." Mention that this may give us room to work with the deal.
+- Close with one sentence acknowledging that Franco will make the final call on whether the deal is workable. Sign off as Vienna / Private Mortgage Link.
+
+That is the ENTIRE email. Three short paragraphs at most: greeting + LTV acknowledgment, collateral question with examples, signoff.
+
+DO NOT include any of the following (negative list — these are the empirically-observed leak shapes from the Ryan/Donna 45bd01df production fixture):
+- A document list of any kind (no <ul>, no bulleted asks for intake items)
+- The words "exit strategy", "payout statement", "appraisal", "proof of income", "credit bureau", "government-issued ID", "property tax assessment", "NOA", "T4", "loan application", "PNW", "AML", "PEP" as items being requested
+- Any "we'll also need", "I'll need", "could you send over", "to complete the file", or doc-request framing
+- Any "I received the [doc]", "I've got the application", "thanks for sending those through", or document receipt acknowledgment (the collateral question is the entire point — doc receipt is acknowledged elsewhere)
+- Any rejection language ("we cannot proceed", "the deal is declined") — Franco makes that call, not Vienna; the email asks the collateral question first
+- Any promise of approval ("we should be able to make this work") — Franco's call
+- Any mention of internal workflow ("our review process", "the file will be sent to admin", "we'll forward this") — R5-C carve-out
+
+Return only the HTML email body. Use <p> tags around each paragraph. No subject line, no <html>/<body> wrappers.`,
+        }],
+      });
+      return response.content[0].text.trim();
+    } catch (error) {
+      console.error('Claude high-LTV collateral ask error:', error.message);
+      throw error;
+    }
+  },
+
   parseIdentityClarification: async (replyText, dealSummary = {}) => {
     const stripped = module.exports.stripQuotedText(replyText);
     const text = (stripped || replyText || '').trim();
@@ -4062,6 +4264,9 @@ ${JSON.stringify(summaryData, null, 2)}`,
   injectDiscrepancySection,
   stripVienna_DealSnapshot,
   prependDealSnapshot,
+  // R10-C-2 (2026-05-27): elevated-LTV-band callout injector for 75-80%
+  // manual-review band per Schedule A Stage 1 spec.
+  injectElevatedLtvBandCallout,
   // Cluster E — broker-facing routing-leak post-gen sweep.
   enforceNoRoutingLeak,
   ROUTING_LEAK_PATTERNS,

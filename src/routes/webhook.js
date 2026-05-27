@@ -1367,6 +1367,39 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   if (_snapStrip.strippedAny) {
     console.log('B-2b (admin Snapshot): Vienna emitted a Snapshot block despite NO-SNAPSHOT instruction — backstop stripped it before prepending JS canonical.');
   }
+  // R10-C-2 (2026-05-27): elevated-LTV-band Risk Factors callout. Closes
+  // contract Schedule A Stage 1 75-80% manual-review band gap at MVP level.
+  // Computes ltvBand from the same filtered canonical_map driving R9-B's
+  // canonical LTV (no drift between Snapshot LTV row + callout band). Fires
+  // only for 'elevated_75_80'; 'over_80' deals bypass this site entirely
+  // (awaiting_collateral state); 'standard' deals fall through unchanged.
+  //
+  // STAGE-1 MANUAL-REVIEW SURFACE — MVP-level visibility for the admin
+  // reviewer; no separate state machine or distinct admin-handoff template.
+  // Deeper surface deferred (per R10-D code-docblock discipline) — closure
+  // condition: production fixture surfaces need OR Franco product-design
+  // call. Risk Factors callout is the JS-deterministic backstop matching
+  // the broker-facing prompt-and-sweep language discipline pattern for
+  // empirically-stubborn Claude surfaces.
+  const _r10cPrelimMarketTuples = _bFilteredCanonicalMap.subject_property_market_value || [];
+  const _r10cPrelimRequestedTuples = _bFilteredCanonicalMap.requested_loan_amount || [];
+  const _r10cPrelimMarketVal = _r10cPrelimMarketTuples[0]?.value;
+  const _r10cPrelimRequestedVal = _r10cPrelimRequestedTuples[0]?.value;
+  const _r10cPrelimStandaloneLtv = (Number.isFinite(_r10cPrelimMarketVal) && _r10cPrelimMarketVal > 0
+    && Number.isFinite(_r10cPrelimRequestedVal))
+    ? Number(((_r10cPrelimRequestedVal / _r10cPrelimMarketVal) * 100).toFixed(1))
+    : null;
+  const _r10cPrelimCombined = dEngine.computeCombinedLtv(_bFilteredCanonicalMap);
+  const _r10cPrelimCombinedLtv = _r10cPrelimCombined ? _r10cPrelimCombined.combined_ltv_percent : null;
+  const _r10cPrelimBand = dEngine.computeLtvBand({
+    standaloneLtv: _r10cPrelimStandaloneLtv,
+    combinedLtv: _r10cPrelimCombinedLtv,
+  });
+  if (_r10cPrelimBand === 'elevated_75_80') {
+    const _r10cPrelimEffectiveLtv = (_r10cPrelimCombinedLtv != null) ? _r10cPrelimCombinedLtv : _r10cPrelimStandaloneLtv;
+    leadSummary = aiService.injectElevatedLtvBandCallout(leadSummary, _r10cPrelimBand, _r10cPrelimEffectiveLtv);
+    console.log(`R10-C-2: elevated LTV band (${_r10cPrelimEffectiveLtv}%) — admin prelim callout injected (Schedule A Stage 1 manual-review band).`);
+  }
   // R4-Bucket-C.6 (Grace 5f8e4921 T4 fix): strip Claude's Documents Included
   // section + inject JS-rendered authoritative one. Claude probabilistically
   // dropped items from Section 9 (Grace lost T4 from [RECEIVED] + gov_id +
@@ -3560,6 +3593,33 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           existingDeal.status,
           { postApprovalAmlPepAsk, postApprovalAmlPepPending, stillMissingForReview, discrepancyDetected: _bDiscrepancyDetectedActive, canonicalFieldsPrompt: _bCanonicalCtxActive, greetingFirstName: _eActiveGreeting, brokerRepliedSinceLastViennaOutbound: _zActiveBrokerReplied }
         );
+        // R10-C-1 (2026-05-27): active-branch dedicated-generator bypass for
+        // the high-LTV collateral-question workflow. Closes Bug 4-? empirical
+        // (Ryan/Donna 45bd01df msg[3] + msg[5] outbounds bypassed the HIGH LTV
+        // prompt block at ai.js:2052-2059 and asked for intake docs instead).
+        //
+        // Gate condition: status='awaiting_collateral' AND broker hasn't
+        // offered collateral yet (per the existing collateralAlreadyOffered
+        // derivation pattern at L3625-3626, hoisted here for the gate). Same
+        // gate semantic as willGoToCollateralCheck at L3654 but applied to
+        // the broker-facing responseEmail rather than the DB-status routing.
+        //
+        // Wiring: REPLACE result.responseEmail with the dedicated generator's
+        // output. result.updatedSummary preserved (Task 2 still runs — deal
+        // metadata + LTV recompute remain authoritative). Subsequent sweeps
+        // (discrepancy strip+inject, enforceNoRoutingLeak, stripPerfectOpener)
+        // cascade-compose normally on the dedicated output — preserved per
+        // R5-C-CASCADE-COMPOSITION precedent.
+        const _r10cActiveCollateralOffered = !!existingDeal.extracted_data?.collateral_offered
+          || !!result.updatedSummary?.collateral_offered;
+        if (existingDeal.status === 'awaiting_collateral' && !_r10cActiveCollateralOffered && result.responseEmail) {
+          console.log(`R10-C-1 (active-branch): awaiting_collateral && !collateral_offered — replacing Claude responseEmail with generateHighLtvCollateralAsk output`);
+          const _r10cActiveCollateralAsk = await aiService.generateHighLtvCollateralAsk(
+            result.updatedSummary || summaryIn,
+            _eActiveGreeting,
+          );
+          result.responseEmail = _r10cActiveCollateralAsk;
+        }
         // Cluster B Commit 2b — post-Claude strip + inject on broker-facing reply.
         if (_bDiscrepancyDetectedActive && result.responseEmail) {
           const _stripRes = aiService.stripVienna_DiscrepancyContent(result.responseEmail);

@@ -371,6 +371,50 @@ const shouldEscalateOnAnyLtv = ({ standaloneLtv, combinedLtv, standaloneThreshol
   return stdHit || cmbHit;
 };
 
+// R10-C-2 (2026-05-27): LTV-band classifier. Closes contract Schedule A
+// Stage 1 LTV-routing three-band specification at MVP level.
+//
+// Contract Schedule A Stage 1 spec:
+//   - LTV ≥ 80%  → REJECTION band  (mapped to 'over_80'; current MVP
+//                                   preserves the existing soft-rejection
+//                                   front door via collateral-question
+//                                   workflow rather than strict auto-reject;
+//                                   see generateHighLtvCollateralAsk
+//                                   docblock in ai.js for the deferred-
+//                                   residual flag re: strict-spec literal
+//                                   interpretation pending Franco
+//                                   product-design call)
+//   - 75% ≤ LTV < 80% → MANUAL REVIEW band ('elevated_75_80'; MVP surface
+//                                   is Risk Factors callout in admin-
+//                                   facing prelim + welcomeEmail
+//                                   acknowledgment via prompt-context
+//                                   hint. Deeper state-machine surface
+//                                   deferred pending production fixture
+//                                   need OR Franco product-design call.)
+//   - LTV < 75%  → AUTO-PROCEED band ('standard'; existing flow unchanged)
+//
+// CONSERVATIVE-MAX SEMANTIC — band classification uses max(standalone,
+// combined) to mirror shouldEscalateOnAnyLtv's OR-of-thresholds gate.
+// A deal with combined LTV in the >80% band AND standalone in the 75-80%
+// band classifies as 'over_80' (the more conservative band).
+//
+// Architectural family — State-derived gate signal (2nd template family,
+// 5th instance per R10-F lineage extension: BBBB + JJJJ + SSS + R10-F +
+// R10-C-2). Pure function; signal threaded through generator selection
+// (R10-C-1) and prelim Risk Factors rendering (R10-C-2 admin surface).
+const computeLtvBand = ({ standaloneLtv, combinedLtv } = {}) => {
+  const stdFinite = Number.isFinite(standaloneLtv);
+  const cmbFinite = Number.isFinite(combinedLtv);
+  if (!stdFinite && !cmbFinite) return 'standard'; // no LTV signal → can't classify; defer to existing gates
+  const effective = Math.max(
+    stdFinite ? standaloneLtv : -Infinity,
+    cmbFinite ? combinedLtv : -Infinity,
+  );
+  if (effective > 80) return 'over_80';
+  if (effective >= 75) return 'elevated_75_80';
+  return 'standard';
+};
+
 const renderDealSnapshot = (canonicalMap, opts = {}) => {
   const { ownershipType = null, isCommercial = false } = opts;
   const lines = [];
@@ -953,6 +997,9 @@ module.exports = {
   // R4-RESIDUAL-1: combined-LTV escalation trigger
   COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
   shouldEscalateOnAnyLtv,
+  // R10-C-2 (2026-05-27): LTV-band classifier — contract Schedule A Stage 1
+  // three-band spec ('over_80' / 'elevated_75_80' / 'standard').
+  computeLtvBand,
   formatCanonicalFieldsForPrompt,
   filterCanonicalLenderForPayoutOnly,
   // R6-α (2026-05-21): consumer-side source-hierarchy filter for
