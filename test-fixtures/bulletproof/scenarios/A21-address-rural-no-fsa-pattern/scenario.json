@@ -1,0 +1,11 @@
+{
+  "id": "A21",
+  "name": "address-rural-no-fsa-pattern",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "NB" },
+  "families": ["F1.AD", "F1.PC"],
+  "bugHint": "H",
+  "anchor": "F1.AD rural address + F1.PC FSA edge",
+  "rationale": "Subject property is a rural NB address: 'RR #3, Site 22, Comp 7, Fredericton Junction, NB E5L 1A0'. Non-standard street format (Rural Route + Site + Comp). F1.AD ADDR_LINE_RE regex (in canonical-fields.js) expects 'street number + street name + type'; rural addresses don't match. F1.PC FSA parsing (NB E-prefix) still applies. Tests address regex robustness on rural Canadian addresses.",
+  "notes": "Single-event sequence. GE=NB to also exercise R10-D FSA-letter-to-province mapping for E-prefix postal codes."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "A09",
+  "name": "loan-amount-broker-requests-range",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #17 (range ambiguity)",
+  "rationale": "Broker email phrases loan_amount as a range: 'between $250,000 and $300,000 depending on appraisal'. F1.LA canonical-map encounters ambiguous numeric source. Expected behavior is UNDEFINED — possibilities: (a) pick midpoint, (b) pick high end, (c) flag for broker disambiguation, (d) prompt broker. Layer 3 product-design item.",
+  "notes": "Single-event sequence. Layer 3 item; Phase 4 spec pending_product_decision."
+}

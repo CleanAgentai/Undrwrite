@@ -1,0 +1,11 @@
+{
+  "id": "A01",
+  "name": "loan-amount-broker-correction-wins",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA", "F3.BR"],
+  "bugHint": "L",
+  "anchor": "F1.LA source-hierarchy: broker_correction tier",
+  "rationale": "Broker initial intake states loan_amount $260,000. loan_application doc shows $260,000 (no discrepancy at intake). Broker subsequently corrects to $295,000 via reply. F1.LA canonical-map resolves to broker_correction tier value ($295k); loan_app source is shadowed by broker_correction. Tests highest-tier source winning when broker explicitly corrects.",
+  "notes": "Two-event sequence. Distinct from A08 (>30% discrepancy triggering suppression): A01 correction is small enough not to trigger discrepancyHold but broker_correction still authoritative."
+}

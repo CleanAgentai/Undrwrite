@@ -1,0 +1,11 @@
+{
+  "id": "A02",
+  "name": "loan-amount-broker-initial-intent",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA", "F3.BI"],
+  "bugHint": "L",
+  "anchor": "F1.LA source-hierarchy: broker_initial_intent tier (no correction)",
+  "rationale": "Broker initial intake asserts loan_amount $410,000. loan_application doc shows $410,000 (no discrepancy). No subsequent correction. F1.LA canonical-map resolves via broker_initial_intent tier; loan_app source agrees and provides corroboration. Tests broker_initial_intent winning when broker_correction tier is empty.",
+  "notes": "Single-event sequence. Distinct from A01 (which adds a correction); A02 tests the next-tier-down resolution when correction tier is empty."
+}

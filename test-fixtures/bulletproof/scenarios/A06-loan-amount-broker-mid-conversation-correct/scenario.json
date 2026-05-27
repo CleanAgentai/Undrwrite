@@ -1,0 +1,11 @@
+{
+  "id": "A06",
+  "name": "loan-amount-broker-mid-conversation-correct",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA", "F3.BR"],
+  "bugHint": "M",
+  "anchor": "R10-G push machinery (mid-conversation correction)",
+  "rationale": "Three-event sequence: intake states loan_amount $310k → broker follows up after Vienna prelim with mid-conversation correction to $345k → broker re-confirms $345k after Vienna acknowledgment. F1.LA canonical-map must propagate the corrected value via R10-G push machinery across the multi-turn thread. Tests temporal correction-tier resolution (latest correction wins; not first).",
+  "notes": "Three-event sequence. Distinct from A01 (single correction): A06 tests push machinery durability across multiple in-thread corrections."
+}

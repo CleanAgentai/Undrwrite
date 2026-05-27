@@ -1,0 +1,11 @@
+{
+  "id": "A20",
+  "name": "address-normalization",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.AD"],
+  "bugHint": "M",
+  "anchor": "F1.AD address normalization (Blvd→Boulevard, NE→Northeast, abbreviations)",
+  "rationale": "Broker email uses abbreviated address forms ('1142 Tory Rd NW' instead of '1142 Tory Road NW'). loan_application + appraisal show fully-spelled-out form. F1.AD canonical-map address normalization (per canonical-fields.js ADDRESS_ABBREV_EXPAND) must canonicalize 'Rd' → 'Road' so both sources resolve to same canonical value. Tests address-string normalization producing consistent canonical despite source-string variation.",
+  "notes": "Single-event sequence. Normalization test specifically — broker uses Rd/Blvd/St abbreviations; docs use full forms."
+}

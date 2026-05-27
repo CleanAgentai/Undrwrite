@@ -1,0 +1,11 @@
+{
+  "id": "A41",
+  "name": "annual-income-missing-when-required",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "M1", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.AI"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #11 (annual_income missing — when required + escalation timing)",
+  "rationale": "Broker intake omits annual_income from email body. loan_application doc has empty annual_income field. NOA doc is NOT attached (DS=M1). F1.AI canonical-map has no source for annual_income. Expected: Vienna escalates to broker requesting NOA + income docs. Layer 3: when is annual_income REQUIRED (always? above LTV threshold? for specific transaction types?), and what's the escalation timing?",
+  "notes": "Single-event sequence. Missing NOA per DS=M1; loan_app omits income. Phase 4: Layer 3 #11 pending_product_decision."
+}

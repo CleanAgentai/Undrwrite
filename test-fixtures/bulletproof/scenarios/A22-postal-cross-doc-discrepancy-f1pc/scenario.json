@@ -1,0 +1,11 @@
+{
+  "id": "A22",
+  "name": "postal-cross-doc-discrepancy-f1pc",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.PC"],
+  "bugHint": "M",
+  "anchor": "F1.PC cross-doc postal-code source-hierarchy (sibling to D04's F4.PC focus)",
+  "rationale": "loan_application doc shows postal T6R 2K8; appraisal shows T6R 2K9 — same street, different postal-suffix. F1.PC canonical-map captures both with distinct source-tier tuples (loan_application vs appraisal). Distinct from D04 which asserts F4.PC callout injection; A22 asserts F1.PC source-hierarchy tuple capture for postal field.",
+  "notes": "Single-event sequence. Intentional overlap with D04 input shape; different assertion axis per Group A vs Group D overlap principle."
+}

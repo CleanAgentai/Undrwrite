@@ -1,0 +1,11 @@
+{
+  "id": "A08",
+  "name": "loan-amount-30pct-discrepant-suppression",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA", "F2.DH"],
+  "bugHint": "H",
+  "anchor": "R11-B-1 Layer 1 (canonical-map suppression at >30% discrepancy)",
+  "rationale": "Broker correction asserts loan_amount $290,000; loan_application doc shows $115,000 (>50% discrepancy from broker). F1.LA Layer 1 (R11-B-1) detects >30% discrepancy and SUPPRESSES the loan_app source tuple from canonical_map for that field; broker source becomes sole authority. F2.DH discrepancyHold ACTIVATES due to major discrepancy. Tests both Layer 1 suppression mechanic and F2.DH gate co-activation.",
+  "notes": "Two-event sequence. Distinct from A04 (multi-source conflict requiring resolution) — A08 specifically tests the suppression-at-threshold mechanic + concurrent gate activation."
+}

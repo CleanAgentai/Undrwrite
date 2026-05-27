@@ -1,0 +1,11 @@
+{
+  "id": "A17",
+  "name": "property-value-less-than-loan-amount",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.PV", "F2.DH"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #19 (PV < requested_loan_amount sanity violation)",
+  "rationale": "Broker correction asserts property_value $400,000 and loan_amount $475,000 — sanity violation: requested loan exceeds property value (>100% LTV). F1.PV canonical-map accepts the value but F2.DH discrepancyHold should activate via sanity-violation check (Vienna shouldn't underwrite >100% LTV). Layer 3 product-design item: decline outright vs escalate vs flag-for-admin-review.",
+  "notes": "Two-event sequence. Layer 3 #19 product-design item; PV<LA represents an impossible-to-underwrite shape."
+}

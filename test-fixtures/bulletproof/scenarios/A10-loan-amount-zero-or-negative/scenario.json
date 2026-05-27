@@ -1,0 +1,11 @@
+{
+  "id": "A10",
+  "name": "loan-amount-zero-or-negative",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #18 (validation: zero/negative)",
+  "rationale": "Broker email states loan_amount as '$0' (likely typo or placeholder); loan_application doc shows $0. F1.LA canonical-map must validate non-negative + non-zero. Expected behavior is UNDEFINED — possibilities: (a) reject deal at intake with validation error, (b) flag for broker clarification, (c) coerce to missing-source fallback. Layer 3 product-design item.",
+  "notes": "Single-event sequence. Layer 3 #18 — validation taxonomy (zero/negative/very-large/non-CAD combined into one decision-item)."
+}

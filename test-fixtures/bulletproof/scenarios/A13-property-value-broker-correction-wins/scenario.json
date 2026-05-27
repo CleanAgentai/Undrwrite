@@ -1,0 +1,11 @@
+{
+  "id": "A13",
+  "name": "property-value-broker-correction-wins",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.PV"],
+  "bugHint": "L",
+  "anchor": "F1.PV source-hierarchy: broker_correction tier",
+  "rationale": "Broker initial intake states property_value $700,000. Appraisal doc shows $700,000. Broker corrects mid-thread to $735,000 (refreshed appraisal from second valuator). F1.PV canonical-map resolves to broker_correction value; appraisal source is shadowed. Tests broker_correction tier winning for property_value field.",
+  "notes": "Two-event sequence. Tests F1.PV resolution analogously to A01's F1.LA test."
+}

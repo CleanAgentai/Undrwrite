@@ -1,0 +1,11 @@
+{
+  "id": "A11",
+  "name": "loan-amount-very-large",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA"],
+  "bugHint": "M",
+  "anchor": "Layer 3 #18 (validation: very-large)",
+  "rationale": "Broker email states loan_amount $12,000,000 against $20,000,000 commercial-style residential property. F1.LA must handle very-large numeric values without overflow / format errors. Expected behavior depends on product policy: (a) accept (Vienna supports any size), (b) flag as outside-policy with size-based threshold, (c) reject. Layer 3 product-design item (validation taxonomy).",
+  "notes": "Single-event sequence. Tests numeric-format handling at extreme values; pdfSynth uses Number.toLocaleString which handles $12,000,000 cleanly. Phase 4 may surface separate validation thresholds."
+}

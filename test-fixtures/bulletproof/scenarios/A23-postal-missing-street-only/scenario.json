@@ -1,0 +1,11 @@
+{
+  "id": "A23",
+  "name": "postal-missing-street-only",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.PC"],
+  "bugHint": "M",
+  "anchor": "Layer 3 (postal missing — when is it required?)",
+  "rationale": "Subject property address provided in all sources as '287 Glencairn Avenue, Toronto, ON' WITHOUT postal code suffix. F1.PC canonical-map has no postal source. Layer 3: is postal_code a REQUIRED canonical field (escalate-as-missing) or DERIVED-via-lookup (Vienna geocodes from street address)? Product-design decision.",
+  "notes": "Single-event sequence. Layer 3 item — postal field requirement semantic."
+}

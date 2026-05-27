@@ -1,0 +1,11 @@
+{
+  "id": "A18",
+  "name": "address-broker-correction-wins",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.AD"],
+  "bugHint": "L",
+  "anchor": "F1.AD source-hierarchy: broker_correction tier",
+  "rationale": "Broker intake states subject_property_address '52 Winston Boulevard'. loan_application doc shows '52 Winston Boulevard'. Broker corrects to '52 Winston Churchill Boulevard' (fuller street name) via reply. F1.AD canonical-map resolves to broker_correction (more specific value). Tests address-string correction at broker tier.",
+  "notes": "Two-event sequence. Pair with A19 (docs-only) and A20 (normalization) for F1.AD coverage triplet."
+}

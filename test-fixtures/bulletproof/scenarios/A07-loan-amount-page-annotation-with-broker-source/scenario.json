@@ -1,0 +1,11 @@
+{
+  "id": "A07",
+  "name": "loan-amount-page-annotation-with-broker-source",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA"],
+  "bugHint": "H",
+  "anchor": "R11-B-1 Layer 2 (sanitizeLoanAppDocTextForLLM)",
+  "rationale": "loan_application doc text contains '[Page N annotation]' markers (PDF reviewer annotations preserved during extraction). Broker correction asserts loan_amount $245,000; loan_app annotation marker contains 'Note: client previously requested $180,000'. F1.LA Layer 2 (R11-B-1) must strip [Page N annotation] markers from LLM-visible doc text WHEN broker_correction or broker_initial_intent source is present — so LLM doesn't read the annotation as canonical. Tests doc-text sanitization keyed on broker-source presence.",
+  "notes": "Two-event sequence. The PDF annotation marker is the specific R11-B-1 Layer 2 trigger. Phase 4 assertion: LLM-narrative output does NOT contain '$180,000' string."
+}

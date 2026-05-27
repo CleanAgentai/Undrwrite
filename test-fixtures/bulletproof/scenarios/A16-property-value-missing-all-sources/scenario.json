@@ -1,0 +1,11 @@
+{
+  "id": "A16",
+  "name": "property-value-missing-all-sources",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "M1", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.PV"],
+  "bugHint": "M",
+  "anchor": "F1.PV missing-source fallback (no appraisal, broker silent)",
+  "rationale": "Broker intake doesn't state property_value. No appraisal attached (DS=M1). loan_application + mortgage_statement only. F1.PV canonical-map has no source for property_value. Expected: Vienna flags missing, requests appraisal. Tests behavior when canonical_map fields cannot be derived from any source.",
+  "notes": "Single-event sequence. Missing appraisal per DS=M1. Phase 4 spec: missing-PV escalation flow."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "A04",
+  "name": "loan-amount-cross-source-conflict",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA", "F2.DH"],
+  "bugHint": "H",
+  "anchor": "R11-B-1 multi-tier source-resolution",
+  "rationale": "Three-way cross-source conflict: broker_correction asserts loan_amount $320,000; loan_application doc shows $245,000; derived-from-LTV (property_value × declared LTV %) would yield ~$390,000. F1.LA canonical-map must resolve to broker_correction tier (highest priority); F2.DH discrepancyHold should activate due to multi-source conflict magnitude. Tests resolution across MORE THAN TWO source tiers.",
+  "notes": "Two-event sequence. Distinct from A08 (two-tier broker vs loan_app discrepancy): A04 introduces a third derived-from-LTV signal to stress resolution-hierarchy depth."
+}

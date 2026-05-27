@@ -1,0 +1,11 @@
+{
+  "id": "A15",
+  "name": "property-value-broker-contradicts-appraisal",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CT", "CV": "1", "GE": "ON" },
+  "families": ["F1.PV", "F2.DH"],
+  "bugHint": "M",
+  "anchor": "F1.PV broker-vs-doc direct contradiction",
+  "rationale": "Broker asserts property_value $850,000 in intake. Appraisal doc shows $720,000 (18% lower). Broker did not 'correct' the appraisal — they're directly contradicting it. F1.PV canonical-map captures both with broker_initial_intent vs docs-tier classifications; F2.DH discrepancyHold may activate if discrepancy exceeds threshold. Tests how Vienna resolves broker-vs-doc contradiction at the intake step (BW=CT, not BW=CR — broker isn't correcting, they're asserting alongside docs).",
+  "notes": "Single-event sequence. BW=CT (contradict) distinct from BW=CR (correct): contradict is intake-time disagreement; correct is post-intake update."
+}

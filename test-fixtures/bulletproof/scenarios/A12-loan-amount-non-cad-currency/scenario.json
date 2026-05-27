@@ -1,0 +1,11 @@
+{
+  "id": "A12",
+  "name": "loan-amount-non-cad-currency",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #18 (validation: non-CAD currency)",
+  "rationale": "Broker email states loan_amount in USD: 'USD $280,000'. Property in Toronto (CAD jurisdiction). F1.LA canonical-map must handle currency-tagged values. Expected behavior is UNDEFINED — possibilities: (a) reject non-CAD with validation error, (b) accept + flag for FX conversion at admin review, (c) silently treat as CAD. Layer 3 product-design item.",
+  "notes": "Single-event sequence. Tests currency-tag handling; assumes Vienna's underwriting is CAD-only. Phase 4 spec needs product decision on FX support."
+}

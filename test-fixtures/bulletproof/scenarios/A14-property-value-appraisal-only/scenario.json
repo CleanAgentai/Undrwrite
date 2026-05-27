@@ -1,0 +1,11 @@
+{
+  "id": "A14",
+  "name": "property-value-appraisal-only",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.PV"],
+  "bugHint": "L",
+  "anchor": "F1.PV source-hierarchy: appraisal-doc only (broker silent)",
+  "rationale": "Broker intake does not state property_value in email body. Appraisal doc shows $815,000. No correction. F1.PV canonical-map falls back to docs-tier (appraisal) when broker tiers are empty. Tests appraisal-doc winning when broker source is absent for property_value.",
+  "notes": "Single-event sequence. Mirror of A02 (broker_initial_intent for LA) but for PV with broker_silent — appraisal is the canonical doc source for PV."
+}

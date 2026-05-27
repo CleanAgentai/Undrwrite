@@ -1,0 +1,11 @@
+{
+  "id": "A42",
+  "name": "credit-score-broker-correction",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.CS"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #12 (credit_score requirements — when needed + correction handling)",
+  "rationale": "Broker initial intake states credit_score 720. Subsequent correction asserts 695 (refreshed credit pull came in lower). F1.CS canonical-map resolves to broker_correction (695). Layer 3: when is credit_score REQUIRED in canonical_map (always? above LTV threshold? for specific risk-band scenarios?); how is missing-credit_score handled?",
+  "notes": "Two-event sequence. Layer 3 item #12 — credit_score field requirement semantic + correction precedence test."
+}

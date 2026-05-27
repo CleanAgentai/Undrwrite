@@ -1,0 +1,11 @@
+{
+  "id": "A19",
+  "name": "address-docs-only",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.AD"],
+  "bugHint": "L",
+  "anchor": "F1.AD source-hierarchy: docs-only (broker silent on address)",
+  "rationale": "Broker email mentions borrower + loan_amount but does not state full address. loan_application + appraisal + mortgage_statement all show '4421 Kingsway, Vancouver, BC V5R 5T7' consistently. F1.AD canonical-map falls back to docs-tier; cross-doc agreement reinforces. Tests broker-silent address resolution path.",
+  "notes": "Single-event sequence. Broker mentions 'the Kingsway property' colloquially but doesn't restate full address — exercises docs-only canonical resolution."
+}

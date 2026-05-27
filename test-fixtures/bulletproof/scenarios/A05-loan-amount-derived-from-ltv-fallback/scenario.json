@@ -1,0 +1,11 @@
+{
+  "id": "A05",
+  "name": "loan-amount-derived-from-ltv-fallback",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "M1", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA"],
+  "bugHint": "H",
+  "anchor": "F1.LA missing-source fallback (derived from PV × LTV)",
+  "rationale": "Broker email states target LTV (65%) and property value ($720k) but does NOT state explicit loan_amount. loan_application doc has empty loan_amount field. F1.LA missing-source fallback: derive loan_amount from property_value × LTV = $468,000. Tests Vienna's behavior when canonical_map fields are absent from all primary sources and must derive from related fields.",
+  "notes": "Single-event sequence. Missing loan_application doc per DS=M1; substituted with appraisal + mortgage_statement only. Phase 4 spec: derive vs flag-as-missing is the expected-behavior question."
+}

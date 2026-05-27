@@ -1,0 +1,11 @@
+{
+  "id": "A03",
+  "name": "loan-amount-docs-only-broker-silent",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "P", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA"],
+  "bugHint": "M",
+  "anchor": "F1.LA source-hierarchy: docs-only fallback (broker silent)",
+  "rationale": "Broker intake email mentions submission but does NOT state loan_amount in body. loan_application doc contains loan_amount $340,000. No correction. F1.LA canonical-map must fall back to docs-only source tier (loan_application). Tests behavior when both broker_correction + broker_initial_intent tiers are empty for the field; doc source is the only signal.",
+  "notes": "Single-event sequence. TT=P (purchase, not refi) varies the transaction type axis incidentally. Broker email is intentionally vague on loan_amount — name + property + 'submission' but no $ figure."
+}
