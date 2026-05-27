@@ -646,6 +646,52 @@ const filterCanonicalLoanAmountForDocAuthoritative = (canonicalMap) => {
   };
 };
 
+// R10-E (2026-05-27): mortgage_position OBJECTIVE-field source-hierarchy filter.
+// 7th cluster in 1st template family. Strips email_body tuples when doc-source
+// (loan_application annotation) OR derived signal (mortgage_position_inferred_
+// from_existing_balance) is present. Empirical anchor: Patricia Simmons deal
+// a0caddfb — broker email said "first mortgage" → canonical_map.mortgage_position
+// had email_body tuple "1st"; loan_application annotation said "Second Mortgage"
+// + existing_first_mortgage_balance was $342k from credit_bureau + PNW. Without
+// this filter, the email_body tuple would win at [0]-indexed consumers.
+//
+// Source-hierarchy (post-R10-E, OBJECTIVE-field shape):
+//   broker_correction (R10-G machinery; broker explicit correction outranks
+//     even objective-field doc values per R10-G Q2-(a) universal verdict)
+//   > loan_application (doc-authoritative AcroForm annotation extraction)
+//   > mortgage_position_inferred_from_existing_balance (logical-constraint
+//     derived signal — balance > 0 implies new application is 2nd+)
+//   > email_subject_or_body (broker initial statement; least authoritative
+//     for OBJECTIVE field — broker can be factually wrong about objective
+//     transaction facts)
+//
+// Paired with R10-G's filterCanonicalPurposeForBrokerAuthoritative (INTENT
+// field shape: broker_correction > broker_initial_intent > docs > email_body)
+// to formalize the OBJECTIVE-vs-INTENT field-semantics distinction.
+const filterCanonicalMortgagePositionForObjectiveAuthoritative = (canonicalMap) => {
+  if (!canonicalMap) return canonicalMap;
+  const tuples = canonicalMap.mortgage_position || [];
+  // broker_correction wins universally (R10-G precedent — broker has authority
+  // to correct any field including objective ones if explicitly corrected)
+  const hasBrokerCorrection = tuples.some(t => t?.classification === 'broker_correction');
+  if (hasBrokerCorrection) {
+    return { ...canonicalMap, mortgage_position: tuples.filter(t => t?.classification === 'broker_correction') };
+  }
+  // Doc-source (loan_application annotation) wins over derived + email_body
+  const hasDocSource = tuples.some(t => t?.classification === 'loan_application');
+  if (hasDocSource) {
+    return { ...canonicalMap, mortgage_position: tuples.filter(t => t?.classification === 'loan_application') };
+  }
+  // Derived signal wins over email_body
+  const hasDerivedSignal = tuples.some(t => t?.classification === 'mortgage_position_inferred_from_existing_balance');
+  if (hasDerivedSignal) {
+    return { ...canonicalMap, mortgage_position: tuples.filter(t => t?.classification === 'mortgage_position_inferred_from_existing_balance') };
+  }
+  // No higher-priority source → preserve email_body tuples (fail-open;
+  // clean 1st-mortgage deals legitimately have only email_body source)
+  return canonicalMap;
+};
+
 // R10-G (2026-05-27): companion filter for purpose canonical field.
 // Same intent-field-authoritative hierarchy as requested_loan_amount:
 //   broker_correction > broker_initial_intent > loan_application / aml > email_body
@@ -916,6 +962,11 @@ module.exports = {
   // fields per Q2-sub-b. Consumed at Snapshot rendering + narrative input
   // composition.
   filterCanonicalPurposeForBrokerAuthoritative,
+  // R10-E (2026-05-27): mortgage_position filter — OBJECTIVE-field hierarchy
+  // (broker_correction > docs > derived > email_body). 7th cluster in 1st
+  // template family; pairs with R10-G's INTENT-field filter to formalize
+  // OBJECTIVE-vs-INTENT distinction.
+  filterCanonicalMortgagePositionForObjectiveAuthoritative,
   filterBrokerFacing,
   runDiscrepancyDetection,
   // R5-B-1 (2026-05-21): aggregating Snapshot fix

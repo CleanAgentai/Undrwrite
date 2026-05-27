@@ -1264,9 +1264,18 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // LTV computed below uses IDENTICAL source-hierarchy to what the Deal
   // Snapshot displays — no drift between Snapshot "Combined LTV" row and
   // subject-line / narrative override.
-  const _bFilteredCanonicalMap = dEngine.filterCanonicalPurposeForBrokerAuthoritative(
-    dEngine.filterCanonicalLoanAmountForDocAuthoritative(
-      dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map)
+  // R10-E (2026-05-27): filter chain composes by field; ordering is by
+  // introduction cycle (R6-γ first innermost, R10-E last outermost) for
+  // reading-order parity with cycle history. Filters are commutative since
+  // each operates on a distinct field; ordering is purely a readability
+  // convention. Per-field source-hierarchy: R6-γ (lender, OBJECTIVE),
+  // R6-α (loan_amount, INTENT post-R10-G), R10-G (purpose, INTENT),
+  // R10-E (mortgage_position, OBJECTIVE).
+  const _bFilteredCanonicalMap = dEngine.filterCanonicalMortgagePositionForObjectiveAuthoritative(
+    dEngine.filterCanonicalPurposeForBrokerAuthoritative(
+      dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+        dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map)
+      )
     )
   );
   const _bSnapshotHtml = dEngine.renderDealSnapshot(

@@ -1054,6 +1054,103 @@ const inferProvinceFromAddressSignals = (city, postal) => {
   return null;
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// R10-E (2026-05-27) — mortgage_position canonical resolver.
+// 7th cluster in 1st template family (canonical-map source-hierarchy
+// enforcement; precedents R6-γ + R6-α + R9-B + R9-D + R10-G + R10-D).
+//
+// Empirical headline (Patricia Simmons deal a0caddfb): canonical_map only
+// pushed mortgage_position from email_body source ("Loan Request: First
+// mortgage" — broker's incorrect statement); Snapshot rendered "Mortgage
+// Position: 1st" while Risk Factors narrative correctly said "second
+// mortgage with existing $342,000 TD Bank first mortgage." Self-
+// contradicting prelim because Snapshot is data-driven (canonical_map)
+// while narrative is LLM-driven with broader context. R10-E adds two
+// canonical sources: loan_application Page-1 annotation extraction + derived
+// signal from existing_first_mortgage_balance > 0 logical constraint.
+//
+// ARCHITECTURAL DISTINCTION — OBJECTIVE vs INTENT fields (R10-G + R10-E
+// formalize this pairing):
+//   INTENT fields (R10-G — requested_loan_amount, purpose): broker statement
+//     authoritative. Hierarchy: broker_correction > broker_initial_intent >
+//     docs > generic email_body. Rationale: broker is authority for what
+//     they're REQUESTING.
+//   OBJECTIVE fields (R10-E — mortgage_position, address, balances, lender,
+//     market_value, province): documents + derived signals authoritative.
+//     Hierarchy: broker_correction > docs > derived signals > email_body.
+//     Rationale: broker can be factually wrong about objective transaction
+//     facts; documents + logical constraints win.
+//   Common: broker_correction sits at top universally (broker has authority
+//     to correct any field). Distinction: where broker_initial_intent fits —
+//     present for INTENT fields above docs; absent for OBJECTIVE fields.
+//
+// Defended residual (code-docblock per R10-D deferred-residual-flagging
+// discipline): 3rd-mortgage case. Currently inferMortgagePositionFromExistingBalance
+// returns "2nd" when existing_first_mortgage_balance > 0. Closure condition:
+// when canonical_map.existing_first_mortgage_balance has tuples representing
+// distinct existing mortgages (separate lenders + balances suggesting
+// multiple existing positions), infer position = N+1 where N = count of
+// distinct existing mortgages. Future-trigger if production 3rd-mortgage
+// case surfaces; empirically rare in residential lending.
+//
+// Defended residual (code-docblock): R9-B/R9-D/R10-G-style override block
+// in prelim prompt NOT added in R10-E per Q5 verdict. Patricia's narrative
+// was already correct via LLM broader-context inference; bug surface was
+// Snapshot data-driven path only. Closure condition: if Stage 2 retest
+// surfaces narrative non-compliance with canonical mortgage_position (e.g.,
+// LLM emits "first mortgage" in narrative despite canonical = "2nd"), add
+// override block in subsequent cycle. R8-B empirical-evidence-required
+// discipline (post-gen sweep requires production evidence threshold).
+
+// R10-E (2026-05-27): mortgage_position extraction from loan_application
+// Page-1 AcroForm annotation. Sibling to R10-G's extractPurposeFromLoanApplication.
+// Empirical anchor: Patricia loan_application annotation list contains
+// literal "Second Mortgage" standalone-line annotation — directly extractable.
+// Annotation order in loan_application template: amount, rate, term, purpose,
+// position, name. extractMortgagePositionFromLoanApplication walks annotations
+// and matches the position-shaped line.
+const extractMortgagePositionFromLoanApplication = (doc) => {
+  const text = doc?.text || doc?.extracted_data?.text || '';
+  if (!text) return null;
+  const annPattern = /\[Page\s*1\s*annotation\]\s+([^\n]+)/gi;
+  let m;
+  while ((m = annPattern.exec(text)) !== null) {
+    const val = m[1].trim();
+    const posM = val.match(/^(1st|2nd|3rd|First|Second|Third)\s+Mortgage$/i);
+    if (posM) {
+      const v = posM[1].toLowerCase();
+      return (v === 'first' || v === '1st') ? '1st'
+           : (v === 'second' || v === '2nd') ? '2nd'
+           : '3rd';
+    }
+  }
+  return null;
+};
+
+// R10-E (2026-05-27): derived signal — OBJECTIVE-field logical constraint.
+// When canonical_map.existing_first_mortgage_balance has any tuple with
+// value > 0, the new application is mathematically a 2nd mortgage (or
+// higher) by definition: can't have two 1st mortgages on the same property.
+// Empirical anchor: Patricia has $342k existing TD Bank 1st mortgage from
+// credit_bureau + PNW tuples; new application is necessarily 2nd or higher.
+//
+// Returns { value, source } shape consistent with R10-D's
+// inferProvinceFromAddressSignals. Source classification:
+// 'mortgage_position_inferred_from_existing_balance' (verbose-explicit per
+// R10-D + R10-G naming discipline).
+//
+// 3rd-mortgage future-trigger flagged in docblock above; currently returns
+// "2nd" universally when balance > 0.
+const inferMortgagePositionFromExistingBalance = (canonicalMap) => {
+  if (!canonicalMap) return null;
+  const balances = canonicalMap.existing_first_mortgage_balance || [];
+  const hasNonZero = balances.some(t => t && Number.isFinite(t.value) && t.value > 0);
+  if (hasNonZero) {
+    return { value: '2nd', source: 'mortgage_position_inferred_from_existing_balance' };
+  }
+  return null;
+};
+
 // ─── Top-level: extract everything per submission ───
 
 // R5 Cluster B Sub-root 1 (2026-05-21): opts.preExtractedEmailFields
@@ -1111,7 +1208,12 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   // tuples and strip them from prompt context when a loan_application-sourced
   // tuple exists (Derek S3 dce308c8 source-mis-attribution-inversion fix).
   push('requested_loan_amount', email.requested_loan_amount, 'email_body', { classification: 'email_body' });
-  push('mortgage_position', email.mortgage_position, 'email_subject_or_body');
+  // R10-E (2026-05-27): classification field added for uniform filter logic
+  // (filterCanonicalMortgagePositionForObjectiveAuthoritative checks
+  // classification === 'email_subject_or_body' to strip when doc/derived
+  // sources present). Existing source field preserved for backward-compat
+  // with any pre-R10-E consumers reading source directly.
+  push('mortgage_position', email.mortgage_position, 'email_subject_or_body', { classification: 'email_subject_or_body' });
   push('requested_loan_term_months', email.requested_loan_term_months, 'email_body');
 
   // Per-doc
@@ -1192,6 +1294,12 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       // R10-G (2026-05-27): purpose from loan_application Page-1 annotation
       const loanAppPurpose = extractPurposeFromLoanApplication(doc);
       push('purpose', loanAppPurpose, doc.file_name, { classification: cls });
+      // R10-E (2026-05-27): mortgage_position from loan_application Page-1
+      // annotation. OBJECTIVE-field doc-source — outranks email_body at
+      // filter time. Empirically anchored: Patricia loan_application
+      // annotation contains "Second Mortgage" standalone-line.
+      const loanAppMortgagePos = extractMortgagePositionFromLoanApplication(doc);
+      push('mortgage_position', loanAppMortgagePos, doc.file_name, { classification: cls });
     } else if (cls === 'pnw_statement') {
       // R4-RESIDUAL-2: PNW-only existing-first-mortgage fallback. Page-2
       // annotation anchor `<Lender> — First Mortgage` + immediately-following
@@ -1236,6 +1344,25 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
         classification: inferred.source,
       });
     }
+  }
+
+  // R10-E (2026-05-27): mortgage_position derived signal from existing_first_
+  // mortgage_balance > 0 logical constraint. OBJECTIVE-field signal sitting
+  // BELOW loan_application doc-source in hierarchy (filter at consumer site
+  // picks loan_application if present; falls back to derived signal; falls
+  // back to email_body). Push happens AFTER all doc pushes (so balance tuples
+  // populated) and BEFORE R10-G broker block (so broker_correction unshift
+  // to [0] still wins universally if broker explicitly corrects position).
+  // 7th cluster in 1st template family. Closes Patricia Snapshot vs Risk
+  // Factors self-contradiction (canonical_map now has docs/derived tuples
+  // outranking broker's incorrect "first mortgage" email statement).
+  const inferredMortgagePos = inferMortgagePositionFromExistingBalance(map);
+  if (inferredMortgagePos) {
+    map.mortgage_position.push({
+      value: inferredMortgagePos.value,
+      source: inferredMortgagePos.source,
+      classification: inferredMortgagePos.source,
+    });
   }
 
   // R10-G (2026-05-27): Broker-source push (broker_correction +
@@ -1345,6 +1472,12 @@ module.exports = {
   inferProvinceFromAddressSignals,
   FSA_LETTER_TO_PROVINCE,
   CITY_TO_PROVINCE,
+  // R10-E (2026-05-27): mortgage_position canonical resolver helpers.
+  // 7th cluster in 1st template family. OBJECTIVE-field source-hierarchy
+  // (docs > derived > email_body); pairs with R10-G's INTENT-field
+  // hierarchy to formalize the OBJECTIVE-vs-INTENT distinction.
+  extractMortgagePositionFromLoanApplication,
+  inferMortgagePositionFromExistingBalance,
   extractFromLoanApplication,
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,
