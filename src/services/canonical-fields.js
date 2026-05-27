@@ -736,11 +736,53 @@ const extractFromLoanApplication = (doc) => {
 
 const extractFromAmlPep = (doc) => {
   const text = doc?.text || doc?.extracted_data?.text || '';
-  const out = { primary_borrower_full_name: null };
+  const out = { primary_borrower_full_name: null, purpose: null };
   if (!text) return out;
   const m = text.match(/Full\s+Legal\s+Name\s*\n\s*([A-Z][a-zA-Z'\-]+(?:[ \t]+[A-Z][a-zA-Z'\-]+){1,4})/);
   if (m) out.primary_borrower_full_name = m[1].trim();
+  // R10-G (2026-05-27): purpose extraction from AML "Purpose of Mortgage" /
+  // "Source of Funds" field. Empirically anchored against Ethan AML form
+  // (Round-6 Scenario 7) where "Debt consolidation and emergency home
+  // repairs" appears under the Purpose of Mortgage label.
+  const purposeM = text.match(/(?:Purpose\s+of\s+Mortgage|Source\s+of\s+Funds)\s*\n+\s*([^.\n]{3,100})/i);
+  if (purposeM && purposeM[1]) {
+    const p = purposeM[1].trim().replace(/[,.]+$/, '');
+    if (p.length >= 3 && p.length <= 100) out.purpose = p;
+  }
   return out;
+};
+
+// R10-G (2026-05-27): purpose extraction from loan_application Page-1
+// AcroForm annotations. Same extractor shape as R6-β-A
+// extractFromLoanApplication for requested_loan_amount. Annotations after
+// the amount/rate/term typically include "Use of funds" / purpose text.
+// Empirically anchored against Ethan loan_application where Page-1
+// annotation contained "Debt consolidation and emergency home repairs".
+const extractPurposeFromLoanApplication = (doc) => {
+  const text = doc?.text || doc?.extracted_data?.text || '';
+  if (!text) return null;
+  // Look for Page-1 annotations matching the purpose-shaped text
+  // (multi-word, mid-length, not numeric/percent/duration).
+  const annPattern = /\[Page\s*1\s*annotation\]\s+([^\n]{5,100})/gi;
+  const annotations = [];
+  let m;
+  while ((m = annPattern.exec(text)) !== null) {
+    const val = m[1].trim().replace(/[,.]+$/, '');
+    // Filter: skip numeric/percent/duration shapes
+    if (/^\$[\d,]+(\.\d+)?$/.test(val)) continue;        // amount
+    if (/^\d+(\.\d+)?\s*%$/.test(val)) continue;          // rate
+    if (/^\d+\s*months?$/i.test(val)) continue;           // duration
+    if (/^(?:1st|2nd|3rd|First|Second|Third)\s+Mortgage$/i.test(val)) continue;  // position
+    if (/^[A-Z][a-z]+$/.test(val)) continue;              // single name (borrower first name)
+    if (val.length < 5) continue;                          // too short
+    annotations.push(val);
+  }
+  // First multi-word annotation = purpose (loan_application annotation
+  // order: amount, rate, term, purpose, position, name).
+  for (const ann of annotations) {
+    if (/\s/.test(ann)) return ann;  // contains whitespace → multi-word → purpose candidate
+  }
+  return null;
 };
 
 // ─── Property tax — Owner Name (additional borrower-name source) ───
@@ -754,6 +796,164 @@ const extractBorrowerFromPropertyTax = (doc) => {
   // Block starts with name, then concatenated roll number. Take leading name tokens.
   const m = block.match(/^\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})/);
   return m ? m[1].trim() : null;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// R10-G (2026-05-27) — Broker-correction parser + intent-vs-objective source
+// hierarchy. 5th cluster in 1st template family (canonical-map source-
+// hierarchy enforcement; precedents: R6-γ + R6-α + R9-B + R9-D).
+//
+// Empirical headline: Franco Round-6 Scenario 7 (Ethan Broussard deal
+// c95f3a20). The loan_application PDF has filled AcroForm annotations
+// ($74,000 + "Debt consolidation and emergency home repairs"); broker email
+// stated $73,880 + "home renovation"; broker explicitly corrected with
+// "The correct loan amount is $73,880" in reply. Pre-R10-G: documents won
+// over broker statements for intent fields; broker correction was IGNORED
+// in canonical_map; prelim narrative said "broker confirmed the application
+// amount" — the OPPOSITE of what broker said.
+//
+// Architectural innovation (Q2-sub-b verdict): source-classification
+// distinction between INTENT fields (requested_loan_amount, purpose —
+// broker INTENT for what's being requested) vs OBJECTIVE fields (property
+// address, balances, lender, market value — facts about the world).
+//   For intent fields:    broker_correction > broker_initial_intent > documents > generic email_body
+//   For objective fields: documents > broker_correction > broker_initial_intent > generic email_body
+//   broker_correction OVERRIDES even objective-field doc values (broker has
+//     authority to correct documents when they're wrong).
+//
+// Two new source-classifications:
+//   broker_correction       — explicit correction in subsequent inbound
+//   broker_initial_intent   — initial broker statement of intent (from
+//                              FIRST inbound's body for intent fields)
+//
+// parseBrokerCorrections: deterministic regex-based parser (Q1 verdict).
+// Returns array of structured corrections; webhook calls on every broker
+// inbound (Q5 verdict) after AI extraction, before prelim/draft prompt
+// generation. Output threads to generateLeadSummary via
+// canonicalCorrectionsOverride opt (Q4 verdict; R9-B/R9-D pattern).
+//
+// Carve-out discipline (Q-CARVE-OUT-RESPECT):
+//   - Confirmations of Vienna's question ("Yes, $73,880 is correct") →
+//     treat as broker_correction with that value
+//   - Reconsideration agreements ("Looking at it again, $74,000 sounds
+//     right") → treat as broker_correction (broker has selected)
+//   - Hedging/approximation ("I think the amount might be around X") → NO
+//     pattern match (defer to future broker_initial_intent_hedged classification)
+//   - Question forms ("Is the amount $X?") → NO pattern match
+const parseBrokerCorrections = (messageBody) => {
+  if (!messageBody || typeof messageBody !== 'string') return [];
+  const corrections = [];
+
+  // Carve-out 1: skip hedging/approximation phrases. If the message contains
+  // hedging language anywhere near a number, defer to non-correction default
+  // hierarchy. Empirically: "I think the amount might be around $X" /
+  // "approximately $X" / "roughly $X" / "maybe $X".
+  const HEDGING_RE = /\b(?:I\s+think|might\s+be|maybe|approximately|roughly|around|about|sort\s+of|kind\s+of|could\s+be)\b/i;
+  const isHedged = HEDGING_RE.test(messageBody);
+
+  // Carve-out 2: skip question forms. Question marks AND leading
+  // is/are/can/could/would/should before the number portion suggest a
+  // question, not a statement.
+  const QUESTION_RE = /\b(?:is|are|can|could|would|should)\b[^.\n]{0,100}\$?[\d,]+[^.\n]*\?/i;
+  const isQuestion = QUESTION_RE.test(messageBody);
+
+  if (isHedged || isQuestion) return [];
+
+  // Loan amount correction patterns. Each captures the amount as group 1.
+  const amountPatterns = [
+    /\bthe\s+correct\s+(?:loan\s+)?amount\s+is\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
+    /\bcorrect\s+(?:loan\s+)?amount\s*:\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
+    /\bthe\s+(?:loan\s+)?amount\s+is\s+actually\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
+    /\bactually\s*\$?\s*([\d,]+(?:\.\d+)?)\s*\(\s*not\s*\$?[\d,]+(?:\.\d+)?\s*\)/i,
+    /\bI\s+meant\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
+    /\b(?:loan\s+)?amount\s+should\s+be\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
+    // Confirmation patterns (broker affirming a specific value in reply)
+    /\byes,?\s*\$?\s*([\d,]+(?:\.\d+)?)\s+is\s+correct/i,
+    // Reconsideration patterns ("looking at it again, $X sounds right")
+    /\b(?:looking\s+at\s+it\s+again|on\s+second\s+look|after\s+checking),?\s*\$?\s*([\d,]+(?:\.\d+)?)\s+(?:sounds\s+right|is\s+correct|works)/i,
+  ];
+  for (const re of amountPatterns) {
+    const m = messageBody.match(re);
+    if (m) {
+      const value = normalizeMoney(m[1]);
+      if (value != null && value > 0 && value < 100_000_000) {
+        corrections.push({
+          field: 'requested_loan_amount',
+          value,
+          source: 'broker_correction',
+          rawPhrase: m[0],
+        });
+        break;
+      }
+    }
+  }
+
+  // Purpose correction patterns
+  const purposePatterns = [
+    /\bthe\s+(?:correct|actual)\s+purpose\s+is[:\s]+["']?([^."'\n]{3,80})/i,
+    /\b(?:correct|actual)\s+(?:loan\s+)?purpose\s*:\s*["']?([^."'\n]{3,80})/i,
+    /\bthe\s+purpose\s+is\s+actually\s+["']?([^."'\n]{3,80})/i,
+    /\bthis\s+is\s+(?:for|a)\s+["']?([^."'\n]{3,80}?)["']?\s*\(\s*not\s/i,
+  ];
+  for (const re of purposePatterns) {
+    const m = messageBody.match(re);
+    if (m && m[1]) {
+      const value = m[1].trim().replace(/[,.]+$/, '');
+      if (value.length >= 3 && value.length <= 100) {
+        corrections.push({
+          field: 'purpose',
+          value,
+          source: 'broker_correction',
+          rawPhrase: m[0],
+        });
+        break;
+      }
+    }
+  }
+
+  return corrections;
+};
+
+// Extract broker's initial intent statements from FIRST inbound's body.
+// Different from parseBrokerCorrections: looks for the broker stating
+// loan amount + purpose in their initial submission email (NOT correcting
+// a prior Vienna statement). Examples from Round-6 fixtures:
+//   "Loan Request: Second mortgage — $73,880 — home renovation" (Harpreet)
+//   "Loan Request: $250,000 — debt consolidation" (synthetic)
+// Returns same structure as parseBrokerCorrections but with source
+// 'broker_initial_intent' (rank below broker_correction; above docs for
+// intent fields; below docs for objective fields per Q2-sub-b verdict).
+const parseBrokerInitialIntent = (messageBody) => {
+  if (!messageBody || typeof messageBody !== 'string') return [];
+  const intents = [];
+
+  // Pattern: "Loan Request: [type] — $X — [purpose]" / variants
+  // Captures both amount and purpose from the same line where possible.
+  const loanRequestM = messageBody.match(/\bLoan\s+Request\s*:?\s*[^—\n]*?[—\-]\s*\$?\s*([\d,]+(?:\.\d+)?)\s*[—\-]\s*([^.\n]{3,80})/i);
+  if (loanRequestM) {
+    const amount = normalizeMoney(loanRequestM[1]);
+    if (amount != null && amount > 0 && amount < 100_000_000) {
+      intents.push({ field: 'requested_loan_amount', value: amount, source: 'broker_initial_intent', rawPhrase: loanRequestM[0] });
+    }
+    const purpose = loanRequestM[2].trim().replace(/[,.]+$/, '');
+    if (purpose.length >= 3 && purpose.length <= 100) {
+      intents.push({ field: 'purpose', value: purpose, source: 'broker_initial_intent', rawPhrase: loanRequestM[0] });
+    }
+  }
+
+  // Fallback: "for $X" purpose-only or amount-only patterns
+  if (!intents.find(i => i.field === 'purpose')) {
+    // "for [purpose]" patterns common in broker initial statements
+    const purposeM = messageBody.match(/\b(?:purpose|use\s+of\s+funds)\s*:?\s+([^.\n]{3,80})/i);
+    if (purposeM) {
+      const purpose = purposeM[1].trim().replace(/[,.]+$/, '');
+      if (purpose.length >= 3 && purpose.length <= 100) {
+        intents.push({ field: 'purpose', value: purpose, source: 'broker_initial_intent', rawPhrase: purposeM[0] });
+      }
+    }
+  }
+
+  return intents;
 };
 
 // ─── Top-level: extract everything per submission ───
@@ -786,6 +986,13 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     // Display-only fields (Snapshot completeness — NOT in discrepancy compute list):
     mortgage_position: [],
     requested_loan_term_months: [],
+    // R10-G (2026-05-27): purpose canonical field. Intent-type (broker's
+    // stated reason for the loan); pushed from broker_initial_intent
+    // (first inbound), broker_correction (subsequent explicit corrections),
+    // loan_application (AcroForm annotation), aml form (Source of Funds /
+    // Purpose of Mortgage field). Source-hierarchy resolution per Q2-sub-b:
+    // broker_correction > broker_initial_intent > documents > generic email_body.
+    purpose: [],
   };
 
   const push = (field, value, source, extra = {}) => {
@@ -867,6 +1074,8 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     } else if (cls === 'aml' || cls === 'pep') {
       const r = extractFromAmlPep(doc);
       push('primary_borrower_full_name', r.primary_borrower_full_name, doc.file_name);
+      // R10-G: purpose from AML form's Purpose-of-Mortgage field
+      push('purpose', r.purpose, doc.file_name, { classification: cls });
     } else if (cls === 'loan_application') {
       // R6-β-A (2026-05-21): Page-1 annotation extraction of requested_loan_amount.
       // R6-δ (2026-05-21): same extractor extended for requested_loan_term_months
@@ -882,6 +1091,9 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       const r = extractFromLoanApplication(doc);
       push('requested_loan_amount', r.requested_loan_amount, doc.file_name, { classification: cls });
       push('requested_loan_term_months', r.requested_loan_term_months, doc.file_name);
+      // R10-G (2026-05-27): purpose from loan_application Page-1 annotation
+      const loanAppPurpose = extractPurposeFromLoanApplication(doc);
+      push('purpose', loanAppPurpose, doc.file_name, { classification: cls });
     } else if (cls === 'pnw_statement') {
       // R4-RESIDUAL-2: PNW-only existing-first-mortgage fallback. Page-2
       // annotation anchor `<Lender> — First Mortgage` + immediately-following
@@ -908,7 +1120,73 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     // bounded scope (Page-2 annotation anchor only).
   }
 
+  // R10-G (2026-05-27): Broker-source push (broker_correction +
+  // broker_initial_intent). Per Q2-sub-b verdict, broker_correction has
+  // highest priority universally; broker_initial_intent has higher priority
+  // than documents for INTENT fields (requested_loan_amount, purpose) and
+  // lower priority than documents for OBJECTIVE fields (others). Unshift to
+  // index 0 puts the broker source at highest priority position; existing
+  // [0]-indexed consumers (discrepancy-engine renderSnapshotRow's
+  // formatValue + computeCombinedLtv) naturally see the broker value first.
+  // resolveCanonicalForIntent (helper below) does explicit filter at
+  // consumer-site boundary for Snapshot rendering + override block injection.
+  const INTENT_FIELDS = new Set(['requested_loan_amount', 'purpose']);
+  if (Array.isArray(opts.brokerCorrections)) {
+    for (const c of opts.brokerCorrections) {
+      if (!c || !c.field || !map[c.field]) continue;
+      map[c.field].unshift({
+        value: c.value,
+        source: 'broker_correction',
+        classification: 'broker_correction',
+        rawPhrase: c.rawPhrase || '',
+      });
+    }
+  }
+  if (Array.isArray(opts.brokerInitialIntent)) {
+    for (const i of opts.brokerInitialIntent) {
+      if (!i || !i.field || !map[i.field]) continue;
+      if (INTENT_FIELDS.has(i.field)) {
+        // For intent fields: insert AFTER any broker_correction, BEFORE docs.
+        const correctionIdx = map[i.field].findIndex(t => t.classification === 'broker_correction');
+        const insertAt = correctionIdx === -1 ? 0 : correctionIdx + 1;
+        map[i.field].splice(insertAt, 0, {
+          value: i.value,
+          source: 'broker_initial_intent',
+          classification: 'broker_initial_intent',
+          rawPhrase: i.rawPhrase || '',
+        });
+      } else {
+        // For objective fields: append (docs already win).
+        map[i.field].push({
+          value: i.value,
+          source: 'broker_initial_intent',
+          classification: 'broker_initial_intent',
+          rawPhrase: i.rawPhrase || '',
+        });
+      }
+    }
+  }
+
   return map;
+};
+
+// R10-G (2026-05-27): resolver helper. Returns the canonical chosen tuple
+// for an INTENT field per Q2-sub-b source-hierarchy:
+//   broker_correction > broker_initial_intent > docs > email_body > other
+// Used by ai.js override-block builder + (optionally) by discrepancy-engine
+// renderer to ensure broker-source authority on intent fields.
+const INTENT_FIELDS_R10G = new Set(['requested_loan_amount', 'purpose']);
+const resolveCanonicalIntentValue = (canonicalMap, field) => {
+  if (!canonicalMap || !INTENT_FIELDS_R10G.has(field)) return null;
+  const tuples = canonicalMap[field] || [];
+  if (tuples.length === 0) return null;
+  const PRIORITY = ['broker_correction', 'broker_initial_intent', 'loan_application', 'aml', 'pep', 'email_body'];
+  for (const cls of PRIORITY) {
+    const found = tuples.find(t => t?.classification === cls);
+    if (found) return { value: found.value, source: cls, rawPhrase: found.rawPhrase || '' };
+  }
+  // Fallback: first tuple
+  return { value: tuples[0].value, source: tuples[0].classification || tuples[0].source || 'unknown', rawPhrase: '' };
 };
 
 // Convenience tokenizer used by discrepancy-engine for name comparison.
@@ -935,6 +1213,14 @@ module.exports = {
   extractFromCreditBureau,
   extractFromAmlPep,
   extractFromPnwStatement,
+  // R10-G (2026-05-27): broker-correction parser + initial-intent parser +
+  // canonical intent-value resolver. 5th cluster in 1st template family
+  // (canonical-map source-hierarchy enforcement; R6-γ/R6-α/R9-B/R9-D
+  // precedents).
+  parseBrokerCorrections,
+  parseBrokerInitialIntent,
+  resolveCanonicalIntentValue,
+  extractPurposeFromLoanApplication,
   extractFromLoanApplication,
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,

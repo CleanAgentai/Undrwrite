@@ -1264,8 +1264,10 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // LTV computed below uses IDENTICAL source-hierarchy to what the Deal
   // Snapshot displays — no drift between Snapshot "Combined LTV" row and
   // subject-line / narrative override.
-  const _bFilteredCanonicalMap = dEngine.filterCanonicalLoanAmountForDocAuthoritative(
-    dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map)
+  const _bFilteredCanonicalMap = dEngine.filterCanonicalPurposeForBrokerAuthoritative(
+    dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+      dEngine.filterCanonicalLenderForPayoutOnly(_bDetectAdmin.canonical_map)
+    )
   );
   const _bSnapshotHtml = dEngine.renderDealSnapshot(
     _bFilteredCanonicalMap,
@@ -1289,13 +1291,34 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // lender attribution and Exit Strategy lender claim.
   const _r9dCanonicalLender = computeCanonicalLenderForReview(_bFilteredCanonicalMap);
 
+  // R10-G (2026-05-27): broker-corrections override block. Reads
+  // requested_loan_amount + purpose canonical tuples from filtered map;
+  // selects broker_correction > broker_initial_intent > docs source per
+  // intent-field hierarchy. Override block (in generateLeadSummary) injects
+  // anti-source + anti-phrasing instructions when broker source present.
+  const _r10gLoanAmount = cFields.resolveCanonicalIntentValue(_bFilteredCanonicalMap, 'requested_loan_amount');
+  const _r10gPurpose = cFields.resolveCanonicalIntentValue(_bFilteredCanonicalMap, 'purpose');
+  const _r10gIsBrokerSourceForAmount = _r10gLoanAmount && (_r10gLoanAmount.source === 'broker_correction' || _r10gLoanAmount.source === 'broker_initial_intent');
+  const _r10gIsBrokerSourceForPurpose = _r10gPurpose && (_r10gPurpose.source === 'broker_correction' || _r10gPurpose.source === 'broker_initial_intent');
+  const _r10gCanonicalCorrections = (_r10gIsBrokerSourceForAmount || _r10gIsBrokerSourceForPurpose)
+    ? {
+        loanAmount: _r10gIsBrokerSourceForAmount ? _r10gLoanAmount : null,
+        purpose: _r10gIsBrokerSourceForPurpose ? _r10gPurpose : null,
+      }
+    : null;
+
   let leadSummary = await aiService.generateLeadSummary(
     dealSummary,
     ownershipType,
     dealDocs,
     missingDocs,
     labeledMessages,
-    { noSnapshot: true, canonicalLtvOverride: _r9bCanonicalLtv, canonicalLenderOverride: _r9dCanonicalLender }
+    {
+      noSnapshot: true,
+      canonicalLtvOverride: _r9bCanonicalLtv,
+      canonicalLenderOverride: _r9dCanonicalLender,
+      canonicalCorrectionsOverride: _r10gCanonicalCorrections,
+    }
   );
   // Post-Claude: strip any residual Vienna-emitted Snapshot block + prepend the JS canonical Snapshot.
   const _snapStrip = aiService.stripVienna_DealSnapshot(leadSummary);

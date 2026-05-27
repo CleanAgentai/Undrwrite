@@ -610,6 +610,25 @@ const filterCanonicalLenderForPayoutOnly = (canonicalMap) => {
 const filterCanonicalLoanAmountForDocAuthoritative = (canonicalMap) => {
   if (!canonicalMap) return canonicalMap;
   const tuples = canonicalMap.requested_loan_amount || [];
+  // R10-G (2026-05-27): broker_correction and broker_initial_intent are
+  // intent-field-authoritative per Q2-sub-b. When either broker source
+  // exists, it OUTRANKS docs + email_body for requested_loan_amount.
+  // Filter to keep only the broker source (strip docs + email_body so the
+  // Snapshot doesn't multi-render conflicting values).
+  const hasBrokerCorrection = tuples.some(t => t?.classification === 'broker_correction');
+  if (hasBrokerCorrection) {
+    return {
+      ...canonicalMap,
+      requested_loan_amount: tuples.filter(t => t?.classification === 'broker_correction'),
+    };
+  }
+  const hasBrokerIntent = tuples.some(t => t?.classification === 'broker_initial_intent');
+  if (hasBrokerIntent) {
+    return {
+      ...canonicalMap,
+      requested_loan_amount: tuples.filter(t => t?.classification === 'broker_initial_intent'),
+    };
+  }
   const hasDocSource = tuples.some(t => t?.classification === 'loan_application');
   if (!hasDocSource) return canonicalMap; // no doc on file → broker's email is the only signal; preserve.
   return {
@@ -618,6 +637,39 @@ const filterCanonicalLoanAmountForDocAuthoritative = (canonicalMap) => {
     // sources (none currently expected for loan_amount) + legacy tuples
     // without classification preserved per Q3-(i) verdict.
     requested_loan_amount: tuples.filter(t => t?.classification !== 'email_body'),
+  };
+};
+
+// R10-G (2026-05-27): companion filter for purpose canonical field.
+// Same intent-field-authoritative hierarchy as requested_loan_amount:
+//   broker_correction > broker_initial_intent > loan_application / aml > email_body
+// Applied at consumer-site boundary so the Snapshot + narrative input both
+// see the broker-authoritative value.
+const filterCanonicalPurposeForBrokerAuthoritative = (canonicalMap) => {
+  if (!canonicalMap) return canonicalMap;
+  const tuples = canonicalMap.purpose || [];
+  const hasBrokerCorrection = tuples.some(t => t?.classification === 'broker_correction');
+  if (hasBrokerCorrection) {
+    return {
+      ...canonicalMap,
+      purpose: tuples.filter(t => t?.classification === 'broker_correction'),
+    };
+  }
+  const hasBrokerIntent = tuples.some(t => t?.classification === 'broker_initial_intent');
+  if (hasBrokerIntent) {
+    return {
+      ...canonicalMap,
+      purpose: tuples.filter(t => t?.classification === 'broker_initial_intent'),
+    };
+  }
+  // No broker source: defer to documents (loan_application + aml). Strip
+  // generic email_body if any doc source present (same shape as the
+  // requested_loan_amount filter — empirical pattern).
+  const hasDocSource = tuples.some(t => t?.classification === 'loan_application' || t?.classification === 'aml' || t?.classification === 'pep');
+  if (!hasDocSource) return canonicalMap;
+  return {
+    ...canonicalMap,
+    purpose: tuples.filter(t => t?.classification !== 'email_body'),
   };
 };
 
@@ -770,9 +822,29 @@ const extractCanonicalFieldsAggregated = (inboundMessages, savedDocs, opts = {})
     }
   }
 
+  // R10-G (2026-05-27): broker_initial_intent + broker_correction parsing.
+  // Q5 verdict: parse on every broker inbound; initial intent from first
+  // inbound; corrections from subsequent inbounds. Aggregated in priority
+  // order before threading to extractCanonicalFields via opts.
+  const brokerInitialIntent = inbounds.length > 0
+    ? cf.parseBrokerInitialIntent(stripQuotedReplyChain(inbounds[0].body || ''))
+    : [];
+  const brokerCorrections = [];
+  for (let i = 1; i < inbounds.length; i++) {
+    const corrections = cf.parseBrokerCorrections(stripQuotedReplyChain(inbounds[i].body || ''));
+    // Latest correction per field wins (later inbound's correction supersedes earlier).
+    for (const c of corrections) {
+      const existingIdx = brokerCorrections.findIndex(b => b.field === c.field);
+      if (existingIdx >= 0) brokerCorrections[existingIdx] = c;
+      else brokerCorrections.push(c);
+    }
+  }
+
   return cf.extractCanonicalFields('', savedDocs, {
     emailSubject,
     preExtractedEmailFields: resolved,
+    brokerInitialIntent,
+    brokerCorrections,
   });
 };
 
@@ -834,6 +906,10 @@ module.exports = {
   // R6-α (2026-05-21): consumer-side source-hierarchy filter for
   // requested_loan_amount (doc-authoritative when loan_application on file).
   filterCanonicalLoanAmountForDocAuthoritative,
+  // R10-G (2026-05-27): purpose filter — broker-source-authoritative for intent
+  // fields per Q2-sub-b. Consumed at Snapshot rendering + narrative input
+  // composition.
+  filterCanonicalPurposeForBrokerAuthoritative,
   filterBrokerFacing,
   runDiscrepancyDetection,
   // R5-B-1 (2026-05-21): aggregating Snapshot fix

@@ -2812,7 +2812,7 @@ Classification guidance:
     //   (loan_application + PNW + credit_bureau cite Scotiabank historically;
     //   RBC_Payout_Statement is authoritative for current lender = RBC).
     //   See computeCanonicalLenderForReview in webhook.js for resolver shape.
-    const { noSnapshot = false, canonicalLtvOverride = null, canonicalLenderOverride = null } = opts;
+    const { noSnapshot = false, canonicalLtvOverride = null, canonicalLenderOverride = null, canonicalCorrectionsOverride = null } = opts;
     try {
       // Build document text sections from extracted data
       const docSections = documents
@@ -2882,12 +2882,74 @@ CRITICAL — CANONICAL EXISTING MORTGAGE LENDER (R9-D JS-deterministic, USE THIS
 - CARVE-OUT — preserve UUU cross-source discrepancy flagging discipline (per existing prompt rule at "CATEGORICAL/PURPOSE MISMATCHES MUST FLAG"): if loan_application / pnw_statement / credit_bureau lender DIFFERS from the payout-statement lender, you MUST flag the cross-source discrepancy explicitly in Risk Factors (e.g., "Loan application and PNW reference Scotiabank as the existing mortgage holder; payout statement is from RBC — needs clarification on refinance history"). The constraint above applies ONLY to FACTUAL "current lender" statements in narrative; cross-source discrepancy DETECTION is preserved and important risk information for the underwriter.`;
       }
 
+      // R10-G (2026-05-27): broker-correction + initial-intent override block.
+      // 5th cluster in 1st template family (canonical-map source-hierarchy
+      // enforcement). 12+ anchor content discipline per R9-D/R9-A'/R9-F/R9-F'/
+      // R10-A precedent.
+      //
+      // Empirical root: Ethan Broussard deal c95f3a20 — broker stated $73,880 +
+      // "home renovation"; loan_application AcroForm annotations had $74,000 +
+      // "Debt consolidation and emergency home repairs"; broker explicitly
+      // corrected with "The correct loan amount is $73,880." Pre-R10-G: prelim
+      // used document values + said "broker confirmed the application amount"
+      // (OPPOSITE of broker correction). Smoking-gun anti-phrasing anchor pins
+      // the exact hallucination phrase as a banned-phrase verbatim per R6-ι
+      // precedent.
+      //
+      // canonicalCorrectionsOverride shape: { loanAmount, purpose } each an
+      // object with { value, source, rawPhrase } or null. Only intent fields
+      // (requested_loan_amount → loanAmount, purpose) are included.
+      let r10gCanonicalCorrectionsBlock = '';
+      if (canonicalCorrectionsOverride && (canonicalCorrectionsOverride.loanAmount || canonicalCorrectionsOverride.purpose)) {
+        const fmtMoney = n => '$' + Math.round(n).toLocaleString('en-US');
+        let block = `
+
+CRITICAL — BROKER STATEMENT AUTHORITATIVE FOR INTENT FIELDS (R10-G JS-deterministic, USE THIS):
+
+The broker's explicit statement of LOAN AMOUNT and LOAN PURPOSE is AUTHORITATIVE for these fields. These are INTENT fields — the broker is the authoritative source for what they are requesting. Documents (loan application, AML form, etc.) provide supporting evidence but DO NOT override the broker's stated intent.
+
+The source-hierarchy below is JS-resolved per R10-G canonical-fields source-priority:
+  broker_correction (explicit correction in reply) > broker_initial_intent (initial statement) > documents > generic email_body`;
+
+        if (canonicalCorrectionsOverride.loanAmount) {
+          const la = canonicalCorrectionsOverride.loanAmount;
+          const sourceLabel = la.source === 'broker_correction' ? 'EXPLICITLY CORRECTED' : 'INITIALLY STATED';
+          const verbLabel = la.source === 'broker_correction' ? 'corrected' : 'stated';
+          block += `
+
+LOAN AMOUNT: ${fmtMoney(la.value)} — broker ${sourceLabel} (source: ${la.source}).
+  - Use "${fmtMoney(la.value)}" in the Deal Snapshot "Loan Amount Requested" row.
+  - Use "${fmtMoney(la.value)}" in all LTV math, Combined LTV computation, narrative references in Borrower Overview / Loan Purpose / Risk Factors / Deal Rating / Collateral & Valuation / Financial Snapshot.
+  - DO NOT use any other value (e.g., a different value from the loan_application document, AML form, or any other source). The broker's stated/corrected value OVERRIDES document values for loan amount.
+  - DO NOT phrase this as "broker confirmed the application amount" / "broker has confirmed" / "as broker confirmed" / "broker confirmed". The broker ${verbLabel} the amount TO ${fmtMoney(la.value)} — phrase as "broker ${verbLabel} the amount to ${fmtMoney(la.value)}" or "broker clarified the amount as ${fmtMoney(la.value)}".
+  - DO NOT raise this as a "discrepancy" risk factor — the broker has resolved any discrepancy by explicit ${verbLabel === 'corrected' ? 'correction' : 'statement'} of intent. The loan amount is settled at ${fmtMoney(la.value)}.`;
+        }
+
+        if (canonicalCorrectionsOverride.purpose) {
+          const pp = canonicalCorrectionsOverride.purpose;
+          const sourceLabel = pp.source === 'broker_correction' ? 'EXPLICITLY CORRECTED' : 'INITIALLY STATED';
+          const verbLabel = pp.source === 'broker_correction' ? 'corrected' : 'stated';
+          block += `
+
+LOAN PURPOSE: "${pp.value}" — broker ${sourceLabel} (source: ${pp.source}).
+  - Use "${pp.value}" in the Loan Purpose section verbatim. This is broker INTENT and is authoritative for the purpose field.
+  - DO NOT use a different purpose from the loan_application Page-1 annotation, AML form "Purpose of Mortgage" field, or any other document source. The broker's stated/corrected purpose OVERRIDES document purpose text.
+  - DO NOT raise purpose as a "discrepancy" risk factor — broker statement is authoritative for purpose (broker INTENT). The loan purpose is settled at "${pp.value}".`;
+        }
+
+        block += `
+
+OVERALL: For both loan amount and loan purpose, the broker's stated/corrected values are the AUTHORITATIVE canonical values per R10-G source-hierarchy. Documents are supporting evidence; broker statement OUTRANKS document values for these INTENT fields. The Deal Rating should reflect that broker-stated intent is resolved, NOT that there's an outstanding "purpose discrepancy" or "amount discrepancy" — those are resolved by the broker's statement.`;
+
+        r10gCanonicalCorrectionsBlock = block;
+      }
+
       const response = await callClaude({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.${r9bCanonicalLtvOverrideBlock}${r9dCanonicalLenderOverrideBlock}
+          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.${r9bCanonicalLtvOverrideBlock}${r9dCanonicalLenderOverrideBlock}${r10gCanonicalCorrectionsBlock}
 
 Your job is to read ALL available information — the deal summary, every extracted document, and the overall file — and produce a structured, lender-ready lead summary.
 
