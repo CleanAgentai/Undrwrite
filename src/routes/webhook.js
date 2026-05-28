@@ -2838,6 +2838,44 @@ No deal record was created. If this was a legitimate broker submission, please r
           return;
         }
 
+        // FRANCO-Q7 (2026-05-28): non-Canadian SUBJECT-PROPERTY auto-decline.
+        // Franco's rule: Canadian property + non-Canadian borrower = process
+        // normally; non-Canadian PROPERTY = decline. Detection is property-region
+        // scoped + conservative (strong structural US signals only) — see
+        // cFields.detectNonCanadianProperty. Placed pre-create so non-Canadian
+        // properties don't consume full processing. On detect: polite broker
+        // decline + admin alert + skip create (mirrors R9-F / R9-F' convention).
+        const _q7NonCanadian = cFields.detectNonCanadianProperty(email.textBody || '');
+        if (_q7NonCanadian.outOfScope) {
+          console.log(`FRANCO-Q7: non-Canadian property detected (${_q7NonCanadian.signal}) — declining + alerting admin + skipping deal-create.`);
+          const _q7DealSummary = {
+            borrower_name: email.fromName,
+            sender_name: email.fromName,
+            sender_type: 'broker',
+          };
+          const _q7Greeting = aiService.parseBrokerFirstName(email.textBody);
+          const _q7DeclineEmail = await aiService.generateRejectionEmail(
+            _q7DealSummary,
+            'our underwriting is currently limited to properties located in Canada',
+            { greetingFirstName: _q7Greeting }
+          );
+          await emailService.sendEmail(
+            email.from,
+            `Re: ${email.subject || 'Your mortgage inquiry'}`,
+            _q7DeclineEmail.replace(/<[^>]*>/g, ''),
+            _q7DeclineEmail
+          );
+          await emailService.sendEmail(
+            config.adminEmail,
+            `[Out of Scope] Non-Canadian property auto-declined — ${email.fromName || 'unnamed'}`,
+            `Vienna auto-declined a submission because the SUBJECT PROPERTY appears to be outside Canada.\n\nSignal: ${_q7NonCanadian.signal}\nFrom: ${email.fromName || '(empty)'} <${email.from}>\nSubject: ${email.subject || '(empty)'}\n\nProperty region (first 300 chars of body):\n${(email.textBody || '').slice(0, 300)}\n\nNo deal record was created. Borrower location is NOT a decline trigger (per Franco Q7) — if this property IS in Canada, reply directly to the broker.\n\n(Automatic — FRANCO-Q7 non-Canadian-property gate, conservative strong-signal detection.)`,
+            null,
+            [],
+            []
+          );
+          return;
+        }
+
         // Create deal in database
         const deal = await dealsService.create({
           email: email.from,

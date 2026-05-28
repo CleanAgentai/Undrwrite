@@ -291,6 +291,46 @@ const findAllAnchorBlocks = (text, anchorReGlobal, windowChars = 250) => {
 //   *Borrower:* <name> *Property:* <addr line 1>\n<line 2 with postal>*<next-tag>
 // The `*` markers come from Postmark's inbound conversion of `*bold*` markdown.
 
+// FRANCO-Q7 (2026-05-28): non-Canadian SUBJECT-PROPERTY detection for auto-decline.
+// Franco's rule is PROPERTY-based — a non-Canadian borrower on a Canadian property
+// is processed normally; only a non-Canadian PROPERTY is declined. So detection is
+// scoped to the property-address REGION (same anchors as extractFromEmailBody's
+// property block), NOT the whole email — a US-resident borrower's mailing address
+// elsewhere in the body must NOT trigger a decline.
+//
+// CONSERVATIVE BY DESIGN: declines ONLY on strong structural US/international
+// signals in the property region (US ZIP+4, US-state+5-digit-ZIP adjacency, or an
+// address-positioned country marker). It does NOT decline on mere absence of a
+// Canadian postal — false-positive (declining a Canadian deal) is the costly error;
+// false-negative (a US property without these markers slips to normal processing)
+// is recoverable downstream. US state codes listed below exclude all Canadian
+// province codes (AB/BC/MB/NB/NL/NS/NT/NU/ON/PE/QC/SK/YT) so there is no collision.
+const US_STATE_CODES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','MA','MD','ME','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY'];
+const US_STATE_ZIP_RE = new RegExp('\\b(' + US_STATE_CODES.join('|') + ')\\s+\\d{5}\\b'); // uppercase-only — low false-positive
+const US_ZIP4_RE = /\b\d{5}-\d{4}\b/;
+const US_COUNTRY_LINE_RE = /,\s*(USA|U\.S\.A\.?|United States)\b/i;
+
+// Returns the raw property-address region text from a broker email (bold
+// `*Property:* …*` block, else `Property:` fallback line), or '' if none found.
+const extractPropertyRegion = (emailBody) => {
+  if (!emailBody) return '';
+  const boldM = emailBody.match(/\*\s*Property\s*:\s*\*\s*([\s\S]+?)\*/i);
+  if (boldM) return boldM[1];
+  const lineM = emailBody.match(/Property\s*:\s*([\s\S]{0,200}?)(?:\n\n|\nLTV|\nAppraised|\nMortgage|$)/i);
+  if (lineM) return lineM[1];
+  return '';
+};
+
+const detectNonCanadianProperty = (emailBody) => {
+  const region = extractPropertyRegion(emailBody);
+  if (!region) return { outOfScope: false, signal: null }; // no property region → can't tell → fail-open (process)
+  let m;
+  if ((m = region.match(US_ZIP4_RE))) return { outOfScope: true, signal: `US ZIP+4 in property region: "${m[0]}"` };
+  if ((m = region.match(US_STATE_ZIP_RE))) return { outOfScope: true, signal: `US state+ZIP in property region: "${m[0]}"` };
+  if ((m = region.match(US_COUNTRY_LINE_RE))) return { outOfScope: true, signal: `non-Canadian country marker in property region: "${m[0].trim()}"` };
+  return { outOfScope: false, signal: null };
+};
+
 const extractFromEmailBody = (emailBody, emailSubject = '') => {
   const out = {
     subject_property_address: null,
@@ -1879,6 +1919,8 @@ module.exports = {
   LENDER_SYNONYMS,
   LENDER_REVERSE_MAP,
   normalizeLender,
+  detectNonCanadianProperty, // FRANCO-Q7
+  extractPropertyRegion,     // FRANCO-Q7 (exported for testing)
   findLenderInWindow,
   normalizePostal,
   normalizeMoney,
