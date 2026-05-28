@@ -1,0 +1,38 @@
+{
+  "scenario_id": "B03",
+  "spec_version": "1.0",
+  "rationale_source": "F2.DH asymmetric-gate edge (R10-F): minor discrepancy below 30% threshold should NOT activate hold; broker_correction tier still wins for canonical resolution",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 290000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction $290k; loan_app $280k. Discrepancy = 3.6% from broker, below 30% R11-B-1 Layer 1 threshold. F1.LA broker_correction wins; loan_app NOT suppressed (small delta)."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": {
+        "value": false,
+        "rationale": "Minor discrepancy (<30%) does NOT activate F2.DH per R10-F asymmetric-gate threshold semantics."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Clean state; deal proceeds normally."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Marcus", "rationale": "Borrower name (F1.BN)." },
+          { "pattern": "290,000", "rationale": "Final corrected loan_amount per F1.LA broker_correction." }
+        ],
+        "must_not_include": []
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

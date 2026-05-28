@@ -1,0 +1,38 @@
+{
+  "scenario_id": "D01",
+  "spec_version": "1.0",
+  "rationale_source": "R10-C-1 dedicated-generator-bypass: LTV >80% triggers F4.HL minimal-ask generator + bypasses standard prelim path. Phase 4 TWO-ASSERTION discipline per Porter framing.",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 540000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." },
+      "property_value": { "value": 650000, "source_classification": "broker_initial_intent", "rationale": "F1.PV broker + appraisal." }
+    },
+    "gate_states": {
+      "high_ltv_detected": { "value": true, "rationale": "LTV 83% (>80%) detected; F4.HL trigger active." },
+      "awaiting_collateral": { "value": true, "rationale": "F2.AC activated per R10-C-1." }
+    },
+    "workflow_state": { "value": "awaiting_collateral", "rationale": "F2.AC state transition." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_collateral_ask",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "collateral", "rationale": "F4.HL dedicated generator content shape." },
+          { "pattern": "David Okafor|Okafor", "rationale": "F1.BN in greeting." }
+        ],
+        "must_not_include": [
+          { "pattern": "Snapshot|Deal Snapshot|deal summary block", "rationale": "ASSERTION-2 dedicated-generator-bypass: bypass-content MUST NOT include standard prelim Snapshot block (Porter framing TWO-ASSERTION discipline)." },
+          { "pattern": "Risk Factors", "rationale": "ASSERTION-2 bypass: standard Risk Factors section not in dedicated minimal-ask." }
+        ]
+      },
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "ASSERTION-2: standard prelim path BYPASSED per R10-C-1 dedicated-generator-bypass discipline."
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

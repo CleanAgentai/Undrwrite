@@ -1,0 +1,24 @@
+{
+  "scenario_id": "D06",
+  "spec_version": "1.0",
+  "rationale_source": "R10-H sweepBrokerFacingDraft expansion to saveDraftAndPreview sites: broker correction triggers draft preview; sweep strips internal-review-tail patterns",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 360000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Post-correction processing." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin_draft_preview",
+        "expected_fire": true,
+        "must_not_include": [
+          { "pattern": "<p>\\s*\\.\\s*</p>", "rationale": "ASSERTION-2: F4.SW sweep prevents orphan-period cascade artifact." },
+          { "pattern": "internal[- ]review|reviewer note|admin only", "rationale": "F4.SW strips internal-review-tail patterns from broker-facing draft." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,34 @@
+{
+  "scenario_id": "B07",
+  "spec_version": "1.0",
+  "rationale_source": "F2.AC exit path: broker provides collateral details → collateral_offered=true → workflow transitions from awaiting_collateral → active",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 540000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.LA broker_initial_intent."
+      }
+    },
+    "gate_states": {
+      "collateral_offered": {
+        "value": true,
+        "rationale": "Event-1 collateralOffer message provides 2nd property as additional security; F2.AC collateral_offered flag set."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "F2.AC exit path: collateral_offered=true transitions back to active per R10-C-1 inverse."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "rationale": "After F2.AC exit, standard prelim path resumes."
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,33 @@
+{
+  "scenario_id": "C06",
+  "spec_version": "1.0",
+  "rationale_source": "F3.AH × F2.AC cross-family interaction: admin handoff overrides standard collateral-wait; admin route transitions out of awaiting_collateral without collateral_offered",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 540000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." }
+    },
+    "gate_states": {
+      "awaiting_collateral_initially_activated": { "value": true, "rationale": "Event_0 high-LTV (83%) activates F2.AC per R10-C-1." },
+      "awaiting_collateral_after_admin_override": { "value": false, "rationale": "Event_1 admin handoff overrides F2.AC without collateral_offered (admin exception)." }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Post-admin-override transitions back to active for standard prelim path."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_collateral_ask",
+        "expected_fire": true,
+        "phase5_temporal_dependency": "fires from event_0; admin override in event_1 may not retract once sent"
+      },
+      {
+        "kind": "preliminary_review_admin_post_override",
+        "expected_fire": true,
+        "rationale": "After admin override resolves F2.AC, standard prelim path resumes."
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

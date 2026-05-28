@@ -1,0 +1,38 @@
+{
+  "scenario_id": "B06",
+  "spec_version": "1.0",
+  "rationale_source": "F2.AC state transition (R10-C-1): LTV >80% triggers workflow_state transition from active → awaiting_collateral",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 738000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.LA broker_initial_intent + loan_app corroborate $738k."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Clean intake; no discrepancy." }
+    },
+    "workflow_state": {
+      "value": "awaiting_collateral",
+      "rationale": "LTV 82% (>80%) + no collateral_offered triggers F2.AC state transition per R10-C-1 architectural intent."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_collateral_ask",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "collateral", "rationale": "F4.HL dedicated generator must ask about collateral (R10-C-1)." }
+        ]
+      },
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "Standard prelim path BYPASSED in favor of F4.HL dedicated collateral-ask path per R10-C-1 dedicated-generator-bypass discipline."
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

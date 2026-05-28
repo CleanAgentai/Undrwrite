@@ -1,0 +1,33 @@
+{
+  "scenario_id": "D02",
+  "spec_version": "1.0",
+  "rationale_source": "Group D control: NO bypass-trigger conditions; standard prelim review path fires with full Snapshot + Risk Factors structure",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 525000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." }
+    },
+    "gate_states": {
+      "high_ltv_detected": { "value": false, "rationale": "LTV 62% — no F4.HL trigger." },
+      "elevated_ltv_band": { "value": false, "rationale": "LTV 62% below 75-80% band — no F4.EL trigger." },
+      "discrepancyHold": { "value": false, "rationale": "Clean intake." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Sarah Chen", "rationale": "F1.BN." },
+          { "pattern": "Snapshot|Deal Snapshot", "rationale": "ASSERTION-2 control: standard prelim path includes Snapshot block (vs F4.HL bypass)." },
+          { "pattern": "Risk Factors|risk factors", "rationale": "ASSERTION-2 control: standard prelim includes Risk Factors section." }
+        ],
+        "must_not_include": [
+          { "pattern": "75-80%|elevated.{0,15}band", "rationale": "F4.EL elevated-band callout NOT triggered at 62% LTV." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

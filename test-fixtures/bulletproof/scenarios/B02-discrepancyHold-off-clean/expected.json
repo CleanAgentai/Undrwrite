@@ -1,0 +1,42 @@
+{
+  "scenario_id": "B02",
+  "spec_version": "1.0",
+  "rationale_source": "F2.DH OFF-path control: no discrepancy across sources → discrepancyHold remains false → preliminary-review dispatch proceeds",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 525000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "Broker email + loan_app agree on $525k; F1.LA broker_initial_intent tier with docs corroboration."
+      },
+      "borrower_name": {
+        "value_includes": ["Sarah Chen"],
+        "rationale": "F1.BN consistent across sources."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": {
+        "value": false,
+        "rationale": "No cross-source discrepancy. F2.DH OFF per control intent."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Clean intake → active state pending prelim approval."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Sarah Chen", "rationale": "Borrower name in prelim review (F1.BN)." },
+          { "pattern": "525,000", "rationale": "Canonical loan_amount appears in Snapshot." }
+        ],
+        "must_not_include": []
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

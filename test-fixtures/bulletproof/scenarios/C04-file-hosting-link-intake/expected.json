@@ -1,0 +1,28 @@
+{
+  "scenario_id": "C04",
+  "spec_version": "1.0",
+  "rationale_source": "F3.FL pre-create intake classification (sibling to B10's F2.FH state-gate axis): wetransfer URL pattern in body → file-hosting-link intake classification",
+  "layer1_structural": {
+    "intake_classification": {
+      "value": "file_hosting_link",
+      "rationale": "F3.FL routes intake to file-hosting handler when URL pattern detected at pre-create time."
+    },
+    "gate_states": {
+      "file_hosting_link_detected": { "value": true, "rationale": "wetransfer.com URL triggers F2.FH (sibling gate to F3.FL classification)." },
+      "vienna_paused_per_deal": { "value": true, "rationale": "Same as B10 — Vienna paused." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Deal created; processing paused." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "admin_handoff_notification",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "wetransfer|file hosting|external link", "rationale": "F3.FL classification surfaces link-shape to admin." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,22 @@
+{
+  "scenario_id": "D07",
+  "spec_version": "1.0",
+  "rationale_source": "R5-C-a + R10-H orphan-period regex anchoring: 'note for internal review' pattern followed by sentence-end should NOT cascade to '<p>..</p>' artifact",
+  "layer1_structural": {
+    "workflow_state": { "value": "active", "rationale": "Post-correction." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin_draft_preview",
+        "expected_fire": true,
+        "must_not_include": [
+          { "pattern": "<p>\\s*\\.\\s*</p>", "rationale": "ASSERTION-1: orphan-period cascade artifact MUST NOT appear (R10-H bugfix anchor)." },
+          { "pattern": "\\.\\s*\\.", "rationale": "ASSERTION-2: dangling period sequences indicating regex anchoring failure." },
+          { "pattern": "note for internal review", "rationale": "F4.SW sweep removes the trigger phrase + dependent text." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

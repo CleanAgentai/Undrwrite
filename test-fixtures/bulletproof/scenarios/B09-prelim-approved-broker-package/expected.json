@@ -1,0 +1,37 @@
+{
+  "scenario_id": "B09",
+  "spec_version": "1.0",
+  "rationale_source": "F2.PA prelim_approved_at × F4.BP broker-package composer (R10-I): admin approval triggers broker-package generation",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 280000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.LA broker_initial_intent."
+      }
+    },
+    "gate_states": {
+      "prelim_approved_at": {
+        "value": "non-null timestamp",
+        "rationale": "Admin approval event sets F2.PA timestamp."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Post-approval; broker-package fires within active state."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_lender_package",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Marcus|Marcus Webb", "rationale": "Borrower name in package (F1.BN)." },
+          { "pattern": "Snapshot|Deal Snapshot|deal summary", "rationale": "R10-I package structure includes Snapshot block." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

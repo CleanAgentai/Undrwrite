@@ -1,0 +1,41 @@
+{
+  "scenario_id": "B05",
+  "spec_version": "1.0",
+  "rationale_source": "F2.PD × F2.DH symmetric coverage (R10-F): complete docs do NOT override discrepancyHold suppression of prelim dispatch",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 460000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction $460k; loan_app $180k (>30% discrepancy). F1.LA broker_correction wins; loan_app SUPPRESSED per R11-B-1 Layer 1."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": {
+        "value": true,
+        "rationale": "Major discrepancy activates F2.DH per R11-B-1 + R10-F."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Held for admin review; no state transition."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "F2.PD SUPPRESSED by F2.DH ACTIVE per R10-F symmetric coverage. Complete docs do NOT override the hold."
+      },
+      {
+        "kind": "admin_discrepancy_notification",
+        "expected_fire": true,
+        "must_not_include": [
+          { "pattern": "\\$180,000", "rationale": "Suppressed loan_app value (R11-B-1 Layer 1) must NOT appear as canonical figure." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,32 @@
+{
+  "scenario_id": "D03",
+  "spec_version": "1.0",
+  "rationale_source": "R10-C-2 elevated-band callout: LTV 75-80% triggers F4.EL Risk Factors callout injection; standard prelim path NOT bypassed (distinct from D01 R10-C-1)",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 507000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." }
+    },
+    "gate_states": {
+      "elevated_ltv_band": { "value": true, "rationale": "LTV 78% in 75-80% band; F4.EL trigger active per R10-C-2." },
+      "high_ltv_detected": { "value": false, "rationale": "LTV 78% below 80%; F4.HL NOT triggered." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard refi state." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Marcus Webb", "rationale": "F1.BN." },
+          { "pattern": "75-80%|elevated", "rationale": "ASSERTION-1: F4.EL callout text injected in Risk Factors (R10-C-2 intent)." },
+          { "pattern": "Snapshot|Deal Snapshot", "rationale": "ASSERTION-2: standard prelim path TAKEN (not bypassed); Snapshot block present." }
+        ],
+        "must_not_include": [
+          { "pattern": "collateral question|please provide collateral", "rationale": "F4.HL dedicated-bypass NOT triggered at 78% — minimal-ask must not appear." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

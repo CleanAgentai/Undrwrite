@@ -1,0 +1,42 @@
+{
+  "scenario_id": "D09",
+  "spec_version": "1.0",
+  "rationale_source": "F4.CH chase email after broker silence; timing threshold per Layer 3 #6 recommended default (72h)",
+  "layer1_structural": {
+    "gate_states": {
+      "broker_silence_detected": {
+        "value": "true after 72h silence",
+        "rationale": "Per Layer 3 #6 recommended default: 72h auto-fire threshold."
+      }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting NOA + missing docs; not declined." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_intake_followup",
+        "expected_fire": true,
+        "phase5_temporal_dependency": "fires AFTER 72h silence per Layer 3 #6 default",
+        "must_include": [
+          { "pattern": "NOA|notice of assessment", "rationale": "F4.CH intent: ask for the specifically-missing doc (NOA per intake admission)." }
+        ]
+      },
+      {
+        "kind": "broker_facing_chase_email",
+        "expected_fire": true,
+        "phase5_temporal_dependency": "fires AFTER 72h silence post-followup",
+        "must_include": [
+          { "pattern": "Patricia Simmons|Simmons", "rationale": "F1.BN in chase greeting." },
+          { "pattern": "followup|follow up|checking in|still waiting", "rationale": "F4.CH chase email content shape." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#6",
+      "scope": "broker-silent escalation timing threshold",
+      "phase5_placeholder": "spec assumes 72h auto-fire default; revisit if Phase 4.5 selects different timing"
+    }
+  ]
+}

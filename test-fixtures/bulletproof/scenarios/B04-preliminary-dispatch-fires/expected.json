@@ -1,0 +1,39 @@
+{
+  "scenario_id": "B04",
+  "spec_version": "1.0",
+  "rationale_source": "F2.PD preliminary-all-docs-in dispatch positive path: complete doc set + no hold → prelim review auto-fires to admin",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 360000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.LA broker_initial_intent + loan_app corroborate."
+      },
+      "borrower_name": {
+        "value_includes": ["David Okafor"],
+        "rationale": "F1.BN consistent."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Clean docs; no discrepancy." }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Complete-docs intake; awaiting admin prelim approval."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "David Okafor", "rationale": "F1.BN in prelim." },
+          { "pattern": "Refinance|refinance", "rationale": "F1.TT value in Snapshot." }
+        ],
+        "must_not_include": []
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

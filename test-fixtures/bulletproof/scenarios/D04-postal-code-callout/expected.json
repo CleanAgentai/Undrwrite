@@ -1,0 +1,39 @@
+{
+  "scenario_id": "D04",
+  "spec_version": "1.0",
+  "rationale_source": "R11-C M1 + M2: cross-doc postal discrepancy triggers F4.PC callout injection in admin Risk Factors; Snapshot Property Address row is street-address-only (postal stripped)",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code_tuples": {
+        "expected_count": 2,
+        "expected_values": ["T6R 2K8", "T6R 2K9"],
+        "rationale": "F1.PC captures both with distinct source-tier classifications (loan_app vs appraisal)."
+      },
+      "subject_property_address": {
+        "value_includes": ["1142 Tory Road NW", "Edmonton"],
+        "rationale": "F1.AD; address consistent, only postal varies."
+      }
+    },
+    "gate_states": {
+      "postal_code_discrepancy_detected": { "value": true, "rationale": "F4.PC triggered by >1 distinct postal value across doc-tier sources." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard refi state." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "T6R 2K8", "rationale": "F4.PC callout enumerates distinct postal values with source labels (R11-C M2)." },
+          { "pattern": "T6R 2K9", "rationale": "F4.PC callout enumerates second value." },
+          { "pattern": "1142 Tory Road NW", "rationale": "F1.AD street address in Snapshot row." }
+        ],
+        "must_not_include": [
+          { "pattern": "1142 Tory Road NW.{0,30}T6R 2K8", "rationale": "ASSERTION-2 R11-C M1: Snapshot Property Address row must NOT contain inline postal suffix (street-address-only after R11-C M1 strip)." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

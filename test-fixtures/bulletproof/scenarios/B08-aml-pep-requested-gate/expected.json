@@ -1,0 +1,34 @@
+{
+  "scenario_id": "B08",
+  "spec_version": "1.0",
+  "rationale_source": "F2.AP aml_pep_requested_at gate (per 2026-05-21-aml-pep-requested-at migration): post-prelim AML/PEP documentation request fires to broker",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 525000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.LA + loan_app corroborate."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Clean intake." }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Post-intake; F2.AP fires after prelim is sent (Phase 5 replay drives forward to observe)."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_aml_pep_request",
+        "expected_fire": true,
+        "phase5_temporal_dependency": "fires AFTER preliminary_review_admin per F2.AP gate sequencing",
+        "must_include": [
+          { "pattern": "AML|PEP|anti-money laundering|politically exposed", "rationale": "F2.AP intent: ask broker for AML/PEP documentation." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,37 @@
+{
+  "scenario_id": "C02",
+  "spec_version": "1.0",
+  "rationale_source": "F3.BR broker-correction routing baseline: reply to existing thread → broker_correction handler; thread reconstructed via MessageID continuity",
+  "layer1_structural": {
+    "intake_classification": {
+      "event_0": "broker_initial_intent",
+      "event_1": "broker_correction",
+      "rationale": "F3.BR routes event_1 (Re: subject) to correction handler; event_0 created the deal via F3.BI."
+    },
+    "canonical_map": {
+      "borrower_name": {
+        "value_includes": ["Patricia Simmons"],
+        "rationale": "F1.BN."
+      },
+      "borrower_contact": {
+        "value_includes": ["416-555-0188"],
+        "source_classification": "broker_correction",
+        "rationale": "F3.BR correction provides phone; F1.CT broker_correction tier."
+      }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard refi state." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Patricia Simmons", "rationale": "F1.BN in prelim." },
+          { "pattern": "416-555-0188", "rationale": "Updated F1.CT borrower phone from broker correction." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

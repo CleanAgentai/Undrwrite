@@ -1,0 +1,28 @@
+{
+  "scenario_id": "D10",
+  "spec_version": "1.0",
+  "rationale_source": "R10-H sweep scope expansion: admin-handoff broker-facing draft must have F4.SW applied (admin-handoff is one of 8 saveDraftAndPreview call sites)",
+  "layer1_structural": {
+    "intake_classification": {
+      "event_1": "admin_handoff",
+      "rationale": "F3.AH admin-direction routing per event_1 subject pattern."
+    },
+    "workflow_state": { "value": "active", "rationale": "Admin-direction processing within active state." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_admin_handoff_draft",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Franco|Marcus", "rationale": "F1.BN broker + borrower names in greeting." }
+        ],
+        "must_not_include": [
+          { "pattern": "<p>\\s*\\.\\s*</p>", "rationale": "ASSERTION-3 (cross-family): F4.SW × F3.AH interaction — sweep applies at admin-handoff path." },
+          { "pattern": "internal[- ]review|note for internal review|reviewer flag", "rationale": "F4.SW strips internal-review-tail patterns at admin-handoff broker-facing draft." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

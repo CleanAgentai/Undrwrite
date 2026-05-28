@@ -1,0 +1,36 @@
+{
+  "scenario_id": "C03",
+  "spec_version": "1.0",
+  "rationale_source": "F3.BI broker_initial_intent baseline: first-touch intake creates deal in active state; prelim review fires after canonical-map extraction",
+  "layer1_structural": {
+    "intake_classification": {
+      "value": "broker_initial_intent",
+      "rationale": "F3.BI new-deal first-touch."
+    },
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 460000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.LA broker_initial_intent + loan_app corroborate."
+      },
+      "borrower_name": { "value_includes": ["Patricia Simmons"], "rationale": "F1.BN." }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Clean intake." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard new deal." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Patricia Simmons", "rationale": "F1.BN." },
+          { "pattern": "460,000", "rationale": "F1.LA in Snapshot." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

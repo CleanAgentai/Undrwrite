@@ -1,0 +1,25 @@
+{
+  "scenario_id": "C01",
+  "spec_version": "1.0",
+  "rationale_source": "F3.AH admin-handoff intake classification: admin-direction subject pattern → admin handler path; broker_initial_intent path BYPASSED",
+  "layer1_structural": {
+    "intake_classification": {
+      "value": "admin_handoff",
+      "rationale": "F3.AH classification triggered by subject pattern matching admin-direction signal."
+    },
+    "workflow_state": {
+      "value": "admin_handoff",
+      "rationale": "Deal created in admin_handoff state per F3.AH routing."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_intake_acknowledgment",
+        "expected_fire": false,
+        "rationale": "Admin-handoff path does NOT trigger broker-facing auto-response."
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

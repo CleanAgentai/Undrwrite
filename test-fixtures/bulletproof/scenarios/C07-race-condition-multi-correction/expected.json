@@ -1,0 +1,41 @@
+{
+  "scenario_id": "C07",
+  "spec_version": "1.0",
+  "rationale_source": "F3.BR multi-correction race: 3 corrections within ~75 minutes to same field; canonical_map resolution per Layer 3 #21",
+  "layer1_structural": {
+    "intake_classification": {
+      "event_0": "broker_initial_intent",
+      "events_1_2": "broker_correction",
+      "rationale": "F3.BR routes all three."
+    },
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 295000,
+        "source_classification": "broker_correction",
+        "rationale": "Per Layer 3 #21 recommended-default (a) last-write-wins: event_2 ($295k) is latest; canonical resolves to $295k."
+      }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard processing post-resolution." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "295,000", "rationale": "Final canonical loan_amount per last-write-wins resolution." }
+        ],
+        "must_not_include": [
+          { "pattern": "\\$280,000|\\$310,000", "rationale": "Superseded values must not appear as canonical figures." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#21",
+      "scope": "multi-correction race resolution semantic (last-write-wins vs rate-limit vs admin disambiguation)",
+      "phase5_placeholder": "spec assumes Layer 3 #21 recommended default (a) last-write-wins; revisit if Phase 4.5 selects (b) or (c)"
+    }
+  ]
+}

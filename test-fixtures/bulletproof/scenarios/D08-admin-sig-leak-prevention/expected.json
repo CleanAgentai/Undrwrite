@@ -1,0 +1,22 @@
+{
+  "scenario_id": "D08",
+  "spec_version": "1.0",
+  "rationale_source": "R5-C-a admin-sig leak prevention: broker-facing outbound MUST NOT contain Vienna internal admin signatures, mock-data markers, or test-fixture artifacts",
+  "layer1_structural": {
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_not_include": [
+          { "pattern": "XXX-XXX-XXXX|placeholder|TODO|FIXME", "rationale": "F4.SL: mock-data markers must not leak to broker-facing outbound." },
+          { "pattern": "test fixture|synthetic|bulletproof", "rationale": "F4.SL: test-fixture artifacts must not leak (anti-fab discipline)." },
+          { "pattern": "Vienna boilerplate|automated signature template", "rationale": "F4.SL: internal sig templates must not appear as broker-facing content." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

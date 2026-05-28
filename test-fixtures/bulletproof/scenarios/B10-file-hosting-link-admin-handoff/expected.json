@@ -1,0 +1,44 @@
+{
+  "scenario_id": "B10",
+  "spec_version": "1.0",
+  "rationale_source": "F2.FH file-hosting link detection (admin-handoff link-submission, recent commit 86605a9): URL pattern in body → admin handoff + Vienna paused per-deal",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": {
+        "value_includes": ["Patricia Simmons"],
+        "rationale": "F1.BN from broker email body."
+      }
+    },
+    "gate_states": {
+      "file_hosting_link_detected": {
+        "value": true,
+        "rationale": "file.io URL pattern in body triggers F2.FH detection per recent commit anchor."
+      },
+      "vienna_paused_per_deal": {
+        "value": true,
+        "rationale": "F2.FH → Vienna paused awaiting admin manual review."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Deal created but Vienna processing paused (admin handles)."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "admin_handoff_notification",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "file\\.io|file hosting|external link|download", "rationale": "F2.FH detection surfaces the link-submission to admin." }
+        ]
+      },
+      {
+        "kind": "broker_facing_auto_response",
+        "expected_fire": false,
+        "rationale": "Vienna paused per-deal — no auto-response to broker pending admin manual review."
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,52 @@
+{
+  "scenario_id": "B01",
+  "spec_version": "1.0",
+  "rationale_source": "F1 canonical-map source-hierarchy (broker_correction tier wins) + R11-B-1 Layer 1 canonical-map suppression at >30% discrepancy + F2.DH discrepancyHold gate (R10-F symmetric coverage)",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 280000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction email asserts $280,000; loan_app source ($95k) is SUPPRESSED per R11-B-1 Layer 1 (>30% discrepancy detection). F1.LA broker_correction tier wins."
+      },
+      "borrower_name": {
+        "value_includes": ["Marcus Webb"],
+        "rationale": "F1.BN consistent across all sources (loan_app + statement + appraisal)."
+      },
+      "subject_property_address": {
+        "value_includes": ["1142 Tory Road NW", "Edmonton"],
+        "rationale": "F1.AD docs-tier consistent; no broker correction."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": {
+        "value": true,
+        "rationale": "loan_app $95k vs broker_correction $280k = 195% discrepancy from broker source. >30% triggers R11-B-1 Layer 1 suppression AND F2.DH activation. R10-F symmetric coverage."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "F2.DH ACTIVE does not transition workflow_state; deal proceeds (not completed, not declined); held for admin review only."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "F2.PD preliminary-all-docs-in dispatch SUPPRESSED when F2.DH ACTIVE per R10-F symmetric coverage."
+      },
+      {
+        "kind": "admin_discrepancy_notification",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Marcus", "rationale": "Borrower name from canonical_map must appear in admin notification (F1.BN)." }
+        ],
+        "must_not_include": [
+          { "pattern": "\\$95,000", "rationale": "Suppressed loan_app value per R11-B-1 Layer 1 must NOT appear as canonical figure (anti-fab discipline)." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

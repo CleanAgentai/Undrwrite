@@ -1,0 +1,41 @@
+{
+  "scenario_id": "C05",
+  "spec_version": "1.0",
+  "rationale_source": "F3.BR with unknown-field correction: F3.BR routing succeeds; canonical-map field extraction on unknown fields is Layer 3 product-design",
+  "layer1_structural": {
+    "intake_classification": {
+      "event_0": "broker_initial_intent",
+      "event_1": "broker_correction",
+      "rationale": "F3.BR routes regardless of field-recognition status."
+    },
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 525000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "Recognized fields process normally per Layer 3 #20 recommended-default (a) graceful-ignore-unknown + process-recognized."
+      }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard processing." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Sarah Chen", "rationale": "F1.BN." }
+        ],
+        "must_not_include": [
+          { "pattern": "amortization period|30 years|property tax", "rationale": "Unrecognized fields gracefully ignored per Layer 3 #20 recommended-default; do NOT appear as canonical." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#20",
+      "scope": "graceful-ignore vs flag-for-admin behavior on unknown-field corrections",
+      "phase5_placeholder": "spec assumes Layer 3 #20 recommended default (a) graceful ignore; revisit if Phase 4.5 selects different option"
+    }
+  ]
+}

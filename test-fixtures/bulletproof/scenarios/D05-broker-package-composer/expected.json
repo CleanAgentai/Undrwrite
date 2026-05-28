@@ -1,0 +1,33 @@
+{
+  "scenario_id": "D05",
+  "spec_version": "1.0",
+  "rationale_source": "R10-I broker-package composer (F4.BP) × F2.PA prelim approval interaction: admin approval triggers composeBrokerLenderPackageEmail with formatted structure",
+  "layer1_structural": {
+    "gate_states": {
+      "prelim_approved_at": { "value": "non-null timestamp", "rationale": "Event_1 admin approval sets F2.PA." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Post-approval; broker-package fires within active." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_lender_package",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Patricia Simmons", "rationale": "F1.BN in greeting." },
+          { "pattern": "Jason|Mercer", "rationale": "Broker greeting." },
+          { "pattern": "Snapshot|Deal Snapshot", "rationale": "ASSERTION-2: R10-I package structure includes Snapshot block." },
+          { "pattern": "Franco|franco", "rationale": "ASSERTION-2: Franco-pointer per R10-I composer template." }
+        ],
+        "must_not_include": [
+          { "pattern": "<p>\\s*\\.\\s*</p>", "rationale": "R10-H sweep applied: orphan-period cascade artifact must NOT appear." }
+        ],
+        "expected_attachments": {
+          "min_count": 1,
+          "rationale": "R10-I package includes R9-G deal package zip per composer template."
+        }
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}
