@@ -3,6 +3,7 @@ const { buildContentBlocks } = require('../lib/pdf');
 const config = require('../config');
 const { isPurchaseFromSummary, intakeRequiredFor, isDocRequirementSatisfied, allIntakeReceived } = require('../lib/dealType');
 const { selectGreetingFirstName } = require('../lib/greeting');
+const { detectCorporateEntities } = require('./corporate-entities'); // FRANCO-Q5
 
 // Retry wrapper for Claude API calls (handles rate limits)
 const callClaude = async (params, maxRetries = 3) => {
@@ -2797,7 +2798,7 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
 
   // Generate Stage 3 document request email — different checklist for personal vs corporate,
   // and different items for purchase vs refinance
-  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true, isPostApproval = false, greetingFirstName = null } = {}) => {
+  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true, isPostApproval = false, greetingFirstName = null, corporateDocAsk = null } = {}) => {
     try {
       // R6-ζ (2026-05-21): forbidden-non-sequitur-openers block — see
       // buildForbiddenOpenersBlock docblock at module scope. Admin-approval
@@ -2815,6 +2816,16 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
         ? `\n\nGREETING TARGET (R5-E refined — load-bearing, JS-deterministic, R8-A wiring extension):\n- Address the recipient as "Hi ${greetingFirstName}!" — selected by JS-side selectGreetingFirstName helper (broker_name > sender_name; anti-collided against admin's first name).\n- This OVERRIDES the broker_name / sender_name extraction below for greeting purposes. DO NOT greet by sender_name if it differs from "${greetingFirstName}".\n- Use "${greetingFirstName}" verbatim — do NOT shorten, abbreviate, or substitute.`
         : `\n\nGREETING TARGET (R5-E refined): no defensible first-name target available (helper returned null — likely admin-collision case). Use a GENERIC greeting: "Hi there!" or "Hello!" — NO first name. Do NOT default to sender_name in this case.`;
       const receivedClassifications = existingDocs.map(d => d.classification).filter(Boolean);
+      // FRANCO-Q5 (2026-05-28): self-compute corporate accountant-financials doc-ask
+      // from the borrower name + conversation text (no call-site threading needed).
+      // opts.corporateDocAsk, if provided, takes precedence (richer textSources incl.
+      // doc text). Falls back to broker-email-text detection here.
+      let _q5CorporateDocAsk = corporateDocAsk;
+      if (!_q5CorporateDocAsk) {
+        const _q5Text = (conversationHistory || []).map(m => m.body || m.textBody || m.content || '').join('\n');
+        const _q5Detect = detectCorporateEntities({ borrowerName: dealSummary?.borrower_name || '', textSources: _q5Text });
+        _q5CorporateDocAsk = _q5Detect.isCorporate ? _q5Detect.docAskLines : null;
+      }
       // Group MMMM: canonical purchase/refinance signal via dealType.js
       // (single-source-of-truth — no more duplicated /purchas/ regex).
       const reqIsPurchase = isPurchaseFromSummary(dealSummary);
@@ -2898,7 +2909,7 @@ CRITICAL — DO NOT NAME UNSTATED LENDERS: never reference a specific bank, cred
 
 DEAL TYPE: ${reqIsPurchase ? 'PURCHASE — borrower does not yet own the subject property' : 'REFINANCE / EXISTING MORTGAGE'}
 
-${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPORATE DEAL CHECKLIST:
+${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' || !!_q5CorporateDocAsk ? `CORPORATE DEAL CHECKLIST:
 - Loan Application Form (if not received — mention they can use their own or Franco's template)
 - PNW Statement Form (if not received — mention they can use their own or Franco's template)
 - Government-Issued ID
@@ -2907,7 +2918,7 @@ ${ownershipType === 'corporate' || ownershipType === 'corporate_mixed' ? `CORPOR
 - Property Tax Assessment and current balance
 - Proof of Income (NOA, pay stubs, T4, or employment letter — any one is fine. Do NOT list NOA and Proof of Income as separate items)
 ${propertySpecificDoc}${complianceDocs}
-- Corporate Financial Statements ('24, '23, '25)
+${_q5CorporateDocAsk || "- Corporate Financial Statements ('24, '23, '25)"}
 - T1s for key principals ('24, '23)
 - Borrower Resume and Building/Development Experience (if applicable)` : `PERSONAL DEAL CHECKLIST:
 - Loan Application Form (if not received — mention they can use their own or Franco's template)

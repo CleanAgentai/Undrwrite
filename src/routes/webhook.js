@@ -26,6 +26,7 @@ const dEngine = require('../services/discrepancy-engine');
 // Snapshot side effect fires at the escalation-decision layer.
 const cFields = require('../services/canonical-fields');
 const bq = require('../services/borrower-qualification'); // FRANCO-Q3/Q4 multi-party qualification roster
+const ce = require('../services/corporate-entities'); // FRANCO-Q5 corporate-entity detection
 // ADMIN-HANDOFF LINK-SUBMISSION (2026-05-20): pure detection of file-hosting
 // links in inbound broker body. No URL fetching, no link-following.
 const { detectFileHostingLinksInBody } = require('../lib/linkDetector');
@@ -1347,6 +1348,15 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   if (_q3Roster.clarificationPending) {
     console.log(`FRANCO-Q4: cosigner role ambiguous (${_q3Roster.clarificationMessage}) — defaulted to guarantor-only (not counted); surfaced on admin Snapshot.`);
   }
+  // FRANCO-Q5: corporate-entity detection (primary + best-effort multi-entity)
+  // for the Snapshot flag. textSources includes doc text (better multi-entity).
+  const _q5Corporate = ce.detectCorporateEntities({
+    borrowerName: dealSummary?.borrower_name || leadSummaryBrokerName || '',
+    textSources: _q4TextSources,
+  });
+  if (_q5Corporate.isCorporate) {
+    console.log(`FRANCO-Q5: corporate borrower (${_q5Corporate.entityCount} entit${_q5Corporate.entityCount === 1 ? 'y' : 'ies'}) — accountant-prepared financials required${_q5Corporate.clarificationPending ? '; multi-entity clarification pending' : ''}.`);
+  }
   const _bSnapshotHtml = dEngine.renderDealSnapshot(
     _bFilteredCanonicalMap,
     {
@@ -1354,6 +1364,7 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       isCommercial: !!_bDetectAdmin.commercial,
       jointBorrowers: _bDetectAdmin.joint_multi_borrower, // FRANCO-PREDICTED-Q8
       qualificationRoster: _q3Roster,                     // FRANCO-Q3/Q4
+      corporateEntities: _q5Corporate,                    // FRANCO-Q5
     }
   );
 
@@ -1741,6 +1752,10 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
     qualificationRoster: bq.buildQualificationRoster({ // FRANCO-Q3/Q4
       detectedBorrowers: _r10iDetect.joint_multi_borrower,
       primaryName: dealSummary?.borrower_name || borrowerName || null,
+    }),
+    corporateEntities: ce.detectCorporateEntities({ // FRANCO-Q5
+      borrowerName: dealSummary?.borrower_name || borrowerName || '',
+      textSources: [..._r10iInboundMessages.map(m => m.body || ''), ...dealDocs.map(d => d?.extracted_data?.text || '')].join('\n'),
     }),
   });
   const _r10iBrokerGreeting = selectGreetingFirstName({

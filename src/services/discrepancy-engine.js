@@ -503,7 +503,7 @@ const computeLtvBand = ({ standaloneLtv, combinedLtv } = {}) => {
 };
 
 const renderDealSnapshot = (canonicalMap, opts = {}) => {
-  const { ownershipType = null, isCommercial = false, jointBorrowers = null, qualificationRoster = null } = opts;
+  const { ownershipType = null, isCommercial = false, jointBorrowers = null, qualificationRoster = null, corporateEntities = null } = opts;
   const lines = [];
 
   // Property Address row — clean street address only.
@@ -619,6 +619,20 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     }
   }
   lines.push(`<p><strong>Borrower Type:</strong> ${isCommercial ? 'Corporate' : 'Personal'}</p>`);
+  // FRANCO-Q5 (2026-05-28): corporate-borrower flag — entity count, per-entity
+  // disposition, accountant-financials requirement, and multi-entity clarification.
+  // Threaded via opts.corporateEntities (corporate-entities.detectCorporateEntities).
+  if (corporateEntities && corporateEntities.isCorporate && Array.isArray(corporateEntities.allEntities)) {
+    const n = corporateEntities.allEntities.length;
+    lines.push(`<p><strong>Corporate borrower:</strong> ${n} entit${n === 1 ? 'y' : 'ies'} — accountant-prepared financials required</p>`);
+    const roleLabel = { primary: 'primary', additional_confirmed: 'additional (confirmed)', additional_pending: 'additional (clarification pending)' };
+    for (const e of corporateEntities.allEntities) {
+      lines.push(`<p>&nbsp;&nbsp;• ${e.name} — ${roleLabel[e.role] || e.role}</p>`);
+    }
+    if (corporateEntities.clarificationPending && corporateEntities.clarificationMessage) {
+      lines.push(`<p><strong>⚠ Additional entity — clarification needed:</strong> ${corporateEntities.clarificationMessage}</p>`);
+    }
+  }
   lines.push(`<p><strong>Ownership Type:</strong> ${ownershipType || 'TBD'}</p>`);
 
   return `<h2>Deal Snapshot</h2>\n` + lines.join('\n');
