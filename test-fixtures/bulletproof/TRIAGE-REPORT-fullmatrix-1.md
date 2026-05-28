@@ -293,3 +293,53 @@ The auto-classifier marked 26 "acceptance-blocking" by detecting broker_correcti
 - **Spec/fixture revision** (not Vienna bugs): CLUSTER-1 (47) + CLUSTER-6 (2) + part of CLUSTER-5 (B03/B07/C06 LTV-band) + EMERGENT-FIND-E.
 - **Real correctness questions**: CLUSTER-4 (17 gate) + CLUSTER-3 (19 extraction, pending normalize-map check) + C01.
 - **Machinery**: CLUSTER-7 (13).
+
+---
+
+## 9. DIAGNOSTIC PROBE RESULTS (Sub-phase 5.5 — pre-fix bug-surface determination)
+
+Two probes run per Q-5.5-1 to determine true Vienna-bug surface before sequencing fixes. **Both resolve toward NOT-A-BUG. The combined CLUSTER-2 + CLUSTER-3 surface (~30 fails) is a verification-surface mismatch, not Vienna defects.**
+
+### CLUSTER-2 probe — broker_correction tier-resolution → NOT A BUG, NO LATENT RISK
+
+Empirical (A01 raw-state probe, deal f4c3a541): broker corrects loan_amount $260k→$295k.
+- **(a) Persisted** `extracted_data.loan_amount_requested` = **$260k** (raw intake snapshot).
+- **(b) Render** uses request-time canonical_map resolution: `cFields.resolveCanonicalIntentValue(_bFilteredCanonicalMap, 'requested_loan_amount')` with broker_correction > broker_initial_intent > docs (webhook.js:1340-1349), injected via `canonicalCorrectionsOverride` into leadSummary + deterministic JS Snapshot → **$295k**.
+
+**Architecture**: `extracted_data` is a RAW pre-canonical intake snapshot, NOT the canonical store. Canonical resolution is **request-time** via `extractCanonicalFields`/`extractCanonicalFieldsAggregated` (discrepancy-engine.js:912,1067), rebuilt from messages+docs each request.
+
+**Latent-risk check (Porter's critical question)**: ZERO direct reads of `extracted_data.loan_amount_requested`/`requested_loan_amount` for decisions or render anywhere in src/. The lender-package composer (R10-I, webhook.js:1683-1697) — named specifically — rebuilds canonical_map request-time via `runDiscrepancyDetectionAggregated(inboundMessages, docs)` + renders deterministic Snapshot; its only extracted_data read is `d?.extracted_data?.text` (per-document OCR text, the correct canonical-extraction INPUT). **No consumer reads the deal-level persisted canonical figures directly. No latent risk.** Consistent with R11 Stage 1.5 harnesses (render correctness) passing.
+
+**Disposition**: matrix asserted the WRONG verification surface (persisted extracted_data vs request-time canonical_map / rendered Snapshot). MATRIX-DESIGN amendment, not Vienna fix.
+
+### CLUSTER-3 probe — extraction-gap undefined → SPLIT, mostly NOT A BUG
+
+A01 persisted extracted_data keys inspected (full dump). Findings:
+- **mortgage_position**: NOT in extracted_data. Resolved request-time in canonical-fields.js:278-298 (canonical_map). Matrix wrong layer. NOT a gap.
+- **existing_mortgage_lender**: Vienna's field is **`existing_first_mortgage_lender`** (name mismatch), resolved request-time canonical-fields.js:434-638 from PNW statement / filename / header lender. Lender "Royal Bank of Canada" present in `summary` prose. Matrix wrong layer + wrong key. NOT a gap.
+- **transaction_type**: shape-transform (loan_type + is_purchase) present + handled by normalize-map; 4 fails are shape-transform edge cases → minor normalize-map refinement.
+- **annual_income**: `income_details: null` when no income doc attached — EXPECTED (no income source). Minor spec revision (don't assert when no income doc).
+
+**Disposition**: mortgage_position + existing_mortgage_lender = same MATRIX-DESIGN amendment as CLUSTER-2 (assert render surface / request-time canonical_map, not extracted_data). transaction_type + annual_income = minor normalize-map/spec refinements. NOT Vienna bugs.
+
+### REVISED TRUE BUG-SURFACE
+
+| Cluster | Count | Disposition |
+|---|---|---|
+| CLUSTER-1 | 47 | spec-assumption (Vienna-correct, exit_strategy-gating intended) — NOT bugs |
+| CLUSTER-2 | ~13 | verification-surface mismatch (request-time-semantic, no latent risk) — NOT bugs |
+| CLUSTER-3 | ~19 | mostly verification-surface (mortgage_position/lender) + minor refinements — NOT bugs |
+| CLUSTER-6 | 2 | fixture-doc precision — NOT bugs |
+| CLUSTER-7 | 13 | machinery (GATE_INFERENCE/normalize-map/arch-amendment) — NOT Vienna bugs |
+| **CLUSTER-4** | **17** | **gate-firing — THE genuine-bug investigation surface** |
+| **CLUSTER-5** | **4** | **workflow transitions — genuine questions** |
+
+**~60 of 73 failures are matrix-design / spec-assumption, NOT Vienna defects. Genuine Vienna-behavior investigation surface ≤21 (CLUSTER-4 + CLUSTER-5), itself likely a mix of GATE_INFERENCE observation-method gaps + real bugs.**
+
+### CRITICAL MATRIX-DESIGN IMPLICATION + DEPENDENCY
+
+For canonical-resolution fields (loan_amount, purpose, mortgage_position, lender), the matrix must assert on the **render surface** (deterministic Snapshot in outbound) or reconstruct request-time canonical_map — NOT persisted extracted_data. This creates a **dependency**: render-surface verification needs the prelim/lead-summary to fire, which CLUSTER-1 (exit_strategy gating) currently blocks. **CLUSTER-1 fixture resolution (add exit_strategy to canonical-field scenarios) is a PREREQUISITE for CLUSTER-2/3 render-surface verification.** Phase 6 sequencing must account for this.
+
+### 16th CARRY-FORWARD — probes sharpen the persistence-layer theme
+
+"Vienna persists a RAW pre-canonical intake snapshot in extracted_data; the canonical store is REQUEST-TIME (canonical_map rebuilt from messages+docs each request, applying R10-G source-hierarchy). Verification must observe canonical figures via the render surface (deterministic Snapshot) or by reconstructing canonical_map — NEVER via persisted extracted_data, which is pre-resolution." This is now distinct enough from the empirical-behavior-validation theme to likely warrant being its OWN carry-forward (verification-surface-selection discipline) vs a sub-case. Lean: TWO carry-forwards. Defer final split to Phase 8.
