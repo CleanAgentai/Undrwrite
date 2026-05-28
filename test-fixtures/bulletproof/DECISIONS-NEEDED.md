@@ -303,3 +303,10 @@ These are real Vienna behavior findings (NOT machinery issues) surfaced by post-
 - **Symptom**: Spec asserts workflow_state='admin_handoff'; Vienna's actual status='active' AND (per Finding #3 fix) admin_controlled flag check ALSO did not match.
 - **Disposition pending**: Phase 5.4 triage — verify whether Vienna actually sets admin_controlled=true when FromName="Admin" sends initial intake (vs only on link-submission flip at L2786 or per-deal pause at L1988). C01 scenario shape may not trigger Vienna's admin_controlled flip logic.
 
+
+### EMERGENT-FIND-E — F25 prelim gate correctly held when property_value source absent
+
+- **Scenarios**: F25 (spot-check 2026-05-27, 4/7 pass)
+- **Symptom**: F25 spec expected preliminary_review_admin fire=true; Vienna correctly did NOT fire because property_value=null → LTV uncomputable → `computeWillReview` ltv-precondition fails.
+- **Disposition pending**: SPEC REVISION (not Vienna bug). F25 should expect prelim NOT fire pending appraisal arrival. Sharpens carry-forward candidate "empirical-trigger validation" — Vienna's automated triggers have multi-precondition gates (LTV computability is one); spec assumptions about "complete docs = prelim fires" need PV-presence qualifier.
+- **Additional F25 fails**: `first_mortgage_balance` $225k vs $226.5k (fixture-doc precision check); `existing_mortgage_lender` undefined (R11-B-2 statement-tier extraction gap; strengthens EMERGENT-FIND-A persistence-extraction pattern).
