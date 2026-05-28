@@ -239,3 +239,67 @@ Per Q-R3 refinement: ambiguous fields default to TRANSIENT (Option B gate-infere
 ## Running Layer 3 count: 24 firm + 4 architecture-amendment candidates = 24-28 items
 
 **Trajectory:** 22 Phase 1 baseline + 2 mid-program additions + 0 firm new from Batches 3-4. Architecture-amendment candidates may convert to firm Layer 3 items in Phase 5 triage. Below 40-item escalation threshold.
+
+---
+
+## Sub-phase 5.2 / Mini-triage Findings (2026-05-27)
+
+Empirical anchors from 9-scenario sample replay + 4-scenario validation re-run (post-patches). All findings durable in `bulletproof-sample-results-1.json` + `bulletproof-mini-triage-validation.json`.
+
+### Finding #1 — Vienna R9-F intake classifier rejects FromName="Franco Maione" (architectural context, NOT a Porter decision)
+
+- **Mechanism**: `src/routes/webhook.js:530-633` — `classifyIntakeBorrower` rejects when `firstNameOf(email.fromName) === ADMIN_FIRST_NAME` ("franco") + no broker_name context + no Lic.# body-signal override (R10-A). Returns `reject:admin-as-borrower` → no deal created.
+- **Sample-replay impact**: 43 fixtures across A/B/C/D/E/F groups used FromName="Franco Maione" as spec-author error (Franco IS the admin per `ADMIN_EMAIL=franco@privatemortgagelink.com`, not a broker). All 43 produced extracted_data=undefined.
+- **Fix applied**: Mini-triage commit re-tagged all 43 fixtures' FromName + From + body-signature → Jonathan Ferrara. Mechanical, additive. No spec semantics change.
+- **Status**: RESOLVED in fixtures. Vienna's safety rule is correct behavior — no Vienna change needed.
+
+### Finding #2 — Vienna prelim outbound Supabase persistence latency exceeds 8s (machinery, NOT a Porter decision)
+
+- **Mechanism**: Vienna's `sendPreliminaryReviewToAdmin` (webhook.js:1235) runs synchronously within the inbound webhook handler, but outbound email render + Supabase messages-table insert latency is variable (8s sometimes insufficient).
+- **Empirical**: B04 missed prelim with 8s post-extraction wait; captured cleanly at 30s wait (5/5 assertions pass).
+- **Fix applied**: Mini-triage commit raised `replay.js` default `waitForOutbound` 8s → 30s. Env var override `BULLETPROOF_WAIT_OUTBOUND_MS` retained for tuning.
+- **Status**: RESOLVED in machinery.
+
+### Finding #3 — Vienna persists admin-handoff as `admin_controlled` boolean, NOT status enum
+
+- **Mechanism**: `src/routes/webhook.js:1988, 2786, 2818` — admin_controlled boolean flag flipped on deal; status remains `active`. No `admin_handoff` status enum value exists in Vienna.
+- **Fix applied**: Mini-triage commit updated `normalize-map.js` `resolveStatus()` to accept full deal object; special-case `specStatus='admin_handoff'` → check `deal.admin_controlled === true`.
+- **Status**: RESOLVED in normalize-map. C01 still failed in validation re-run — Phase 5.4 triage needed to verify Vienna actually sets admin_controlled=true on FromName="Admin" intake (the C01 scenario shape).
+
+### Finding #4 — B06 + B04 full-pass validates 3-layer assertion framework end-to-end (positive validation)
+
+- **Empirical**: B06 (Group B awaiting_collateral) and B04 (preliminary_review_admin dispatch) both achieve full 5/5 assertion pass post-patches. Layer 1 STRUCTURAL + Layer 1 GATES + Layer 1 WORKFLOW + Layer 2 OUTBOUND all functional.
+- **Status**: NO ACTION — positive control for matrix machinery soundness.
+
+---
+
+## EMERGENT FROM SUB-PHASE 5.2 VALIDATION — Phase 5.4 triage candidates
+
+These are real Vienna behavior findings (NOT machinery issues) surfaced by post-patch validation re-run. They are empirical anchors for Phase 5.4 triage, NOT Porter decisions yet — they need Phase 5.4 disposition (Vienna bug vs spec assumption mismatch vs architectural-amendment).
+
+### EMERGENT-FIND-A — F1.LA broker_correction tier not persisting
+
+- **Scenarios**: B01 (4/7 pass), A01 (3/5 pass)
+- **Symptom**: Spec asserts `requested_loan_amount` reflects broker_correction tier value; Vienna's extracted_data retains loan_app value.
+  - B01: expected=$280k (broker correction), actual=$95k (loan_app)
+  - A01: expected=$295k (broker correction), actual=$260k (loan_app)
+- **Disposition pending**: Phase 5.4 triage — Vienna F1.LA implementation gap, OR spec assumption about correction-tier persistence vs request-time behavior mismatch, OR transient processing concept (not persisted).
+
+### EMERGENT-FIND-B — F2.DH admin_discrepancy_notification not firing for >30% discrepancy
+
+- **Scenarios**: B01
+- **Symptom**: Spec asserts admin_discrepancy_notification fires when broker_correction vs loan_app discrepancy >30%; Vienna does not fire for B01 (195% discrepancy).
+- **Disposition pending**: Phase 5.4 triage — Vienna R11-B-1 Layer 1 gate implementation gap, OR spec wording about which outbound kind is correct, OR notification routes to a different email kind.
+
+### EMERGENT-FIND-C — F4.EL elevated_ltv_band "75-80%" callout pattern absent
+
+- **Scenarios**: D03 (3/5 pass)
+- **Symptom**: Spec asserts Risk Factors callout contains "75-80%" band string for LTV=78% (in elevated band); Vienna does not include this exact string.
+- **Disposition pending**: Phase 5.4 triage — Vienna R10-C-2 implementation uses different wording, OR callout fires in different outbound kind, OR spec wording is too narrow.
+
+### EMERGENT-FIND-D — C01 admin_handoff persistence pattern
+
+- **Scenarios**: C01 (1/2 pass)
+- **Symptom**: Spec asserts workflow_state='admin_handoff'; Vienna's actual status='active' AND (per Finding #3 fix) admin_controlled flag check ALSO did not match.
+- **Disposition pending**: Phase 5.4 triage — verify whether Vienna actually sets admin_controlled=true when FromName="Admin" sends initial intake (vs only on link-submission flip at L2786 or per-deal pause at L1988). C01 scenario shape may not trigger Vienna's admin_controlled flip logic.
+

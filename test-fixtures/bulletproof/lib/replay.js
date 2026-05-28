@@ -239,9 +239,14 @@ const runScenario = async (fixtureDir, opts = {}) => {
     if (refetched) finalDealState = refetched;
   }
 
-  // Wait for Vienna to generate outbound (after extraction; should be faster
-  // since pollForDeal already waited for extraction to complete)
-  await new Promise(r => setTimeout(r, 8000));
+  // Wait for Vienna to generate outbound (after extraction).
+  // Mini-triage Finding #2 (2026-05-27): default raised from 8s → 30s.
+  // Empirical: B04 prelim missed at 8s, captured cleanly at 30s. Vienna's
+  // sendPreliminaryReviewToAdmin runs synchronously after extraction, but
+  // outbound Supabase persistence + email-render latency exceeds 8s. Override
+  // via BULLETPROOF_WAIT_OUTBOUND_MS env var.
+  const waitOutboundMs = Number(process.env.BULLETPROOF_WAIT_OUTBOUND_MS || 30000);
+  await new Promise(r => setTimeout(r, waitOutboundMs));
 
   let outboundEmails = [];
   if (finalDealState?.id) {

@@ -176,7 +176,7 @@ const evalWorkflowState = (expected, captured) => {
   const expectedState = expected.layer1_structural?.workflow_state?.value;
   if (!expectedState) return null;
   const actualStatus = captured.finalDealState?.status;
-  const matches = resolveStatus(expectedState, actualStatus);
+  const matches = resolveStatus(expectedState, captured.finalDealState);
   return {
     expected: expectedState,
     actual: actualStatus,

@@ -123,12 +123,15 @@ const ARCH_AMENDMENT_FIELDS = new Set([
 // Empirical probe: Vienna uses status='under_review' for what spec calls 'active'
 // in some contexts. Need expanded mapping based on Phase 5 observation.
 // ────────────────────────────────────────────────────────────────────────────
+// Empirical anchor (mini-triage Finding #3): Vienna persists admin-handoff as
+// `status='active' + admin_controlled=true` boolean — NOT as a special status
+// enum. resolveStatus consults the full deal so it can apply the boolean rule.
 const SPEC_TO_VIENNA_STATUS = {
   active: ['active', 'under_review'], // spec 'active' may match either
   awaiting_collateral: ['awaiting_collateral'],
   awaiting_identity_confirmation: ['awaiting_identity_confirmation'],
   ltv_escalated: ['ltv_escalated'],
-  admin_handoff: ['admin_handoff', 'admin_controlled_true'], // pseudo-status; may map to admin_controlled boolean
+  admin_handoff: ['admin_handoff'], // also matched via deal.admin_controlled === true
   completed: ['completed'],
 };
 
@@ -156,7 +159,15 @@ const resolveSpecField = (specKey, extracted_data) => {
   return { value: extracted_data?.[mapped], classification: 'direct_or_remapped', rationale: `Mapped to extracted_data.${mapped}` };
 };
 
-const resolveStatus = (specStatus, viennaStatus) => SPEC_TO_VIENNA_STATUS[specStatus]?.includes(viennaStatus) || specStatus === viennaStatus;
+const resolveStatus = (specStatus, deal) => {
+  // Accept either a string (legacy: just the status enum) or a deal object
+  // (preferred: {status, admin_controlled, ...}). Mini-triage Finding #3:
+  // admin_handoff is satisfied by admin_controlled boolean regardless of status.
+  const viennaStatus = typeof deal === 'string' ? deal : deal?.status;
+  const adminControlled = typeof deal === 'object' && deal?.admin_controlled === true;
+  if (specStatus === 'admin_handoff' && adminControlled) return true;
+  return SPEC_TO_VIENNA_STATUS[specStatus]?.includes(viennaStatus) || specStatus === viennaStatus;
+};
 
 module.exports = {
   SPEC_TO_VIENNA_KEY,
