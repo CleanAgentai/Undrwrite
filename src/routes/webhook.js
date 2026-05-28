@@ -2381,6 +2381,67 @@ ${draftEmail}
           const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message, dealMessages);
           await saveDraftAndPreview(sweepBrokerFacingDraft(polishedEmail), borrowerSubject, 'conditions');
         }
+      } else if (existingDeal.status === 'awaiting_collateral') {
+        // FRANCO-PREDICTED-Q9 (2026-05-28): admin-override path out of the
+        // collateral hold. awaiting_collateral previously had NO admin-reply
+        // branch — an admin reply fell through the chain entirely. Now an admin
+        // 'approved'/override transitions the deal back to active WITH an audit
+        // trail (collateral_override_at + collateral_override_by stored in
+        // extracted_data — mirrors the collateral_offered persistence pattern at
+        // the broker-reply branch; NO new DB column / migration), then proceeds
+        // exactly like an approval (doc-request draft). 'rejected'/conditions
+        // mirror the ltv_escalated/under_review branches.
+        const { intent, message } = await aiService.parseAdminReply(email.textBody);
+        console.log('Admin intent for awaiting_collateral deal:', intent);
+        const dealMessages = await dealsService.getMessages(existingDeal.id);
+
+        if (intent === 'approved') {
+          const _q9OverrideAt = new Date().toISOString();
+          const _q9UpdatedExtracted = {
+            ...(existingDeal.extracted_data || {}),
+            collateral_override_at: _q9OverrideAt,
+            collateral_override_by: email.from,
+          };
+          const _q9Update = { status: 'active', extracted_data: _q9UpdatedExtracted };
+          if (!existingDeal.prelim_approved_at) _q9Update.prelim_approved_at = _q9OverrideAt;
+          await dealsService.update(existingDeal.id, _q9Update);
+          existingDeal.status = 'active';
+          existingDeal.extracted_data = _q9UpdatedExtracted;
+          if (_q9Update.prelim_approved_at) existingDeal.prelim_approved_at = _q9OverrideAt;
+          console.log(`FRANCO-PREDICTED-Q9: admin override on awaiting_collateral → active (collateral_override_at=${_q9OverrideAt}, by=${email.from})`);
+          const existingDocs = await dealsService.getDocumentsByDeal(existingDeal.id);
+          const _q9DocGreeting = selectGreetingFirstName({
+            broker_name: existingDeal.extracted_data?.broker_name,
+            sender_name: existingDeal.extracted_data?.sender_name,
+            borrower_name: existingDeal.extracted_data?.borrower_name,
+            sender_type: existingDeal.extracted_data?.sender_type,
+          });
+          const docRequestEmail = await aiService.generateDocumentRequestEmail(
+            existingDeal.extracted_data,
+            existingDeal.ownership_type,
+            existingDeal.has_application_form,
+            existingDeal.has_pnw_statement,
+            existingDocs,
+            dealMessages,
+            { isPostApproval: true, greetingFirstName: _q9DocGreeting }
+          );
+          await saveDraftAndPreview(sweepBrokerFacingDraft(docRequestEmail), borrowerSubject, 'approval_doc_request');
+        } else if (intent === 'rejected') {
+          console.log('Admin rejected awaiting_collateral deal — generating draft rejection');
+          const adminDeclineReason = extractDeclineReason(message);
+          const _q9RejGreeting = selectGreetingFirstName({
+            broker_name: existingDeal.extracted_data?.broker_name,
+            sender_name: existingDeal.extracted_data?.sender_name,
+            borrower_name: existingDeal.extracted_data?.borrower_name,
+            sender_type: existingDeal.extracted_data?.sender_type,
+          });
+          const rejectionEmail = await aiService.generateRejectionEmail(existingDeal.extracted_data, adminDeclineReason, { greetingFirstName: _q9RejGreeting });
+          await saveDraftAndPreview(sweepBrokerFacingDraft(rejectionEmail), borrowerSubject, 'rejection');
+        } else {
+          console.log('Admin sent conditions/notes on awaiting_collateral — generating draft response');
+          const polishedEmail = await aiService.generateAdminResponseEmail(existingDeal.extracted_data, message, dealMessages);
+          await saveDraftAndPreview(sweepBrokerFacingDraft(polishedEmail), borrowerSubject, 'conditions');
+        }
       } else if (existingDeal.status === 'under_review') {
         const { intent, message } = await aiService.parseAdminReply(email.textBody);
         console.log('Admin intent for under_review deal:', intent);
