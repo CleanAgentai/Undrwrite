@@ -20,24 +20,44 @@ const listBulletproofDeals = async (supabase) => {
   return dealIds;
 };
 
-// Delete deal + messages + documents matching a specific RUN_TAG.
+// Delete deal + messages + documents. Two correlation modes per Sub-phase 5.2:
+//   1. opts.dealId: explicit deal_id from runScenario return value (PRIMARY,
+//      most reliable — bypasses MessageID pattern matching brittleness)
+//   2. runTag string: fallback MessageID pattern matching (preserved for
+//      cases where dealId is unavailable, e.g., scenario failed to create
+//      a deal but left partial state)
+//
 // runTag format: 'bulletproof-{scenarioId}-{timestamp}'
 const cleanupRun = async (supabase, runTag, opts = {}) => {
-  const { verbose = false } = opts;
+  const { verbose = false, dealId = null } = opts;
   if (!runTag || !runTag.startsWith('bulletproof-')) {
     throw new Error(`cleanupRun: refusing — runTag '${runTag}' must start with 'bulletproof-'`);
   }
-  // Find deal IDs associated with this runTag (via messages.external_message_id LIKE 'runTag-%')
-  const tagPattern = `${runTag}%`;
-  const { data: msgs, error: msgErr } = await supabase
+
+  let dealIds = [];
+
+  if (dealId) {
+    // PRIMARY: explicit deal_id from runScenario (Sub-phase 5.2 patch)
+    dealIds = [dealId];
+  } else {
+    // FALLBACK: MessageID pattern matching (legacy correlation)
+    const tagPattern = `${runTag}%`;
+    const { data: msgs, error: msgErr } = await supabase
+      .from('messages')
+      .select('id, deal_id, external_message_id')
+      .ilike('external_message_id', tagPattern);
+    if (msgErr) throw new Error(`cleanupRun lookup: ${msgErr.message}`);
+    dealIds = [...new Set((msgs || []).map(m => m.deal_id).filter(Boolean))];
+  }
+
+  // Re-query messages for the deal(s) to get count for return-stats
+  const { data: msgs } = await supabase
     .from('messages')
-    .select('id, deal_id, external_message_id')
-    .ilike('external_message_id', tagPattern);
-  if (msgErr) throw new Error(`cleanupRun lookup: ${msgErr.message}`);
-  const dealIds = [...new Set((msgs || []).map(m => m.deal_id).filter(Boolean))];
+    .select('id')
+    .in('deal_id', dealIds);
 
   if (dealIds.length === 0) {
-    if (verbose) console.log(`[cleanupRun] no deals found for runTag '${runTag}'`);
+    if (verbose) console.log(`[cleanupRun] no deals found for runTag '${runTag}' (dealId=${dealId})`);
     return { deletedDeals: 0, deletedMessages: 0, deletedDocs: 0 };
   }
 
@@ -51,10 +71,11 @@ const cleanupRun = async (supabase, runTag, opts = {}) => {
   const { error: dealsErr } = await supabase.from('deals').delete().in('id', dealIds);
   if (dealsErr) throw new Error(`cleanupRun deals delete: ${dealsErr.message}`);
 
+  const messageCount = msgs ? msgs.length : 0;
   if (verbose) {
-    console.log(`[cleanupRun] runTag='${runTag}' deleted ${dealIds.length} deal(s) + ${msgs.length} message(s) + cascade-deleted documents`);
+    console.log(`[cleanupRun] runTag='${runTag}' dealId=${dealId} deleted ${dealIds.length} deal(s) + ${messageCount} message(s) + cascade-deleted documents`);
   }
-  return { deletedDeals: dealIds.length, deletedMessages: msgs.length };
+  return { deletedDeals: dealIds.length, deletedMessages: messageCount };
 };
 
 // Admin command: delete ALL bulletproof-tagged deals. Requires explicit opts.confirm.

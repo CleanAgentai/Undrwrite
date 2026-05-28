@@ -107,7 +107,7 @@ const filterByLayer3 = (scenarioDirs) => {
     console.log(`  → ${result.status} (pass=${result.summary?.pass_count || 0} fail=${result.summary?.fail_count || 0})`);
 
     if (captured && supabase) {
-      try { await cleanupRun(supabase, captured.runTag, { verbose: false }); } catch (e) { console.warn(`  cleanup warning: ${e.message}`); }
+      try { await cleanupRun(supabase, captured.runTag, { verbose: false, dealId: captured.dealId }); } catch (e) { console.warn(`  cleanup warning: ${e.message}`); }
     }
 
     if (result.status === 'fail' && !opts.continueOnFail) {

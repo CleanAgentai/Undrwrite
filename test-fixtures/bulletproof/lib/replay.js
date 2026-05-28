@@ -54,7 +54,42 @@ const pollForDeal = async (supabase, runTag, opts = {}) => {
   throw new Error(`pollForDeal timeout — runTag '${runTag}' not found after ${timeoutMs}ms`);
 };
 
-// Fetch outbound Postmark messages tagged with runTag (matches In-Reply-To OR recipient pattern)
+// PRIMARY: fetch outbound messages from Supabase by deal_id correlation.
+// Sub-phase 5.2 machinery patch (2026-05-27): runTag-in-subject correlation
+// did not work because Vienna's outbound emails are generated via aiService
+// templates with deterministic subjects ("ACTION REQUIRED: PRELIMINARY
+// Review — {borrower} — {ltv}% LTV") — they don't echo the inbound subject
+// prefix. Empirical probe of Supabase messages table confirmed this.
+// Deal_id is the durable correlation key.
+//
+// Returns array shaped for assertEngine matchEmail compatibility (Subject +
+// TextBody + HtmlBody fields, even though Vienna stores HTML in single body
+// column).
+const fetchOutboundFromSupabase = async (supabase, dealId) => {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id, deal_id, direction, subject, body, external_message_id, created_at')
+    .eq('deal_id', dealId)
+    .eq('direction', 'outbound')
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`fetchOutboundFromSupabase: ${error.message}`);
+  return (data || []).map(m => ({
+    Subject: m.subject || '',
+    TextBody: m.body || '',
+    HtmlBody: m.body || '',
+    external_message_id: m.external_message_id,
+    created_at: m.created_at,
+  }));
+};
+
+// PRESERVED (per Q-S2-4): Postmark API outbound fetch. Default replay path
+// uses fetchOutboundFromSupabase (above); this helper retained as exported
+// utility for potential future use cases where Postmark-side metadata
+// (delivery status, opens, bounces) matters.
+// CLOSURE CONDITION: if a future scenario needs Postmark-side outbound
+// observation (e.g., bounce detection, delivery confirmation), this helper
+// is available — but default Supabase correlation is preferred for assertion
+// purposes.
 const fetchOutboundEmails = async (runTag, opts = {}) => {
   const { sinceMinutes = 30 } = opts;
   const fromDate = new Date(Date.now() - sinceMinutes * 60 * 1000).toISOString();
@@ -64,7 +99,6 @@ const fetchOutboundEmails = async (runTag, opts = {}) => {
   });
   if (!res.ok) throw new Error(`Postmark outbound fetch: ${res.status}`);
   const json = await res.json();
-  // Filter by runTag in subject body — bulletproof tag flows into Subject prefix via MessageID
   return (json.Messages || []).filter(m => {
     return (m.Subject || '').includes(runTag) ||
            (m.TextBody || '').includes(runTag) ||
@@ -132,8 +166,8 @@ const runScenario = async (fixtureDir, opts = {}) => {
     const ev = taggedEvents[i];
     // Resolve attachment refs (inline base64 from documents/)
     const resolved = resolveAttachmentRefs(ev.postmark, fixtureDir);
-    // Inject runTag into subject so outbound fetch can correlate
-    resolved.Subject = `[${runTag}] ${resolved.Subject}`;
+    // Sub-phase 5.2 patch: removed runTag subject injection. Correlation is
+    // via deal_id (post-poll), not subject-string matching.
     if (verbose) console.log(`[replay ${scenario.id}] event ${i} (${ev.kind}) → POST webhook`);
     await postToWebhook(resolved);
     // Fast-forward delay (per Q2): ~500ms between POSTs (vs delayFromPreviousMs original)
@@ -148,27 +182,31 @@ const runScenario = async (fixtureDir, opts = {}) => {
     }
   }
 
-  // Final state capture: re-fetch deal + outbound emails
+  // Final state capture: re-fetch deal + outbound emails via deal_id correlation
   let finalDealState = dealRecord;
   if (dealRecord?.id) {
     const { data: refetched } = await supabase.from('deals').select('*').eq('id', dealRecord.id).single();
     if (refetched) finalDealState = refetched;
   }
 
-  // Wait a beat for Vienna to process + send any outbound
-  await new Promise(r => setTimeout(r, 3000));
+  // Wait for Vienna to process + generate outbound
+  await new Promise(r => setTimeout(r, 5000));
 
   let outboundEmails = [];
-  try {
-    outboundEmails = await fetchOutboundEmails(runTag, { sinceMinutes: 10 });
-  } catch (e) {
-    if (verbose) console.warn(`[replay ${scenario.id}] fetchOutboundEmails warning: ${e.message}`);
+  if (finalDealState?.id) {
+    try {
+      // Sub-phase 5.2 patch: Supabase-by-deal-id correlation (replaces Postmark API polling)
+      outboundEmails = await fetchOutboundFromSupabase(supabase, finalDealState.id);
+    } catch (e) {
+      if (verbose) console.warn(`[replay ${scenario.id}] fetchOutboundFromSupabase warning: ${e.message}`);
+    }
   }
 
   const executionDurationMs = Date.now() - startTime;
   return {
     runTag,
     scenarioId: scenario.id,
+    dealId: finalDealState?.id,
     finalDealState,
     outboundEmails,
     executionDurationMs,
@@ -185,6 +223,7 @@ module.exports = {
   triggerChaseCron,
   postToWebhook,
   pollForDeal,
-  fetchOutboundEmails,
+  fetchOutboundFromSupabase,
+  fetchOutboundEmails, // preserved per Q-S2-4 for potential future Postmark-side observation
   rewriteEventMessageIds,
 };

@@ -77,8 +77,8 @@ const findFixtureDir = (id) => {
   if (flags.cleanup && captured.mode === 'live') {
     try {
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-      const { deletedDeals } = await cleanupRun(supabase, captured.runTag, { verbose: flags.verbose });
-      console.log(`  cleanup: deleted ${deletedDeals} deal(s)`);
+      const { deletedDeals, deletedMessages } = await cleanupRun(supabase, captured.runTag, { verbose: flags.verbose, dealId: captured.dealId });
+      console.log(`  cleanup: deleted ${deletedDeals} deal(s) + ${deletedMessages} message(s)`);
     } catch (e) {
       console.warn(`  cleanup warning: ${e.message}`);
     }
