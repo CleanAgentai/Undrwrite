@@ -1,0 +1,19 @@
+{
+  "scenario_id": "F21",
+  "spec_version": "1.0",
+  "rationale_source": "Grace-T4 Section 9 JS-render — F1 multi-field extraction across less-common loan_app sections",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 460000, "source_classification": "loan_application", "rationale": "F1.LA standard extraction." },
+      "annual_income": { "value": 168000, "source_classification": "loan_application", "rationale": "F1.AI per A41 disposition." }
+    },
+    "gate_states": { "section_9_content_detected": { "value": true, "rationale": "Section 9 populated; Grace-T4 JS-render handles non-canonical content (employment, investment properties, exit strategy)." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Stantec|employment", "rationale": "Section 9 employment surfaced." }, { "pattern": "exit strategy|stay-in-property|renovation", "rationale": "Section 9 exit strategy + use-of-funds surfaced." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

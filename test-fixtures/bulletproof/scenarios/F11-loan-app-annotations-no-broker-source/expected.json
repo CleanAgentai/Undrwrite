@@ -1,0 +1,20 @@
+{
+  "scenario_id": "F11",
+  "spec_version": "1.0",
+  "rationale_source": "R11-B-1 Layer 2 INVERSE: annotations preserved when no broker source (sanitization trigger is broker-source presence)",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 280000, "source_classification": "loan_application", "rationale": "F1.LA docs-tier (broker silent); loan_app source canonical." }
+    },
+    "gate_states": {
+      "loan_app_annotations_sanitized": { "value": false, "rationale": "R11-B-1 Layer 2 sanitization trigger is broker-source presence; broker silent → annotations preserved (inverse of A07)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "280,000", "rationale": "F1.LA docs-tier value." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

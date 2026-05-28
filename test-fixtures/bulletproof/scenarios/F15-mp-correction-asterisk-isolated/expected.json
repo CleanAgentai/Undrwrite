@@ -1,0 +1,18 @@
+{
+  "scenario_id": "F15",
+  "spec_version": "1.0",
+  "rationale_source": "R11-A asterisk-tolerance isolated baseline (intentional overlap with A24 per Group A vs Group F overlap principle)",
+  "layer1_structural": {
+    "canonical_map": {
+      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_correction", "rationale": "F1.MP '2nd mortgage*' parsed via R11-A asterisk-tolerance per A24 pattern." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Position correction only." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "2nd mortgage|second mortgage", "rationale": "F1.MP per R11-A." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

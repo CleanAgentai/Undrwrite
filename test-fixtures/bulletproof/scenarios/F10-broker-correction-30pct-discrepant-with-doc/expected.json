@@ -1,0 +1,19 @@
+{
+  "scenario_id": "F10",
+  "spec_version": "1.0",
+  "rationale_source": "R11-B-1 Layer 1 isolated >30% threshold (broker correction edge); F2.DH activates",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 290000, "source_classification": "broker_correction", "rationale": "Broker correction $290k; loan_app $180k SUPPRESSED per R11-B-1 Layer 1 (38% discrepancy from broker, above 30% threshold)." }
+    },
+    "gate_states": { "discrepancyHold": { "value": true, "rationale": "F2.DH activated per R11-B-1." } },
+    "workflow_state": { "value": "active", "rationale": "Held for admin." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": false, "rationale": "F2.PD SUPPRESSED." },
+      { "kind": "admin_discrepancy_notification", "expected_fire": true, "must_not_include": [{ "pattern": "\\$180,000(?!.{0,30}stale|.{0,30}draft)", "rationale": "Suppressed loan_app value not canonical." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

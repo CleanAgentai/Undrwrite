@@ -1,0 +1,23 @@
+{
+  "scenario_id": "F06",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PC × F4.PC interaction — both source-tuple capture AND callout injection on same input (A22 + D04 combined assertion)",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code_tuples": { "expected_count": 2, "expected_values": ["M5N 1V3", "M5N 1V4"], "rationale": "F1.PC captures both per A22 pattern." }
+    },
+    "gate_states": { "postal_code_discrepancy_detected": { "value": true, "rationale": "F1.PC distinct-tuple count >1 → F4.PC callout triggered per R11-C M2." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [
+        { "pattern": "M5N 1V3", "rationale": "ASSERTION-1 (F1.PC capture surface): first postal in callout." },
+        { "pattern": "M5N 1V4", "rationale": "ASSERTION-1: second postal in callout." }
+      ], "must_not_include": [
+        { "pattern": "287 Glencairn.{0,30}M5N 1V[34]", "rationale": "ASSERTION-2 (F4.PC × R11-C M1): Snapshot Property Address row street-address-only." }
+      ] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

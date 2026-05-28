@@ -1,0 +1,18 @@
+{
+  "scenario_id": "F18",
+  "spec_version": "1.0",
+  "rationale_source": "Spousal-joint × 60% LTV control (no band callout / no correction / clean docs) — isolates F1 aggregation",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value_includes": ["David Okafor", "Adaobi Okafor"], "source_classification": "broker_initial_intent", "rationale": "F1.BN spousal-joint." }
+    },
+    "gate_states": { "elevated_ltv_band": { "value": false, "rationale": "60% LTV — no callout." }, "discrepancyHold": { "value": false, "rationale": "Clean." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "David Okafor.{0,40}Adaobi Okafor|Adaobi Okafor.{0,40}David Okafor", "rationale": "Joint applicants in Snapshot." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

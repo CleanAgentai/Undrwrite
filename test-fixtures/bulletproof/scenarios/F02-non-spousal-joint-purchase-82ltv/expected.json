@@ -1,0 +1,27 @@
+{
+  "scenario_id": "F02",
+  "spec_version": "1.0",
+  "rationale_source": "Cross-family: F1 non-spousal-joint #7 × F4.HL high-LTV × F2.AC awaiting_collateral × purchase",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value_includes": ["David Okafor", "Jennifer Tran"], "source_classification": "broker_initial_intent", "rationale": "F1 non-spousal joint per Layer 3 #7 (b) — separate income + combined LTV." },
+      "transaction_type": { "value": "purchase", "source_classification": "broker_initial_intent", "rationale": "F1.TT purchase." }
+    },
+    "gate_states": {
+      "high_ltv_detected": { "value": true, "rationale": "LTV 82% > 80%; F4.HL triggered." },
+      "awaiting_collateral": { "value": true, "rationale": "F2.AC activated per R10-C-1." }
+    },
+    "workflow_state": { "value": "awaiting_collateral", "rationale": "F2.AC state per R10-C-1." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_collateral_ask", "expected_fire": true, "must_include": [
+        { "pattern": "David Okafor.{0,40}Jennifer Tran|Jennifer Tran.{0,40}David Okafor", "rationale": "ASSERTION-1: joint applicants in collateral-ask greeting." },
+        { "pattern": "collateral", "rationale": "ASSERTION-2: F4.HL dedicated-generator content." }
+      ], "must_not_include": [{ "pattern": "Snapshot|Deal Snapshot", "rationale": "ASSERTION-3: dedicated-bypass excludes Snapshot." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#7", "scope": "non-spousal joint aggregation × F4.HL routing question (single addressee vs joint)", "phase5_placeholder": "(b) separate income + combined LTV + joint greeting" }
+  ]
+}

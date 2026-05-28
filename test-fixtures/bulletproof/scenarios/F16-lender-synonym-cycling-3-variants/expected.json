@@ -1,0 +1,18 @@
+{
+  "scenario_id": "F16",
+  "spec_version": "1.0",
+  "rationale_source": "F1.EL multi-variant LENDER_SYNONYMS within thread + alt-lender disambiguation (RBC entity vs BMO alternative-quote consideration)",
+  "layer1_structural": {
+    "canonical_map": {
+      "existing_mortgage_lender": { "value": "Royal Bank of Canada", "source_classification": "mortgage_statement", "rationale": "F1.EL existing 1st per docs-tier; RBC entity normalized across 'RBC' and 'Royal Bank' variants. BMO mention is alt-quote consideration, NOT lender update." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Synonym normalization; alt-quote mention not entity-change." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Royal Bank|RBC", "rationale": "ASSERTION-1: F1.EL canonical RBC entity." }], "must_not_include": [{ "pattern": "existing.{0,20}BMO|switched.{0,20}BMO", "rationale": "ASSERTION-2: BMO mention preserved as alt-consideration, not entity-update." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

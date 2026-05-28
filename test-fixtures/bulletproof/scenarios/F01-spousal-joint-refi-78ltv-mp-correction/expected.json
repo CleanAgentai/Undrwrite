@@ -1,0 +1,26 @@
+{
+  "scenario_id": "F01",
+  "spec_version": "1.0",
+  "rationale_source": "Cross-family interaction: F1.MP broker_correction × F4.EL elevated-band × spousal-joint aggregation — 5 dims stacked",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value_includes": ["Marcus Webb", "Patricia Webb"], "source_classification": "broker_initial_intent", "rationale": "F1.BN joint per docs (E11 spousal-joint disposition)." },
+      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_correction", "rationale": "F1.MP broker_correction wins per R11-A asterisk-tolerance + R10-G." }
+    },
+    "gate_states": {
+      "elevated_ltv_band": { "value": true, "rationale": "LTV 78% in 75-80% band; F4.EL triggered per R10-C-2." },
+      "discrepancyHold": { "value": false, "rationale": "Position correction not value discrepancy." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [
+        { "pattern": "Marcus Webb.{0,40}Patricia Webb|Patricia Webb.{0,40}Marcus Webb", "rationale": "ASSERTION-1: aggregation surfaces both applicants." },
+        { "pattern": "2nd mortgage|second mortgage", "rationale": "ASSERTION-2: F1.MP correction integrated." },
+        { "pattern": "75-80%|elevated", "rationale": "ASSERTION-3: F4.EL callout (cross-family interaction with correction)." }
+      ] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

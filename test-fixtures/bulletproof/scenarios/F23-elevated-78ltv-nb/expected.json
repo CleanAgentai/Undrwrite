@@ -1,0 +1,21 @@
+{
+  "scenario_id": "F23",
+  "spec_version": "1.0",
+  "rationale_source": "F4.EL elevated × F1.PC NB FSA cross-axis interaction",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code": { "value": "E3B 5C2", "source_classification": "broker_initial_intent", "rationale": "F1.PC E-prefix → NB per R10-D." }
+    },
+    "gate_states": {
+      "elevated_ltv_band": { "value": true, "rationale": "ASSERTION-1: LTV 78% triggers F4.EL." },
+      "province_inferred": { "value": "NB", "rationale": "ASSERTION-2: F1.PC E-prefix → NB inference per R10-D." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard NB refi with elevated callout." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "75-80%|elevated", "rationale": "F4.EL callout." }, { "pattern": "NB|New Brunswick", "rationale": "Province per R10-D." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

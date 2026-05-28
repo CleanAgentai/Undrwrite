@@ -1,0 +1,20 @@
+{
+  "scenario_id": "F20",
+  "spec_version": "1.0",
+  "rationale_source": "F3.FL × F2.FH dual-gate trigger from same input (sibling to B10 F2.FH focus + C04 F3.FL focus; F20 asserts both)",
+  "layer1_structural": {
+    "intake_classification": { "value": "file_hosting_link", "rationale": "F3.FL pre-create routing." },
+    "gate_states": {
+      "file_hosting_link_detected": { "value": true, "rationale": "ASSERTION-1: F2.FH triggered by Google Drive URL pattern." },
+      "vienna_paused_per_deal": { "value": true, "rationale": "ASSERTION-2: F2.FH → Vienna paused." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Deal created; processing paused per F2.FH." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "admin_handoff_notification", "expected_fire": true, "must_include": [{ "pattern": "Google Drive|file hosting|drive\\.google", "rationale": "Link-shape surfaced to admin." }] },
+      { "kind": "broker_facing_auto_response", "expected_fire": false, "rationale": "Vienna paused; no broker-facing auto-response." }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

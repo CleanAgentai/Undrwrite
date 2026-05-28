@@ -1,0 +1,28 @@
+{
+  "scenario_id": "F09",
+  "spec_version": "1.0",
+  "rationale_source": "R11-B-1 Layer 1+2 × purchase × elevated-band triple interaction",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 570000, "source_classification": "broker_initial_intent", "rationale": "Broker asserts $570k at intake (BW=CT); loan_app $475k SUPPRESSED per R11-B-1 Layer 1 (>30% discrepancy from broker)." },
+      "transaction_type": { "value": "purchase", "source_classification": "broker_initial_intent", "rationale": "F1.TT." }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": true, "rationale": "ASSERTION-1: R11-B-1 Layer 1 suppression + F2.DH activation." },
+      "elevated_ltv_band": { "value": true, "rationale": "ASSERTION-2: LTV 76% in 75-80% band; F4.EL fires." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Held for admin." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": false, "rationale": "F2.PD SUPPRESSED by F2.DH." },
+      { "kind": "admin_discrepancy_notification", "expected_fire": true, "must_include": [
+        { "pattern": "discrepancy|570,000", "rationale": "ASSERTION-1: discrepancy surfaced." },
+        { "pattern": "75-80%|elevated|76%", "rationale": "ASSERTION-3: F4.EL callout (cross-family interaction with discrepancy hold)." }
+      ], "must_not_include": [
+        { "pattern": "\\$475,000(?!.{0,30}draft|.{0,30}stale)", "rationale": "R11-B-1 Layer 1 suppressed value not presented as canonical." }
+      ] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,41 @@
+{
+  "scenario_id": "F25",
+  "spec_version": "1.0",
+  "rationale_source": "16th carry-forward CANDIDATE: LLM-narrative semantic-invariant verification. R10-G OBJECTIVE-vs-INTENT framing dictates broker-authoritative for INTENT fields; narrative is an INTENT consumer; semantic invariant = narrative reflects verified sources only, no fabrication, broker statement preserved when present.\n\nEMPIRICAL ANCHOR: pre-R11-B-1, Vienna's prelim cited 'loan application requests $95,000' from blank-template AcroForm annotations — fabrication from unverified source. Post-R11-B-1 Layer 2 sanitization closes the loan_application annotation case; F25 generalizes the semantic-invariant across all canonical fields.\n\nKey invariant: if no source supplies a value for a canonical field, narrative MUST NOT cite a figure for that field.",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 280000, "source_classification": "broker_initial_intent", "rationale": "F1.LA broker_initial_intent — broker stated $280k explicitly; loan_app omits LA field, no other source. Verified broker-source." },
+      "property_value": { "value": null, "source_classification": "no_source", "rationale": "F1.PV no source: broker silent on PV, no appraisal attached, no doc-tier source. Canonical_map property_value is UNSET. Critical: narrative must not invent." },
+      "first_mortgage_balance": { "value": 225000, "source_classification": "mortgage_statement", "rationale": "F1.FB statement-tier per R11-B-2." },
+      "existing_mortgage_lender": { "value": "Royal Bank of Canada", "source_classification": "mortgage_statement", "rationale": "F1.EL statement-tier." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "No discrepancy; missing-source distinct from discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Awaiting appraisal." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "280,000|\\$280k", "rationale": "ASSERTION-1 (must_include): broker-stated F1.LA value MUST appear — broker has stated value, narrative must reference (R10-G INTENT consumer)." },
+          { "pattern": "Marcus Webb", "rationale": "F1.BN broker-source value." },
+          { "pattern": "Royal Bank|RBC", "rationale": "F1.EL statement-tier value." }
+        ],
+        "must_not_include": [
+          { "pattern": "property value.{0,40}\\$\\d", "rationale": "ASSERTION-2 (must_not_include): NO property_value figure cited — F1.PV has no source; narrative MUST NOT fabricate. Semantic-invariant LOAD-BEARING ASSERTION." },
+          { "pattern": "appraised at \\$\\d|appraisal.{0,30}\\$\\d", "rationale": "ASSERTION-2: NO appraisal value cited — no appraisal attached, narrative must not invent." },
+          { "pattern": "LTV.{0,20}\\d{1,3}%", "rationale": "ASSERTION-3 (derived-canonical anti-fab): NO LTV cited — derives from PV which has no source; therefore LTV is unknown; narrative must not invent LTV figure either. Cascading anti-fab discipline." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "EMERGENT-SEMANTIC-INVARIANT-1",
+      "scope": "LLM-narrative fabrication boundary: must_not_include patterns cover canonical-field absence; broader cases (e.g., LLM context-window includes related-but-not-canonical references; narrative-tone uncertainty between 'pending appraisal' vs 'awaiting appraisal' vs 'no appraisal provided'; whether to surface 'PV not yet known' as explicit narrative element vs omit silently) may need additional spec articulation",
+      "phase5_placeholder": "spec captures core must_not_include / must_include pattern as load-bearing; refinement during Phase 5 triage may add narrative-tone specifications",
+      "carry_forward_candidate": "16th — LLM-narrative semantic-invariant verification (per Phase 1 + Phase 4 framing)"
+    }
+  ]
+}

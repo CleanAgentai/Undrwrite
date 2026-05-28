@@ -1,0 +1,20 @@
+{
+  "scenario_id": "F19",
+  "spec_version": "1.0",
+  "rationale_source": "F3.AH × F4.EL cross-family interaction — admin-handoff intake composition with elevated-band callout. Behavior derivation not fully grounded in existing template lineage; Layer 3 candidate.",
+  "layer1_structural": {
+    "intake_classification": { "value": "admin_handoff", "rationale": "F3.AH per admin-direction subject pattern." },
+    "gate_states": {
+      "elevated_ltv_band": { "value": true, "rationale": "LTV 78% triggers F4.EL." }
+    },
+    "workflow_state": { "value": "admin_handoff", "rationale": "F3.AH state." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "admin_handoff_draft_with_callout", "expected_fire": true, "phase5_emergent_question": "Does admin-handoff path COMPOSE with F4.EL callout (callout still injected) or BYPASS (admin handler omits standard callouts)? Behavior not externally derivable from F3.AH or F4.EL template lineage individually.", "must_include_if_compose": [{ "pattern": "75-80%|elevated", "rationale": "F4.EL composes through admin-handoff path." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "EMERGENT-CROSS-FAMILY-INTERACTION-1", "scope": "F3.AH × F4.EL composition vs bypass — behavior not derivable from individual template lineage; Phase 5 triage reveals empirical anchor for which composition rule applies", "phase5_placeholder": "spec assumes compose (callout injected through admin-handoff draft); if bypass, Phase 6 decision" }
+  ]
+}

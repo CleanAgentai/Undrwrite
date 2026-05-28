@@ -1,0 +1,24 @@
+{
+  "scenario_id": "F12",
+  "spec_version": "1.0",
+  "rationale_source": "Spousal-joint × elevated-LTV × broker-silent — chase email addressing for joint applicants",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value_includes": ["Patricia Simmons", "James Simmons"], "source_classification": "broker_initial_intent", "rationale": "F1.BN joint." }
+    },
+    "gate_states": {
+      "elevated_ltv_band": { "value": true, "rationale": "ASSERTION-1: LTV 78% triggers F4.EL." },
+      "broker_silence_threshold_pending": { "value": "72h per Layer 3 #6", "rationale": "ASSERTION-2: F4.CH chase fires after 72h." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting broker response." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Patricia Simmons.{0,40}James Simmons|James Simmons.{0,40}Patricia Simmons", "rationale": "Joint applicants in prelim." }, { "pattern": "75-80%|elevated", "rationale": "F4.EL callout." }] },
+      { "kind": "broker_facing_chase_email", "expected_fire": true, "phase5_temporal_dependency": "fires after 72h silence", "must_include": [{ "pattern": "Patricia.{0,40}James|James.{0,40}Patricia|Simmons", "rationale": "ASSERTION-3 (cross-family): chase greeting addresses joint applicants correctly (not single-applicant default)." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#6", "scope": "broker-silent timing × joint-applicant chase addressing", "phase5_placeholder": "72h fire; joint greeting" }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "scenario_id": "F04",
+  "spec_version": "1.0",
+  "rationale_source": "R4-RESIDUAL-1 combined-LTV escalation × F1.MP correction × elevated-band interaction",
+  "layer1_structural": {
+    "canonical_map": {
+      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_correction", "rationale": "F1.MP confirmed via R11-A asterisk-tolerance correction." },
+      "first_mortgage_balance": { "value": 380000, "source_classification": "mortgage_statement", "rationale": "F1.FB existing 1st per R11-B-2." },
+      "requested_loan_amount": { "value": 185000, "source_classification": "broker_initial_intent", "rationale": "F1.LA new 2nd amount." }
+    },
+    "gate_states": {
+      "combined_ltv_computed": { "value": "0.785", "rationale": "($380k + $185k) / $720k = 78.5% per R4-RESIDUAL-1 math." },
+      "elevated_ltv_band": { "value": true, "rationale": "Combined LTV 78.5% triggers F4.EL per R4-RESIDUAL-1 escalation. R4-RESIDUAL-1 carry-forward watch." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard 2nd mortgage with elevated combined-LTV." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [
+        { "pattern": "2nd mortgage|second mortgage", "rationale": "ASSERTION-1: F1.MP correction." },
+        { "pattern": "combined LTV|78%|78\\.5%", "rationale": "ASSERTION-2: R4-RESIDUAL-1 combined-LTV in Snapshot." },
+        { "pattern": "75-80%|elevated", "rationale": "ASSERTION-3: F4.EL callout on combined LTV (cross-family R4-RESIDUAL-1 × R10-C-2 interaction)." }
+      ] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "R4-RESIDUAL-1-carry-forward-watch", "scope": "2nd-mortgage combined-LTV math: Phase 5 reveals if deferred residual still in-scope (Vienna's handling has unresolved cases beyond R10-E/R11-A coverage)", "phase5_placeholder": "spec assumes R4-RESIDUAL-1 closed; if Phase 5 surfaces gaps, Phase 6 fix-cycle scope expands" }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "scenario_id": "F13",
+  "spec_version": "1.0",
+  "rationale_source": "R4-RESIDUAL-2 PNW-only existing-first-mortgage extraction × F1.EL bank-vs-private distinction",
+  "layer1_structural": {
+    "canonical_map": {
+      "existing_mortgage_lender": { "value": "Royal Bank of Canada", "source_classification": "mortgage_statement", "rationale": "F1.EL existing 1st per R11-B-2." },
+      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.MP new 2nd; new 2nd lender (Centum Private) is separate from existing 1st (RBC)." }
+    },
+    "gate_states": {
+      "combined_ltv_computed": { "value": "0.729", "rationale": "($380k existing 1st + $145k new 2nd) / $720k = 73% per R4-RESIDUAL-1 math (also tests R4-RESIDUAL-2 PNW-only extraction)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard 2nd mortgage." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [
+        { "pattern": "Royal Bank|RBC", "rationale": "ASSERTION-1: existing 1st-mortgage lender per R4-RESIDUAL-2." },
+        { "pattern": "Centum|private", "rationale": "ASSERTION-2: new 2nd lender distinct from existing 1st." },
+        { "pattern": "combined LTV|73%", "rationale": "ASSERTION-3: R4-RESIDUAL-1 combined-LTV math." }
+      ] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "R4-RESIDUAL-2-carry-forward-watch", "scope": "PNW-only existing-first-mortgage extraction: Phase 5 reveals if deferred residual still in-scope", "phase5_placeholder": "spec assumes R4-RESIDUAL-2 closed" }
+  ]
+}

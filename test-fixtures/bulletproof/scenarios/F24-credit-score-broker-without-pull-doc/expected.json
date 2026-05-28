@@ -1,0 +1,21 @@
+{
+  "scenario_id": "F24",
+  "spec_version": "1.0",
+  "rationale_source": "F1.CS broker-supplied per Layer 3 #12 (b); architecture-amendment-candidate cross-listed",
+  "layer1_structural": {
+    "canonical_map": {
+      "credit_score": { "value": 742, "source_classification": "broker_initial_intent", "rationale": "F1.CS broker-supplied per Layer 3 #12 (b) recommended-default (broker-supplied accepted)." }
+    },
+    "gate_states": { "credit_pull_doc_requested": { "value": true, "rationale": "Per Layer 3 #12 (b): credit-pull doc requested as additional verification but not blocking." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "742", "rationale": "F1.CS broker-supplied value." }] },
+      { "kind": "broker_facing_intake_doc_ask", "expected_fire": true, "must_include": [{ "pattern": "credit pull|credit report", "rationale": "Credit-pull verification request." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#12", "scope": "credit_score required + verification policy", "phase5_placeholder": "(b) broker-supplied + credit-pull-doc requested" }
+  ]
+}

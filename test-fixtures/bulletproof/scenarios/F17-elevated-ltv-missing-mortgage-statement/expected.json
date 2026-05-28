@@ -1,0 +1,23 @@
+{
+  "scenario_id": "F17",
+  "spec_version": "1.0",
+  "rationale_source": "F1.FB loan_app fallback × F4.EL elevated-band × DS=M1 — three-way interaction without contradiction",
+  "layer1_structural": {
+    "canonical_map": {
+      "first_mortgage_balance": { "value": 545000, "source_classification": "loan_application", "rationale": "F1.FB loan_app fallback per A33 (no statement)." }
+    },
+    "gate_states": {
+      "mortgage_statement_missing": { "value": true, "rationale": "ASSERTION-1: doc-set gap detected." },
+      "elevated_ltv_band": { "value": true, "rationale": "ASSERTION-2: LTV 78% triggers F4.EL." },
+      "discrepancyHold": { "value": false, "rationale": "ASSERTION-3: missing-source != discrepancy; F2.DH not triggered (correct interaction)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting statement; standard otherwise." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "75-80%|elevated", "rationale": "F4.EL callout." }] },
+      { "kind": "broker_facing_intake_doc_ask", "expected_fire": true, "must_include": [{ "pattern": "mortgage statement|payout", "rationale": "Doc-ask for missing statement." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

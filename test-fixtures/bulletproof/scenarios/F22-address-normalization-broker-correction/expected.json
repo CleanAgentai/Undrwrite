@@ -1,0 +1,18 @@
+{
+  "scenario_id": "F22",
+  "spec_version": "1.0",
+  "rationale_source": "ADDRESS_ABBREV_EXPAND × F1.AD broker_correction (intentional overlap with A20)",
+  "layer1_structural": {
+    "canonical_map": {
+      "subject_property_address": { "value_includes": ["1142 Tory Road NW", "Edmonton"], "source_classification": "broker_correction", "rationale": "Abbreviated 'Tory Rd NW' → normalized 'Tory Road NW' per ADDRESS_ABBREV_EXPAND; F1.AD broker_correction tier." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Normalization; no discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Tory Road NW", "rationale": "Normalized F1.AD value (Road, not Rd)." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

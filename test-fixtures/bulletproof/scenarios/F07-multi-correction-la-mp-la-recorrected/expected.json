@@ -1,0 +1,25 @@
+{
+  "scenario_id": "F07",
+  "spec_version": "1.0",
+  "rationale_source": "R10-G push machinery cross-field stress — 4-event multi-correction across LA + MP without state-mutation regression",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 295000, "source_classification": "broker_correction", "rationale": "Latest LA correction (c3 = $295k) wins per Layer 3 #21 last-write-wins + R10-G push." },
+      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_correction", "rationale": "c2 MP correction integrated; persists through c3 (no re-correction)." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "All within range." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [
+        { "pattern": "295,000", "rationale": "ASSERTION-1: final LA per R10-G last-write-wins." },
+        { "pattern": "2nd mortgage|second mortgage", "rationale": "ASSERTION-2: MP correction persisted across cross-field thread (no regression)." }
+      ], "must_not_include": [
+        { "pattern": "\\$280,000|\\$310,000", "rationale": "ASSERTION-3: superseded LA values shadowed (R10-G push integrity)." },
+        { "pattern": "1st mortgage|first mortgage", "rationale": "ASSERTION-3: superseded MP value shadowed." }
+      ] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

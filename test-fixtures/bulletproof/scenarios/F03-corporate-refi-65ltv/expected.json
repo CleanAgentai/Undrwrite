@@ -1,0 +1,23 @@
+{
+  "scenario_id": "F03",
+  "spec_version": "1.0",
+  "rationale_source": "Corporate × standard 65% LTV control — isolates corporate canonical_map shape without high-LTV/callout interference",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value": "Webb Holdings Ltd.", "source_classification": "broker_initial_intent", "rationale": "F1.BN corporate per Layer 3 #1 (b) — borrower_name holds corp entity." }
+    },
+    "gate_states": {
+      "corporate_borrower_detected": { "value": true, "rationale": "Per Layer 3 #1 (b)." },
+      "elevated_ltv_band": { "value": false, "rationale": "65% LTV — no callout." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Webb Holdings", "rationale": "ASSERTION-1: corporate F1.BN." }, { "pattern": "Marcus Webb|beneficial owner", "rationale": "ASSERTION-2: beneficial owner surfaced for AML/PEP per Layer 3 #1 (b)." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#1", "scope": "corporate canonical_map shape", "phase5_placeholder": "(b) borrower_name + AML/PEP per beneficial-owner" }
+  ]
+}

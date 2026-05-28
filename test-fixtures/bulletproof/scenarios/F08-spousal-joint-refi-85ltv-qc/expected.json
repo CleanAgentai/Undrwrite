@@ -1,0 +1,32 @@
+{
+  "scenario_id": "F08",
+  "spec_version": "1.0",
+  "rationale_source": "5-dimension stack: SJ aggregation × R refinance × 85% high-LTV × CR broker correction × QC FSA. Highest cross-family complexity in Batch 4.",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value_includes": ["Sarah Chen", "Wei Chen"], "source_classification": "broker_initial_intent", "rationale": "ASSERTION-1: spousal-joint aggregation per E11/F01 pattern." },
+      "transaction_type": { "value": "refinance", "source_classification": "broker_initial_intent", "rationale": "F1.TT refi." },
+      "existing_mortgage_lender": { "value": "Caisse Desjardins", "source_classification": "broker_correction", "rationale": "ASSERTION-4: F1.EL broker_correction (formal entity name per LENDER_SYNONYMS)." },
+      "postal_code": { "value": "H2K 4L7", "source_classification": "broker_initial_intent", "rationale": "F1.PC H-prefix → QC per R10-D mapping." }
+    },
+    "gate_states": {
+      "high_ltv_detected": { "value": true, "rationale": "ASSERTION-3: LTV 85% triggers F4.HL per R10-C-1." },
+      "awaiting_collateral": { "value": true, "rationale": "F2.AC activated per R10-C-1." },
+      "qc_french_content_detected": { "value": true, "rationale": "ASSERTION-5: French content per Layer 3 #22 (b)." }
+    },
+    "workflow_state": { "value": "awaiting_collateral", "rationale": "F2.AC state per R10-C-1." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_collateral_ask", "expected_fire": true, "must_include": [
+        { "pattern": "Sarah Chen.{0,40}Wei Chen|Wei Chen.{0,40}Sarah Chen", "rationale": "ASSERTION-1: joint applicants in collateral-ask greeting." },
+        { "pattern": "collateral", "rationale": "ASSERTION-3: F4.HL dedicated content." }
+      ], "must_not_include": [
+        { "pattern": "Snapshot|Deal Snapshot", "rationale": "ASSERTION-3: dedicated-bypass excludes Snapshot per D01 pattern." }
+      ] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#22", "scope": "QC French support × cross-family interaction with high-LTV ask", "phase5_placeholder": "(b) French intake + English admin render; broker-facing ask language TBD by Layer 3 #22" }
+  ]
+}
