@@ -3195,7 +3195,7 @@ Classification guidance:
     //   (loan_application + PNW + credit_bureau cite Scotiabank historically;
     //   RBC_Payout_Statement is authoritative for current lender = RBC).
     //   See computeCanonicalLenderForReview in webhook.js for resolver shape.
-    const { noSnapshot = false, canonicalLtvOverride = null, canonicalLenderOverride = null, canonicalCorrectionsOverride = null } = opts;
+    const { noSnapshot = false, canonicalLtvOverride = null, canonicalLenderOverride = null, canonicalCorrectionsOverride = null, multiPartyQualificationOverride = null } = opts;
     try {
       // Build document text sections from extracted data
       const docSections = documents
@@ -3240,6 +3240,16 @@ CRITICAL — CANONICAL LTV OVERRIDE (R9-B JS-deterministic, USE THIS, NOT extrac
 ${componentLines}
 - DO NOT use any other LTV value, even if the DEAL SUMMARY JSON below shows a different "ltv_percent" field — that field is extraction-derived from one specific document source and may diverge from this canonical computation. The canonical value above is the JS-resolved authority per dEngine.computeCombinedLtv source-hierarchy.
 - CARVE-OUT — hypothetical/conditional LTV references in narrative are allowed (e.g., "if combined LTV exceeded 80% we'd require additional collateral", "the lender's threshold is typically 75%"). The constraint applies to FACTUAL LTV statements about THIS deal's actual value — those must use ${canonicalLtvOverride.value}%.`;
+      }
+
+      // FRANCO-Q3/Q4 (2026-05-28): multi-party qualification aggregation directive.
+      // JS-deterministic roster (borrower-qualification.js) decides WHO counts;
+      // the LLM does the numeric aggregation because income/debt are narrative,
+      // not structured (Phase-8 architectural carry-forward). Block injected only
+      // when multiple parties count toward qualification.
+      let multiPartyQualificationBlock = '';
+      if (multiPartyQualificationOverride && typeof multiPartyQualificationOverride === 'string') {
+        multiPartyQualificationBlock = `\n\nCRITICAL — ${multiPartyQualificationOverride}`;
       }
 
       // R9-D (2026-05-26): canonical existing-mortgage lender override block.
@@ -3332,7 +3342,7 @@ OVERALL: For both loan amount and loan purpose, the broker's stated/corrected va
         max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.${r9bCanonicalLtvOverrideBlock}${r9dCanonicalLenderOverrideBlock}${r10gCanonicalCorrectionsBlock}
+          content: `You are a senior mortgage underwriting analyst preparing a comprehensive lead summary for Franco Maione, a private mortgage lender at Private Mortgage Link.${r9bCanonicalLtvOverrideBlock}${r9dCanonicalLenderOverrideBlock}${r10gCanonicalCorrectionsBlock}${multiPartyQualificationBlock}
 
 Your job is to read ALL available information — the deal summary, every extracted document, and the overall file — and produce a structured, lender-ready lead summary.
 

@@ -503,7 +503,7 @@ const computeLtvBand = ({ standaloneLtv, combinedLtv } = {}) => {
 };
 
 const renderDealSnapshot = (canonicalMap, opts = {}) => {
-  const { ownershipType = null, isCommercial = false, jointBorrowers = null } = opts;
+  const { ownershipType = null, isCommercial = false, jointBorrowers = null, qualificationRoster = null } = opts;
   const lines = [];
 
   // Property Address row — clean street address only.
@@ -600,6 +600,19 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
   // (the joint_multi_borrower array of distinct borrower names, or null).
   if (Array.isArray(jointBorrowers) && jointBorrowers.length >= 2) {
     lines.push(`<p><strong>Joint Applicants:</strong> ${jointBorrowers.join(', ')} (${jointBorrowers.length} borrowers)</p>`);
+  }
+  // FRANCO-Q3/Q4 (2026-05-28): multi-party qualification disposition — show per-
+  // borrower role so Franco sees the qualification structure (who's counted vs
+  // guarantor-only), not just the joint roster. Threaded via opts.qualificationRoster
+  // (borrower-qualification.buildQualificationRoster output).
+  if (qualificationRoster && qualificationRoster.multiParty && Array.isArray(qualificationRoster.roster)) {
+    const dispo = (r) => r.role === 'guarantor_only'
+      ? `${r.name} — guarantor-only (liable on default; NOT counted toward qualification)`
+      : `${r.name} — counted (${r.role === 'primary' ? 'primary' : 'co-applicant'})`;
+    lines.push(`<p><strong>Qualification basis:</strong> combined across ${qualificationRoster.countingCount} borrower(s)</p>`);
+    for (const r of qualificationRoster.roster) {
+      lines.push(`<p>&nbsp;&nbsp;• ${dispo(r)}</p>`);
+    }
   }
   lines.push(`<p><strong>Borrower Type:</strong> ${isCommercial ? 'Corporate' : 'Personal'}</p>`);
   lines.push(`<p><strong>Ownership Type:</strong> ${ownershipType || 'TBD'}</p>`);

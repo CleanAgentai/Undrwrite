@@ -25,6 +25,7 @@ const dEngine = require('../services/discrepancy-engine');
 // side-effect-free read-only helpers; no B-pipeline injection or admin-
 // Snapshot side effect fires at the escalation-decision layer.
 const cFields = require('../services/canonical-fields');
+const bq = require('../services/borrower-qualification'); // FRANCO-Q3/Q4 multi-party qualification roster
 // ADMIN-HANDOFF LINK-SUBMISSION (2026-05-20): pure detection of file-hosting
 // links in inbound broker body. No URL fetching, no link-following.
 const { detectFileHostingLinksInBody } = require('../lib/linkDetector');
@@ -1328,12 +1329,20 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       )
     )
   );
+  // FRANCO-Q3/Q4 (2026-05-28): multi-party qualification roster — deterministic
+  // who-counts determination feeding the Snapshot disposition rows + the
+  // generateLeadSummary aggregation directive below.
+  const _q3Roster = bq.buildQualificationRoster({
+    detectedBorrowers: _bDetectAdmin.joint_multi_borrower,
+    primaryName: dealSummary?.borrower_name || leadSummaryBrokerName || null,
+  });
   const _bSnapshotHtml = dEngine.renderDealSnapshot(
     _bFilteredCanonicalMap,
     {
       ownershipType,
       isCommercial: !!_bDetectAdmin.commercial,
       jointBorrowers: _bDetectAdmin.joint_multi_borrower, // FRANCO-PREDICTED-Q8
+      qualificationRoster: _q3Roster,                     // FRANCO-Q3/Q4
     }
   );
 
@@ -1395,6 +1404,7 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       canonicalLtvOverride: _r9bCanonicalLtv,
       canonicalLenderOverride: _r9dCanonicalLender,
       canonicalCorrectionsOverride: _r10gCanonicalCorrections,
+      multiPartyQualificationOverride: _q3Roster.aggregationDirective, // FRANCO-Q3/Q4
     }
   );
   // Post-Claude: strip any residual Vienna-emitted Snapshot block + prepend the JS canonical Snapshot.
@@ -1717,6 +1727,10 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
     ownershipType: deal.ownership_type || null,
     isCommercial: !!_r10iDetect.commercial,
     jointBorrowers: _r10iDetect.joint_multi_borrower, // FRANCO-PREDICTED-Q8
+    qualificationRoster: bq.buildQualificationRoster({ // FRANCO-Q3/Q4
+      detectedBorrowers: _r10iDetect.joint_multi_borrower,
+      primaryName: dealSummary?.borrower_name || borrowerName || null,
+    }),
   });
   const _r10iBrokerGreeting = selectGreetingFirstName({
     broker_name: dealSummary?.broker_name,
