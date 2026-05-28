@@ -3052,10 +3052,11 @@ ${greetingFirstName
   ? `\nGREETING TARGET (R5-E refined — load-bearing, JS-deterministic):\n- Address the recipient as "Hi ${greetingFirstName}!" — selected by JS-side priority (broker_name > sender_name for broker reminders; anti-collided against admin's first name).\n- This OVERRIDES the Sender name field above for greeting purposes.\n- Use "${greetingFirstName}" verbatim — do NOT shorten, abbreviate, or substitute.\n`
   : `\nGREETING TARGET (R5-E refined): no defensible first-name target available. Use a GENERIC greeting: "Hi there!" or "Hello!" — NO first name. Do NOT default to sender_name in this case.\n`}
 
-TONE — preserve the warm-but-businesslike gradient across reminders:
+TONE — preserve the warm-but-businesslike gradient across reminders (FRANCO-Q6: four-reminder cadence; NEVER tell the broker the file is being closed — after the 4th, the file is escalated to the team to follow up personally, NOT auto-closed):
 - Reminder #1: Warm and friendly check-in — "Hi [first name]! Just wanted to check in on [borrower's] file." Open with a "Hi" greeting (NOT "Hey"). Direct and substantive — no filler greetings.
 - Reminder #2: Still warm but a little more direct — "Wanted to make sure this didn't slip through the cracks" / "We'd love to keep this moving forward." More urgency without losing friendliness.
-- Reminder #3: Kind but clear closer — "We'll go ahead and close this file for now, but no worries at all — feel free to reach out anytime and we'd be happy to pick it back up!"
+- Reminder #3: Warm but increasingly direct — "We want to make sure [borrower's] file doesn't stall on our end — we'd really appreciate hearing back so we can keep it moving." More urgency; still friendly; do NOT mention closing.
+- Reminder #4: Final friendly nudge — "This is our last automated check-in on [borrower's] file for now — we'd genuinely love to move it forward, so just reply whenever you're ready and we'll pick it right back up!" Do NOT say the file is closed or being closed; it stays open and our team will follow up.
 
 BANNED OPENERS — these are too casual or filler-y for business follow-up:
 - "Hey [name]!" — too casual; use "Hi [name]!" instead
@@ -4398,7 +4399,7 @@ Format as clean HTML. Include these sections:
 
 6. **Automated Follow-Up Reminders** — Group AAAA (S13.1): this section MUST always be rendered, even when both lists are empty. OMITTING the section entirely is NOT acceptable; empty-state strings are required when lists are empty.
 
-   (a) Reminders sent today: enumerate every entry in \`summaryData.remindersSentToday\`. For each: borrower name, broker email, reminder number (e.g. "Reminder #2 of 3"), and how many days silent. If the list is empty, render: "No automated reminders sent today."
+   (a) Reminders sent today: enumerate every entry in \`summaryData.remindersSentToday\`. For each: borrower name, broker email, reminder number (e.g. "Reminder #2 of 4"), and how many days silent. If the list is empty, render: "No automated reminders sent today."
 
    (b) Deals at max reminders: deals with \`primarySection === "at_max_reminders"\` (at max reminders, not escalated, not stale — those went to Sections 2/5). For each: borrower, email, current status. These need your personal attention or a decision to close. If the list is empty, render: "No deals at max-reminder threshold."
 

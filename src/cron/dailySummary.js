@@ -27,7 +27,7 @@ const REMINDER_TESTING_MODE = !!process.env.REMINDER_TESTING_MODE;
 const FOLLOW_UP_AFTER_DAYS = REMINDER_TESTING_MODE ? (1 / 24) : 2;   // 1h vs 2d
 const RESEND_GUARD_HOURS   = REMINDER_TESTING_MODE ? 0.5         : 20;   // 30m vs 20h
 const CRON_SCHEDULE        = REMINDER_TESTING_MODE ? '*/30 * * * *' : '0 21 * * *';
-const MAX_REMINDERS = 3;
+const MAX_REMINDERS = 4; // FRANCO-Q6 (2026-05-28): 3→4 chases before escalate-to-admin (no auto-close)
 
 // Single source of truth for "Franco's timezone." Used by both the cron
 // schedule (so we fire at 9 PM Edmonton wall time regardless of DST) and the
