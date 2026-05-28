@@ -613,6 +613,10 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     for (const r of qualificationRoster.roster) {
       lines.push(`<p>&nbsp;&nbsp;• ${dispo(r)}</p>`);
     }
+    // FRANCO-Q4: surface unconfirmed-cosigner clarification on the admin surface.
+    if (qualificationRoster.clarificationPending && qualificationRoster.clarificationMessage) {
+      lines.push(`<p><strong>⚠ Cosigner role — clarification needed:</strong> ${qualificationRoster.clarificationMessage}</p>`);
+    }
   }
   lines.push(`<p><strong>Borrower Type:</strong> ${isCommercial ? 'Corporate' : 'Personal'}</p>`);
   lines.push(`<p><strong>Ownership Type:</strong> ${ownershipType || 'TBD'}</p>`);

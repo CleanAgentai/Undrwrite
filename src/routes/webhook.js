@@ -1332,10 +1332,21 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // FRANCO-Q3/Q4 (2026-05-28): multi-party qualification roster — deterministic
   // who-counts determination feeding the Snapshot disposition rows + the
   // generateLeadSummary aggregation directive below.
+  // FRANCO-Q4: textSources = broker message bodies + doc text, scoped for role
+  // signals (co-applicant / guarantor / cosigner) near each party's name.
+  const _q4TextSources = [
+    ..._bInboundMessages.map(m => m.body || ''),
+    ...dealDocs.map(d => d?.extracted_data?.text || ''),
+  ].join('\n');
   const _q3Roster = bq.buildQualificationRoster({
     detectedBorrowers: _bDetectAdmin.joint_multi_borrower,
     primaryName: dealSummary?.borrower_name || leadSummaryBrokerName || null,
+    textSources: _q4TextSources,
+    resolvedRoles: {}, // FRANCO-Q4: broker-reply → resolvedRoles wiring is the deferred deepening (see commit note)
   });
+  if (_q3Roster.clarificationPending) {
+    console.log(`FRANCO-Q4: cosigner role ambiguous (${_q3Roster.clarificationMessage}) — defaulted to guarantor-only (not counted); surfaced on admin Snapshot.`);
+  }
   const _bSnapshotHtml = dEngine.renderDealSnapshot(
     _bFilteredCanonicalMap,
     {
