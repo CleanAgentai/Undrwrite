@@ -100,13 +100,80 @@ const GATE_INFERENCE = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// RENDER-SURFACE verification (Sub-phase 5.5 probe finding + Q-6.1-1/2)
+//
+// extracted_data is a RAW pre-canonical intake snapshot — NOT the canonical
+// store. Canonical resolution (R10-G source-hierarchy incl. broker corrections)
+// is REQUEST-TIME and only observable on the rendered Deal Snapshot
+// (renderDealSnapshot, discrepancy-engine.js) in the prelim/lead-summary
+// outbound. These fields are therefore verified by parsing the ACTUAL rendered
+// Snapshot HTML — NOT extracted_data, and NOT by reconstructing canonical_map
+// via Vienna's own extractCanonicalFields (which would be partially circular:
+// a bug in the shared resolution logic would produce matching wrong values in
+// both expected and actual, defeating the assertion). Parsing rendered output
+// keeps verification independent of the logic under test.
+//
+// Dependency: the Snapshot only renders when the prelim/lead-summary fires
+// (requires exit_strategy per CLUSTER-1). Scenarios verifying these fields
+// must supply exit_strategy so the render surface is exposed.
+// ────────────────────────────────────────────────────────────────────────────
+const SNAPSHOT_ROW_LABELS = {
+  requested_loan_amount:    { label: 'Loan Amount Requested', type: 'money' },
+  property_value:           { label: 'Appraised Value', type: 'money' },
+  mortgage_position:        { label: 'Mortgage Position', type: 'string' },
+  subject_property_address: { label: 'Property Address', type: 'string' },
+  property_address:         { label: 'Property Address', type: 'string' },
+  ltv_percent:              { label: 'LTV', type: 'percent' },
+};
+const RENDER_SURFACE_FIELDS = new Set(Object.keys(SNAPSHOT_ROW_LABELS));
+
+const findSnapshotEmail = (captured) =>
+  (captured.outboundEmails || []).find(e => /Deal Snapshot/i.test(e.HtmlBody || e.TextBody || ''));
+
+// Parse one Snapshot row "<p><strong>LABEL:</strong> VALUE</p>". Returns the
+// FIRST value (canonical-resolved value renders first; multi-value only when
+// sources genuinely disagree post-filter).
+const parseSnapshotRow = (body, label, type) => {
+  const re = new RegExp('<strong>\\s*' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*:\\s*</strong>\\s*([^<]+)', 'i');
+  const m = re.exec(body || '');
+  if (!m) return { present: false, value: null, raw: null };
+  const raw = m[1].trim();
+  if (/^TBD/i.test(raw)) return { present: true, value: null, raw };
+  if (type === 'money') {
+    const mm = raw.match(/\$?([\d,]+)/);
+    return { present: true, value: mm ? Number(mm[1].replace(/,/g, '')) : null, raw };
+  }
+  if (type === 'percent') {
+    const mm = raw.match(/(\d+)\s*%/);
+    return { present: true, value: mm ? Number(mm[1]) : null, raw };
+  }
+  // string: first value before " / " (multi-value) or " (per ...)" source tag
+  const clean = raw.split(/\s+\/\s+/)[0].split(/\s+\(/)[0].trim();
+  return { present: true, value: clean, raw };
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // Layer 1 STRUCTURAL assertion evaluator
 // ────────────────────────────────────────────────────────────────────────────
 const evalCanonicalMap = (expected, captured) => {
   const results = [];
   const extracted = captured.finalDealState?.extracted_data || {};
+  const snapEmail = findSnapshotEmail(captured);
   for (const [specKey, expectation] of Object.entries(expected.layer1_structural?.canonical_map || {})) {
-    const { value: actualValue, classification, rationale: normRationale } = resolveSpecField(specKey, extracted);
+    let actualValue, classification, normRationale;
+    if (RENDER_SURFACE_FIELDS.has(specKey)) {
+      const { label, type } = SNAPSHOT_ROW_LABELS[specKey];
+      if (!snapEmail) {
+        results.push({ field: specKey, status: 'fail', detail: 'no Deal Snapshot rendered (prelim/lead-summary did not fire) — render surface unavailable', normalization: 'render_surface', normalization_rationale: `verified via rendered Snapshot row "${label}" per Sub-phase 5.5`, spec_rationale: expectation.rationale });
+        continue;
+      }
+      const parsed = parseSnapshotRow(snapEmail.HtmlBody || snapEmail.TextBody || '', label, type);
+      actualValue = parsed.value;
+      classification = 'render_surface';
+      normRationale = `parsed from Deal Snapshot row "${label}" (render surface; raw="${parsed.raw}")`;
+    } else {
+      ({ value: actualValue, classification, rationale: normRationale } = resolveSpecField(specKey, extracted));
+    }
     let status, detail;
     if (classification === 'architecture_amendment_candidate') {
       status = 'architecture_amendment_candidate';

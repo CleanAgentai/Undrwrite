@@ -219,8 +219,6 @@ const runScenario = async (fixtureDir, opts = {}) => {
     const resolved = resolveAttachmentRefs(ev.postmark, fixtureDir);
     if (verbose) console.log(`[replay ${scenario.id}] event ${i} (${ev.kind}) → POST webhook (from=${resolved.From})`);
     await postToWebhook(resolved);
-    // Fast-forward delay (per Q2): ~500ms between POSTs (vs delayFromPreviousMs original)
-    if (i < taggedEvents.length - 1) await new Promise(r => setTimeout(r, 500));
     // Poll for deal after first event via +tag email correlation
     if (i === 0) {
       try {
@@ -229,6 +227,16 @@ const runScenario = async (fixtureDir, opts = {}) => {
       } catch (e) {
         if (verbose) console.warn(`[replay ${scenario.id}] pollForDeal warning: ${e.message}`);
       }
+    }
+    // Inter-event settle (multi-event sequencing fix, Sub-phase 6): Vienna's
+    // async pipeline (~30-50s) must COMPLETE for event i before event i+1 posts
+    // — otherwise a broker correction (event 1) races event 0's still-running
+    // prelim render, and the post-correction canonical value never renders.
+    // Default 500ms (legacy single-event behaviour); raise via
+    // BULLETPROOF_INTER_EVENT_MS for correction-sequencing correctness.
+    if (i < taggedEvents.length - 1) {
+      const interMs = Number(process.env.BULLETPROOF_INTER_EVENT_MS || 500);
+      await new Promise(r => setTimeout(r, interMs));
     }
   }
 
@@ -239,22 +247,42 @@ const runScenario = async (fixtureDir, opts = {}) => {
     if (refetched) finalDealState = refetched;
   }
 
-  // Wait for Vienna to generate outbound (after extraction).
-  // Mini-triage Finding #2 (2026-05-27): default raised from 8s → 30s.
-  // Empirical: B04 prelim missed at 8s, captured cleanly at 30s. Vienna's
-  // sendPreliminaryReviewToAdmin runs synchronously after extraction, but
-  // outbound Supabase persistence + email-render latency exceeds 8s. Override
-  // via BULLETPROOF_WAIT_OUTBOUND_MS env var.
-  const waitOutboundMs = Number(process.env.BULLETPROOF_WAIT_OUTBOUND_MS || 30000);
-  await new Promise(r => setTimeout(r, waitOutboundMs));
-
+  // Poll-for-stable-outbound (Sub-phase 6 — replaces fixed wait, fixes B4).
+  // Vienna's pipeline emits outbound over time. Calibration (A01, 2026-05-28):
+  // welcome ~19s, prelim ~46s after deal creation; welcome→prelim gap ~27s.
+  // A fixed 30s wait captured the welcome but missed the prelim (~50% B4
+  // flakiness). Poll until the outbound count is STABLE for STABILITY_WINDOW
+  // (> the observed ~27s inter-outbound gap, safety margin) before concluding,
+  // capped at MAX_WAIT. A zero-outbound floor avoids waiting MAX_WAIT on
+  // legitimately-silent scenarios (e.g. silent escalation). Env-tunable.
   let outboundEmails = [];
   if (finalDealState?.id) {
-    try {
-      // Sub-phase 5.2 patch: Supabase-by-deal-id correlation (replaces Postmark API polling)
-      outboundEmails = await fetchOutboundFromSupabase(supabase, finalDealState.id);
-    } catch (e) {
-      if (verbose) console.warn(`[replay ${scenario.id}] fetchOutboundFromSupabase warning: ${e.message}`);
+    const stabilityWindowMs = Number(process.env.BULLETPROOF_STABILITY_WINDOW_MS || 40000);
+    const maxWaitMs = Number(process.env.BULLETPROOF_MAX_WAIT_MS || 150000);
+    const zeroFloorMs = Number(process.env.BULLETPROOF_ZERO_OUTBOUND_FLOOR_MS || 90000);
+    const pollMs = 5000;
+    const start = Date.now();
+    const deadline = start + maxWaitMs;
+    let lastCount = -1;
+    let lastChangeAt = Date.now();
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, pollMs));
+      try {
+        outboundEmails = await fetchOutboundFromSupabase(supabase, finalDealState.id);
+      } catch (e) {
+        if (verbose) console.warn(`[replay ${scenario.id}] fetchOutboundFromSupabase warning: ${e.message}`);
+      }
+      if (outboundEmails.length !== lastCount) {
+        lastCount = outboundEmails.length;
+        lastChangeAt = Date.now();
+        if (verbose) console.log(`[replay ${scenario.id}] outbound count → ${lastCount} (stability timer reset @ ${((Date.now() - start) / 1000).toFixed(0)}s)`);
+      } else if (lastCount > 0 && (Date.now() - lastChangeAt) >= stabilityWindowMs) {
+        if (verbose) console.log(`[replay ${scenario.id}] outbound STABLE at ${lastCount} (${(stabilityWindowMs / 1000)}s no-change) @ ${((Date.now() - start) / 1000).toFixed(0)}s`);
+        break;
+      } else if (lastCount === 0 && (Date.now() - start) >= zeroFloorMs) {
+        if (verbose) console.log(`[replay ${scenario.id}] zero outbound after ${(zeroFloorMs / 1000)}s floor — concluding silent`);
+        break;
+      }
     }
   }
 

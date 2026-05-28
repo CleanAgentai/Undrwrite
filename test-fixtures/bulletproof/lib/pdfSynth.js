@@ -139,20 +139,25 @@ const synthMortgageStatement = async (opts) => {
     validityDate,
   } = opts;
 
+  // Production-faithful anchors (Sub-phase 6 Option A): real payout statements
+  // use "Outstanding Principal Balance" + "TOTAL PAYOUT AMOUNT" + lender in the
+  // header + a "Property Address" block — the conventions Vienna's deterministic
+  // canonical-fields extractors (extractFromMortgageStatement) were tuned to on
+  // verified RBC/TD/CIBC corpus. Prior synthetic text ("Current balance:" /
+  // "Payout amount:") matched none → canonical_map sparse → Snapshot TBD.
   const sections = [
-    { label: 'MORTGAGE PAYOUT STATEMENT', body: [
+    { label: `${lender || 'Lender'} — Mortgage Payout Statement`, body: [
       `Lender: ${lender || ''}`,
-      `Account: ${accountNumber}`,
+      `Mortgage Account No.: ${accountNumber}`,
       `Borrower: ${borrowerName || ''}`,
-      `Property: ${propertyAddress || ''}`,
+      `Property Address: ${propertyAddress || ''}`,
     ].filter(Boolean).join('\n') },
-    { label: 'BALANCE INFORMATION', body: [
-      balance ? `Current balance: $${Number(balance).toLocaleString()}` : '',
-      payoffAmount ? `Payout amount: $${Number(payoffAmount).toLocaleString()}` : '',
-      interestRate ? `Interest rate: ${interestRate}%` : '',
-      validityDate ? `Validity date: ${validityDate}` : '',
-      'Prepayment penalty: see schedule',
-      'Interest to date: included in payout amount',
+    { label: 'STATEMENT OF MORTGAGE', body: [
+      balance ? `Outstanding Principal Balance $${Number(balance).toLocaleString()}` : '',
+      payoffAmount ? `TOTAL PAYOUT AMOUNT $${Number(payoffAmount).toLocaleString()}` : '',
+      interestRate ? `Annual Interest Rate: ${interestRate}%` : '',
+      validityDate ? `Payout valid until: ${validityDate}` : '',
+      'Per diem interest applies after the validity date.',
     ].filter(Boolean).join('\n') },
   ];
 
@@ -169,14 +174,24 @@ const synthAppraisal = async (opts) => {
     comparableSales = 3,
   } = opts;
 
+  // Production-faithful anchors (Sub-phase 6 Option A): real appraisal reports
+  // carry a "SUBJECT PROPERTY" / "Civic Address" block and a reconciliation
+  // section stating "Reconciled Market Value" / "OPINION OF VALUE" / "Final
+  // Value Opinion" — the conventions Vienna's extractFromAppraisal was tuned to
+  // (HarrisonBowker / Pinnacle verified corpus). Prior synthetic text
+  // ("Appraised market value:") matched none → market_value null → Snapshot
+  // "Appraised Value: TBD".
   const sections = [
     { label: 'PROPERTY APPRAISAL REPORT', body: [
-      `Subject property: ${propertyAddress || ''}`,
-      `Appraised market value: $${Number(appraisedValue).toLocaleString()}`,
-      `Appraisal date: ${appraisalDate}`,
+      'SUBJECT PROPERTY',
+      `Civic Address: ${propertyAddress || ''}`,
+      `Effective date of appraisal: ${appraisalDate}`,
       `Appraiser: ${appraiserName}`,
+    ].filter(Boolean).join('\n') },
+    { label: 'RECONCILIATION AND FINAL VALUE OPINION', body: [
       `Comparable sales analyzed: ${comparableSales}`,
-      'Market value opinion based on direct comparison approach.',
+      'Final value estimate developed via the direct comparison approach.',
+      `Reconciled Market Value: $${Number(appraisedValue).toLocaleString()}`,
     ].filter(Boolean).join('\n') },
   ];
 

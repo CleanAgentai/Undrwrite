@@ -37,10 +37,16 @@ const findDir = (sid) => {
     if (col in d) console.log(`  ${col}: ${JSON.stringify(d[col])}`);
   }
   console.log(`\n--- OUTBOUND emails (${captured.outboundEmails.length}) — subject + body excerpt ---`);
+  const dealCreated = d.created_at ? new Date(d.created_at).getTime() : null;
+  let prevTs = dealCreated;
   captured.outboundEmails.forEach((e, i) => {
     const body = (e.TextBody || e.HtmlBody || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    console.log(`  [${i}] SUBJECT: ${e.Subject}`);
-    console.log(`      BODY: ${body.slice(0, 600)}`);
+    const ts = e.created_at ? new Date(e.created_at).getTime() : null;
+    const sinceDeal = (ts && dealCreated) ? `${((ts - dealCreated) / 1000).toFixed(1)}s since deal` : '';
+    const sincePrev = (ts && prevTs) ? `+${((ts - prevTs) / 1000).toFixed(1)}s gap` : '';
+    if (ts) prevTs = ts;
+    console.log(`  [${i}] (${sinceDeal}, ${sincePrev}) SUBJECT: ${e.Subject}`);
+    console.log(`      BODY: ${body.slice(0, 200)}`);
   });
 
   if (doCleanup && captured.dealId) {
