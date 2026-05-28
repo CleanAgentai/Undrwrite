@@ -503,7 +503,7 @@ const computeLtvBand = ({ standaloneLtv, combinedLtv } = {}) => {
 };
 
 const renderDealSnapshot = (canonicalMap, opts = {}) => {
-  const { ownershipType = null, isCommercial = false } = opts;
+  const { ownershipType = null, isCommercial = false, jointBorrowers = null } = opts;
   const lines = [];
 
   // Property Address row — clean street address only.
@@ -593,6 +593,14 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
   }
 
   lines.push(renderSnapshotRow('Loan Term Requested', canonicalMap.requested_loan_term_months, { suffix: ' months' }));
+  // FRANCO-PREDICTED-Q8 (2026-05-28): surface joint/multi-borrower deals so
+  // Franco sees the structure at a glance. detectJointMultiBorrower already
+  // runs in runDiscrepancyDetection(Aggregated) but its result was previously
+  // dropped before render (Discipline-2 gap). Threaded in via opts.jointBorrowers
+  // (the joint_multi_borrower array of distinct borrower names, or null).
+  if (Array.isArray(jointBorrowers) && jointBorrowers.length >= 2) {
+    lines.push(`<p><strong>Joint Applicants:</strong> ${jointBorrowers.join(', ')} (${jointBorrowers.length} borrowers)</p>`);
+  }
   lines.push(`<p><strong>Borrower Type:</strong> ${isCommercial ? 'Corporate' : 'Personal'}</p>`);
   lines.push(`<p><strong>Ownership Type:</strong> ${ownershipType || 'TBD'}</p>`);
 

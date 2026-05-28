@@ -1333,6 +1333,7 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     {
       ownershipType,
       isCommercial: !!_bDetectAdmin.commercial,
+      jointBorrowers: _bDetectAdmin.joint_multi_borrower, // FRANCO-PREDICTED-Q8
     }
   );
 
@@ -1715,6 +1716,7 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   const _r10iSnapshotHtml = dEngine.renderDealSnapshot(_r10iFilteredMap, {
     ownershipType: deal.ownership_type || null,
     isCommercial: !!_r10iDetect.commercial,
+    jointBorrowers: _r10iDetect.joint_multi_borrower, // FRANCO-PREDICTED-Q8
   });
   const _r10iBrokerGreeting = selectGreetingFirstName({
     broker_name: dealSummary?.broker_name,
