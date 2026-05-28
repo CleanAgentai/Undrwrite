@@ -178,9 +178,29 @@ Each item:
 
 ---
 
-## ARCHITECTURE-AMENDMENT-CANDIDATES (4 items)
+## ARCHITECTURE-AMENDMENT-CANDIDATES (4 baseline items + Phase 5 Sub-phase 5.1 auto-detection expansion)
 
 These items surface Phase 5 triage empirical anchors before any Phase 1 matrix amendment lands. Phase 4 spec uses placeholder behavior pending Phase 5 confirmation.
+
+### Auto-detection expansion (Sub-phase 5.1 empirical probe, 2026-05-27)
+
+Per Q-R3 two-factor detection (no Vienna mapping + no gate-inference entry), `lib/normalize-map.js` ARCH_AMENDMENT_FIELDS auto-flags scenarios that reference genuinely-missing canonical fields:
+
+| Field | Scenarios | Layer 3 # |
+|---|---|---|
+| `credit_score` | A42, F24 | #12 |
+| `cosigner_name`, `cosigner_income` | E13 | #8 |
+| `beneficial_owners`, `incorporation_jurisdiction`, `directors` | E14, F03 | #1 |
+| `draw_schedule`, `projected_completion_value`, `completion_date`, `lender_inspection_required` | E10 | #3 |
+| `postal_code_tuples` (spec shape issue) | A22, F06 | (normalize-map handling concern; verify in Phase 5) |
+| `province` (may be derived not persisted) | E27, E28, E29 | (verify in Phase 5) |
+
+**Auto-detected scope: ~10-12 scenarios** (within Porter's modest expansion projection vs original Revision 3 estimate of 15-20). Baseline 6 (E08/E10/E13/E14/E27/F03) + auto-detection adds A22/A42/F06/F24/E28/E29 to candidate pool.
+
+Per Q-R3 refinement: ambiguous fields default to TRANSIENT (Option B gate-inference), not architecture-amendment. Specifically:
+- `mortgage_position` (R10-G machinery): transient, NOT auto-flagged
+- `existing_mortgage_lender` (R11-B-2 transient inference): NOT auto-flagged
+- `annual_income` (shape-transformed via income_details object): NOT auto-flagged (handled via SHAPE_TRANSFORM)
 
 ### #2 — 3rd mortgage support
 - **Scenario anchors**: E08
