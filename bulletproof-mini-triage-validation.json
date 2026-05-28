@@ -1,0 +1,244 @@
+{
+  "summary": {
+    "total": 4,
+    "by_status": {
+      "fail": 4
+    },
+    "cumulative_budget_estimate": 1
+  },
+  "results": [
+    {
+      "scenarioId": "B01",
+      "status": "fail",
+      "architecture_amendment_candidate": false,
+      "layer1_canonical": [
+        {
+          "field": "requested_loan_amount",
+          "status": "fail",
+          "detail": "expected=280000 actual=95000",
+          "normalization": "direct_or_remapped",
+          "normalization_rationale": "Mapped to extracted_data.loan_amount_requested",
+          "spec_rationale": "Broker correction email asserts $280,000; loan_app source ($95k) is SUPPRESSED per R11-B-1 Layer 1 (>30% discrepancy detection). F1.LA broker_correction tier wins."
+        },
+        {
+          "field": "borrower_name",
+          "status": "pass",
+          "detail": "all includes present",
+          "normalization": "direct_or_remapped",
+          "normalization_rationale": "Mapped to extracted_data.borrower_name",
+          "spec_rationale": "F1.BN consistent across all sources (loan_app + statement + appraisal)."
+        },
+        {
+          "field": "subject_property_address",
+          "status": "pass",
+          "detail": "all includes present",
+          "normalization": "direct_or_remapped",
+          "normalization_rationale": "Mapped to extracted_data.property_address",
+          "spec_rationale": "F1.AD docs-tier consistent; no broker correction."
+        }
+      ],
+      "layer1_gates": [
+        {
+          "gate": "discrepancyHold",
+          "status": "fail",
+          "detail": "inferred=false expected=true",
+          "inferred": false,
+          "evidence_pattern": "admin_discrepancy_notification fired AND preliminary_review_admin NOT fired",
+          "architectural_anchor": "R10-F + R11-B-1 Layer 1",
+          "spec_rationale": "loan_app $95k vs broker_correction $280k = 195% discrepancy from broker source. >30% triggers R11-B-1 Layer 1 suppression AND F2.DH activation. R10-F symmetric coverage."
+        }
+      ],
+      "layer1_workflow": {
+        "expected": "active",
+        "actual": "active",
+        "status": "pass",
+        "rationale": "F2.DH ACTIVE does not transition workflow_state; deal proceeds (not completed, not declined); held for admin review only."
+      },
+      "layer2_outbound": [
+        {
+          "kind": "preliminary_review_admin",
+          "expected_fire": false,
+          "fired_actual": false,
+          "match_count": 0,
+          "spec_rationale": "F2.PD preliminary-all-docs-in dispatch SUPPRESSED when F2.DH ACTIVE per R10-F symmetric coverage.",
+          "status": "pass",
+          "detail": "fire-state matches expectation"
+        },
+        {
+          "kind": "admin_discrepancy_notification",
+          "expected_fire": true,
+          "fired_actual": false,
+          "match_count": 0,
+          "status": "fail",
+          "detail": "expected to fire but no matching email"
+        }
+      ],
+      "layer3_pending": [],
+      "summary": {
+        "total_assertions": 7,
+        "pass_count": 4,
+        "fail_count": 3,
+        "skip_count": 0
+      }
+    },
+    {
+      "scenarioId": "A01",
+      "status": "fail",
+      "architecture_amendment_candidate": false,
+      "layer1_canonical": [
+        {
+          "field": "requested_loan_amount",
+          "status": "fail",
+          "detail": "expected=295000 actual=260000",
+          "normalization": "direct_or_remapped",
+          "normalization_rationale": "Mapped to extracted_data.loan_amount_requested",
+          "spec_rationale": "Broker correction asserts $295,000. F1.LA broker_correction tier wins per R10-G INTENT framing; loan_app source ($260k) corroborates but is shadowed by correction."
+        },
+        {
+          "field": "borrower_name",
+          "status": "pass",
+          "detail": "all includes present",
+          "normalization": "direct_or_remapped",
+          "normalization_rationale": "Mapped to extracted_data.borrower_name",
+          "spec_rationale": "F1.BN docs+broker consistent."
+        }
+      ],
+      "layer1_gates": [
+        {
+          "gate": "discrepancyHold",
+          "status": "pass",
+          "detail": "inferred=false expected=false",
+          "inferred": false,
+          "evidence_pattern": "admin_discrepancy_notification fired AND preliminary_review_admin NOT fired",
+          "architectural_anchor": "R10-F + R11-B-1 Layer 1",
+          "spec_rationale": "Discrepancy ($260k vs $295k) = 11.9% from broker source, below R11-B-1 Layer 1 30% threshold. No F2.DH activation."
+        }
+      ],
+      "layer1_workflow": {
+        "expected": "active",
+        "actual": "active",
+        "status": "pass",
+        "rationale": "Standard refi state."
+      },
+      "layer2_outbound": [
+        {
+          "kind": "preliminary_review_admin",
+          "expected_fire": true,
+          "fired_actual": false,
+          "match_count": 0,
+          "status": "fail",
+          "detail": "expected to fire but no matching email"
+        }
+      ],
+      "layer3_pending": [],
+      "summary": {
+        "total_assertions": 5,
+        "pass_count": 3,
+        "fail_count": 2,
+        "skip_count": 0
+      }
+    },
+    {
+      "scenarioId": "C01",
+      "status": "fail",
+      "architecture_amendment_candidate": false,
+      "layer1_canonical": [],
+      "layer1_gates": [],
+      "layer1_workflow": {
+        "expected": "admin_handoff",
+        "actual": "active",
+        "status": "fail",
+        "rationale": "Deal created in admin_handoff state per F3.AH routing."
+      },
+      "layer2_outbound": [
+        {
+          "kind": "broker_facing_intake_acknowledgment",
+          "expected_fire": false,
+          "fired_actual": false,
+          "match_count": 0,
+          "spec_rationale": "Admin-handoff path does NOT trigger broker-facing auto-response.",
+          "status": "pass",
+          "detail": "fire-state matches expectation"
+        }
+      ],
+      "layer3_pending": [],
+      "summary": {
+        "total_assertions": 2,
+        "pass_count": 1,
+        "fail_count": 1,
+        "skip_count": 0
+      }
+    },
+    {
+      "scenarioId": "D03",
+      "status": "fail",
+      "architecture_amendment_candidate": false,
+      "layer1_canonical": [
+        {
+          "field": "requested_loan_amount",
+          "status": "pass",
+          "detail": "expected=507000 actual=507000",
+          "normalization": "direct_or_remapped",
+          "normalization_rationale": "Mapped to extracted_data.loan_amount_requested",
+          "spec_rationale": "F1.LA."
+        }
+      ],
+      "layer1_gates": [
+        {
+          "gate": "elevated_ltv_band",
+          "status": "fail",
+          "detail": "inferred=false expected=true",
+          "inferred": false,
+          "evidence_pattern": "Risk Factors callout contains \"75-80%\" band string",
+          "architectural_anchor": "R10-C-2",
+          "spec_rationale": "LTV 78% in 75-80% band; F4.EL trigger active per R10-C-2."
+        },
+        {
+          "gate": "high_ltv_detected",
+          "status": "pass",
+          "detail": "inferred=false expected=false",
+          "inferred": false,
+          "evidence_pattern": "workflow_state=awaiting_collateral OR collateral-question outbound fires",
+          "architectural_anchor": "R10-C-1",
+          "spec_rationale": "LTV 78% below 80%; F4.HL NOT triggered."
+        }
+      ],
+      "layer1_workflow": {
+        "expected": "active",
+        "actual": "active",
+        "status": "pass",
+        "rationale": "Standard refi state."
+      },
+      "layer2_outbound": [
+        {
+          "kind": "preliminary_review_admin",
+          "expected_fire": true,
+          "fired_actual": false,
+          "match_count": 0,
+          "status": "fail",
+          "detail": "expected to fire but no matching email"
+        }
+      ],
+      "layer3_pending": [],
+      "summary": {
+        "total_assertions": 5,
+        "pass_count": 3,
+        "fail_count": 2,
+        "skip_count": 0
+      }
+    }
+  ],
+  "opts": {
+    "mode": "explicit",
+    "scenarios": [
+      "B01",
+      "A01",
+      "C01",
+      "D03"
+    ],
+    "includeLayer3": false,
+    "budgetCap": 50,
+    "output": "bulletproof-mini-triage-validation.json",
+    "continueOnFail": true
+  }
+}
