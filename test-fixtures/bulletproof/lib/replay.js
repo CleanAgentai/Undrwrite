@@ -35,23 +35,60 @@ const postToWebhook = async (payload, fetchImpl = global.fetch) => {
   return res;
 };
 
-// Poll Supabase for deal record matching this run's first MessageID
-const pollForDeal = async (supabase, runTag, opts = {}) => {
-  const { timeoutMs = 30000, intervalMs = 1000 } = opts;
+// Poll Supabase for deal record by tagged broker email. Sub-phase 5.2
+// patches:
+//   1st (2026-05-27): switch to +tag email subaddressing per test-staging-e2e.js
+//      precedent — MessageID storage was NULL on inbound rows
+//   3rd (2026-05-28): two-stage polling — (a) wait for deal existence,
+//      (b) wait for extracted_data populated (signals Vienna's async pipeline
+//      completed extraction). Vienna processes async after webhook 202; full
+//      pipeline 20-50s typical (pdf-parse + LLM extraction + canonical
+//      resolution + outbound generation).
+const pollForDeal = async (supabase, taggedEmail, opts = {}) => {
+  const { timeoutMs = 90000, intervalMs = 2000, waitForExtraction = true } = opts;
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const { data: msgs } = await supabase
-      .from('messages')
-      .select('deal_id, external_message_id')
-      .ilike('external_message_id', `${runTag}%`)
+  let dealRecord = null;
+  // Stage 1: poll for deal existence
+  while (Date.now() < deadline && !dealRecord) {
+    const { data: deals } = await supabase
+      .from('deals')
+      .select('*')
+      .eq('email', taggedEmail)
+      .order('created_at', { ascending: false })
       .limit(1);
-    if (msgs && msgs.length > 0 && msgs[0].deal_id) {
-      const { data: deal } = await supabase.from('deals').select('*').eq('id', msgs[0].deal_id).single();
-      if (deal) return deal;
+    if (deals && deals.length > 0) {
+      dealRecord = deals[0];
+      break;
     }
     await new Promise(r => setTimeout(r, intervalMs));
   }
-  throw new Error(`pollForDeal timeout — runTag '${runTag}' not found after ${timeoutMs}ms`);
+  if (!dealRecord) {
+    throw new Error(`pollForDeal stage-1 timeout — deal not created for '${taggedEmail}' after ${timeoutMs}ms`);
+  }
+  if (!waitForExtraction) return dealRecord;
+  // Stage 2: poll for extracted_data populated (Vienna's async pipeline done)
+  while (Date.now() < deadline) {
+    const ed = dealRecord.extracted_data;
+    // "Populated" = object with at least 3 keys (heuristic: borrower_name + something + something else)
+    if (ed && typeof ed === 'object' && Object.keys(ed).length >= 3) {
+      return dealRecord;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+    const { data: refetched } = await supabase.from('deals').select('*').eq('id', dealRecord.id).single();
+    if (refetched) dealRecord = refetched;
+  }
+  // Return whatever we have (extraction may have failed; let assertion engine surface)
+  return dealRecord;
+};
+
+// Tag broker email with +runTag subaddressing for deal isolation.
+// Example: jason@mercerbrokerage.example.com → jason+bulletproof-C03-1234@mercerbrokerage.example.com
+const tagBrokerEmail = (email, runTag) => {
+  if (!email || !email.includes('@')) return email;
+  const [local, domain] = email.split('@');
+  // Strip any existing +tag from local part to avoid double-tagging
+  const cleanLocal = local.split('+')[0];
+  return `${cleanLocal}+${runTag}@${domain}`;
 };
 
 // PRIMARY: fetch outbound messages from Supabase by deal_id correlation.
@@ -119,11 +156,23 @@ const triggerChaseCron = async () => {
   return runFollowUpReminders();
 };
 
-// Rewrite event MessageIDs to scope under runTag for deal isolation
-const rewriteEventMessageIds = (events, runTag) => events.map((ev, i) => ({
-  ...ev,
-  postmark: { ...ev.postmark, MessageID: `${runTag}-event${i}@bulletproof.synthetic` },
-}));
+// Rewrite events for deal isolation:
+//   - MessageID gets runTag prefix (for any future correlation; may be NULL'd
+//     by Vienna's webhook handler — backup correlation only)
+//   - From + FromFull rewritten with +runTag subaddressing (PRIMARY correlation
+//     via deals.email exact-match)
+const rewriteEventMessageIds = (events, runTag) => events.map((ev, i) => {
+  const taggedFrom = tagBrokerEmail(ev.postmark.From, runTag);
+  return {
+    ...ev,
+    postmark: {
+      ...ev.postmark,
+      MessageID: `${runTag}-event${i}@bulletproof.synthetic`,
+      From: taggedFrom,
+      FromFull: ev.postmark.FromFull ? { ...ev.postmark.FromFull, Email: taggedFrom } : undefined,
+    },
+  };
+});
 
 // Primary entry: replay one scenario end-to-end.
 //   fixtureDir: absolute path to scenarios/{ID}-{slug}/
@@ -160,22 +209,23 @@ const runScenario = async (fixtureDir, opts = {}) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   const taggedEvents = rewriteEventMessageIds(events, runTag);
+  // Per-event tagged email (used for pollForDeal correlation)
+  const taggedFromEmail = taggedEvents[0]?.postmark?.From;
   let dealRecord = null;
 
   for (let i = 0; i < taggedEvents.length; i++) {
     const ev = taggedEvents[i];
     // Resolve attachment refs (inline base64 from documents/)
     const resolved = resolveAttachmentRefs(ev.postmark, fixtureDir);
-    // Sub-phase 5.2 patch: removed runTag subject injection. Correlation is
-    // via deal_id (post-poll), not subject-string matching.
-    if (verbose) console.log(`[replay ${scenario.id}] event ${i} (${ev.kind}) → POST webhook`);
+    if (verbose) console.log(`[replay ${scenario.id}] event ${i} (${ev.kind}) → POST webhook (from=${resolved.From})`);
     await postToWebhook(resolved);
     // Fast-forward delay (per Q2): ~500ms between POSTs (vs delayFromPreviousMs original)
     if (i < taggedEvents.length - 1) await new Promise(r => setTimeout(r, 500));
-    // Poll for deal after first event
+    // Poll for deal after first event via +tag email correlation
     if (i === 0) {
       try {
-        dealRecord = await pollForDeal(supabase, runTag, { timeoutMs: timeoutSec * 1000 });
+        dealRecord = await pollForDeal(supabase, taggedFromEmail, { timeoutMs: timeoutSec * 1000 });
+        if (verbose) console.log(`[replay ${scenario.id}] dealId=${dealRecord.id} email=${dealRecord.email}`);
       } catch (e) {
         if (verbose) console.warn(`[replay ${scenario.id}] pollForDeal warning: ${e.message}`);
       }
@@ -189,8 +239,9 @@ const runScenario = async (fixtureDir, opts = {}) => {
     if (refetched) finalDealState = refetched;
   }
 
-  // Wait for Vienna to process + generate outbound
-  await new Promise(r => setTimeout(r, 5000));
+  // Wait for Vienna to generate outbound (after extraction; should be faster
+  // since pollForDeal already waited for extraction to complete)
+  await new Promise(r => setTimeout(r, 8000));
 
   let outboundEmails = [];
   if (finalDealState?.id) {
@@ -219,6 +270,7 @@ const runScenario = async (fixtureDir, opts = {}) => {
 module.exports = {
   runScenario,
   buildRunTag,
+  tagBrokerEmail,
   advanceDealTime,
   triggerChaseCron,
   postToWebhook,
