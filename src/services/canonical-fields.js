@@ -150,10 +150,41 @@ const normalizePostal = (str) => {
   return null;
 };
 
+// Bug 2 (2026-05-28): magnitude-suffix family. Brokers write "$280k",
+// "$1.2M"/"1.2MM", "$1.2 million", "$280 thousand" — the pre-fix money-capture
+// regexes captured "([\\d,]+)" only, DROPPING the suffix → "$280k" extracted as
+// $280 (factor-1000) and "$1.2 million" as $1 (factor-1,000,000). This poisoned
+// every downstream computation (LTV, escalation, admin Snapshot). Centralized
+// here: any captured token that includes a k/K, m/M/MM, "thousand", or "million"
+// suffix is multiplied. The broker-written capture regexes are widened (with a
+// letter-lookahead guard) to feed the suffix through; doc-extractor regexes are
+// intentionally NOT widened (real production docs write full amounts) but this
+// helper still multiplies a suffix if one ever reaches it.
+const MONEY_MAGNITUDE_RE = /^[\s$]*([\d,]+(?:\.\d+)?)\s*(million|thousand|mm|m|k)\b/i;
 const normalizeMoney = (val) => {
   if (val == null) return null;
   if (typeof val === 'number') return Math.round(val);
-  const cleaned = String(val).replace(/[$,\s]/g, '');
+  const s = String(val).trim();
+  const sm = MONEY_MAGNITUDE_RE.exec(s);
+  if (sm) {
+    const base = parseFloat(sm[1].replace(/,/g, ''));
+    if (isFinite(base)) {
+      const unit = sm[2].toLowerCase();
+      const factor = (unit === 'k' || unit === 'thousand') ? 1000 : 1000000; // m / mm / million → 1e6
+      const result = base * factor;
+      // No-silent-guess sanity bound: an absurd multiplied result signals a
+      // malformed double-unit ("$280,000k"). Do NOT silently emit the absurd
+      // figure NOR a silent guess — log the inference + fall back to the base
+      // (visible-as-inferred), so a malformed money input never drives the
+      // LTV/escalation gates invisibly (same discipline as Bug 1).
+      if (result > 100000000) {
+        console.warn(`[normalizeMoney] magnitude suffix on already-large base '${val}' → ${result} exceeds sanity ceiling; INFERRING base ${Math.round(base)} (flagged-inferred, not a clean extraction)`);
+        return Math.round(base);
+      }
+      return Math.round(result);
+    }
+  }
+  const cleaned = s.replace(/[$,\s]/g, '');
   const n = parseFloat(cleaned);
   if (!isFinite(n)) return null;
   return Math.round(n);
@@ -403,11 +434,14 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   // widening. Q2 verdict: narrow corpus discipline — adjacent variants
   // ("Loan Requested", "Funding Request", "Funds Requested") deliberately
   // NOT added without corpus evidence.
-  const loanFormalM = emailBody.match(/\*?\s*(?:Mortgage\s+Amount\s+Requested|Loan\s+Amount\s+Requested|Mortgage\s+Amount|Loan\s+Amount|Requested\s+Loan(?:\s+Amount)?)\s*:?\s*\*?\s*\$?\s*([\d,]+)/i);
+  // Bug 2: capture trailing magnitude suffix (k/K, m/M/MM, "thousand", "million")
+  // so normalizeMoney multiplies; (?![A-Za-z]) guard avoids swallowing a
+  // following word's initial ("$650,000 Market" → not "650,000 M").
+  const loanFormalM = emailBody.match(/\*?\s*(?:Mortgage\s+Amount\s+Requested|Loan\s+Amount\s+Requested|Mortgage\s+Amount|Loan\s+Amount|Requested\s+Loan(?:\s+Amount)?)\s*:?\s*\*?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
   if (loanFormalM) {
     out.requested_loan_amount = normalizeMoney(loanFormalM[1]);
   } else {
-    const loanInformalM = emailBody.match(/\brequesting\s+\$\s*([\d,]+)/i);
+    const loanInformalM = emailBody.match(/\brequesting\s+\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
     if (loanInformalM) out.requested_loan_amount = normalizeMoney(loanInformalM[1]);
   }
   // Appraised value (broker-stated): `*Appraised Value:* $X` (formal-template
@@ -419,7 +453,7 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   // new "at" branch catches informal phrasing). Cascade-closes R6-δ
   // property_value TBD on informal-phrasing fixtures + enables R6-β LTV
   // CASCADE end-to-end on Marcus/Ryan.
-  const apprM = emailBody.match(/\*?\s*(?:Appraised\s+(?:Value|at)|Property\s+Value|Purchase\s+Price)\s*:?\s*\*?\s*\$?\s*([\d,]+)/i);
+  const apprM = emailBody.match(/\*?\s*(?:Appraised\s+(?:Value|at)|Property\s+Value|Purchase\s+Price)\s*:?\s*\*?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
   if (apprM) out.subject_property_market_value = normalizeMoney(apprM[1]);
   return out;
 };
@@ -641,7 +675,7 @@ const extractFromPnwStatement = (doc) => {
     // annotation line, ~50-80 chars away).
     const afterIdx = m.index + m[0].length;
     const followingWindow = text.slice(afterIdx, afterIdx + 200);
-    const balM = followingWindow.match(/\[Page\s+\d+\s+annotation\]\s*\$([\d,]+(?:\.\d{2})?)/);
+    const balM = followingWindow.match(/\[Page\s+\d+\s+annotation\]\s*\$([\d,]+(?:\.\d{2})?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/); // Bug 2: suffix-aware (broker-filled annotation)
     if (balM) {
       const bal = normalizeMoney(balM[1]);
       if (bal != null) out.existing_first_mortgage_balance = bal;
@@ -700,7 +734,7 @@ const extractFromLoanApplication = (doc) => {
   // anchor on the FULL annotation line (no spurious text trailing). Anchor
   // on first match in the doc — Page-1 annotations come before Page-2+ in
   // PDF text-extraction order.
-  const annM = text.match(/\[Page\s+1\s+annotation\]\s*\$?\s*([\d,]+(?:\.\d{2})?)\s*$/m);
+  const annM = text.match(/\[Page\s+1\s+annotation\]\s*\$?\s*([\d,]+(?:\.\d{2})?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s*$/m); // Bug 2: suffix-aware (broker-filled annotation)
   if (annM) {
     const amount = normalizeMoney(annM[1]);
     // Sanity bound per R6-β-A verdict: $5,000-$2,000,000. Catches obvious
@@ -860,17 +894,20 @@ const parseBrokerCorrections = (messageBody) => {
   if (isHedged || isQuestion) return [];
 
   // Loan amount correction patterns. Each captures the amount as group 1.
+  // Bug 2: group 1 widened to include the magnitude suffix (k/K, m/M/MM,
+  // "thousand", "million") so a corrected "$1.2 million" isn't read as $1.2.
+  // The "not $X" tail in the `actually` pattern is intentionally NOT widened.
   const amountPatterns = [
-    /\bthe\s+correct\s+(?:loan\s+)?amount\s+is\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
-    /\bcorrect\s+(?:loan\s+)?amount\s*:\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
-    /\bthe\s+(?:loan\s+)?amount\s+is\s+actually\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
-    /\bactually\s*\$?\s*([\d,]+(?:\.\d+)?)\s*\(\s*not\s*\$?[\d,]+(?:\.\d+)?\s*\)/i,
-    /\bI\s+meant\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
-    /\b(?:loan\s+)?amount\s+should\s+be\s*\$?\s*([\d,]+(?:\.\d+)?)/i,
+    /\bthe\s+correct\s+(?:loan\s+)?amount\s+is\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\bcorrect\s+(?:loan\s+)?amount\s*:\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\bthe\s+(?:loan\s+)?amount\s+is\s+actually\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\bactually\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s*\(\s*not\s*\$?[\d,]+(?:\.\d+)?\s*\)/i,
+    /\bI\s+meant\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\b(?:loan\s+)?amount\s+should\s+be\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
     // Confirmation patterns (broker affirming a specific value in reply)
-    /\byes,?\s*\$?\s*([\d,]+(?:\.\d+)?)\s+is\s+correct/i,
+    /\byes,?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s+is\s+correct/i,
     // Reconsideration patterns ("looking at it again, $X sounds right")
-    /\b(?:looking\s+at\s+it\s+again|on\s+second\s+look|after\s+checking),?\s*\$?\s*([\d,]+(?:\.\d+)?)\s+(?:sounds\s+right|is\s+correct|works)/i,
+    /\b(?:looking\s+at\s+it\s+again|on\s+second\s+look|after\s+checking),?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s+(?:sounds\s+right|is\s+correct|works)/i,
   ];
   for (const re of amountPatterns) {
     const m = messageBody.match(re);
