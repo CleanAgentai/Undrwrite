@@ -1,0 +1,35 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jason@mercerbrokerage.example.com",
+      "FromName": "Jason Mercer",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Purchase — Sarah Chen",
+      "TextBody": "Hi Franco,\n\nPurchase for Sarah Chen at 4421 Kingsway, Vancouver, BC V5R 5T7. Purchase $750k, loan amount $570,000 (please use this number; the $475k on the attached loan app form is from an earlier scenario before borrower bumped the offer).\n\nLTV 76%.\n\nJason Mercer\nMercer Mortgage Group\nLic. #M12001505",
+      "HtmlBody": null,
+      "MessageID": "F09-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "Appraisal_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        },
+        {
+          "Name": "NOA_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/noa.pdf"
+        }
+      ]
+    }
+  }
+]

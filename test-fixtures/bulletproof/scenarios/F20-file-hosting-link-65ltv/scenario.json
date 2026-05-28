@@ -1,0 +1,11 @@
+{
+  "id": "F20",
+  "name": "file-hosting-link-65ltv",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F3.FL", "F2.FH"],
+  "bugHint": "M",
+  "anchor": "F3.FL × F2.FH interaction at standard LTV (cross-axis sibling to B10/C04)",
+  "rationale": "File-hosting link intake at standard 65% LTV. Both F3.FL classification AND F2.FH state-gate fire from same input. Tests interaction in the routing-control flow: F3.FL routes intake to admin-handoff handler; F2.FH marks Vienna paused per-deal. Sibling to B10 (F2.FH focus) and C04 (F3.FL focus); F20 asserts both.",
+  "notes": "Single-event sequence. Cross-family interaction triangle: B10 + C04 + F20 fully characterize file-hosting-link handling."
+}

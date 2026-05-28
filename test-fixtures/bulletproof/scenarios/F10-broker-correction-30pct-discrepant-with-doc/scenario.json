@@ -1,0 +1,11 @@
+{
+  "id": "F10",
+  "name": "broker-correction-30pct-discrepant-with-doc",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA", "F2.DH"],
+  "bugHint": "M",
+  "anchor": "R11-B-1 Layer 1 canonical-map suppression isolated",
+  "rationale": "Broker correction asserts loan_amount $290k; loan_application doc shows $180k (>30% discrepancy). F1.LA Layer 1 (R11-B-1) detects >30% discrepancy + SUPPRESSES loan_app source from canonical_map. F2.DH discrepancyHold ACTIVATES. Tests the suppression mechanic at its exact >30% threshold (vs A08 which was >50%).",
+  "notes": "Two-event sequence. Distinct from A08 (>50% discrepancy) — F10 isolates the >30% threshold edge case."
+}

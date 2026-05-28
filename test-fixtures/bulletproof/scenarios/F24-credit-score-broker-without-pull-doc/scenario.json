@@ -1,0 +1,11 @@
+{
+  "id": "F24",
+  "name": "credit-score-broker-without-pull-doc",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.CS"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #12 (credit_score requirements + verification flow)",
+  "rationale": "Broker provides credit_score in intake email (742) but does NOT attach credit-pull doc. F1.CS canonical-map captures broker_initial_intent tier value; no docs-tier verification. Layer 3: does Vienna accept broker-supplied score (trust-based; broker has lender-relationship), or require docs verification (no broker_initial_intent acceptance without backing doc)?",
+  "notes": "Single-event sequence. Layer 3 #12 product-design item."
+}

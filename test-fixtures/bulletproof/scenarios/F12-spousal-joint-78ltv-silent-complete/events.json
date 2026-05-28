@@ -1,0 +1,40 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jason@mercerbrokerage.example.com",
+      "FromName": "Jason Mercer",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Patricia Simmons and James Simmons",
+      "TextBody": "Hi Franco,\n\nJoint refi for Patricia Simmons and James Simmons (spouses). Property 287 Glencairn Avenue, Toronto, ON M5N 1V3, 78% LTV ($718k against $920k). Full package attached.\n\nJason Mercer\nMercer Mortgage Group\nLic. #M12001505",
+      "HtmlBody": null,
+      "MessageID": "F12-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        },
+        {
+          "Name": "NOA_Simmons.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/noa.pdf"
+        }
+      ]
+    }
+  }
+]

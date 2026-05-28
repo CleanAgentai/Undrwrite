@@ -1,0 +1,11 @@
+{
+  "id": "F22",
+  "name": "address-normalization-broker-correction",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.AD"],
+  "bugHint": "L",
+  "anchor": "ADDR_LINE_RE normalization × broker_correction (R20 intentional overlap)",
+  "rationale": "Broker initial intake uses abbreviated address ('1142 Tory Rd NW'). Subsequent broker correction supplies fully-spelled-out form ('1142 Tory Road NW') for canonical record. F1.AD canonical-map should resolve via broker_correction tier; normalization should accept both abbreviated and spelled-out forms as same canonical value via ADDRESS_ABBREV_EXPAND.",
+  "notes": "Two-event sequence. Intentional overlap with A20 (normalization-only) — F22 adds the broker_correction tier interaction."
+}

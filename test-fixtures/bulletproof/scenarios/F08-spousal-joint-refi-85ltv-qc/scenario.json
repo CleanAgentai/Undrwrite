@@ -1,0 +1,11 @@
+{
+  "id": "F08",
+  "name": "spousal-joint-refi-85ltv-qc",
+  "group": "F",
+  "dimensions": { "BC": "SJ", "TT": "R", "LTV": "80-85", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "QC" },
+  "families": ["F1.PC-QC", "F4.EL", "F4.HL", "aggregation"],
+  "bugHint": "H",
+  "anchor": "5-dimension stack: SJ + R + 85% + CR + QC (French + cross-province)",
+  "rationale": "Stacks 5 dimensions: spousal-joint applicants + refinance + 85% LTV (top of band; F4.HL trigger zone) + broker correction + QC (French content + H-prefix FSA). Tests interaction of QC FSA path (F1.PC-QC mapping) + spousal-joint aggregation + high-LTV bypass (F4.HL) + elevated-band callout (F4.EL) + broker correction propagation. Highest cross-family complexity in Batch 4.",
+  "notes": "Two-event sequence with French content (Montréal address, Avenue Papineau). Cross-province + cross-family interaction test."
+}

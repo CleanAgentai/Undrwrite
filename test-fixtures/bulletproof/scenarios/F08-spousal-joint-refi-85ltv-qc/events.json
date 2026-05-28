@@ -1,0 +1,52 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinancement — Sarah Chen and Wei Chen (Montréal)",
+      "TextBody": "Bonjour Franco,\n\nRefi joint pour Sarah Chen and Wei Chen (conjoints), propriété à 1855 Avenue Papineau, Montréal, QC H2K 4L7. LTV 85%, montant du prêt $493,000. Hypothèque existante: Desjardins, solde $380,000.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "F08-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "DemandePret_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "ReleveDuHypotheque_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Evaluation_Chen.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 86400000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Refinancement — Sarah Chen and Wei Chen (Montréal)",
+      "TextBody": "Correction: existing lender is Caisse Desjardins (not just \"Desjardins\") — please use full name in the file. Same payout terms.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "F08-correction@bulletproof.synthetic",
+      "Date": "2026-05-16T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]

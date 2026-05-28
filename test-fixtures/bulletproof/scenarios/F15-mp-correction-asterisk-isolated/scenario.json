@@ -1,0 +1,11 @@
+{
+  "id": "F15",
+  "name": "mp-correction-asterisk-isolated",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.MP"],
+  "bugHint": "L",
+  "anchor": "R11-A asterisk-tolerance isolated baseline",
+  "rationale": "Pure F1.MP asterisk-tolerance test: broker correction uses '2nd mortgage*' shorthand. Distinct from A24 (which has same shape; F15 is intentional overlap per Group A vs Group F overlap principle). Tests R11-A asterisk parser robustness as isolated baseline — assertion focus on regex tolerance, not interaction.",
+  "notes": "Two-event sequence. Intentional overlap with A24 per Phase 1 overlap principle."
+}

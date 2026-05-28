@@ -1,0 +1,35 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Purchase — David Okafor and Jennifer Tran (82% LTV)",
+      "TextBody": "Hi Franco,\n\nNon-spousal joint purchase: David Okafor and Jennifer Tran buying 52 Winston Churchill Boulevard, Mississauga, ON L5M 4Y1 as business partners (50/50 title). Purchase price $900k, loan amount $738k (82% LTV).\n\nCombined income $285k. Both NOAs attached. Lender wants additional collateral conversation given the elevated LTV.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "F02-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T11:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Okafor_Tran.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "Appraisal_Property.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        },
+        {
+          "Name": "NOA_Combined.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/noa.pdf"
+        }
+      ]
+    }
+  }
+]

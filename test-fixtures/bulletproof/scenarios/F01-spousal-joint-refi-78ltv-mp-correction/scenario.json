@@ -1,0 +1,11 @@
+{
+  "id": "F01",
+  "name": "spousal-joint-refi-78ltv-mp-correction",
+  "group": "F",
+  "dimensions": { "BC": "SJ", "TT": "R", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.MP", "F1.TT", "F4.EL", "aggregation"],
+  "bugHint": "H",
+  "anchor": "Cross-family interaction: spousal-joint aggregation × mortgage_position correction × elevated-LTV callout",
+  "rationale": "Stacks 5 dimensions: spousal-joint applicants + refinance at 78% LTV + broker corrects mortgage_position via R11-A asterisk-tolerance pattern + clean docs + ON. F1.MP resolves to broker_correction tier; F4.EL elevated-band callout fires; spousal-joint aggregation flows into canonical_map. Interaction test: does aggregation propagate correctly when broker_correction tier is invoked for a non-aggregation field (mortgage_position)?",
+  "notes": "Two-event sequence. Interaction-axis scenario — Group A passes each component individually; F01 tests interaction. Phase 4 assertion discipline: F1.MP correction landed + F4.EL callout text injected + canonical_map borrower-name retains joint aggregation."
+}

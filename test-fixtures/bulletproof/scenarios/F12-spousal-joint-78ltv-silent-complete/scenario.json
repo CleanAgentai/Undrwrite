@@ -1,0 +1,11 @@
+{
+  "id": "F12",
+  "name": "spousal-joint-78ltv-silent-complete",
+  "group": "F",
+  "dimensions": { "BC": "SJ", "TT": "R", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "S", "GE": "ON" },
+  "families": ["F1 agg", "F4.EL", "F4.CH"],
+  "bugHint": "H",
+  "anchor": "Spousal-joint × elevated-LTV × broker-silent interaction",
+  "rationale": "Spousal-joint refi at 78% LTV with broker going silent post-intake. F1 aggregation captures joint applicant info; F4.EL elevated callout fires; F4.CH chase email should fire after silence threshold. Interaction: does chase email correctly address joint applicants (both names, joint salutation), or default to single-applicant phrasing? Layer 3 #6 silent-timing applies + interaction-specific addressing question.",
+  "notes": "Single-event intake; replay harness drives chase-cron forward. Tests chase-email addressing for joint applicants."
+}

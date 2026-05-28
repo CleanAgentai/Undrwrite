@@ -1,0 +1,11 @@
+{
+  "id": "F03",
+  "name": "corporate-refi-65ltv",
+  "group": "F",
+  "dimensions": { "BC": "CO", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 corporate-shape"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #1 corporate canonical_map shape (interaction control)",
+  "rationale": "Corporate refi at standard 65% LTV (no high-LTV or band-callout interaction). Distinct from E14 (which tests corporate at high LTV); F03 isolates corporate-shape canonical_map handling at standard underwriting band — no F2.AC / F4.HL / F4.EL gates interfere. Pure corporate-canonical_map test.",
+  "notes": "Single-event sequence. Controls for corporate × LTV interaction; E14 stresses corporate × edge LTV."
+}

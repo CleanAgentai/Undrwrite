@@ -1,0 +1,11 @@
+{
+  "id": "F19",
+  "name": "admin-handoff-elevated-78ltv",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F3.AH", "F4.EL"],
+  "bugHint": "M",
+  "anchor": "F3.AH admin-handoff × F4.EL elevated-band callout interaction",
+  "rationale": "Admin-direction message on a deal that would trigger F4.EL elevated-band callout (78% LTV). Interaction question: when admin handoff intake classification activates, does F4.EL callout still fire in the admin-handler output, or is the standard prelim path (which generates F4.EL) bypassed entirely?",
+  "notes": "Single-event sequence. Cross-family interaction between intake classification and gate-derived generator."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "F23",
+  "name": "elevated-78ltv-nb",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "NB" },
+  "families": ["F4.EL", "F1.PC-NB"],
+  "bugHint": "M",
+  "anchor": "F4.EL elevated-band × F1.PC NB FSA interaction",
+  "rationale": "Refi at 78% LTV in New Brunswick. Cross-axis interaction: F4.EL elevated-band callout fires + F1.PC E-prefix FSA mapping resolves NB province. Tests whether band-callout text correctly references province context. Tests interaction across LTV-band axis + geographic axis.",
+  "notes": "Single-event sequence. Pair with E03 (ON elevated) and E28 (NB clean baseline) for full elevated × geographic coverage triangle."
+}

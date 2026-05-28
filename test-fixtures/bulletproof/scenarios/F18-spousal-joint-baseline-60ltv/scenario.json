@@ -1,0 +1,11 @@
+{
+  "id": "F18",
+  "name": "spousal-joint-baseline-60ltv",
+  "group": "F",
+  "dimensions": { "BC": "SJ", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 agg control"],
+  "bugHint": "M",
+  "anchor": "Spousal-joint baseline at standard 60% LTV (control case)",
+  "rationale": "Spousal-joint applicants at 60% LTV with NO band callout / NO correction / NO contradiction / clean docs. Pure F1 aggregation control case. Pair with F01 (joint + MP correction) and F08 (joint + 85% + QC + correction) to fully characterize joint-applicant handling.",
+  "notes": "Single-event sequence. Joint-applicant baseline; assertion focus on canonical_map borrower_name aggregation shape."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "F05",
+  "name": "lender-synonym-rbc-royal-bank",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.EL", "LENDER_SYNONYMS"],
+  "bugHint": "M",
+  "anchor": "LENDER_SYNONYMS normalization × broker_correction interaction",
+  "rationale": "Broker submits intake using 'RBC' shorthand. mortgage_statement doc uses 'Royal Bank of Canada' (formal). Broker correction explicitly switches to 'Royal Bank' (intermediate variant). F1.EL canonical-map must normalize all 3 synonyms via LENDER_SYNONYMS reverse-map to single canonical lender entity. Tests synonym-normalization × broker_correction tier interaction.",
+  "notes": "Two-event sequence. Distinct from A37 (4-variant cycling); F05 isolates 3-variant resolution with correction-tier authority."
+}

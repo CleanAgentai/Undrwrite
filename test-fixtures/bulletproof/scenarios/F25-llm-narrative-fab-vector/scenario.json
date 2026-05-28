@@ -1,0 +1,11 @@
+{
+  "id": "F25",
+  "name": "llm-narrative-fab-vector",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA", "LLM-semantic-invariant"],
+  "bugHint": "H",
+  "anchor": "16th carry-forward candidate — LLM-narrative semantic-invariant verification",
+  "rationale": "Broker email states loan_amount $280,000 explicitly. loan_application doc deliberately omits loan_amount field (broker source is sole authority for LA). Tests LLM narrative invariant: narrative-prose output must NOT FABRICATE canonical values not in canonical_map. Per anti-circularity discipline: spec rationale is 'broker statement is authoritative for INTENT field per R10-G framing; narrative must not invent canonical values not in canonical_map' — externally grounded.\n\nIf Vienna's narrative invents a property_value (not provided by broker, not in any doc) or some other canonical field not present in canonical_map, that's a SEMANTIC-INVARIANT VIOLATION. 16th carry-forward candidate per Phase 1 framing: LLM-narrative semantic-invariant discipline as emergent template family from this Phase 5 anchor.",
+  "notes": "Single-event sequence. Strongest 16th carry-forward candidate. Phase 4 spec authoring: must_not_include assertions for fabricated values (broker provided $280k; narrative must not assert a property_value, appraised_value, or other unspecified canonical fields)."
+}

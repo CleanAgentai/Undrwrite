@@ -1,0 +1,11 @@
+{
+  "id": "F09",
+  "name": "purchase-76ltv-broker-contradicts-loan-app",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "P", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "CT", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA", "F2.DH"],
+  "bugHint": "H",
+  "anchor": "R11-B-1 Layer 1+2 × purchase × elevated band interaction",
+  "rationale": "Purchase at 76% LTV (elevated band) with broker directly contradicting loan_app at intake. loan_app shows $475k; broker email asserts $570k (>30% discrepancy). Tests R11-B-1 Layer 1 canonical-map suppression + Layer 2 doc-text sanitization × purchase-LTV math × F4.EL elevated-band callout. Triple interaction.",
+  "notes": "Single-event intake (BW=CT, direct contradiction). Distinct from E22 (refi-baseline contradict); F09 adds purchase + elevated-LTV stacking."
+}

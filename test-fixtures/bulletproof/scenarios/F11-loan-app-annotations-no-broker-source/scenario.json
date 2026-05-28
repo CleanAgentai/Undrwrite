@@ -1,0 +1,11 @@
+{
+  "id": "F11",
+  "name": "loan-app-annotations-no-broker-source",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "SL", "CV": "1", "GE": "ON" },
+  "families": ["F1.LA", "doc-text"],
+  "bugHint": "M",
+  "anchor": "R11-B-1 Layer 2 inverse: annotations preserved when no broker source",
+  "rationale": "loan_application doc has [Page N annotation] markers. Broker is SILENT on loan_amount (no broker_correction, no broker_initial_intent). R11-B-1 Layer 2 sanitization should NOT strip annotations because there's no broker source — Layer 2 trigger is broker-source presence. Tests Layer 2 inverse: annotations preserved when sanitization shouldn't apply.",
+  "notes": "Single-event sequence. Distinct from A07 (annotations with broker correction); F11 tests the inverse — annotations without broker source."
+}

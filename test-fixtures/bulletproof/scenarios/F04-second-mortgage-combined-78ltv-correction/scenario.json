@@ -1,0 +1,11 @@
+{
+  "id": "F04",
+  "name": "second-mortgage-combined-78ltv-correction",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "M2", "LTV": "75-80", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.MP", "R4-RESIDUAL-1"],
+  "bugHint": "H",
+  "anchor": "R4-RESIDUAL-1 combined-LTV escalation + broker correction interaction",
+  "rationale": "2nd mortgage at combined 78% LTV (1st mortgage $380k + 2nd request $185k against $720k property) with broker correction on mortgage_position. R4-RESIDUAL-1 combined-LTV escalation should fire (78% combined LTV is in elevated band). Interaction test: combined-LTV gate × broker_correction × F4.EL elevated-callout. If Vienna's 2nd-mortgage handling still has unresolved cases beyond R10-E/R11-A closure, surfaces as Layer 3 carry-forward candidate.",
+  "notes": "Two-event sequence. R4-RESIDUAL-1 carry-forward watch — if Phase 5 reveals gaps, surfaces in Phase 4.5."
+}

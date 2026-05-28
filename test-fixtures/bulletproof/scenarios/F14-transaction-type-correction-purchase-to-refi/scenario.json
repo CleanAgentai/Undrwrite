@@ -1,0 +1,11 @@
+{
+  "id": "F14",
+  "name": "transaction-type-correction-purchase-to-refi",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.TT"],
+  "bugHint": "M",
+  "anchor": "R11-A inferential canonical field × broker_correction",
+  "rationale": "Broker initial intake frames as purchase. Subsequent correction clarifies the deal is actually a refinance. F1.TT inferential canonical field per R11-A must accept broker_correction tier override of broker_initial_intent tier. Tests inferential-field correction precedence + workflow-state transition implications (purchase doesn't require mortgage_statement; refi does — so missing-doc escalation may shift after correction).",
+  "notes": "Two-event sequence. Distinct from A28 (which has same shape); F14 emphasizes the workflow-state-transition interaction."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "F21",
+  "name": "loan-app-section-9-populated",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 multi-field", "Grace-T4"],
+  "bugHint": "M",
+  "anchor": "Grace-T4 Section 9 JS-render (R4-RESIDUAL-2 sibling)",
+  "rationale": "loan_application doc has Section 9 (additional info / supplementary canonical fields) populated with content beyond standard fields. Tests Vienna's Section 9 JS-render handling — F1 multi-field extraction across less-common loan_app sections. Grace-T4 anchor from R4-RESIDUAL-2 deferred residual.",
+  "notes": "Single-event sequence. Tests less-common loan_app section parsing."
+}

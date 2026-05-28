@@ -1,0 +1,11 @@
+{
+  "id": "F06",
+  "name": "cross-doc-postal-discrepancy",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.PC", "F4.PC"],
+  "bugHint": "M",
+  "anchor": "R11-C M2 × F1.PC source-hierarchy interaction",
+  "rationale": "Cross-doc postal discrepancy + standard refi at 50-75% LTV. F1.PC source-hierarchy captures both postal values with distinct source classifications (loan_app T6R 2K8 vs appraisal T6R 2K9); F4.PC injectPostalCodeDiscrepancyCallout fires. Interaction: F1.PC source-tuple capture + F4.PC callout text injection both happen. Distinct from A22 (F1.PC focus only) and D04 (F4.PC focus only) — F06 tests both simultaneously.",
+  "notes": "Single-event sequence. Three-scenario interaction triangle: A22 (F1.PC) + D04 (F4.PC) + F06 (both)."
+}

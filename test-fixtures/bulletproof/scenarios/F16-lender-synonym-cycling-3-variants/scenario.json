@@ -1,0 +1,11 @@
+{
+  "id": "F16",
+  "name": "lender-synonym-cycling-3-variants",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "M", "GE": "ON" },
+  "families": ["F1.EL"],
+  "bugHint": "M",
+  "anchor": "LENDER_SYNONYMS multi-variant within single thread",
+  "rationale": "Broker uses 'RBC', 'Royal Bank', and 'B of M' interchangeably across multiple turns (intake says RBC, follow-up says Royal Bank, third turn references 'B of M' as alternative-lender option). Tests LENDER_SYNONYMS normalization within a multi-turn thread where multiple lender entities appear (RBC for existing; BMO as alternative quote consideration).",
+  "notes": "Three-event sequence. Stresses both same-lender synonym resolution + multi-lender disambiguation in same thread."
+}

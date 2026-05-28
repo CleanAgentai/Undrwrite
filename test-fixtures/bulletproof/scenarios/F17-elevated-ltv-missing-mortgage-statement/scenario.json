@@ -1,0 +1,11 @@
+{
+  "id": "F17",
+  "name": "elevated-ltv-missing-mortgage-statement",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "75-80", "DQ": "CL", "DS": "M1", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.FB", "F2.DH", "F4.EL"],
+  "bugHint": "M",
+  "anchor": "F1.FB loan-app fallback × F4.EL elevated band × DS=M1 interaction",
+  "rationale": "Refi at 78% LTV with mortgage_statement missing. F1.FB falls back to loan_app source (per A33). F4.EL elevated-band callout fires. F2.DH should not activate (no discrepancy, just missing source). Tests three-way interaction: missing-doc fallback + elevated callout + no-hold-when-just-missing.",
+  "notes": "Single-event sequence. Cross-family interaction without contradiction or correction — pure missing-doc + elevated-band stacking."
+}

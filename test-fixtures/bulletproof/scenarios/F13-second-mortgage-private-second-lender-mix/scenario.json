@@ -1,0 +1,11 @@
+{
+  "id": "F13",
+  "name": "second-mortgage-private-second-lender-mix",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "M2", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1.EL", "F1.MP", "R4-RESIDUAL-2"],
+  "bugHint": "M",
+  "anchor": "R4-RESIDUAL-2 PNW-only existing-first-mortgage extraction",
+  "rationale": "2nd mortgage scenario: existing 1st with RBC bank-lender + new 2nd request from private lender (Centum Private Capital). F1.EL must distinguish 1st-mortgage-lender from new-2nd-lender; PNW Statement (Personal Net Worth) typically has the existing 1st context per R4-RESIDUAL-2. If Vienna's existing-first-mortgage extraction has unresolved cases for private-second scenarios, surfaces as Layer 3 carry-forward candidate.",
+  "notes": "Single-event sequence. R4-RESIDUAL-2 carry-forward watch — Phase 5 reveals whether deferred residual is still in-scope."
+}

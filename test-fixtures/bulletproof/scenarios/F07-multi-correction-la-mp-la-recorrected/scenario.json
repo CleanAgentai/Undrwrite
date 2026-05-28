@@ -1,0 +1,11 @@
+{
+  "id": "F07",
+  "name": "multi-correction-la-mp-la-recorrected",
+  "group": "F",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CR", "CV": "MC", "GE": "ON" },
+  "families": ["F1.LA", "F1.MP", "F3.BR"],
+  "bugHint": "M",
+  "anchor": "R10-G push machinery cross-field stress",
+  "rationale": "Intake states LA $280k + MP 1st. Correction-1: LA $310k. Correction-2: MP changes to 2nd mortgage. Correction-3: LA recorrected to $295k. Tests R10-G push machinery durability across (a) multiple corrections, (b) different fields, (c) re-correction of same field. F1.LA canonical-map should resolve to final $295k; F1.MP to 2nd mortgage. Cross-field push integrity test.",
+  "notes": "Four-event sequence: intake + 3 corrections across 5 days. Distinct from C07 (race within hour) and E26 (LA-only multi-correction)."
+}

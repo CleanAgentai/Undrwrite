@@ -1,0 +1,11 @@
+{
+  "id": "F02",
+  "name": "non-spousal-joint-purchase-82ltv",
+  "group": "F",
+  "dimensions": { "BC": "NJ", "TT": "P", "LTV": "80-85", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "ON" },
+  "families": ["F1 aggregation", "F4.HL", "F2.AC"],
+  "bugHint": "H",
+  "anchor": "Layer 3 #7 × R10-C-1 high-LTV interaction",
+  "rationale": "Stacks: non-spousal joint applicants + purchase at 82% LTV. F1 aggregation (Layer 3 #7) intersects F2.AC awaiting_collateral activation + F4.HL dedicated collateral-ask generator. Interaction question: does Vienna route the high-LTV collateral ask to PRIMARY applicant only, BOTH applicants jointly, or admin-handoff? Layer 3 product-design + interaction-specific.",
+  "notes": "Single-event sequence. Two Layer 3 items overlap; Phase 4.5 batched decisions."
+}
