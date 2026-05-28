@@ -1,0 +1,19 @@
+{
+  "scenario_id": "E29",
+  "spec_version": "1.0",
+  "rationale_source": "R10-D FSA_LETTER_TO_PROVINCE: A-prefix FSA → NL province inference",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code": { "value": "A1C 1A4", "source_classification": "broker_initial_intent", "rationale": "F1.PC A-prefix per R10-D." },
+      "province": { "value": "NL", "source_classification": "derived", "rationale": "F1.PC A-prefix → NL per FSA_LETTER_TO_PROVINCE map." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Clean." } },
+    "workflow_state": { "value": "active", "rationale": "Standard NL refi." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "NL|Newfoundland", "rationale": "Province derived per R10-D." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "E07",
+  "spec_version": "1.0",
+  "rationale_source": "TT=2nd-mortgage: combined-LTV math (existing 1st + new 2nd / property value) per R4-RESIDUAL-1; F1.MP=2nd in canonical_map",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": { "value": "2nd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.TT." },
+      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.MP." },
+      "requested_loan_amount": { "value": 120000, "source_classification": "broker_initial_intent", "rationale": "F1.LA — new 2nd mortgage amount." },
+      "first_mortgage_balance": { "value": 380000, "source_classification": "mortgage_statement", "rationale": "F1.FB existing 1st per R11-B-2." }
+    },
+    "gate_states": {
+      "combined_ltv_computed": { "value": "0.694", "rationale": "($380k + $120k) / $720k = 69.4% combined LTV per R4-RESIDUAL-1 math." },
+      "elevated_ltv_band": { "value": false, "rationale": "Combined LTV 69% in standard band." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard 2nd mortgage." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "2nd mortgage|second mortgage", "rationale": "F1.MP + F1.TT." }, { "pattern": "combined LTV|combined loan-to-value", "rationale": "R4-RESIDUAL-1 combined-LTV math in Snapshot." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

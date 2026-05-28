@@ -1,0 +1,20 @@
+{
+  "scenario_id": "E21",
+  "spec_version": "1.0",
+  "rationale_source": "Broker corrects then silent: F3.BR captures correction; F4.CH chase fires per Layer 3 #6 72h default",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount_pending_confirmation": { "value": null, "source_classification": "pending_broker_confirmation", "rationale": "Broker indicates 'possibly bumping' but doesn't commit. F1.LA holds previous $460k until broker confirms." }
+    },
+    "gate_states": { "broker_silence_threshold_pending": { "value": "72h per Layer 3 #6", "rationale": "F4.CH chase fires after 72h silence." } },
+    "workflow_state": { "value": "active", "rationale": "Awaiting broker confirmation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_chase_email", "expected_fire": true, "phase5_temporal_dependency": "fires AFTER 72h silence per Layer 3 #6", "must_include": [{ "pattern": "loan amount|confirm|still considering", "rationale": "F4.CH asks broker to confirm pending change." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#6", "scope": "broker-silent escalation timing", "phase5_placeholder": "72h auto-fire default" }
+  ]
+}

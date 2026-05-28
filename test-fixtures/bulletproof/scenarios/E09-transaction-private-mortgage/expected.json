@@ -1,0 +1,24 @@
+{
+  "scenario_id": "E09",
+  "spec_version": "1.0",
+  "rationale_source": "TT=private mortgage: Vienna name suggests private-mortgage focus. ARCHITECTURE-AMENDMENT-CANDIDATE per DECISIONS-NEEDED.md #4 — spec captures expected behavior assuming uniform treatment with bank-lender refis.",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": { "value": "private mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.TT private-variant. Per Layer 3 #4 (a) placeholder: treated uniformly with bank-lender refis; private-specific workflow surfaces in Phase 5." },
+      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.MP — private as 2nd behind existing bank 1st." }
+    },
+    "gate_states": {
+      "combined_ltv_high": { "value": true, "rationale": "Combined LTV 95% ($380k 1st + $425k private 2nd / $850k) — extreme band per Layer 3 #14 (b) escalate territory." }
+    },
+    "workflow_state": { "value": "awaiting_collateral", "rationale": "F2.AC + admin exception review per cross-product Layer 3 #14 + #4." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "admin_exception_review_notification", "expected_fire": true, "must_include": [{ "pattern": "private|95%|combined LTV", "rationale": "Private + extreme combined LTV warrants admin attention." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#4", "scope": "private mortgage workflow differentiation", "phase5_placeholder": "spec assumes uniform treatment with bank refis" },
+    { "reference": "DECISIONS-NEEDED.md#14", "scope": "extreme combined LTV (95%) policy", "phase5_placeholder": "spec assumes (b) escalate" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "A26",
+  "spec_version": "1.0",
+  "rationale_source": "F1.MP inference via R10-G + R11-A refinance carve-out: TT=refinance + existing-lender match across sources + balance present → infer mortgage_position from existence of first mortgage",
+  "layer1_structural": {
+    "canonical_map": {
+      "mortgage_position": {
+        "value": "2nd mortgage",
+        "source_classification": "inferred",
+        "rationale": "Broker silent on MP. transaction_type=refinance + existing_mortgage_lender RBC + first_mortgage_balance $225k all consistent. R10-G + R11-A refinance carve-out: existing 1st mortgage present + refinance intent → new loan is 2nd-position. F1.MP inferred-tier."
+      },
+      "existing_mortgage_lender": { "value": "Royal Bank of Canada", "source_classification": "mortgage_statement", "rationale": "F1.EL docs-tier (statement authoritative per R11-B-2)." },
+      "first_mortgage_balance": { "value": 225000, "source_classification": "mortgage_statement", "rationale": "F1.FB docs-tier per R11-B-2." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Cross-source agreement." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "2nd mortgage|second mortgage", "rationale": "Inferred F1.MP per R10-G + R11-A." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

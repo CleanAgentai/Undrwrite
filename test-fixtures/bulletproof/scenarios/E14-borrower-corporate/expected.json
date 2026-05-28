@@ -1,0 +1,24 @@
+{
+  "scenario_id": "E14",
+  "spec_version": "1.0",
+  "rationale_source": "F1 corporate borrower per Layer 3 #1 recommended-default (b) borrower_name + AML/PEP per beneficial-owner. ARCHITECTURE-AMENDMENT-CANDIDATE.",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value": "Webb Holdings Ltd.", "source_classification": "broker_initial_intent", "rationale": "F1.BN holds corporate entity name. Per Layer 3 #1 (b)." },
+      "beneficial_owners": { "value_includes": ["Marcus Webb"], "source_classification": "extraText", "rationale": "Beneficial owner per AML/PEP per Layer 3 #1 (b). ARCHITECTURE-AMENDMENT if canonical_map doesn't track separately." },
+      "transaction_type": { "value": "refinance", "source_classification": "broker_initial_intent", "rationale": "F1.TT corporate refinance." }
+    },
+    "gate_states": {
+      "corporate_borrower_detected": { "value": true, "rationale": "Per Layer 3 #1 (b): corporate intake routes to corporate-specific AML/PEP flow per beneficial owners." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard pending architecture-amendment confirmation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Webb Holdings|holding company|corporate", "rationale": "Corporate-borrower flag." }, { "pattern": "Marcus Webb.{0,30}beneficial owner|beneficial owner.{0,30}Marcus", "rationale": "Beneficial-owner surfaced for AML/PEP per Layer 3 #1 (b)." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#1", "scope": "corporate canonical_map shape — extend with corporate-specific fields vs use existing borrower_name", "phase5_placeholder": "spec assumes (b) borrower_name + AML/PEP per beneficial-owner" }
+  ]
+}

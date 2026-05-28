@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A34",
+  "spec_version": "1.0",
+  "rationale_source": "F1.FB broker_correction cross-tier precedence: broker > docs always per R10-G framing, even when docs-tier is mortgage_statement (authoritative within docs)",
+  "layer1_structural": {
+    "canonical_map": {
+      "first_mortgage_balance": {
+        "value": 222500,
+        "source_classification": "broker_correction",
+        "rationale": "mortgage_statement $225k; broker correction $222.5k (post-statement payment). F1.FB broker_correction tier wins per R10-G cross-tier precedence (broker > docs always, regardless of doc-tier authority)."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "1.1% delta; below 30% threshold." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "222,500", "rationale": "F1.FB broker_correction value." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

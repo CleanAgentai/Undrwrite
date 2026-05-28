@@ -1,0 +1,19 @@
+{
+  "scenario_id": "E17",
+  "spec_version": "1.0",
+  "rationale_source": "OCR-degraded loan_app: F1 multi-field extraction stress; spec asserts robust extractor or flag-for-broker if confidence low",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 280000, "source_classification": "loan_application_ocr", "rationale": "F1.LA from OCR-degraded text 'Lo4n amount: $28O,OOO'. Spec asserts Vienna's extractor handles common O→0/l→1/S→5 substitutions OR flags for manual review." },
+      "borrower_name": { "value": "Marcus Anthony Webb", "source_classification": "loan_application_ocr", "rationale": "F1.BN from OCR text 'Marcu5 Anth0ny Webb' — robust extraction." }
+    },
+    "gate_states": { "ocr_quality_warning": { "value": true, "rationale": "Doc-quality flag for admin attention." } },
+    "workflow_state": { "value": "active", "rationale": "Standard with quality flag." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "OCR|scan quality|low confidence", "rationale": "Quality flag in admin notification." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

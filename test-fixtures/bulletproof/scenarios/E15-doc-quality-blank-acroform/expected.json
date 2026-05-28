@@ -1,0 +1,19 @@
+{
+  "scenario_id": "E15",
+  "spec_version": "1.0",
+  "rationale_source": "Doc quality axis blank-template: pdf-parse extracts form-label text only; no canonical field values; Vienna escalates",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": null, "source_classification": "missing", "rationale": "Blank loan_app has no filled fields; F1.LA has no docs-tier source; broker email also silent on LA." },
+      "borrower_name": { "value": null, "source_classification": "missing", "rationale": "Blank form; F1.BN missing." }
+    },
+    "gate_states": { "blank_loan_app_detected": { "value": true, "rationale": "Empty intake content triggers escalation per F3.AH or doc-quality detection." } },
+    "workflow_state": { "value": "active", "rationale": "Awaiting filled loan_app." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_intake_clarification", "expected_fire": true, "must_include": [{ "pattern": "blank|incomplete|fill|form", "rationale": "Vienna asks broker to send filled loan_app." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

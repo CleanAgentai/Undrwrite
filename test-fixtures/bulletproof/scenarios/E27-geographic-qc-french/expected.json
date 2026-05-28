@@ -1,0 +1,22 @@
+{
+  "scenario_id": "E27",
+  "spec_version": "1.0",
+  "rationale_source": "Geographic QC + French content per Layer 3 #22 recommended-default (b) accept French intake + English admin rendering. ARCHITECTURE-AMENDMENT for full French support.",
+  "layer1_structural": {
+    "canonical_map": {
+      "subject_property_address": { "value_includes": ["Avenue Papineau", "Montréal"], "source_classification": "broker_initial_intent", "rationale": "F1.AD raw French content per Layer 3 #22 (b)." },
+      "postal_code": { "value": "H2K 4L7", "source_classification": "broker_initial_intent", "rationale": "F1.PC H-prefix FSA → QC per R10-D mapping." },
+      "existing_mortgage_lender": { "value": "Desjardins", "source_classification": "loan_application", "rationale": "F1.EL." }
+    },
+    "gate_states": { "qc_french_content_detected": { "value": true, "rationale": "Per Layer 3 #22 (b): accept French; render English in admin." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Sarah Chen|Avenue Papineau|Montréal|QC|Quebec", "rationale": "QC content surfaced." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#22", "scope": "QC French-language support", "phase5_placeholder": "(b) accept French intake + English admin rendering" }
+  ]
+}

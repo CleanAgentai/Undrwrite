@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A32",
+  "spec_version": "1.0",
+  "rationale_source": "F1.FB mortgage_statement source-hierarchy authority per R11-B-2: statement is authoritative within docs-tier for balance/payoff fields",
+  "layer1_structural": {
+    "canonical_map": {
+      "first_mortgage_balance": {
+        "value": 225000,
+        "source_classification": "mortgage_statement",
+        "rationale": "Broker silent on balance. loan_app $220k; mortgage_statement $225k (current). R11-B-2: statement authoritative within docs-tier; F1.FB resolves to statement value."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Intra-docs-tier preference per R11-B-2; not cross-tier discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "225,000", "rationale": "F1.FB statement-tier value." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

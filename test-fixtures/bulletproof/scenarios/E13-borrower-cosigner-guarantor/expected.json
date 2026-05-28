@@ -1,0 +1,22 @@
+{
+  "scenario_id": "E13",
+  "spec_version": "1.0",
+  "rationale_source": "F1 aggregation cosigner per Layer 3 #8 recommended-default (a) cosigner as additional canonical field. ARCHITECTURE-AMENDMENT-CANDIDATE cross-listed.",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value": "Marcus Webb", "source_classification": "broker_initial_intent", "rationale": "F1.BN primary applicant (sole title-holder)." },
+      "cosigner_name": { "value": "Patricia Webb", "source_classification": "extraText", "rationale": "Cosigner in extraText. Per Layer 3 #8 (a): canonical_map should have cosigner_name field; ARCHITECTURE-AMENDMENT if missing." },
+      "annual_income": { "value": 223000, "source_classification": "derived", "rationale": "F1.AI combined for DSCR ($78k primary + $145k cosigner = $223k). Architecture-amendment if cosigner_income not tracked separately." }
+    },
+    "gate_states": { "cosigner_present": { "value": true, "rationale": "Per Layer 3 #8 (a): cosigner flagged distinct from co-applicant." } },
+    "workflow_state": { "value": "active", "rationale": "Standard with cosigner." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Marcus Webb", "rationale": "F1.BN primary." }, { "pattern": "Patricia Webb|cosigner|guarantor", "rationale": "Cosigner surfaced in admin context." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#8", "scope": "cosigner/guarantor distinction from co-applicant", "phase5_placeholder": "spec assumes (a) cosigner as additional canonical field" }
+  ]
+}

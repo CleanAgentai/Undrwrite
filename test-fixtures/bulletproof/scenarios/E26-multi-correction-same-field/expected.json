@@ -1,0 +1,18 @@
+{
+  "scenario_id": "E26",
+  "spec_version": "1.0",
+  "rationale_source": "Multi-correction across days: temporal last-write-wins per Layer 3 #21 + R10-G push (slow-iteration variant of C07 race)",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 285000, "source_classification": "broker_correction", "rationale": "Latest correction c3 ($285k) is canonical per last-write-wins. F1.LA broker_correction with temporal disambiguation." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Iteration within ~10% range; below threshold." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "285,000", "rationale": "Final canonical." }], "must_not_include": [{ "pattern": "\\$260,000|\\$290,000|\\$275,000", "rationale": "Superseded values shadowed." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,21 @@
+{
+  "scenario_id": "E18",
+  "spec_version": "1.0",
+  "rationale_source": "Doc-set missing-1 (refi without mortgage_statement): intake_asked_items flow detects missing required doc; F1.FB falls back to loan_app per A33",
+  "layer1_structural": {
+    "canonical_map": {
+      "first_mortgage_balance": { "value": 285000, "source_classification": "loan_application", "rationale": "F1.FB loan_app fallback per A33 (no statement)." }
+    },
+    "gate_states": {
+      "mortgage_statement_missing": { "value": true, "rationale": "Refi requires statement; missing flagged." },
+      "discrepancyHold": { "value": false, "rationale": "Missing-source != discrepancy; F2.DH not triggered." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting statement." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_intake_doc_ask", "expected_fire": true, "must_include": [{ "pattern": "mortgage statement|payout statement", "rationale": "Vienna asks broker per broker promise to forward." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

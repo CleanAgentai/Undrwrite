@@ -1,0 +1,24 @@
+{
+  "scenario_id": "E05",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA × F2.AC at LTV>85% per Layer 3 #14 recommended-default (b) escalate for manual exception review",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 846000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." }
+    },
+    "gate_states": {
+      "extreme_ltv_detected": { "value": true, "rationale": "LTV 92% > 85% ceiling. Per Layer 3 #14 (b): escalate to admin for manual exception review." },
+      "high_ltv_detected": { "value": true, "rationale": "LTV >80% also triggers F4.HL." }
+    },
+    "workflow_state": { "value": "awaiting_collateral", "rationale": "F2.AC activated; admin manual review required per Layer 3 #14 (b)." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "admin_exception_review_notification", "expected_fire": true, "must_include": [{ "pattern": "92%|over.{0,10}85%|exception|manual review", "rationale": "Admin exception flag per Layer 3 #14 (b)." }] },
+      { "kind": "broker_facing_collateral_ask", "expected_fire": true, "rationale": "F4.HL still fires for collateral discussion." }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#14", "scope": "LTV >85% policy: decline vs escalate vs F4.HL-with-extra-collateral", "phase5_placeholder": "spec assumes (b) escalate for manual exception review" }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "scenario_id": "E11",
+  "spec_version": "1.0",
+  "rationale_source": "F1 aggregation spousal-joint: under-tested area per Phase 1; spec captures expected behavior assuming canonical_map borrower_name accommodates concatenated joint names",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value_includes": ["Marcus Webb", "Patricia Webb"], "source_classification": "broker_initial_intent", "rationale": "F1.BN joint string per docs + broker. Spec assumes string-concatenation accommodation in canonical_map (no per-applicant tuples)." },
+      "annual_income": { "value": 245000, "source_classification": "broker_initial_intent", "rationale": "F1.AI combined household per extraText. Architecture-amendment-candidate from A41 applies." }
+    },
+    "gate_states": { "joint_applicants_detected": { "value": true, "rationale": "Concatenated name pattern signals joint." } },
+    "workflow_state": { "value": "active", "rationale": "Standard joint refi." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Marcus Webb.{0,30}Patricia Webb|Patricia Webb.{0,30}Marcus Webb", "rationale": "Both names in Snapshot per joint intent." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

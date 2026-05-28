@@ -1,0 +1,21 @@
+{
+  "scenario_id": "E02",
+  "spec_version": "1.0",
+  "rationale_source": "LTV-band axis standard control: 65% LTV — bulk of Vienna's underwriting; no band-callout, no bypass",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 552000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." }
+    },
+    "gate_states": {
+      "elevated_ltv_band": { "value": false, "rationale": "LTV 65% in 50-75% standard band; F4.EL not triggered." },
+      "high_ltv_detected": { "value": false, "rationale": "F4.HL not triggered." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Snapshot|Deal Snapshot", "rationale": "Standard prelim path includes Snapshot." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

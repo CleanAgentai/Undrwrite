@@ -1,0 +1,18 @@
+{
+  "scenario_id": "E19",
+  "spec_version": "1.0",
+  "rationale_source": "Doc-set missing-many: comprehensive ask-list bundled; F1 multi-field extraction limited to loan_app",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 460000, "source_classification": "loan_application", "rationale": "F1.LA from sole doc." }
+    },
+    "gate_states": { "doc_package_incomplete": { "value": true, "rationale": "Multiple docs missing; bundled ask." } },
+    "workflow_state": { "value": "active", "rationale": "Awaiting docs." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_intake_doc_ask", "expected_fire": true, "must_include": [{ "pattern": "mortgage statement|appraisal|NOA", "rationale": "Bundled ask for multiple missing docs." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,18 @@
+{
+  "scenario_id": "E22",
+  "spec_version": "1.0",
+  "rationale_source": "R11-B intake-time broker contradiction (BW=CT): F1.LA broker_initial_intent vs docs at single message; F2.DH triggered by R11-B intake-discrepancy detection",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 325000, "source_classification": "broker_initial_intent", "rationale": "Broker email asserts $325k; loan_app $185k. F1.LA broker_initial_intent wins per R10-G; loan_app value below 30% suppression threshold but still flagged." }
+    },
+    "gate_states": { "discrepancyHold": { "value": true, "rationale": "75% discrepancy (broker vs loan_app) → R11-B-1 Layer 1 suppression + F2.DH activation. Distinct from A08: contradiction is INTAKE-time, not post-intake correction (BW=CT vs CR)." } },
+    "workflow_state": { "value": "active", "rationale": "Held for admin." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "admin_discrepancy_notification", "expected_fire": true, "must_include": [{ "pattern": "discrepancy|325,000.{0,50}185,000|185,000.{0,50}325,000", "rationale": "Both values surface to admin." }], "must_not_include": [{ "pattern": "\\$185,000(?!.{0,20}draft)", "rationale": "Suppressed loan_app value not presented as canonical." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "E23",
+  "spec_version": "1.0",
+  "rationale_source": "Broker silent on Vienna callout: F4.PC postal callout fires, broker doesn't reply, F4.CH chase per Layer 3 #6",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code_tuples": { "expected_count": 2, "expected_values": ["T6R 2K8", "T6R 2K9"], "rationale": "F1.PC captures both per A22 pattern." }
+    },
+    "gate_states": {
+      "postal_code_discrepancy_detected": { "value": true, "rationale": "F4.PC callout triggered." },
+      "broker_silence_post_callout": { "value": "true after 72h", "rationale": "F4.CH chase per Layer 3 #6 (72h default)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting broker clarification." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "postal|T6R 2K", "rationale": "F4.PC callout in initial prelim." }] },
+      { "kind": "broker_facing_chase_email", "expected_fire": true, "phase5_temporal_dependency": "fires 72h after prelim silence", "must_include": [{ "pattern": "postal code|discrepancy|clarify", "rationale": "F4.CH chases the unresolved callout." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#6", "scope": "silent-on-callout chase timing", "phase5_placeholder": "72h default" }
+  ]
+}

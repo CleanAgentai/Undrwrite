@@ -1,0 +1,27 @@
+{
+  "scenario_id": "A40",
+  "spec_version": "1.0",
+  "rationale_source": "F1.CT borrower_phone broker_correction tier wins per R10-G; stale doc value shadowed",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_phone": {
+        "value": "780-555-0142",
+        "source_classification": "broker_correction",
+        "rationale": "loan_app extraText '780-555-0099' (stale); broker correction '780-555-0142' (current). F1.CT broker_correction wins per R10-G."
+      },
+      "borrower_email": {
+        "value": "marcus.webb@example.com",
+        "source_classification": "broker_initial_intent",
+        "rationale": "Broker email in intake; consistent with loan_app extraText. F1.CT broker_initial_intent + corroboration."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Contact-update correction; not material discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "780-555-0142", "rationale": "F1.CT canonical phone per broker_correction." }], "must_not_include": [{ "pattern": "780-555-0099", "rationale": "Stale phone shadowed." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "E08",
+  "spec_version": "1.0",
+  "rationale_source": "TT=3rd mortgage: ARCHITECTURE-AMENDMENT-CANDIDATE per DECISIONS-NEEDED.md #2. Spec captures expected behavior IF Vienna canonical_map supports 3rd-position; Phase 5 triage reveals empirical gap.",
+  "layer1_structural": {
+    "canonical_map": {
+      "mortgage_position": { "value": "3rd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.MP per broker statement. ASSUMING canonical_map enum includes '3rd mortgage'; if not, Phase 1 matrix amendment surfaces." },
+      "transaction_type": { "value": "3rd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.TT — ASSUMES TT enum extension." },
+      "first_mortgage_balance": { "value": 380000, "source_classification": "mortgage_statement", "rationale": "F1.FB existing 1st." }
+    },
+    "gate_states": {
+      "combined_ltv_with_existing_2nd": { "value": "0.715", "rationale": "($380k 1st + $85k 2nd from extraText + $50k new 3rd) / $720k = 71.5%. Assumes Vienna combined-LTV math extended to N-position (architecture-amendment surface)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard pending architecture-amendment confirmation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "3rd mortgage|third mortgage", "rationale": "F1.MP per spec ASSUMING canonical enum supports." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#2", "scope": "3rd mortgage support — canonical enum + combined-LTV-math extension", "phase5_placeholder": "spec assumes canonical_map supports 3rd-position; Phase 5 reveals empirical anchor" }
+  ]
+}

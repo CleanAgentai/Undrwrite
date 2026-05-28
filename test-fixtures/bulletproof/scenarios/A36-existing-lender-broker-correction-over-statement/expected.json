@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A36",
+  "spec_version": "1.0",
+  "rationale_source": "F1.EL broker_correction cross-tier precedence even over mortgage_statement (broker > docs always per R10-G)",
+  "layer1_structural": {
+    "canonical_map": {
+      "existing_mortgage_lender": {
+        "value": "Scotia Mortgage Corporation",
+        "source_classification": "broker_correction",
+        "rationale": "mortgage_statement 'Scotiabank'; broker correction 'Scotia Mortgage Corporation' (subsidiary entity). F1.EL broker_correction wins per R10-G cross-tier precedence."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Entity-naming refinement, not value discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Scotia Mortgage Corporation", "rationale": "F1.EL broker_correction value." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

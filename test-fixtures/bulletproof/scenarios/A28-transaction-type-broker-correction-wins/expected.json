@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A28",
+  "spec_version": "1.0",
+  "rationale_source": "F1.TT inferential canonical field (R11-A): broker_correction tier overrides broker_initial_intent + docs",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": {
+        "value": "refinance",
+        "source_classification": "broker_correction",
+        "rationale": "Broker initially framed as purchase; correction clarifies refinance. F1.TT broker_correction wins per R11-A inferential-field source-hierarchy."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Position re-classification, not value discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard refi after correction." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "[Rr]efinance", "rationale": "Canonical F1.TT per broker_correction." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

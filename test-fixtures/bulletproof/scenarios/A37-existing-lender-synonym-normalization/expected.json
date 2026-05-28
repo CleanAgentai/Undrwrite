@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A37",
+  "spec_version": "1.0",
+  "rationale_source": "F1.EL LENDER_SYNONYMS normalization: 4-variant lender names (RBC / Royal Bank of Canada / RBC Royal Bank / Royal Bank) resolve to single canonical entity",
+  "layer1_structural": {
+    "canonical_map": {
+      "existing_mortgage_lender": {
+        "value": "Royal Bank",
+        "source_classification": "broker_correction",
+        "rationale": "All 4 source variants (RBC / Royal Bank of Canada / RBC Royal Bank / Royal Bank) resolve to same canonical entity via LENDER_SYNONYMS reverse-map. F1.EL broker_correction tier specifies 'Royal Bank' per broker preference."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Synonym normalization; no discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Royal Bank|RBC", "rationale": "Canonical F1.EL — any LENDER_SYNONYMS variant for RBC entity." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

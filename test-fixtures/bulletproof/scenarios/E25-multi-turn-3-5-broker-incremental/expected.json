@@ -1,0 +1,20 @@
+{
+  "scenario_id": "E25",
+  "spec_version": "1.0",
+  "rationale_source": "R10-G push machinery multi-turn integration: each turn adds canonical_map content; F3.BR routes each",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 280000, "source_classification": "broker_initial_intent", "rationale": "F1.LA from t1." },
+      "annual_income": { "value": 145200, "source_classification": "noa", "rationale": "F1.AI from t2 NOA attachment (architecture-amendment-candidate from A41)." },
+      "credit_score": { "value": 742, "source_classification": "broker_initial_intent", "rationale": "F1.CS from t3 broker statement per Layer 3 #12 (b) — broker-supplied accepted." }
+    },
+    "gate_states": { "canonical_map_complete_after_t4": { "value": true, "rationale": "Multi-turn integration fully populates canonical_map." } },
+    "workflow_state": { "value": "active", "rationale": "Standard; ready for prelim after t4." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "phase5_temporal_dependency": "fires after t4 completion", "must_include": [{ "pattern": "280,000", "rationale": "F1.LA from t1 in Snapshot." }, { "pattern": "742", "rationale": "F1.CS from t3." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

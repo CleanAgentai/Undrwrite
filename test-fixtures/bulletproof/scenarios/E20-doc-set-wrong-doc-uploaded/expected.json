@@ -1,0 +1,20 @@
+{
+  "scenario_id": "E20",
+  "spec_version": "1.0",
+  "rationale_source": "Wrong-doc-uploaded per Layer 3 #5 — filename routes to one classification but content doesn't match; spec assumes filename-classification dominates per placeholder",
+  "layer1_structural": {
+    "canonical_map": {
+      "first_mortgage_balance": { "value": null, "source_classification": "missing", "rationale": "File classified as mortgage_statement by filename but contains loan_app content; F1.FB doesn't extract from loan_app content under statement label." }
+    },
+    "gate_states": { "filename_content_mismatch_detected": { "value": false, "rationale": "Per Layer 3 #5 placeholder: filename-classification dominates; mismatch not detected today. Phase 5 reveals if Vienna has content-validation capability." } },
+    "workflow_state": { "value": "active", "rationale": "Standard pending Phase 5 empirical surface." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "rationale": "Standard prelim path; mismatch surfaces as missing-field downstream." }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#5", "scope": "wrong-doc-uploaded detection + escalation policy", "phase5_placeholder": "spec assumes filename-classification dominates; mismatch surfaces empirically in Phase 5" }
+  ]
+}

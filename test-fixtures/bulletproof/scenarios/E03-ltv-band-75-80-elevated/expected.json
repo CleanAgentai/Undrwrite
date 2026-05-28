@@ -1,0 +1,22 @@
+{
+  "scenario_id": "E03",
+  "spec_version": "1.0",
+  "rationale_source": "R10-C-2 elevated-band callout at 75-80% LTV; standard prelim path NOT bypassed",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 562000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." },
+      "property_value": { "value": 720000, "source_classification": "broker_initial_intent", "rationale": "F1.PV." }
+    },
+    "gate_states": {
+      "elevated_ltv_band": { "value": true, "rationale": "LTV 78% in 75-80% band; F4.EL triggered per R10-C-2." },
+      "high_ltv_detected": { "value": false, "rationale": "LTV <80%; F4.HL not triggered." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "75-80%|elevated", "rationale": "F4.EL callout text injected per R10-C-2." }, { "pattern": "Snapshot|Deal Snapshot", "rationale": "Standard prelim path TAKEN (not bypassed)." }], "must_not_include": [{ "pattern": "collateral question", "rationale": "F4.HL dedicated-bypass NOT triggered at 78%." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

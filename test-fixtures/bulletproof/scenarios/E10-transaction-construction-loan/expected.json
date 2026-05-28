@@ -1,0 +1,25 @@
+{
+  "scenario_id": "E10",
+  "spec_version": "1.0",
+  "rationale_source": "TT=construction: ARCHITECTURE-AMENDMENT-CANDIDATE per DECISIONS-NEEDED.md #3 — spec captures expected behavior assuming Vienna canonical_map supports construction-specific attributes (draw_schedule, completion_date, projected_completion_value)",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": { "value": "construction", "source_classification": "broker_initial_intent", "rationale": "F1.TT — ASSUMES TT enum extension to include construction." },
+      "property_value": { "value": 280000, "source_classification": "appraisal", "rationale": "F1.PV current land value; construction-specific projected-completion-value ($900k) in extraText — not canonical field today." },
+      "requested_loan_amount": { "value": 620000, "source_classification": "broker_initial_intent", "rationale": "F1.LA construction loan amount." }
+    },
+    "gate_states": {
+      "ltv_at_current_value": { "value": "2.21", "rationale": "$620k / $280k current land value = 221% LTV-to-current. Sanity-violation-shape per F1.PV<F1.LA pattern (A17 anchor)." },
+      "ltv_at_completion": { "value": "0.689", "rationale": "$620k / $900k projected-completion = 69% — only valid LTV math for construction. Architecture-amendment: construction-specific math required." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Held pending architecture-amendment confirmation per Layer 3 #3." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "admin_construction_loan_notification", "expected_fire": true, "must_include": [{ "pattern": "construction|build|draw schedule", "rationale": "Construction-specific shape surfaced to admin." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#3", "scope": "construction loan support — draw schedule + projected-completion-value canonical fields", "phase5_placeholder": "spec assumes Vienna canonical_map needs extension; Phase 5 reveals empirical anchor for matrix amendment scope" }
+  ]
+}

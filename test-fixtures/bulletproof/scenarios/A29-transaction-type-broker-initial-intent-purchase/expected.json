@@ -1,0 +1,18 @@
+{
+  "scenario_id": "A29",
+  "spec_version": "1.0",
+  "rationale_source": "F1.TT broker_initial_intent + loan_app corroboration; purchase variant",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": { "value": "purchase", "source_classification": "broker_initial_intent", "rationale": "F1.TT broker_initial_intent + loan_app agree on Purchase." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Agreement." } },
+    "workflow_state": { "value": "active", "rationale": "Standard purchase." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "[Pp]urchase", "rationale": "F1.TT." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

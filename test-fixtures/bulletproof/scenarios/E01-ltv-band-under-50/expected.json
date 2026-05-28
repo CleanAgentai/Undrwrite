@@ -1,0 +1,23 @@
+{
+  "scenario_id": "E01",
+  "spec_version": "1.0",
+  "rationale_source": "LTV-band axis lower-end control: <50% LTV — no band-specific gates trigger; standard prelim path",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 260000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." },
+      "property_value": { "value": 650000, "source_classification": "broker_initial_intent", "rationale": "F1.PV." }
+    },
+    "gate_states": {
+      "high_ltv_detected": { "value": false, "rationale": "LTV 40% — no F4.HL trigger." },
+      "elevated_ltv_band": { "value": false, "rationale": "LTV 40% — no F4.EL trigger." },
+      "awaiting_collateral": { "value": false, "rationale": "F2.AC off." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "40|low", "rationale": "Low-LTV referenced in Snapshot." }], "must_not_include": [{ "pattern": "75-80%|elevated|collateral question", "rationale": "No band-triggered content at low LTV." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

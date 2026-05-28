@@ -1,0 +1,22 @@
+{
+  "scenario_id": "E30",
+  "spec_version": "1.0",
+  "rationale_source": "Geographic outside-Canada per Layer 3 #13 recommended-default (a) explicit decline with out-of-scope message",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code": { "value": "98225", "source_classification": "broker_initial_intent_rejected", "rationale": "US ZIP format; F1.PC validation per Layer 3 #13 (a): non-Canadian-jurisdiction rejected." },
+      "province": { "value": null, "source_classification": "out_of_jurisdiction", "rationale": "US WA state; Vienna is CAD-only per Layer 3 #13 (a)." }
+    },
+    "gate_states": { "out_of_canadian_jurisdiction": { "value": true, "rationale": "Per Layer 3 #13 (a): explicit out-of-scope decline." } },
+    "workflow_state": { "value": "active", "rationale": "Deal created; processing blocked on jurisdiction-validation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_out_of_scope_decline", "expected_fire": true, "must_include": [{ "pattern": "Canadian|jurisdiction|Canada|out of scope", "rationale": "Out-of-scope decline message per Layer 3 #13 (a)." }] },
+      { "kind": "preliminary_review_admin", "expected_fire": false, "rationale": "Out-of-jurisdiction blocks prelim path." }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#13", "scope": "outside-Canada jurisdiction policy", "phase5_placeholder": "(a) explicit decline" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "A27",
+  "spec_version": "1.0",
+  "rationale_source": "F1.MP ambiguous per Layer 3 #16 recommended-default (a) default to 1st mortgage",
+  "layer1_structural": {
+    "canonical_map": {
+      "mortgage_position": {
+        "value": "1st mortgage",
+        "source_classification": "default_assumption",
+        "rationale": "Broker silent on MP; loan_app field empty; no mortgage_statement for inference path. Per Layer 3 #16 (a): default to 1st mortgage (vast majority of refis; lowest-error default)."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Default applied; no discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "1st mortgage|first mortgage", "rationale": "Default F1.MP per Layer 3 #16 (a)." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#16", "scope": "mortgage_position ambiguous default", "phase5_placeholder": "spec assumes (a) default to 1st mortgage" }
+  ]
+}

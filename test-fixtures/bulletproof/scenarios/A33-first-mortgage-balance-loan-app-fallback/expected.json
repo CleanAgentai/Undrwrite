@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A33",
+  "spec_version": "1.0",
+  "rationale_source": "F1.FB loan_app fallback when mortgage_statement absent; docs-tier next-best",
+  "layer1_structural": {
+    "canonical_map": {
+      "first_mortgage_balance": {
+        "value": 410000,
+        "source_classification": "loan_application",
+        "rationale": "No mortgage_statement; loan_app sole balance source within docs-tier. F1.FB fallback per R11-B-2 hierarchy when statement absent."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Single source." } },
+    "workflow_state": { "value": "active", "rationale": "Awaiting mortgage_statement." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "410,000", "rationale": "F1.FB loan_app fallback value." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

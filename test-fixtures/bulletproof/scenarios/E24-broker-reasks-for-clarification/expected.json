@@ -1,0 +1,18 @@
+{
+  "scenario_id": "E24",
+  "spec_version": "1.0",
+  "rationale_source": "Multi-turn re-engagement: broker clarification question routed through F3.BR; Vienna replies with answer rather than treating as correction",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 525000, "source_classification": "broker_initial_intent", "rationale": "F1.LA unchanged by clarification question." }
+    },
+    "gate_states": { "broker_clarification_question_detected": { "value": true, "rationale": "Question-shape pattern in broker reply." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_clarification_response", "expected_fire": true, "must_include": [{ "pattern": "rate|AML|PEP|confirmation", "rationale": "Vienna responds to broker's specific question." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

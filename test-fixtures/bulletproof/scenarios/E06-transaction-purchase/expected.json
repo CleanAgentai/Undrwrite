@@ -1,0 +1,21 @@
+{
+  "scenario_id": "E06",
+  "spec_version": "1.0",
+  "rationale_source": "TT=purchase: purchase-specific LTV math (no existing mortgage); no mortgage_statement required",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": { "value": "purchase", "source_classification": "broker_initial_intent", "rationale": "F1.TT broker + loan_app agree." },
+      "first_mortgage_balance": { "value": null, "source_classification": "not_applicable", "rationale": "Purchase has no existing first mortgage; F1.FB not applicable per TT=purchase intent." }
+    },
+    "gate_states": {
+      "mortgage_statement_required": { "value": false, "rationale": "Purchase intent: no statement required (no existing mortgage to pay out)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard purchase." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "[Pp]urchase|buying", "rationale": "F1.TT in Snapshot." }, { "pattern": "down payment|deposit", "rationale": "Purchase-specific math reference." }], "must_not_include": [{ "pattern": "payout statement.{0,30}required|missing.{0,30}statement", "rationale": "Statement not asked for at TT=purchase." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

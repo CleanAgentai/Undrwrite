@@ -1,0 +1,21 @@
+{
+  "scenario_id": "E12",
+  "spec_version": "1.0",
+  "rationale_source": "F1 aggregation non-spousal joint per Layer 3 #7 recommended-default (b) separate income + combined LTV",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": { "value_includes": ["David Okafor", "Jennifer Tran"], "source_classification": "broker_initial_intent", "rationale": "F1.BN concatenated joint per docs + broker." },
+      "annual_income": { "value": 285000, "source_classification": "broker_initial_intent", "rationale": "F1.AI combined per Layer 3 #7 (b) recommended-default (separate per-applicant income; combined LTV)." }
+    },
+    "gate_states": { "non_spousal_joint_detected": { "value": true, "rationale": "Per Layer 3 #7 (b): treat as joint with separate income tracking; combined for LTV math." } },
+    "workflow_state": { "value": "active", "rationale": "Standard joint refi." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "David Okafor.{0,40}Jennifer Tran|Jennifer Tran.{0,40}David Okafor", "rationale": "Both applicants in Snapshot." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#7", "scope": "non-spousal joint aggregation rules", "phase5_placeholder": "spec assumes (b) separate income + combined LTV" }
+  ]
+}

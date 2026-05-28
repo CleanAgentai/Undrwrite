@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A38",
+  "spec_version": "1.0",
+  "rationale_source": "F1.BN broker_correction over docs spelling error per R10-G framing",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": {
+        "value": "Marcus Webb",
+        "source_classification": "broker_correction",
+        "rationale": "Docs spell 'Marcus Web' (typo); broker correction 'Marcus Webb' (correct). F1.BN broker_correction wins per R10-G."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Spelling correction; not material discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Marcus Webb", "rationale": "F1.BN broker_correction value." }], "must_not_include": [{ "pattern": "Marcus Web[^b]", "rationale": "Stale spelling shadowed." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,33 @@
+{
+  "scenario_id": "A24",
+  "spec_version": "1.0",
+  "rationale_source": "F1.MP broker_correction tier wins per R10-G framing; R11-A asterisk-tolerance parser handles '2nd mortgage*' shorthand without falling back to loan_app source",
+  "layer1_structural": {
+    "canonical_map": {
+      "mortgage_position": {
+        "value": "2nd mortgage",
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction '2nd mortgage*' (asterisk-shorthand) parsed via R11-A asterisk-tolerance regex. F1.MP broker_correction tier wins over loan_app '1st mortgage'."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Position correction (not value discrepancy); F2.DH not triggered." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "2nd mortgage|second mortgage", "rationale": "Canonical F1.MP per broker_correction." }
+        ],
+        "must_not_include": [
+          { "pattern": "1st mortgage|first mortgage", "rationale": "loan_app MP value shadowed by correction." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

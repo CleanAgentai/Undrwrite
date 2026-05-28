@@ -1,0 +1,19 @@
+{
+  "scenario_id": "E28",
+  "spec_version": "1.0",
+  "rationale_source": "R10-D FSA_LETTER_TO_PROVINCE: E-prefix FSA → NB province inference",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code": { "value": "E3B 5C2", "source_classification": "broker_initial_intent", "rationale": "F1.PC E-prefix per R10-D." },
+      "province": { "value": "NB", "source_classification": "derived", "rationale": "F1.PC E-prefix → NB per FSA_LETTER_TO_PROVINCE map." }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Clean." } },
+    "workflow_state": { "value": "active", "rationale": "Standard NB refi." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "NB|New Brunswick", "rationale": "Province derived per R10-D." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

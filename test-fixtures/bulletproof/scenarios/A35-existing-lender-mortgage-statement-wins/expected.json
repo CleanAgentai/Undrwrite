@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A35",
+  "spec_version": "1.0",
+  "rationale_source": "F1.EL mortgage_statement docs-tier authority per R11-B-2; formal lender name resolves over shorthand",
+  "layer1_structural": {
+    "canonical_map": {
+      "existing_mortgage_lender": {
+        "value": "Scotiabank",
+        "source_classification": "mortgage_statement",
+        "rationale": "loan_app 'Scotia' shorthand; mortgage_statement 'Scotiabank' formal. F1.EL statement-tier wins per R11-B-2; LENDER_SYNONYMS reverse-map normalizes Scotia variants."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Same lender entity; synonym normalization." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Scotia|Scotiabank|Bank of Nova Scotia", "rationale": "Canonical F1.EL (any LENDER_SYNONYMS variant acceptable in output)." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

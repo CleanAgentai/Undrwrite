@@ -1,0 +1,22 @@
+{
+  "scenario_id": "A30",
+  "spec_version": "1.0",
+  "rationale_source": "F1.TT inferential resolution per R11-A: mortgage_statement presence + payout-keywords signal refinance even when broker silent on TT",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": {
+        "value": "refinance",
+        "source_classification": "inferred",
+        "rationale": "Broker silent; loan_app TT empty. mortgage_statement attached with payout-keywords (per R11-B-2 doc identification). R11-A inferential field: mortgage_statement presence implies refinance. F1.TT inferred-tier."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Single inference source." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "[Rr]efinance", "rationale": "Inferred F1.TT." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

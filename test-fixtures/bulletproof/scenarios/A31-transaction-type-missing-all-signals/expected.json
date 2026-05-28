@@ -1,0 +1,25 @@
+{
+  "scenario_id": "A31",
+  "spec_version": "1.0",
+  "rationale_source": "F1.TT missing per Layer 3 #15 recommended-default (b) flag-as-missing + escalate to broker",
+  "layer1_structural": {
+    "canonical_map": {
+      "transaction_type": {
+        "value": null,
+        "source_classification": "missing",
+        "rationale": "Broker silent; loan_app TT empty; no mortgage_statement for inference. F1.TT has no signal. Per Layer 3 #15 (b): flag-as-missing + ask broker (TT is load-bearing for LTV math; defaulting silently risks wrong workflow)."
+      }
+    },
+    "gate_states": { "transaction_type_missing": { "value": true, "rationale": "F1.TT missing triggers escalation." } },
+    "workflow_state": { "value": "active", "rationale": "Awaiting broker TT confirmation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_intake_clarification", "expected_fire": true, "must_include": [{ "pattern": "transaction type|refinance.{0,10}purchase|what type", "rationale": "Vienna asks broker to confirm TT per Layer 3 #15 (b)." }] },
+      { "kind": "preliminary_review_admin", "expected_fire": false, "rationale": "Cannot fire prelim without TT (LTV math depends on it)." }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#15", "scope": "transaction_type missing-source default", "phase5_placeholder": "spec assumes (b) flag-as-missing + escalate" }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "scenario_id": "A39",
+  "spec_version": "1.0",
+  "rationale_source": "F1.BN legal-vs-preferred per Layer 3 #9 recommended-default (c) broker_correction always wins",
+  "layer1_structural": {
+    "canonical_map": {
+      "borrower_name": {
+        "value": "Marcus Webb",
+        "source_classification": "broker_correction",
+        "rationale": "Docs legal 'Marcus Anthony Webb'; broker correction preferred 'Marcus Webb'. Per Layer 3 #9 (c): F1.BN broker_correction tier always wins; preferred name used in canonical_map for all broker-facing comms."
+      }
+    },
+    "gate_states": { "discrepancyHold": { "value": false, "rationale": "Naming preference, not value discrepancy." } },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "Marcus Webb", "rationale": "Canonical F1.BN per Layer 3 #9 (c)." }] }
+    ]
+  },
+  "layer3_pending_decisions": [
+    { "reference": "DECISIONS-NEEDED.md#9", "scope": "legal-vs-preferred name precedence", "phase5_placeholder": "spec assumes (c) broker_correction always wins; preferred name used in canonical_map" }
+  ]
+}

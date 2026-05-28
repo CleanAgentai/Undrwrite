@@ -1,0 +1,20 @@
+{
+  "scenario_id": "E16",
+  "spec_version": "1.0",
+  "rationale_source": "Partial loan_app: filled fields extract normally; missing fields fall to F1 missing-source per A41/A42 disposition",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": { "value": 525000, "source_classification": "loan_application", "rationale": "F1.LA docs-tier from filled portion." },
+      "annual_income": { "value": null, "source_classification": "missing", "rationale": "Omitted from partial form; F1.AI missing per A41 disposition." },
+      "credit_score": { "value": null, "source_classification": "missing", "rationale": "Omitted from partial form; F1.CS missing per A42 disposition." }
+    },
+    "gate_states": { "partial_doc_detected": { "value": true, "rationale": "Filled+missing combo detected." } },
+    "workflow_state": { "value": "active", "rationale": "Awaiting income + credit docs." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      { "kind": "broker_facing_intake_doc_ask", "expected_fire": true, "must_include": [{ "pattern": "NOA|income|credit", "rationale": "Bundled ask for missing income + credit per A41/A42 dispositions." }] }
+    ]
+  },
+  "layer3_pending_decisions": []
+}
