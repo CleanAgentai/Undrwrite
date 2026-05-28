@@ -1,0 +1,35 @@
+{
+  "scenario_id": "A04",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA multi-tier resolution: broker_correction > docs > derived; major discrepancy triggers R11-B-1 Layer 1 suppression + F2.DH activation",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 320000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction asserts $320k; loan_app $245k is SUPPRESSED per R11-B-1 Layer 1 (30.6% discrepancy from broker). Derived-from-LTV ($390k from 60% × $650k) is implicit signal not in canonical_map. F1.LA resolves to broker_correction tier."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": true, "rationale": "Broker $320k vs loan_app $245k = 30.6% discrepancy → R11-B-1 Layer 1 suppression + F2.DH activation." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Held for admin review." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "F2.PD SUPPRESSED by F2.DH ACTIVE per R10-F symmetric coverage."
+      },
+      {
+        "kind": "admin_discrepancy_notification",
+        "expected_fire": true,
+        "must_not_include": [
+          { "pattern": "\\$245,000", "rationale": "Suppressed loan_app value (R11-B-1 Layer 1) must NOT appear as canonical." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,35 @@
+{
+  "scenario_id": "A16",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PV no source available; PV is required canonical for LTV math; Vienna escalates to broker for appraisal",
+  "layer1_structural": {
+    "canonical_map": {
+      "property_value": {
+        "value": null,
+        "source_classification": "missing",
+        "rationale": "Broker silent on PV; no appraisal attached; loan_app PV field empty. F1.PV cannot resolve. PV is REQUIRED canonical field for LTV math (no derivation path)."
+      }
+    },
+    "gate_states": {
+      "property_value_missing": { "value": true, "rationale": "Required-field-missing triggers escalation per F1.PV intent." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting appraisal." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_intake_doc_ask",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "appraisal|property value", "rationale": "Doc-ask references missing appraisal per broker note." }
+        ]
+      },
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "Cannot fire prelim without PV (LTV math undefined)."
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

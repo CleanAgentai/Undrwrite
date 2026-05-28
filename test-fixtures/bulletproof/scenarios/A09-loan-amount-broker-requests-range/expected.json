@@ -1,0 +1,36 @@
+{
+  "scenario_id": "A09",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA range-ambiguity resolution per Layer 3 #17 recommended-default (c) flag-for-broker-disambiguation",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": null,
+        "source_classification": "broker_initial_intent_ambiguous",
+        "rationale": "Broker phrases LA as range ($250k-$300k); F1.LA cannot resolve to single value. Per Layer 3 #17 recommended-default (c): no canonical value set; broker disambiguation requested."
+      }
+    },
+    "gate_states": {
+      "loan_amount_ambiguity_detected": { "value": true, "rationale": "Range pattern in broker source triggers ambiguity flag." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard; awaiting broker disambiguation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_disambiguation_request",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "loan amount|specific amount|exact figure", "rationale": "Vienna asks broker to specify exact LA value per Layer 3 #17 recommended-default." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#17",
+      "scope": "loan_amount range ambiguity resolution: midpoint vs high-end vs disambiguation-request vs broker-prompt",
+      "phase5_placeholder": "spec assumes (c) flag-for-broker-disambiguation"
+    }
+  ]
+}

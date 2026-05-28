@@ -1,0 +1,41 @@
+{
+  "scenario_id": "A10",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA validation per Layer 3 #18 recommended-default (a): zero/negative reject at intake",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 0,
+        "source_classification": "broker_initial_intent_rejected",
+        "rationale": "Broker states $0; loan_app shows $0. F1.LA validation per Layer 3 #18 (a) recommended-default: zero is rejected at intake with validation message to broker."
+      }
+    },
+    "gate_states": {
+      "loan_amount_validation_failed": { "value": true, "rationale": "Zero LA fails validation per Layer 3 #18 (a)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Deal created but processing blocked on validation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_validation_error",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "loan amount|valid|specify", "rationale": "Validation error message to broker per Layer 3 #18 (a) rejection flow." }
+        ]
+      },
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "Validation failure blocks prelim path."
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#18",
+      "scope": "loan_amount validation (zero/negative/very-large/non-CAD): reject-at-intake vs flag-for-admin vs accept-any-positive",
+      "phase5_placeholder": "spec assumes (a) zero/negative reject at intake"
+    }
+  ]
+}

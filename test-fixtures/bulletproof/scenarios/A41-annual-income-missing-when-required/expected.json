@@ -1,0 +1,40 @@
+{
+  "scenario_id": "A41",
+  "spec_version": "1.0",
+  "rationale_source": "F1.AI missing per Layer 3 #11 recommended-default (c) include in next round of doc-ask. ARCHITECTURE-AMENDMENT-CANDIDATE: F1.AI canonical-map tuple may not exist in Vienna today; Phase 5 triage reveals empirical anchor.",
+  "layer1_structural": {
+    "canonical_map": {
+      "annual_income": {
+        "value": null,
+        "source_classification": "missing",
+        "rationale": "Broker omits income; loan_app has empty income field; no NOA attached. F1.AI has no source. Per Layer 3 #11 (c): bundle missing-income with next doc-ask. NOTE: this assumes F1.AI exists as canonical field; Phase 5 triage may reveal canonical-map doesn't track annual_income explicitly (ARCHITECTURE-AMENDMENT signal)."
+      }
+    },
+    "gate_states": {
+      "annual_income_missing": { "value": true, "rationale": "F1.AI missing flagged for bundled doc-ask." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting income docs." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_intake_doc_ask",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "NOA|notice of assessment|income", "rationale": "Bundled doc-ask includes income per Layer 3 #11 (c)." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#11",
+      "scope": "annual_income missing escalation timing: immediate / 24h grace / bundled-with-doc-ask",
+      "phase5_placeholder": "spec assumes (c) bundle with next doc-ask"
+    },
+    {
+      "reference": "architecture-amendment-candidate",
+      "scope": "F1.AI canonical-map tuple existence — Vienna may not track annual_income explicitly; Phase 5 triage reveals empirical anchor; if missing, Phase 1 matrix amendment to add F1.AI canonical field"
+    }
+  ]
+}

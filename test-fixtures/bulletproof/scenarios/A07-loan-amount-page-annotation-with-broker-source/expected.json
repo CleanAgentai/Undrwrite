@@ -1,0 +1,35 @@
+{
+  "scenario_id": "A07",
+  "spec_version": "1.0",
+  "rationale_source": "R11-B-1 Layer 2: sanitizeLoanAppDocTextForLLM strips [Page N annotation] markers when broker source is present, preventing LLM from reading annotation values as canonical",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 245000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction confirms $245k (matches loan_app value). F1.LA broker_correction wins."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Broker correction matches loan_app value." },
+      "loan_app_annotations_sanitized": { "value": true, "rationale": "R11-B-1 Layer 2 strips [Page N annotation] markers when broker source present." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "245,000", "rationale": "Canonical LA value." }
+        ],
+        "must_not_include": [
+          { "pattern": "\\$180,000", "rationale": "R11-B-1 Layer 2 anti-fab discipline: annotation-mentioned $180k must NOT surface as canonical narrative content." },
+          { "pattern": "\\[Page \\d+ annotation\\]", "rationale": "Page annotation markers stripped from LLM-visible text per R11-B-1 Layer 2." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

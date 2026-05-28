@@ -1,0 +1,36 @@
+{
+  "scenario_id": "A15",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PV broker_initial_intent contradicts appraisal at intake (BW=CT not CR); cross-tier resolution + discrepancy detection",
+  "layer1_structural": {
+    "canonical_map": {
+      "property_value": {
+        "value": 850000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "Broker asserts $850k market value; appraisal $720k. F1.PV broker_initial_intent tier wins over docs-tier per R10-G framing. Both tuples captured with distinct source classifications."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": true, "rationale": "Broker $850k vs appraisal $720k = 15.3% discrepancy + cross-tier-contradiction pattern → F2.DH activation per R11-B-1 + R10-F." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Held for admin review." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "F2.PD SUPPRESSED by F2.DH ACTIVE."
+      },
+      {
+        "kind": "admin_discrepancy_notification",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "property value|appraisal|market value", "rationale": "PV discrepancy surfaced in admin notification." },
+          { "pattern": "850,000.{0,80}720,000|720,000.{0,80}850,000", "rationale": "Both values present for admin review." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,41 @@
+{
+  "scenario_id": "A23",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PC missing per Layer 3 #24 recommended-default (a) required + escalate-as-missing",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code": {
+        "value": null,
+        "source_classification": "missing",
+        "rationale": "All sources omit postal suffix; F1.PC has no value. Per Layer 3 #24 (a): postal is REQUIRED canonical field; escalate to broker."
+      },
+      "subject_property_address": {
+        "value_includes": ["287 Glencairn Avenue", "Toronto", "ON"],
+        "source_classification": "loan_application",
+        "rationale": "F1.AD street + city + province present; only postal missing."
+      }
+    },
+    "gate_states": {
+      "postal_code_missing": { "value": true, "rationale": "F1.PC missing triggers escalation per Layer 3 #24 (a)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting broker postal." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_intake_doc_ask",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "postal|postal code|FSA", "rationale": "Vienna asks broker for postal per Layer 3 #24 (a)." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#24",
+      "scope": "postal_code required-field policy: required+escalate vs derive-via-lookup vs optional",
+      "phase5_placeholder": "spec assumes (a) required + escalate-as-missing"
+    }
+  ]
+}

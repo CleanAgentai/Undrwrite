@@ -1,0 +1,31 @@
+{
+  "scenario_id": "A02",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA broker_initial_intent tier wins when broker_correction tier is empty; docs-tier loan_app provides corroboration",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 410000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "Broker intake states $410k; no correction. F1.LA broker_initial_intent tier wins (next-tier-down from broker_correction). Loan_app corroborates."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "No cross-source discrepancy." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Sarah Chen", "rationale": "F1.BN." },
+          { "pattern": "410,000", "rationale": "F1.LA broker_initial_intent value." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

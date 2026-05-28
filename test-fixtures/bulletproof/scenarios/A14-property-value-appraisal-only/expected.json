@@ -1,0 +1,30 @@
+{
+  "scenario_id": "A14",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PV docs-tier (appraisal) wins when broker tiers are empty",
+  "layer1_structural": {
+    "canonical_map": {
+      "property_value": {
+        "value": 815000,
+        "source_classification": "appraisal",
+        "rationale": "Broker silent on PV; appraisal doc shows $815k. F1.PV docs-tier fallback per R6-γ source-hierarchy precedent."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Single source; no discrepancy." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "815,000", "rationale": "F1.PV appraisal value." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

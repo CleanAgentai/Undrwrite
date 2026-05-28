@@ -1,0 +1,30 @@
+{
+  "scenario_id": "A20",
+  "spec_version": "1.0",
+  "rationale_source": "F1.AD canonical-string normalization (ADDRESS_ABBREV_EXPAND): abbreviated forms ('Rd', 'NW') normalize to canonical ('Road', 'NW' preserved) → cross-source agreement after normalization",
+  "layer1_structural": {
+    "canonical_map": {
+      "subject_property_address": {
+        "value_includes": ["1142 Tory Road NW", "Edmonton"],
+        "source_classification": "broker_initial_intent",
+        "rationale": "Broker uses 'Rd' abbreviation; docs use 'Road' full form. F1.AD normalization (Rd→Road) yields same canonical value across sources."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "After normalization, broker + docs agree. No discrepancy." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "1142 Tory Road NW", "rationale": "Normalized canonical F1.AD value (Road not Rd)." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,47 @@
+{
+  "scenario_id": "A17",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PV × F1.LA sanity violation (PV < LA); Layer 3 #19 recommended-default (b) escalate to admin",
+  "layer1_structural": {
+    "canonical_map": {
+      "property_value": {
+        "value": 400000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction PV $400k (revised after foundation issue)."
+      },
+      "requested_loan_amount": {
+        "value": 475000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction LA $475k (added foundation repair)."
+      }
+    },
+    "gate_states": {
+      "pv_less_than_la_sanity_violation": { "value": true, "rationale": "PV $400k < LA $475k = >100% LTV. Layer 3 #19 (b) escalate to admin." },
+      "discrepancyHold": { "value": true, "rationale": "Sanity-violation triggers F2.DH activation." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Held for admin review per Layer 3 #19 (b)." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "F2.PD SUPPRESSED by sanity-violation hold."
+      },
+      {
+        "kind": "admin_sanity_violation_notification",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "loan amount.{0,40}property value|exceeds|over.{0,10}100%", "rationale": "Sanity-violation surfaced to admin." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#19",
+      "scope": "PV < LA sanity-violation policy: decline vs escalate vs flag-for-broker-confirmation",
+      "phase5_placeholder": "spec assumes (b) escalate to admin"
+    }
+  ]
+}

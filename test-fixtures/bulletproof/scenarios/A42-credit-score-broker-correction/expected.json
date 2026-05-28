@@ -1,0 +1,47 @@
+{
+  "scenario_id": "A42",
+  "spec_version": "1.0",
+  "rationale_source": "F1.CS broker_correction per Layer 3 #12 recommended-default (b) required + broker-supplied accepted. ARCHITECTURE-AMENDMENT-CANDIDATE: F1.CS canonical-map tuple may not exist in Vienna today.",
+  "layer1_structural": {
+    "canonical_map": {
+      "credit_score": {
+        "value": 695,
+        "source_classification": "broker_correction",
+        "rationale": "Broker initial intent 720; correction 695 (refreshed pull). F1.CS broker_correction tier wins. Per Layer 3 #12 (b): broker-supplied score accepted; credit-pull doc requested as additional verification. NOTE: assumes F1.CS exists; Phase 5 triage may reveal canonical-map doesn't track credit_score (ARCHITECTURE-AMENDMENT signal)."
+      }
+    },
+    "gate_states": {
+      "credit_pull_doc_requested": { "value": true, "rationale": "Per Layer 3 #12 (b), Vienna requests credit-pull doc for verification (broker-supplied accepted but not blocking)." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard; broker-supplied accepted." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "695", "rationale": "Final canonical F1.CS per broker_correction." }
+        ]
+      },
+      {
+        "kind": "broker_facing_intake_doc_ask",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "credit|credit pull|credit report", "rationale": "Doc-ask requests credit-pull doc for verification per Layer 3 #12 (b)." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#12",
+      "scope": "credit_score required-field + verification policy",
+      "phase5_placeholder": "spec assumes (b) required + broker-supplied accepted + credit-pull-doc requested"
+    },
+    {
+      "reference": "architecture-amendment-candidate",
+      "scope": "F1.CS canonical-map tuple existence — Vienna may not track credit_score explicitly; Phase 5 triage reveals empirical anchor"
+    }
+  ]
+}

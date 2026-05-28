@@ -1,0 +1,30 @@
+{
+  "scenario_id": "A13",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PV broker_correction tier wins; appraisal source shadowed by correction",
+  "layer1_structural": {
+    "canonical_map": {
+      "property_value": {
+        "value": 735000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction asserts refreshed $735k (second appraisal); appraisal source ($700k) is shadowed. F1.PV broker_correction tier wins per R10-G framing."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Discrepancy 5% (broker correction vs appraisal); below 30% threshold." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "735,000", "rationale": "Final canonical PV per F1.PV broker_correction." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

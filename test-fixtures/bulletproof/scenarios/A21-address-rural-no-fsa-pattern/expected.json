@@ -1,0 +1,36 @@
+{
+  "scenario_id": "A21",
+  "spec_version": "1.0",
+  "rationale_source": "F1.AD rural-address handling: non-standard 'RR #3, Site 22, Comp 7' format doesn't match ADDR_LINE_RE; F1.PC NB E-prefix FSA still resolves; address falls back to raw broker/doc string",
+  "layer1_structural": {
+    "canonical_map": {
+      "subject_property_address": {
+        "value_includes": ["RR #3", "Fredericton Junction", "NB"],
+        "source_classification": "loan_application",
+        "rationale": "Rural address format bypasses ADDR_LINE_RE structured extraction; F1.AD falls back to raw string from docs-tier (cross-doc agreement). Canonical value preserved as-is."
+      },
+      "postal_code": {
+        "value": "E5L 1A0",
+        "source_classification": "loan_application",
+        "rationale": "F1.PC NB E-prefix FSA mapping per R10-D FSA_LETTER_TO_PROVINCE."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Cross-doc agreement on rural address." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard NB refi." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "RR #3|Site 22|Comp 7", "rationale": "Rural address preserved as-is in Snapshot." },
+          { "pattern": "NB|New Brunswick", "rationale": "F1.PC NB province inference per R10-D." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

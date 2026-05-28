@@ -1,0 +1,36 @@
+{
+  "scenario_id": "A03",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA docs-tier fallback when broker_correction + broker_initial_intent tiers are empty; loan_application source is canonical",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 340000,
+        "source_classification": "loan_application",
+        "rationale": "Broker email omits loan_amount; loan_app shows $340k. F1.LA docs-tier fallback per R6-γ source-hierarchy precedent."
+      },
+      "transaction_type": {
+        "value": "Purchase",
+        "source_classification": "loan_application",
+        "rationale": "F1.TT docs-tier; broker silent on TT."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Single source; no discrepancy possible." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard purchase." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "David Okafor", "rationale": "F1.BN." },
+          { "pattern": "340,000", "rationale": "F1.LA docs-tier value." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

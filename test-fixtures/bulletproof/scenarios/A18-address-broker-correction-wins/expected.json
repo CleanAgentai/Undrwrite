@@ -1,0 +1,30 @@
+{
+  "scenario_id": "A18",
+  "spec_version": "1.0",
+  "rationale_source": "F1.AD broker_correction tier wins; docs-tier address shadowed by correction (more specific form)",
+  "layer1_structural": {
+    "canonical_map": {
+      "subject_property_address": {
+        "value_includes": ["52 Winston Churchill Boulevard", "Mississauga"],
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction supplies fuller street name 'Winston Churchill Boulevard' (matches title); docs use 'Winston Boulevard'. F1.AD broker_correction wins per R10-G framing."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Same property, naming-specificity correction; no material discrepancy." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Winston Churchill Boulevard", "rationale": "Canonical F1.AD value per broker_correction." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

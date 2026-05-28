@@ -1,0 +1,30 @@
+{
+  "scenario_id": "A19",
+  "spec_version": "1.0",
+  "rationale_source": "F1.AD docs-tier (loan_app + appraisal + mortgage_statement cross-doc agreement) when broker source colloquial-only",
+  "layer1_structural": {
+    "canonical_map": {
+      "subject_property_address": {
+        "value_includes": ["4421 Kingsway", "Vancouver"],
+        "source_classification": "loan_application",
+        "rationale": "Broker uses colloquial 'the Kingsway property'; docs provide full address. F1.AD docs-tier fallback; cross-doc agreement reinforces."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Cross-doc agreement; no discrepancy." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "4421 Kingsway", "rationale": "Canonical F1.AD value per docs-tier." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

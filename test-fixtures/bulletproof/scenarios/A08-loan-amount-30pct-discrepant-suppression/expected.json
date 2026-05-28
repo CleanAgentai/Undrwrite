@@ -1,0 +1,35 @@
+{
+  "scenario_id": "A08",
+  "spec_version": "1.0",
+  "rationale_source": "R11-B-1 Layer 1: canonical-map suppression when loan_app source diverges >30% from broker; F2.DH activates concurrently",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 290000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction $290k; loan_app $115k SUPPRESSED per R11-B-1 Layer 1 (60% discrepancy from broker, well above 30% threshold). F1.LA broker_correction sole authority."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": true, "rationale": "60% discrepancy → F2.DH ACTIVE per R11-B-1 + R10-F." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Held for admin review." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "F2.PD SUPPRESSED by F2.DH ACTIVE."
+      },
+      {
+        "kind": "admin_discrepancy_notification",
+        "expected_fire": true,
+        "must_not_include": [
+          { "pattern": "\\$115,000", "rationale": "Suppressed loan_app value (R11-B-1 Layer 1) must NOT appear." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

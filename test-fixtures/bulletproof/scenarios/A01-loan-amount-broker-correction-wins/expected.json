@@ -1,0 +1,32 @@
+{
+  "scenario_id": "A01",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA broker_correction tier wins per R10-G OBJECTIVE-vs-INTENT framing; loan_app source ($260k) is not suppressed because correction is small (within 30% threshold)",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 295000,
+        "source_classification": "broker_correction",
+        "rationale": "Broker correction asserts $295,000. F1.LA broker_correction tier wins per R10-G INTENT framing; loan_app source ($260k) corroborates but is shadowed by correction."
+      },
+      "borrower_name": { "value_includes": ["Marcus Webb"], "rationale": "F1.BN docs+broker consistent." }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Discrepancy ($260k vs $295k) = 11.9% from broker source, below R11-B-1 Layer 1 30% threshold. No F2.DH activation." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard refi state." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "295,000", "rationale": "Final canonical loan_amount per F1.LA broker_correction tier." }
+        ],
+        "must_not_include": []
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

@@ -1,0 +1,43 @@
+{
+  "scenario_id": "A05",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA missing-source fallback: no broker source, no loan_app field; broker email provides PV $720k + LTV target 65% → derive LA = $468k",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 468000,
+        "source_classification": "derived",
+        "rationale": "Broker omits explicit LA but provides PV $720k + target LTV 65%. F1.LA missing-source derivation: $720k × 0.65 = $468k. Derived-tier (lowest priority, used only when all primary tiers are empty)."
+      },
+      "property_value": {
+        "value": 720000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.PV broker_initial_intent from email."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Single derived value; no cross-source discrepancy." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Awaiting loan_app — broker noted form pending." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "468,000|468000", "rationale": "Derived F1.LA value in Snapshot." }
+        ]
+      },
+      {
+        "kind": "broker_facing_intake_doc_ask",
+        "expected_fire": true,
+        "rationale": "Broker indicated loan_app form pending; Vienna asks for it.",
+        "must_include": [
+          { "pattern": "loan application|signed form", "rationale": "Doc-ask references missing loan_app." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

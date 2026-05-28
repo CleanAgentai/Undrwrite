@@ -1,0 +1,41 @@
+{
+  "scenario_id": "A12",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA non-CAD currency per Layer 3 #18 recommended-default (a): non-CAD reject (Vienna is CAD-jurisdiction)",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": null,
+        "source_classification": "broker_initial_intent_rejected",
+        "rationale": "Broker states 'USD $280,000'. F1.LA validation per Layer 3 #18 (a) recommended-default: non-CAD currency rejected; Vienna is CAD-jurisdiction product."
+      }
+    },
+    "gate_states": {
+      "non_cad_currency_detected": { "value": true, "rationale": "USD prefix in broker source triggers Layer 3 #18 (a) rejection." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Deal created; processing blocked on currency-validation." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "broker_facing_validation_error",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "CAD|Canadian|currency", "rationale": "Validation error message explains Vienna is CAD-only." }
+        ]
+      },
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "Currency validation failure blocks prelim path."
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#18",
+      "scope": "non-CAD currency policy",
+      "phase5_placeholder": "spec assumes (a) non-CAD reject at intake"
+    }
+  ]
+}

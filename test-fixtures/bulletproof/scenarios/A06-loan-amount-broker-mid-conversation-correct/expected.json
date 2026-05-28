@@ -1,0 +1,33 @@
+{
+  "scenario_id": "A06",
+  "spec_version": "1.0",
+  "rationale_source": "R10-G push machinery: temporal correction-tier resolution — latest correction wins; canonical_map propagates updated value across multi-turn thread",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 345000,
+        "source_classification": "broker_correction",
+        "rationale": "Three-event sequence: intake $310k → correction $345k → confirmation $345k. F1.LA broker_correction tier with latest-write-wins per Layer 3 #21 recommended-default consistent with R10-G push semantics."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "11.3% discrepancy (310→345); below 30% threshold." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "345,000", "rationale": "Final canonical LA after R10-G push." }
+        ],
+        "must_not_include": [
+          { "pattern": "\\$310,000", "rationale": "Superseded intake value must not appear as canonical." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

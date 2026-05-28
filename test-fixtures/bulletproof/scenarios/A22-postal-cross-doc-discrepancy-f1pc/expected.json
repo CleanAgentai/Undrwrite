@@ -1,0 +1,39 @@
+{
+  "scenario_id": "A22",
+  "spec_version": "1.0",
+  "rationale_source": "F1.PC source-tuple capture across discrepant doc sources (sibling to D04's F4.PC callout focus); A22 asserts F1.PC canonical-map tuple structure",
+  "layer1_structural": {
+    "canonical_map": {
+      "postal_code_tuples": {
+        "expected_count": 2,
+        "expected_values": ["V5R 5T7", "V5R 5T8"],
+        "expected_source_classifications": ["loan_application", "appraisal"],
+        "rationale": "F1.PC captures both postal values with distinct source-tier tuples per cross-doc-discrepancy intent (R11-C M2 anchor)."
+      },
+      "subject_property_address": {
+        "value_includes": ["4421 Kingsway", "Vancouver"],
+        "rationale": "F1.AD street consistent; only postal varies."
+      }
+    },
+    "gate_states": {
+      "postal_code_discrepancy_detected": { "value": true, "rationale": "F1.PC distinct-tuple count >1 triggers discrepancy flag." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "V5R 5T7", "rationale": "F4.PC callout enumerates first postal (R11-C M2)." },
+          { "pattern": "V5R 5T8", "rationale": "F4.PC callout enumerates second postal." }
+        ],
+        "must_not_include": [
+          { "pattern": "4421 Kingsway.{0,30}V5R 5T7|4421 Kingsway.{0,30}V5R 5T8", "rationale": "R11-C M1: Snapshot Property Address row has postal stripped." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}

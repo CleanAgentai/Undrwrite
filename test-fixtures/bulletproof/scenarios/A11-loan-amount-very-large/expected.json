@@ -1,0 +1,43 @@
+{
+  "scenario_id": "A11",
+  "spec_version": "1.0",
+  "rationale_source": "F1.LA very-large amount per Layer 3 #18 recommended-default (a): very-large (>$5M) flag-for-review at admin",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 12000000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "Corporate refi $12M against $20M property. Per Layer 3 #18 (a): >$5M warrants flag-for-review but not reject. F1.LA accepts value; admin flagged."
+      },
+      "property_value": {
+        "value": 20000000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "F1.PV broker + appraisal corroborate."
+      }
+    },
+    "gate_states": {
+      "discrepancyHold": { "value": false, "rationale": "Clean; LTV 60% in standard band." },
+      "very_large_amount_flag": { "value": true, "rationale": "Layer 3 #18 (a) >$5M threshold triggers admin review flag." }
+    },
+    "workflow_state": { "value": "active", "rationale": "Standard; admin flag in Risk Factors." }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "12,000,000|12,000,000\\.00|\\$12M|12 million", "rationale": "Very-large LA value in Snapshot." },
+          { "pattern": "large amount|review|elevated.{0,30}value|over.{0,20}\\$5M", "rationale": "Admin flag per Layer 3 #18 (a) >$5M threshold." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": [
+    {
+      "reference": "DECISIONS-NEEDED.md#18",
+      "scope": "very-large loan_amount flag threshold",
+      "phase5_placeholder": "spec assumes $5M flag-for-review threshold per Layer 3 #18 (a)"
+    }
+  ]
+}
