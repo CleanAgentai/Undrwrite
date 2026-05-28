@@ -1,0 +1,11 @@
+{
+  "id": "A14P",
+  "name": "payout-signal-refi-isolates-1a",
+  "group": "A",
+  "dimensions": { "BC": "S", "TT": "REFI", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "CL", "CV": "1", "GE": "BC" },
+  "families": ["F1.LA", "F2.AC"],
+  "bugHint": "BUG1-1a-ISOLATION",
+  "anchor": "Controlled A/B vs A14: identical figures + explicit payout signal → R11-B-3 carve-out fires → canonical combined=standalone=56",
+  "rationale": "A14 (no payout signal) escalates via additive canonical combined (Finding 1b). This fixture ADDS the payout signal + lender match so the carve-out fires (canonical 56). Off-hours staging run isolates Finding 1a: does the LLM ltv_percent still compute additive (103) vs canonical 56? Active-divergence (gate-fix resolves) vs latent-robustness (defense-in-depth).",
+  "notes": "Single-event. Same numbers as A14 (BMO $380k existing + $460k new / $815k); only the payout signal differs. Requires Bug 1 fix (d749b1e) deployed: gate consumes canonical standalone, so no escalation when canonical=56 even if LLM=103."
+}

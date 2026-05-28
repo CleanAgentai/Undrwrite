@@ -1,0 +1,48 @@
+{
+  "scenario_id": "A14P",
+  "spec_version": "1.0",
+  "rationale_source": "Bug 1 Finding 1a isolation — payout-signal refinance (R11-B-3 carve-out fires → canonical combined=standalone=56). With Bug 1 gate-fix deployed, the gate consumes canonical standalone (56), so a clean payout-refi does NOT escalate even if the LLM ltv_percent is additive (103).",
+  "layer1_structural": {
+    "canonical_map": {
+      "requested_loan_amount": {
+        "value": 460000,
+        "source_classification": "broker_initial_intent",
+        "rationale": "Broker states $460,000; appraisal $815,000 → standalone 56%. F1.LA."
+      },
+      "property_value": {
+        "value": 815000,
+        "source_classification": "appraisal",
+        "rationale": "Reconciled Market Value $815,000 (faithful appraisal anchor)."
+      }
+    },
+    "gate_states": {
+      "high_ltv_detected": {
+        "value": false,
+        "rationale": "Payout refinance: R11-B-3 carve-out fires (existing BMO paid out at closing + lender match) → canonical combined = standalone = 56% ≤ 80. No high-LTV escalation. CONTRAST with A14 (no payout signal → additive 103 → escalates)."
+      },
+      "awaiting_collateral": {
+        "value": false,
+        "rationale": "56% canonical → no collateral ask. The Finding-1a isolation: with Bug 1 gate-fix, the gate uses canonical 56 (not LLM ltv_percent which may be additive 103)."
+      }
+    },
+    "workflow_state": {
+      "value": "active",
+      "rationale": "Clean payout-refi at canonical 56% → active, awaiting admin prelim. NOT awaiting_collateral."
+    }
+  },
+  "layer2_semantic": {
+    "outbound_emails": [
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "460,000", "rationale": "Canonical loan amount in the prelim Snapshot." }
+        ],
+        "must_not_include": [
+          { "pattern": "collateral", "rationale": "Payout refi at 56% must NOT trigger a collateral ask (the A14 mis-escalation, isolated away here)." }
+        ]
+      }
+    ]
+  },
+  "layer3_pending_decisions": []
+}
