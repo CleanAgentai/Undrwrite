@@ -91,9 +91,16 @@ const firstNameMatchesAdmin = (name) => {
 // (identity_clash takes priority over LTV per HHH). Pure function — caller passes
 // the freshly-extracted dealSummary. Per Q3-VVV: applies regardless of
 // sender_type (borrowers in deferred state skip forms too).
-const shouldSkipIntakeFormsForDeferredState = (dealSummary) => {
+const shouldSkipIntakeFormsForDeferredState = (dealSummary, canonicalHighLtv) => {
   if (!dealSummary) return false;
   if (dealSummary.identity_clash) return true;
+  // Bug 1 (2026-05-28): the high-LTV deferred state (awaiting_collateral) is the
+  // ESCALATION outcome — so detect it via the canonical escalation decision the
+  // caller computes (canonical standalone/combined), NOT dealSummary.ltv_percent
+  // (the LLM computes that additively for refinances → a 56% refi was wrongly
+  // treated as high-LTV deferred, skipping the broker's intake forms). Fallback
+  // to the LLM value only when the caller hasn't threaded the canonical signal.
+  if (canonicalHighLtv !== undefined) return !!canonicalHighLtv;
   const ltv = dealSummary.ltv_percent;
   return !!(ltv && ltv > 80);
 };
@@ -114,15 +121,19 @@ const shouldSkipIntakeFormsForDeferredState = (dealSummary) => {
 // cross-policy drift between intake-time baseRequired and reminder-time
 // baseRequired (post-JJJ AML/PEP removed, post-TTT gov ID + property tax
 // added) — reminders enumerated items Vienna never asked for.
-const computeIntakeAskedItems = (dealSummary, classificationsOnFile = []) => {
+const computeIntakeAskedItems = (dealSummary, classificationsOnFile = [], canonicalHighLtv) => {
   const isBrokerPath = dealSummary?.sender_type === 'broker';
   if (!isBrokerPath) return null;
   // Deferred-intake states: Vienna's welcome asks ONE specific question, not
   // the doc list. No snapshot (cron falls back to baseRequired if the deal
   // ever reaches a state where reminders fire).
   if (dealSummary?.identity_clash) return null;
-  const ltv = dealSummary?.ltv_percent;
-  if (ltv && ltv > 80) return null;
+  // Bug 1 (2026-05-28): high-LTV deferred via the canonical escalation decision
+  // (caller-computed), not dealSummary.ltv_percent (LLM additive-for-refi).
+  const isHighLtv = (canonicalHighLtv !== undefined)
+    ? !!canonicalHighLtv
+    : !!(dealSummary?.ltv_percent && dealSummary.ltv_percent > 80);
+  if (isHighLtv) return null;
   // Broker-path, non-deferred-intake: compute the snapshot.
   const intakeBase = intakeRequiredFor(isPurchaseFromSummary(dealSummary));
   const askedItems = intakeBase.filter(req => !isDocRequirementSatisfied(req, classificationsOnFile));
@@ -402,8 +413,11 @@ const shouldHoldPrelimForDiscrepancy = ({ brokerFacingDiscrepancyCount, brokerFa
   return hasStructuredDiscrepancy || clarificationPending || viennaFlaggedDiscrepancy;
 };
 
-const computeWillReview = ({ deal, summary, classifications, identityClashUnresolved }) => {
-  const ltv = summary?.ltv_percent;
+const computeWillReview = ({ deal, summary, classifications, identityClashUnresolved, standaloneLtv }) => {
+  // Bug 1 (2026-05-28): prefer the caller-computed CANONICAL standalone LTV;
+  // fall back to LLM summary.ltv_percent only when canonical is unavailable
+  // (preserves any caller that doesn't yet thread it).
+  const ltv = (standaloneLtv != null) ? standaloneLtv : summary?.ltv_percent;
   const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
   const hasExitStrategy = !!(summary?.exit_strategy && String(summary.exit_strategy).trim());
   return !!(
@@ -451,16 +465,20 @@ const computeWillReview = ({ deal, summary, classifications, identityClashUnreso
 // the symptom. The cleaner long-term structure is making that template
 // conditional at its source rather than handing it unconditionally then
 // forbidding it via injection. Out of scope for this commit.
-const computeStillMissingForReview = ({ deal, summary, classifications, identityClashUnresolved }) => {
+const computeStillMissingForReview = ({ deal, summary, classifications, identityClashUnresolved, highLtv }) => {
   // Out-of-scope branches: different states own these flows.
   if (deal?.status !== 'active') return [];
   if (deal?.prelim_approved_at) return [];     // KKKK handles post-approval
   if (identityClashUnresolved) return [];      // HHH handles identity-clash re-ask
 
-  const ltv = summary?.ltv_percent;
-  // LTV > 80 routes through Fix 7's awaiting_collateral state — different
-  // conversation (collateral question, not missing-docs ask). Suppress.
-  if (ltv && ltv > 80) return [];
+  // Bug 1 (2026-05-28): high-LTV routes through Fix 7's awaiting_collateral
+  // (collateral question, not missing-docs ask) — detect via the caller's
+  // CANONICAL escalation decision, not summary.ltv_percent (LLM additive-for-
+  // refi). Fallback to LLM only when canonical signal not threaded.
+  const isHighLtv = (highLtv !== undefined)
+    ? !!highLtv
+    : !!(summary?.ltv_percent && summary.ltv_percent > 80);
+  if (isHighLtv) return [];
 
   const items = [];
   const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
@@ -2956,7 +2974,19 @@ No deal record was created. If this was a legitimate broker submission, please r
         // state skip forms too).
         // Otherwise: borrowers always get both forms (they don't have their own);
         // brokers skip whichever form they already provided.
-        const deferredIntake = shouldSkipIntakeFormsForDeferredState(dealSummary);
+        // Bug 1 (2026-05-28): canonical high-LTV signal for the intake-forms +
+        // asked-items gates (was dealSummary.ltv_percent — LLM additive-for-refi
+        // → 56% refi wrongly treated as high-LTV deferred, skipping forms). Same
+        // canonical escalation decision the LTV-gate block below uses. (Separate
+        // extractCanonicalFields from the LTV-gate block's — small duplicate,
+        // isolated to avoid reordering the verified escalation gate.)
+        const _bug1IntakeCanon = cFields.extractCanonicalFields(email.textBody, savedDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })), { emailSubject: email.subject || '' });
+        const _bug1IntakeCombined = dEngine.computeCombinedLtv(_bug1IntakeCanon);
+        const _bug1IntakeHighLtv = dEngine.shouldEscalateOnAnyLtv({
+          standaloneLtv: dEngine.computeStandaloneLtv(_bug1IntakeCanon),
+          combinedLtv: _bug1IntakeCombined ? _bug1IntakeCombined.combined_ltv_percent : null,
+        });
+        const deferredIntake = shouldSkipIntakeFormsForDeferredState(dealSummary, _bug1IntakeHighLtv);
         const isBorrower = dealSummary?.sender_type === 'borrower';
         const skipApp = deferredIntake || (isBorrower ? false : hasOwnApplication);
         const skipPnw = deferredIntake || (isBorrower ? false : hasOwnPnw);
@@ -3017,7 +3047,7 @@ No deal record was created. If this was a legitimate broker submission, please r
         // welcome email already sent to broker, stamping is internal optimization
         // and fallback path is the pre-EEEE behavior (baseRequired recomputed
         // at reminder time).
-        const intakeAskedItems = computeIntakeAskedItems(dealSummary, initialClassifications);
+        const intakeAskedItems = computeIntakeAskedItems(dealSummary, initialClassifications, _bug1IntakeHighLtv);
         if (intakeAskedItems !== null) {
           try {
             await dealsService.update(deal.id, { intake_asked_items: intakeAskedItems });
@@ -3056,8 +3086,15 @@ No deal record was created. If this was a legitimate broker submission, please r
         const _r1InitialCanonicalMap = cFields.extractCanonicalFields(email.textBody, savedDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })), { emailSubject: email.subject || '' });
         const _r1InitialCombined = dEngine.computeCombinedLtv(_r1InitialCanonicalMap);
         const _r1InitialCombinedLtv = _r1InitialCombined ? _r1InitialCombined.combined_ltv_percent : null;
+        // Bug 1 (2026-05-28): escalation/prelim gates consume the CANONICAL
+        // standalone LTV, not dealSummary.ltv_percent (the LLM computes that
+        // additively for refinances → a clean 56% refi wrongly escalated for
+        // collateral at "103% LTV"). Canonical standalone falls back to the LLM
+        // value only when canonical_map lacks loan/value tuples (no regression
+        // on shapes where canonical can't compute).
+        const _r1InitialStandaloneLtv = dEngine.computeStandaloneLtv(_r1InitialCanonicalMap) ?? initialLtv;
         const _r1InitialShouldEscalate = dEngine.shouldEscalateOnAnyLtv({
-          standaloneLtv: initialLtv,
+          standaloneLtv: _r1InitialStandaloneLtv,
           combinedLtv: _r1InitialCombinedLtv,
         });
 
@@ -3076,12 +3113,12 @@ No deal record was created. If this was a legitimate broker submission, please r
           // combined > COMBINED_LTV_ESCALATION_THRESHOLD_PCT (NEW — captures
           // the dangerous-leverage case a 2nd mortgage with standalone ≤80 but
           // combined >80 was previously not flagging).
-          const _r1Reason = (initialLtv && initialLtv > 80)
-            ? `standalone LTV ${initialLtv}% > 80`
-            : `combined LTV ${_r1InitialCombinedLtv}% > ${dEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT} (standalone ${initialLtv ?? 'null'}% under threshold)`;
+          const _r1Reason = (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv > 80)
+            ? `standalone LTV ${_r1InitialStandaloneLtv}% > 80`
+            : `combined LTV ${_r1InitialCombinedLtv}% > ${dEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT} (standalone ${_r1InitialStandaloneLtv ?? 'null'}% under threshold)`;
           console.log(`Initial submission escalation gate triggered (Fix 7 + R4-RESIDUAL-1): ${_r1Reason} — entering awaiting_collateral state`);
           await dealsService.update(deal.id, { status: 'awaiting_collateral' });
-        } else if (initialLtv && initialLtv <= 80 && initialHasReviewableDoc) {
+        } else if (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv <= 80 && initialHasReviewableDoc) {
           // R5-B-2 (2026-05-21): discrepancy-resolution gate at the initial-
           // submission trigger. Pre-B-2, Sandra Nathan (ffb4fa0c) + Sandra
           // Jennifer (112b619a) + Lena (8486bf8a) all fired premature
@@ -3099,14 +3136,14 @@ No deal record was created. If this was a legitimate broker submission, please r
             const _b2Clar = aiService.welcomeEmailIsAskingClarification(welcomeEmail || '');
             console.log(`B-2 (initial-submission): prelim held — discrepancy/clarification pending broker confirmation. structuredDiscrepancyCount=${_bBrokerFacing.length}, clarificationPending=${_b2Clar}, qqqq=${!!dealSummary?.unresolved_discrepancy}. Deal stays 'active'; broker reply still sent.`);
           } else {
-            console.log(`Initial submission LTV ${initialLtv}% <= 80 with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
+            console.log(`Initial submission canonical standalone LTV ${_r1InitialStandaloneLtv}% <= 80 with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
             // ownership_type is null on initial submission (only set later by generateBrokerResponse).
             // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
             // when null. The remaining (deferred) enhancement is to extract ownership_type directly
             // in INITIAL_EMAIL_PROMPT's TASK 2 JSON so it's populated on day 1.
             // Cluster D: pass welcomeEmail so sendPreliminaryReviewToAdmin can detect
             // a pending broker-facing clarification ask and suppress COMPLETE.
-            await sendPreliminaryReviewToAdmin(deal, dealSummary, null, initialLtv, { brokerFacingReplyText: welcomeEmail });
+            await sendPreliminaryReviewToAdmin(deal, dealSummary, null, _r1InitialStandaloneLtv, { brokerFacingReplyText: welcomeEmail });
           }
         }
       } catch (err) {
@@ -3573,7 +3610,16 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           _r5dIntakeEmail = aiService.stripPerfectOpener(_r5dIntakeEmail).swept;
 
           // Form-attachment decision — same shape as new-deal branch L1796-1806
-          const _r5dDeferredIntake = shouldSkipIntakeFormsForDeferredState(_r5dIntakeRes.dealSummary);
+          // Bug 1 (2026-05-28): canonical high-LTV signal (isolated build, doc-
+          // state-at-moment) instead of _r5dIntakeRes.dealSummary.ltv_percent.
+          const _r5dCanonDocs = await dealsService.getDocumentsWithText(existingDeal.id);
+          const _r5dCanon = cFields.extractCanonicalFields(email.textBody, _r5dCanonDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })), { emailSubject: email.subject || '' });
+          const _r5dCanonCombined = dEngine.computeCombinedLtv(_r5dCanon);
+          const _r5dHighLtv = dEngine.shouldEscalateOnAnyLtv({
+            standaloneLtv: dEngine.computeStandaloneLtv(_r5dCanon),
+            combinedLtv: _r5dCanonCombined ? _r5dCanonCombined.combined_ltv_percent : null,
+          });
+          const _r5dDeferredIntake = shouldSkipIntakeFormsForDeferredState(_r5dIntakeRes.dealSummary, _r5dHighLtv);
           const _r5dSkipApp = _r5dDeferredIntake || _r5dHasOwnApp;
           const _r5dSkipPnw = _r5dDeferredIntake || _r5dHasOwnPnw;
           const _r5dFormAttachments = emailService.getFormAttachments({
@@ -3665,11 +3711,28 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // to send the file for review", stalling the file. OOOO suppresses
         // that template + enumerates the actual outstanding items.
         const activeIdentityClashUnresolved = !!summaryIn?.identity_clash;
+        // Bug 1 (2026-05-28): canonical high-LTV signal for the missing-docs gate
+        // (was summary.ltv_percent — LLM additive-for-refi). Isolated build here
+        // captures doc-state at THIS gate's moment.
+        // DEFERRED-RESIDUAL (R10-D docblock discipline): this is a separate
+        // getDocumentsWithText + extractCanonicalFields from the escalation
+        // block's _r1Active build (~L3825). Could collapse to a single build IF
+        // the active branch is confirmed NOT to mutate/reclassify docs between
+        // here and the escalation block — NOT yet confirmed, so the isolated
+        // build (doc-state-at-moment correctness) is the safe default.
+        const _bug1ActiveDocsText = await dealsService.getDocumentsWithText(existingDeal.id);
+        const _bug1ActiveCanon = cFields.extractCanonicalFields(email.textBody, _bug1ActiveDocsText.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })), { emailSubject: email.subject || '' });
+        const _bug1ActiveCombined = dEngine.computeCombinedLtv(_bug1ActiveCanon);
+        const _bug1ActiveHighLtv = dEngine.shouldEscalateOnAnyLtv({
+          standaloneLtv: dEngine.computeStandaloneLtv(_bug1ActiveCanon),
+          combinedLtv: _bug1ActiveCombined ? _bug1ActiveCombined.combined_ltv_percent : null,
+        });
         const stillMissingForReview = computeStillMissingForReview({
           deal: existingDeal,
           summary: summaryIn,
           classifications: activeDocsClassifications,
           identityClashUnresolved: activeIdentityClashUnresolved,
+          highLtv: _bug1ActiveHighLtv,
         });
 
         // Cluster B Commit 2b — pre-Claude discrepancy detection for existing-deal active path.
@@ -3829,8 +3892,11 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         );
         const _r1ActiveCombined = dEngine.computeCombinedLtv(_r1ActiveCanonicalMap);
         const _r1ActiveCombinedLtv = _r1ActiveCombined ? _r1ActiveCombined.combined_ltv_percent : null;
+        // Bug 1 (2026-05-28): canonical standalone LTV for the active-branch
+        // escalation gate (was LLM `ltv`). Same rationale as the initial branch.
+        const _r1ActiveStandaloneLtv = dEngine.computeStandaloneLtv(_r1ActiveCanonicalMap) ?? ltv;
         const _r1ActiveLtvShouldEscalate = dEngine.shouldEscalateOnAnyLtv({
-          standaloneLtv: ltv,
+          standaloneLtv: _r1ActiveStandaloneLtv,
           combinedLtv: _r1ActiveCombinedLtv,
         });
         const willGoToCollateralCheck = _r1ActiveLtvShouldEscalate && existingDeal.status === 'active' && !collateralAlreadyOffered && !identityClashUnresolved;
@@ -3853,6 +3919,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           summary: result.updatedSummary,
           classifications: classificationsForGate,
           identityClashUnresolved,
+          standaloneLtv: _r1ActiveStandaloneLtv, // Bug 1: canonical, not LLM ltv_percent
         });
         // R5-B-2 (2026-05-21): Option II orthogonal gate at the call layer.
         // computeWillReview's signature + D1-D7+QQQQ truth-table preserved
@@ -3956,7 +4023,9 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         } else if (willReview) {
           // Cluster D: pass result.responseEmail so the gate can detect a pending
           // broker clarification ask even when Vienna's reply is NNN-suppressed.
-          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv, { brokerFacingReplyText: result.responseEmail || '' });
+          // Bug 1 (2026-05-28): prelim-subject LTV display = canonical standalone
+          // (coherent with the Snapshot's LTV row), not LLM ltv.
+          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, _r1ActiveStandaloneLtv, { brokerFacingReplyText: result.responseEmail || '' });
         } else if (willFirePreliminaryAllDocsIn) {
           // R7-A (2026-05-22): Franco S14-Bug-1 fix. When all docs in + no
           // prior approval, dispatcher routes to sendPreliminaryReviewToAdmin
@@ -3964,7 +4033,8 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // willReview path → JS-injected computeAdminBanner-authoritative
           // PRELIMINARY banner; admin sees PRELIMINARY review as expected
           // for first admin-facing review.
-          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, ltv, { brokerFacingReplyText: result.responseEmail || '' });
+          // Bug 1 (2026-05-28): canonical standalone LTV display (see willReview branch).
+          await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, _r1ActiveStandaloneLtv, { brokerFacingReplyText: result.responseEmail || '' });
         } else {
           // Deal already under_review or no LTV yet — keep conversation going.
           // (We do NOT auto-flip to 'active' here anymore — awaiting_collateral, completed,

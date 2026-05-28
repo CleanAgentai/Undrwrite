@@ -400,6 +400,33 @@ const computeCombinedLtv = (canonicalMap) => {
   };
 };
 
+// Canonical STANDALONE LTV (new loan / market value) from the resolved-winner
+// canonical tuples. [0] is the R10-G source-hierarchy winner (broker_correction
+// > broker_initial_intent > docs), same indexing as computeCombinedLtv's
+// loans[0]/values[0]. Deterministic — the JS-canonical standalone, NOT the
+// LLM's extracted_data.ltv_percent.
+//
+// Why this exists (Bug 1, 2026-05-28): the LLM is prompted to store only a
+// broker-STATED ltv_percent (ai.js: "Do NOT calculate LTV yourself ... store
+// that number or null"), but empirically computes it ADDITIVELY for refinances
+// (existing + new / market), mislabeling combined leverage as standalone. The
+// escalation/prelim/form gates consumed that LLM value → a clean 56% refinance
+// (existing 1st paid out) wrongly escalated for collateral at "103% LTV". This
+// helper gives the gates the canonical standalone, mirroring the existing R9-B
+// canonical-LTV display discipline (webhook.js:1127 — Snapshot already uses
+// JS-canonical, not LLM, LTV). Completes R11-B-3: that fix corrected the
+// canonical combined-LTV MATH; this routes the GATES to canonical instead of
+// the LLM value.
+const computeStandaloneLtv = (canonicalMap) => {
+  const loans = (canonicalMap && canonicalMap.requested_loan_amount) || [];
+  const values = (canonicalMap && canonicalMap.subject_property_market_value) || [];
+  if (loans.length === 0 || values.length === 0) return null;
+  const requested = loans[0].value;
+  const market = values[0].value;
+  if (!Number.isFinite(requested) || !Number.isFinite(market) || market <= 0) return null;
+  return Number(((requested / market) * 100).toFixed(1));
+};
+
 // ──────────────────────────────────────────────────────────────────────────
 // R4-RESIDUAL-1: Combined-LTV escalation trigger (closes C.4 (c) residual)
 // ──────────────────────────────────────────────────────────────────────────
@@ -1096,6 +1123,7 @@ module.exports = {
   // tuples) or normalized-address string (legacy backward-compat).
   deriveCityProvince,
   computeCombinedLtv,
+  computeStandaloneLtv,
   // R4-RESIDUAL-1: combined-LTV escalation trigger
   COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
   shouldEscalateOnAnyLtv,
