@@ -49,6 +49,27 @@ FRANCO-Q[N] tag. Q10 is the canonical example of mid-Phase-6 follow-up routing.
 - Vienna's continuation is purely thread-based (In-Reply-To/References → findByMessageId);
   multi-turn replay MUST thread subsequent events or every reply spawns a new deal (BATCH-11 Phase 1).
 
+## Raw failure counts ≠ update needs (BATCH 12 Track B, 2026-05-29)
+The over-scoping discipline (banked Batch 5/7) SCALES: at every scale where bulk-editing is
+contemplated, the genuine work decomposes far below the raw count. Empirical baseline:
+Q1 terse-refi 107→few, annotation 17→1, B3 1→0, LIST-C 85→~10 — consistently ~10:1 over-count
+by raw-failure metric. Lesson: per-category grep against actual ENCODED behavior + the
+Franco-rule fingerprint BEFORE bulk-editing. Never bulk-edit to hit a count target. In BATCH-12
+the BATCH-8 raw-fail buckets dissolved into: Bug-3 extraction (held, value-correct), premature-
+prelim (no-op, value-correct), harness-temporal chase (no-op), already-aligned specs (E30/A12/
+E11/C06), and entangled escalation/decline (held to clean re-run) — leaving a small surgical set.
+
+## Live-fire beats unit-green, AGAIN (BATCH 12 Track B, 2026-05-29)
+The "unit-correct ≠ live-firing" carry-forward earned its keep at bundle scale: Q5 (corporate
+Snapshot row) and Q8 (joint-applicants row) both shipped in the Franco-9 bundle with GREEN unit
+harnesses, yet BATCH-12 deployed-code probes showed NEITHER surfaces end-to-end (Q5: render-time
+borrower_name plumbing; Q8: detectJointMultiBorrower needs 2+ credit reports, fixtures express
+joint via name-string). Lesson: a unit harness over a pure function does NOT verify the
+end-to-end plumbing that feeds it. Every rendering feature needs a live-fire probe before its
+expected.json is written — and a feature bundle shipped unit-only should be live-fire-swept as
+a class (BATCH-13). The probe step's stated secondary purpose (production confirmation of
+unit-only-shipped features) is where these surfaced.
+
 ## Discipline-2 thesis VINDICATED (BATCH 12 Track A, 2026-05-29)
 Making previously-unobservable gates observable surfaced exactly one genuine bug that the
 prior verification surface was blind to (Bug-3, loan-amount extraction gap on realistic

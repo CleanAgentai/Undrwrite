@@ -377,3 +377,57 @@ should Vienna set `admin_controlled=true` when `FromName="Admin"` sends the init
 intake (vs only on link-submission flip / per-deal pause)? C01 was NOT in the Franco-9
 set; carried forward as the one remaining product-design open item. Surfaces again in
 BATCH 8's re-run as a mismatch for empirical classification.
+
+---
+
+## BATCH 12 — LIST-C OUTCOME + HELD CATEGORIES (2026-05-29)
+
+LIST-C reality-checked against actual code/fixtures (per-category Franco-rule fingerprint
+grep, not raw BATCH-8 fail count). The "~85 stale-spec" estimate was a ~10:1 over-count by
+raw-failure metric (see PHASE8 carry-forward). Genuine surgical updates applied; the rest
+are HELD with explicit re-verification triggers, or were no-ops.
+
+### Applied (surgical set)
+- **LIST-C-VERIFICATION-SURFACE-BROKER-CORRECTION** (harness machinery, 0c826b9) — assertEngine
+  broker_correction surface (PRIMARY=Q10 notice+ack, SECONDARY=extracted_data, NOT Snapshot re-render).
+- **LIST-C-Q10-RENOTIFY** — A01/A13 (verified end-to-end) + C07/A34 (per probe). Adds the Q10
+  `admin_material_correction_notice` + broker_correction `verification_profile`.
+- **LIST-C-VERIFICATION-SURFACE-MISC** — A03 transaction_type casing, F23 province gate-form.
+
+### Categories with ZERO genuine updates (over-count — no stale fingerprint)
+- **Q6 chase-4** — no expected.json encodes a reminder count / auto-close. Chase emails fail
+  in BATCH-8 only because replay doesn't fast-forward the reminder cron (harness-temporal).
+- **Q7 non-Canadian** — E30/A12 already expect declines; Q7's property-scoping doesn't change them.
+
+### HELD — pending Bug-3 fix + clean BATCH-13 re-run
+- **Q1 escalation-pattern (cat 1)** — escalation scenarios (A02/A11/A14/A15/A19/A21/A22/A23/A25/
+  A30/B02/B04/B07/C03/D03/E12/E14/E15/E22 …) have a correct `wf=active` spec but a BATCH-8
+  `awaiting_collateral` actual *entangled* with the Bug-3 extraction gap + premature-prelim
+  (both corrupt the LTV that drives escalation). The stale dataset can't distinguish a genuine
+  Franco-9 escalation from an artifact. **Re-verify in BATCH-13** (post-Bug-3, post-Finding-1b).
+- **Q2 auto-decline-pattern (cat 2)** — same entanglement (>90 LTV needs correct loan/value).
+  **Re-verify BATCH-13.**
+- **A14 specifically** — intake "$500k against $880k property" is Bug-3 word-order territory;
+  the escalation actual is ambiguous between Q1-correct and Bug-3-artifact, AND it hinges on the
+  still-open **Finding-1b** (terse-"Refi" additive verification surface). Re-classify after Bug-3.
+- **Combined-LTV / 2nd-mortgage spec updates** — E07/E08/A24/E13/E23/E28/E29/F03/F06/F07/F14
+  (+ F04/F13 "any others scoped"). The Combined-LTV row is absent downstream of the Bug-3
+  null loan amount. **Unblocks after Bug-3 ships (BATCH-14).** See BUG3-SCOPE.md.
+- **Premature-prelim-resolved (cat 9)** — ORIGINAL PREMISE WAS WRONG: Phase-1 threading does
+  NOT make broker_correction render values update (Vienna intentionally does not re-render the
+  Snapshot post-correction; that's why Q10 exists). The render assertions for broker_correction
+  scenarios resolve via the harness-side broker_correction surface (above), NOT via expected.json
+  edits expecting a non-existent re-render.
+
+### NEW-VIENNA-FINDINGS surfaced by BATCH-12 live-fire probes (→ BATCH 14)
+- **Q5 corporate Snapshot row does NOT render** (F03 probe: clean corporate prelim "Webb Holdings
+  Ltd. — 65% LTV", no Corporate-borrower row). Detector + threading both correct; render-time
+  borrower_name plumbing evidently doesn't deliver the corporate string. **Q5 expected.json NOT
+  written.** BATCH-14 trace.
+- **Q8 joint-applicants row does NOT render** for joint-via-name deals (E11/E12/F12 probes:
+  prelim fires with both names in the subject, no Joint Applicants row). Root: `detectJointMultiBorrower`
+  requires 2+ credit-bureau docs with distinct names; these fixtures express joint via the
+  borrower_name conjunction + joint NOA (no credit reports). **Q8 expected.json NOT written.**
+  BATCH-14: broaden the joint feed (or a Franco disposition on what "joint" requires).
+- **Q9 admin-override (C06)** — HELD; shipped unit-only like Q5/Q8, multi-turn. Needs BATCH-13
+  live-fire before writing the spec (not asserted blind given Q5/Q8 both failed live-fire).
