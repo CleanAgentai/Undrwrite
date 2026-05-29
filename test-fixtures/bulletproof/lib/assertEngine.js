@@ -284,14 +284,88 @@ const parseSnapshotRow = (body, label, type) => {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// BROKER_CORRECTION verification surface (BATCH 12, Porter Q2 — 2026-05-29)
+//
+// For POST-PRELIM broker_correction scenarios, Vienna INTENTIONALLY does not
+// re-render the prelim Deal Snapshot (that is precisely why FRANCO-Q10 exists —
+// it admin-re-notifies via the [UPDATED] correction notice instead). So the
+// premature intake Snapshot still shows the PRE-correction value, and a Snapshot
+// render-surface assertion would wrongly fail. Per the Q1 verification-surface
+// tiering (PRIMARY=rendered output, SECONDARY=persisted) the correct surfaces for
+// the post-correction value are:
+//   PRIMARY  = the FRANCO-Q10 [UPDATED] admin correction notice + the broker ack
+//              (both rendered outbound — what Vienna ACTUALLY produces on a
+//              post-prelim correction)
+//   SECONDARY= extracted_data persistence (the corrected value is written)
+//   NOT      = a Snapshot re-render (Vienna doesn't produce one; per Q10 design)
+//
+// A scenario opts in via `expected.verification_profile === "broker_correction"`.
+// The mechanism is field-generic so future post-prelim correction patterns inherit
+// it (any canonical_map field whose corrected value appears in the notice/ack/ED).
+// ────────────────────────────────────────────────────────────────────────────
+const Q10_NOTICE_RE = /\[UPDATED\][^<\n]{0,60}correction|Prelim correction/i;
+const collectBrokerCorrectionSurfaces = (captured) => {
+  const emails = captured.outboundEmails || [];
+  const text = (e) => (e.Subject || '') + ' ' + (e.HtmlBody || e.TextBody || '');
+  const q10Notice = emails.filter(e => Q10_NOTICE_RE.test(e.Subject || '') || Q10_NOTICE_RE.test(text(e)));
+  // broker ack = an outbound "Re:" reply that is NOT the admin prelim/notice
+  const brokerAck = emails.filter(e => /^Re:/i.test(e.Subject || '') && !/PRELIMINARY|ACTION REQUIRED|\[UPDATED\]/i.test(e.Subject || ''));
+  return {
+    primaryText: [...q10Notice, ...brokerAck].map(text).join('\n'),
+    q10NoticeFired: q10Notice.length > 0,
+    brokerAckFired: brokerAck.length > 0,
+  };
+};
+// Does `value` appear in `text`? Money → match with optional thousands commas
+// (260000 ↔ "260,000" ↔ "$260,000"); other → substring of stringified value.
+const valueAppearsIn = (value, text) => {
+  if (value == null || !text) return false;
+  if (typeof value === 'number') {
+    const grouped = value.toLocaleString('en-US'); // 295000 → "295,000"
+    return text.includes(String(value)) || text.includes(grouped);
+  }
+  return text.includes(String(value));
+};
+const verifyBrokerCorrectionField = (specKey, expectation, captured) => {
+  const extracted = captured.finalDealState?.extracted_data || {};
+  const { primaryText, q10NoticeFired, brokerAckFired } = collectBrokerCorrectionSurfaces(captured);
+  const expectedVal = expectation.value;
+  const includes = expectation.value_includes || (expectedVal != null ? [expectedVal] : []);
+  // PRIMARY: corrected value present in the Q10 notice + broker ack
+  const primaryMissing = includes.filter(v => !valueAppearsIn(v, primaryText));
+  const primaryPass = includes.length > 0 && primaryMissing.length === 0;
+  // SECONDARY: corrected value persisted in extracted_data (any field)
+  const edStr = JSON.stringify(extracted);
+  const secondaryPass = includes.length > 0 && includes.every(v => valueAppearsIn(v, edStr));
+  const status = primaryPass ? 'pass' : (secondaryPass ? 'pass' : 'fail');
+  const surface = primaryPass ? 'broker_correction_primary(q10_notice+ack)' : (secondaryPass ? 'broker_correction_secondary(extracted_data)' : 'broker_correction_unverified');
+  const detail = primaryPass
+    ? `corrected value present in Q10 notice/ack (q10Notice=${q10NoticeFired} ack=${brokerAckFired})`
+    : (secondaryPass
+        ? `corrected value persisted in extracted_data (PRIMARY render surface absent; q10Notice=${q10NoticeFired} ack=${brokerAckFired})`
+        : `corrected value not found in Q10 notice/ack/extracted_data (missing primary: ${primaryMissing.join(', ')})`);
+  return { status, detail, surface };
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // Layer 1 STRUCTURAL assertion evaluator
 // ────────────────────────────────────────────────────────────────────────────
 const evalCanonicalMap = (expected, captured) => {
   const results = [];
   const extracted = captured.finalDealState?.extracted_data || {};
   const snapEmail = findSnapshotEmail(captured);
+  const brokerCorrectionProfile = expected.verification_profile === 'broker_correction';
   for (const [specKey, expectation] of Object.entries(expected.layer1_structural?.canonical_map || {})) {
     let actualValue, classification, normRationale;
+    // BROKER_CORRECTION profile: render-surface fields verify via Q10 notice + ack
+    // (PRIMARY) / extracted_data (SECONDARY) instead of the (intentionally non-
+    // re-rendered) prelim Snapshot. Non-render-surface fields fall through to the
+    // standard extracted_data path below.
+    if (brokerCorrectionProfile && RENDER_SURFACE_FIELDS.has(specKey)) {
+      const { status, detail, surface } = verifyBrokerCorrectionField(specKey, expectation, captured);
+      results.push({ field: specKey, status, detail, normalization: surface, normalization_rationale: 'broker_correction verification surface (Q10 notice + broker ack PRIMARY; extracted_data SECONDARY; NOT Snapshot re-render — Vienna does not re-render post-correction per Q10 design)', spec_rationale: expectation.rationale });
+      continue;
+    }
     if (RENDER_SURFACE_FIELDS.has(specKey)) {
       const { label, type } = SNAPSHOT_ROW_LABELS[specKey];
       if (!snapEmail) {
