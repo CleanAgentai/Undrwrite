@@ -95,8 +95,24 @@ Tracks whether each predicted entanglement / gate actually clears. NOT a formali
   (F04, 2026-05-28). The missing "75–80% elevated" band callout is a pre-existing
   gap, not a gate-fix regression. Confirmed 3 ways: Bug-1 diff doesn't touch the
   callout path; layer3 flags R4-RESIDUAL-1 `placeholder_assumed`; it was a
-  pre-listed step-3 item. The OTHER `elevated_ltv_band` failures (prelim-firing
-  dependency + Finding-1b interaction) remain **PENDING** post-fixture-rollout.
+  pre-listed step-3 item.
+- **#1 EXTENDED — CONFIRMED across the matrix (BATCH 9, 2026-05-29):** F23 (active,
+  prelim fired, band callout still absent) + F01 + D03 (masked by Q1 escalation) all
+  show the same `elevated_ltv_band` gap → R4-RESIDUAL-1 is a real pre-existing residual
+  matrix-wide, NOT a Franco/BATCH-7 regression. CONFIRM-CLEAR (known root).
+- **#2 CONFIRMED — `discrepancyHold` fires correctly on active-major** (B01, BATCH 9):
+  the major loan-amount discrepancy suppresses prelim as designed; the canonical-read
+  fails are stale-spec. CONFIRM-CLEAR. (B02/B03 minor-delta cases DEFER-9B — suspected
+  gate-inference noise when Franco-9 escalation suppresses prelim, not a discrepancyHold bug.)
+- **#3 ROOT — broker-correction "render shows intake value" cluster (A01/A13/C07/A34,
+  BATCH 9):** NOT a Vienna bug. fullmatrix-1 CLUSTER-2 already proved request-time
+  resolution correct ($295k at render); BATCH-7's exit_strategy broad-add now fires the
+  prelim AT INTAKE before the correction turn → assertEngine reads the premature prelim.
+  EXIT_STRATEGY-PREMATURE-PRELIM fixture-sequencing interaction → fixture-side fix.
+- **GENUINE-CANDIDATES (BATCH 9, NOT confirmed bugs):** A28 (transaction_type
+  refinance→purchase) + F02 (purchase→null) — Q1 purchase-detector interaction; deferred
+  to BATCH 9b cheap probe before any fix-cycle.
+- Full per-scenario classification: see BATCH9-CLASSIFICATION.md.
 
 ### Gate-observation verifications (Discipline 2 — all PENDING step 3)
 - All 12 §1 entries: PENDING empirical confirmation that `infer()` returns the
