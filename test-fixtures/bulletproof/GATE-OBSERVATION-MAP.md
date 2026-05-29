@@ -114,10 +114,31 @@ Tracks whether each predicted entanglement / gate actually clears. NOT a formali
   to BATCH 9b cheap probe before any fix-cycle.
 - Full per-scenario classification: see BATCH9-CLASSIFICATION.md.
 
-### Gate-observation verifications (Discipline 2 — all PENDING step 3)
-- All 12 §1 entries: PENDING empirical confirmation that `infer()` returns the
-  expected value on a real run (a mismatch = real gate bug OR wrong `infer()`).
-- 4 §2 unobservables: PENDING manual check at step 3.
+### Gate-observation verifications (Discipline 2 — VERIFIED BATCH 12 Track A, 2026-05-29)
+Full classification + evidence: BATCH12-TRACKA-GATE-VERIFICATION.md. Method: BATCH-8
+dataset + offline reasoning + 2 cheap deployed-code probes (E06, E07).
+- **VERIFIED FIRED/NOT-FIRED CORRECTLY (5):** loan_app_annotations_sanitized (A07 pos /
+  F11 neg), awaiting_collateral_initially_activated (C06), mortgage_statement_missing
+  (E18, F17).
+- **NOT-A-BUG, stale BATCH-8 value (1):** mortgage_statement_required (E06) — probed
+  deployed code: purchase correctly omits the payout statement; BATCH-8 inf=true predates
+  deployed Franco-9 purchase detection.
+- **Gate-observability-limit (2):** property_value_missing (A16), doc_package_incomplete
+  (E19) — evidence-surface (Snapshot TBD / [MISSING]) only renders in a prelim/leadSummary;
+  these scenarios correctly sit at intake doc-ask (no prelim) so the surface never exists.
+  → Track B re-scope (assert the doc-ask behavior instead).
+- **Pre-Phase-1-threading artifact, re-verify BATCH-13 (4):** collateral_offered (B07),
+  broker_clarification_question_detected (E24), canonical_map_complete_after_t4 (E25),
+  mortgage_statement_now_required (F14) — all multi-turn; results-2.json predates the
+  BATCH-11 Phase-1 threading fix so turn-2+ never processed.
+- **Spec-expectation-form, non-boolean (4):** combined_ltv_computed (E07/F04/F13 assert a
+  numeric LTV) + province_inferred (F23 asserts "NB"). Observable gate is boolean; the
+  value belongs on the rendered Snapshot row. → Track B verification-surface.
+- **GENUINE-CANDIDATE → BATCH-14 fix-cycle (1):** combined_ltv_computed (E07) — Discipline-2
+  VINDICATED. Surfaced a real loan-amount extraction gap (canonical regex misses "New 2nd
+  mortgage request: $X" + bare "Loan $X" shorthand). Surfaced to Porter 2026-05-29. See
+  BATCH12-TRACKA-GATE-VERIFICATION.md §FLAGGED for blast radius + the Vienna-vs-fixture fork.
+- 4 §2 unobservables: deferred to BATCH-13 manual checks (unchanged).
 
 ### §3 red flags — ROUTED AS FRANCO-DISPOSITIONS (2026-05-28, no longer pending-empirical)
 Both §3 gates are product-design questions, not confirmable by observation alone —

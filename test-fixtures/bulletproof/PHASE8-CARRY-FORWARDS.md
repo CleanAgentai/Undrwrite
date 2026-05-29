@@ -49,6 +49,20 @@ FRANCO-Q[N] tag. Q10 is the canonical example of mid-Phase-6 follow-up routing.
 - Vienna's continuation is purely thread-based (In-Reply-To/References → findByMessageId);
   multi-turn replay MUST thread subsequent events or every reply spawns a new deal (BATCH-11 Phase 1).
 
+## Discipline-2 thesis VINDICATED (BATCH 12 Track A, 2026-05-29)
+Making previously-unobservable gates observable surfaced exactly one genuine bug that the
+prior verification surface was blind to (Bug-3, loan-amount extraction gap on realistic
+broker shorthand — "Loan $X", "Nth mortgage request: $X", "$X against $Y"). The 12-gate
+observability work was the discipline pre-requisite that made the bug SURFACEABLE; without
+it, the bug would have remained latent until production user impact. The pattern
+"unobserved ≠ verified" is not paranoid — it's load-bearing risk management. The 11:1 ratio
+(12 newly-observable gates → 1 genuine bug) is the empirical baseline for the value of
+observability investment. Corollary surfaced same-run: a STALE result dataset (BATCH-8
+results-2.json predates Phase-1 threading AND Bug-3) cannot drive confident bulk spec
+updates for extraction/LTV-dependent assertions — those must be re-confirmed against
+deployed code (cheap probe) or a clean re-run, else "updating expected.json to match the
+actual" silently becomes test-fudging against buggy extraction.
+
 ---
 ## LEDGER — Q10 / BATCH 11 closure (2026-05-29)
 Q10 DEPLOYED (origin/main + Render live = 1e35817 @ 2026-05-29T16:26:59Z) and END-TO-END
