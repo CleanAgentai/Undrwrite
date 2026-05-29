@@ -477,12 +477,36 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   // Bug 2: capture trailing magnitude suffix (k/K, m/M/MM, "thousand", "million")
   // so normalizeMoney multiplies; (?![A-Za-z]) guard avoids swallowing a
   // following word's initial ("$650,000 Market" → not "650,000 M").
-  const loanFormalM = emailBody.match(/\*?\s*(?:Mortgage\s+Amount\s+Requested|Loan\s+Amount\s+Requested|Mortgage\s+Amount|Loan\s+Amount|Requested\s+Loan(?:\s+Amount)?)\s*:?\s*\*?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
-  if (loanFormalM) {
-    out.requested_loan_amount = normalizeMoney(loanFormalM[1]);
-  } else {
-    const loanInformalM = emailBody.match(/\brequesting\s+\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
-    if (loanInformalM) out.requested_loan_amount = normalizeMoney(loanInformalM[1]);
+  //
+  // Bug 3 (BATCH 12, 2026-05-29): broker-shorthand widening — surfaced by the
+  // Discipline-2 BATCH-12 probe (E07 "New 2nd mortgage request: $120,000" → null →
+  // Combined-LTV row absent). Four ratified patterns ADDED beyond the formal labels,
+  // tried in order after formal/informal. NARROW-CORPUS DISCIPLINE (per the note
+  // above): every Bug-3 pattern REQUIRES a "$" anchor adjacent to its cue, so prose
+  // like "loan application", "first mortgage: Scotiabank", "the loan officer", or a
+  // hypothetical "$X they paid last year" cannot false-match. Magnitude suffix is
+  // handled centrally by normalizeMoney (+ its no-silent-guess sanity bound).
+  // The "$X for [purpose]" sub-pattern is scoped to FINANCING purposes only
+  // (refinance/purchase/renovation/…) — a bare "for" is FP-prone (down payment
+  // "$X for the deposit", "$X for closing") and is deliberately NOT matched.
+  const MONEY = '([\\d,]+(?:\\.\\d+)?(?:\\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)';
+  const loanPatterns = [
+    // formal labels (pre-Bug-3, unchanged — optional $)
+    '\\*?\\s*(?:Mortgage\\s+Amount\\s+Requested|Loan\\s+Amount\\s+Requested|Mortgage\\s+Amount|Loan\\s+Amount|Requested\\s+Loan(?:\\s+Amount)?)\\s*:?\\s*\\*?\\s*\\$?\\s*' + MONEY,
+    // informal "requesting $X" (pre-Bug-3, unchanged — $ required)
+    '\\brequesting\\s+\\$\\s*' + MONEY,
+    // Bug-3 A: "[New] Nth mortgage [request]: $X" ($ required, adjacent)
+    '\\b(?:new\\s+)?(?:first|second|third|fourth|1st|2nd|3rd|4th)\\s+mortgage(?:\\s+request(?:ed)?)?\\s*:?\\s*\\$\\s*' + MONEY,
+    // Bug-3 B: bare "Loan $X" / "Loan: $X" ($ required — excludes "Loan application")
+    '\\bLoan\\s*:?\\s*\\$\\s*' + MONEY,
+    // Bug-3 C: word-order "$X loan" / "$X requested" / "$X for <financing-purpose>"
+    '\\$\\s*' + MONEY + '\\s+(?:loan\\b|requested\\b|for\\s+(?:a\\s+|the\\s+)?(?:refinanc|refi\\b|purchase|renovat|construction|payout|consolidat|debt))',
+    // Bug-3 E (loan side): "$X against $Y" — loan is the FIRST amount ($ leads)
+    '\\$\\s*' + MONEY + '\\s+against\\s+\\$\\s*[\\d,]+',
+  ];
+  for (const p of loanPatterns) {
+    const m = emailBody.match(new RegExp(p, 'i'));
+    if (m) { out.requested_loan_amount = normalizeMoney(m[1]); break; }
   }
   // Appraised value (broker-stated): `*Appraised Value:* $X` (formal-template
   // shape) OR `Appraised at $X` (informal prose, Marcus/Ryan c56c2a0f R6-β-A
@@ -493,8 +517,19 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   // new "at" branch catches informal phrasing). Cascade-closes R6-δ
   // property_value TBD on informal-phrasing fixtures + enables R6-β LTV
   // CASCADE end-to-end on Marcus/Ryan.
-  const apprM = emailBody.match(/\*?\s*(?:Appraised\s+(?:Value|at)|Property\s+Value|Purchase\s+Price)\s*:?\s*\*?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
+  //
+  // Bug-3 D (BATCH 12): bare "appraised $X" lowercase prose (no "at"/"Value") —
+  // E07 "appraised $720,000" was missed and only rendered because the appraisal
+  // DOC backfilled it. $ required (a bare "appraised" with no $ is not a figure).
+  const apprM = emailBody.match(/\*?\s*(?:Appraised\s+(?:Value|at)|Property\s+Value|Purchase\s+Price)\s*:?\s*\*?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i)
+    || emailBody.match(/\bappraised\s+\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
   if (apprM) out.subject_property_market_value = normalizeMoney(apprM[1]);
+  // Bug-3 E (value side): "$X against $Y [property]" — the SECOND amount is the
+  // property value (only when PV not already extracted by the labelled patterns).
+  if (out.subject_property_market_value == null) {
+    const againstM = emailBody.match(/\$\s*[\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?\s+against\s+\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
+    if (againstM) out.subject_property_market_value = normalizeMoney(againstM[1]);
+  }
   return out;
 };
 
