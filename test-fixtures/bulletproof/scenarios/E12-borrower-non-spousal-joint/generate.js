@@ -33,7 +33,7 @@ const SCENARIO_ID = 'E12';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Refinance — ${jointName}`,
-    textBody: `Hi Franco,\n\nNon-spousal joint refi: ${jointName} are unrelated co-owners (business partners, 50/50 title) at ${property.full}.\n\nLoan amount $460,000. Combined income $285k (David $132k + Jennifer $153k); each filed separately. Both have strong credit independently.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nNon-spousal joint refi: ${jointName} are unrelated co-owners (business partners, 50/50 title) at ${property.full}.\n\nLoan amount $460,000. Combined income $285k (David $132k + Jennifer $153k); each filed separately. Both have strong credit independently.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T11:00:00.000Z',
     attachments: [

@@ -12,7 +12,7 @@ const SCENARIO_ID = 'A26';
 
 (async () => {
   fs.mkdirSync(DOCS_DIR, { recursive: true });
-  const broker = BROKERS.franco;
+  const broker = BROKERS.jonathan_ferrara;
   const borrower = BORROWERS.marcus_webb;
   const property = ADDRESSES.edmonton_tory;
   const lender = LENDERS.rbc;
@@ -35,7 +35,7 @@ const SCENARIO_ID = 'A26';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Refinance — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nRefinance file for ${borrower.fullName}. Existing mortgage with ${lender.name}, property at ${property.full}. Loan amount $280k.\n\nFull package attached.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nRefinance file for ${borrower.fullName}. Existing mortgage with ${lender.name}, property at ${property.full}. Loan amount $280k. Estimated LTV ~43%.\n\nFull package attached. Exit strategy: refinance to a conventional lender at maturity.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T10:00:00.000Z',
     attachments: [

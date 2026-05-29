@@ -30,7 +30,7 @@ const SCENARIO_ID = 'F09';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Purchase — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nPurchase for ${borrower.fullName} at ${property.full}. Purchase $750k, loan amount $570,000 (please use this number; the $475k on the attached loan app form is from an earlier scenario before borrower bumped the offer).\n\nLTV 76%.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nPurchase for ${borrower.fullName} at ${property.full}. Purchase $750k, loan amount $570,000 (please use this number; the $475k on the attached loan app form is from an earlier scenario before borrower bumped the offer).\n\nLTV 76%.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T11:00:00.000Z',
     attachments: [

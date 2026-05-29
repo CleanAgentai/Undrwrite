@@ -21,6 +21,10 @@ const SCENARIO_ID = 'A03';
     propertyValue: 540000, loanAmount: 340000,
     transactionType: 'Purchase', mortgagePosition: '1st mortgage',
     annualIncome: 132000,
+    // Sub-issue #3 fidelity: canonical-fields extracts loan_amount + position
+    // from loan_app Page-1 annotations (real PML form-field annotations), NOT
+    // prose. Without these the docs-only loan amount is never extracted.
+    pageAnnotations: ['$340,000', '1st Mortgage'],
   }));
   fs.writeFileSync(path.join(DOCS_DIR, 'appraisal.pdf'), await synthAppraisal({
     propertyAddress: property.full, appraisedValue: 540000,
@@ -32,7 +36,7 @@ const SCENARIO_ID = 'A03';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Purchase submission — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nNew purchase submission for ${borrower.fullName}. Property at ${property.full}. Full package attached — everything's in the loan application form. Will follow up with NOA + ID separately if needed.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nNew purchase submission for ${borrower.fullName}. Property at ${property.full}. Full package attached — everything's in the loan application form. Will follow up with NOA + ID separately if needed. Estimated LTV ~63%.\n\nExit strategy: long-term hold with renewal at maturity.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T11:00:00.000Z',
     attachments: [

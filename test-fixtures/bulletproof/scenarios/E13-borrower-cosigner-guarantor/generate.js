@@ -32,7 +32,7 @@ const SCENARIO_ID = 'E13';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Refinance — ${borrower.fullName} (with guarantor)`,
-    textBody: `Hi Franco,\n\nRefi for ${borrower.fullName} at ${property.full}. Loan $280k.\n\nMarcus is sole title holder; his income alone ($78k) is light on DSCR. Patricia Webb (Marcus's mother, $145k income) is guaranteeing the loan obligation — not on title, just on the note. Lender accepts guarantor income for qualifying.\n\nPatricia's NOA can be forwarded if needed.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nRefi for ${borrower.fullName} at ${property.full}. Loan $280k.\n\nMarcus is sole title holder; his income alone ($78k) is light on DSCR. Patricia Webb (Marcus's mother, $145k income) is guaranteeing the loan obligation — not on title, just on the note. Lender accepts guarantor income for qualifying.\n\nPatricia's NOA can be forwarded if needed.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T10:30:00.000Z',
     attachments: [

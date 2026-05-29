@@ -31,7 +31,7 @@ const SCENARIO_ID = 'E14';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Corporate refinance — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nCorporate refi for ${borrower.fullName} on investment property at ${property.full}.\n\nBorrower: ${borrower.fullName} (Alberta holding co; Marcus Webb sole director + 100% beneficial owner).\nProperty value $1,850,000.\nExisting 1st mortgage ${lender.name}, balance $890,000.\nNew loan amount: $1,100,000.\nLTV: 59%.\n\nCorporate Articles + Director Resolution authorizing mortgage attached separately on signing. AML/PEP applies to Marcus as ultimate beneficial owner.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nCorporate refi for ${borrower.fullName} on investment property at ${property.full}.\n\nBorrower: ${borrower.fullName} (Alberta holding co; Marcus Webb sole director + 100% beneficial owner).\nProperty value $1,850,000.\nExisting 1st mortgage ${lender.name}, balance $890,000.\nNew loan amount: $1,100,000.\nLTV: 59%.\n\nCorporate Articles + Director Resolution authorizing mortgage attached separately on signing. AML/PEP applies to Marcus as ultimate beneficial owner.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T13:00:00.000Z',
     attachments: [

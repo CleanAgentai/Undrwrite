@@ -32,7 +32,7 @@ const SCENARIO_ID = 'F02';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Purchase — ${jointName} (82% LTV)`,
-    textBody: `Hi Franco,\n\nNon-spousal joint purchase: ${jointName} buying ${property.full} as business partners (50/50 title). Purchase price $900k, loan amount $738k (82% LTV).\n\nCombined income $285k. Both NOAs attached. Lender wants additional collateral conversation given the elevated LTV.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nNon-spousal joint purchase: ${jointName} buying ${property.full} as business partners (50/50 title). Purchase price $900k, loan amount $738k (82% LTV).\n\nCombined income $285k. Both NOAs attached. Lender wants additional collateral conversation given the elevated LTV.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T11:00:00.000Z',
     attachments: [

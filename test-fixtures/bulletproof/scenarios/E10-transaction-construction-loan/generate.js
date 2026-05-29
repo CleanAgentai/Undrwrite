@@ -28,7 +28,7 @@ const SCENARIO_ID = 'E10';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Construction loan — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nConstruction loan for ${borrower.fullName} on bare-land lot at ${property.full}.\n\nLand value (current): $280,000\nConstruction cost: $620,000 (4-draw schedule)\nProjected completion value: $900,000\nLoan amount: $620,000\nLTV-to-completion: 69%\n\nBuilder: Okafor Construction (borrower is owner-builder; 12 years building experience).\n\nKnow Vienna's typical flow is for completed-property mortgages — let me know if construction is in-scope or if we should route differently.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nConstruction loan for ${borrower.fullName} on bare-land lot at ${property.full}.\n\nLand value (current): $280,000\nConstruction cost: $620,000 (4-draw schedule)\nProjected completion value: $900,000\nLoan amount: $620,000\nLTV-to-completion: 69%\n\nBuilder: Okafor Construction (borrower is owner-builder; 12 years building experience).\n\nKnow Vienna's typical flow is for completed-property mortgages — let me know if construction is in-scope or if we should route differently.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T11:00:00.000Z',
     attachments: [

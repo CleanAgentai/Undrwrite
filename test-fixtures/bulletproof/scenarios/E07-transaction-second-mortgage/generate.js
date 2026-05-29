@@ -30,7 +30,7 @@ const SCENARIO_ID = 'E07';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `2nd mortgage — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nSecond mortgage opportunity for ${borrower.fullName}.\n\nProperty: ${property.full}, appraised $720,000.\nExisting first mortgage: ${lender.name}, balance $380,000.\nNew 2nd mortgage request: $120,000.\nCombined LTV: 69% ($500k total / $720k).\nStandalone LTV of 2nd: 17%.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nSecond mortgage opportunity for ${borrower.fullName}.\n\nProperty: ${property.full}, appraised $720,000.\nExisting first mortgage: ${lender.name}, balance $380,000.\nNew 2nd mortgage request: $120,000.\nCombined LTV: 69% ($500k total / $720k).\nStandalone LTV of 2nd: 17%.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T11:00:00.000Z',
     attachments: [

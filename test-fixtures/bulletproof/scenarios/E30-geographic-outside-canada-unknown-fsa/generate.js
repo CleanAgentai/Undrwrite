@@ -30,7 +30,7 @@ const SCENARIO_ID = 'E30';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Refinance — ${borrower.fullName} (cross-border)`,
-    textBody: `Hi Franco,\n\n${borrower.fullName} owns a US property (${usAddr}) and is exploring CAD-funded refinance options. Lender willing to consider with collateral on Canadian assets to backstop.\n\nIs this in scope for PML, or should I route elsewhere?\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\n${borrower.fullName} owns a US property (${usAddr}) and is exploring CAD-funded refinance options. Lender willing to consider with collateral on Canadian assets to backstop.\n\nIs this in scope for PML, or should I route elsewhere?\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T13:00:00.000Z',
     attachments: [

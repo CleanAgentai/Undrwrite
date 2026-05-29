@@ -17,7 +17,7 @@ const SCENARIO_ID = 'C04';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Submission package — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nFull package for ${borrower.fullName} (refi) is hosted on WeTransfer — package is ~80MB with scanned NOA, ID, mortgage statement, appraisal, and supporting documents.\n\nDownload link: https://wetransfer.com/downloads/3f2a9c8b1d4e5f6789abcdef01234567/abcd1234\n\nLink expires in 7 days.\n\nProperty: ${property.full}\nLoan amount: $390,000 (LTV ~54%)\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nFull package for ${borrower.fullName} (refi) is hosted on WeTransfer — package is ~80MB with scanned NOA, ID, mortgage statement, appraisal, and supporting documents.\n\nDownload link: https://wetransfer.com/downloads/3f2a9c8b1d4e5f6789abcdef01234567/abcd1234\n\nLink expires in 7 days.\n\nProperty: ${property.full}\nLoan amount: $390,000 (LTV ~54%)\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T13:30:00.000Z',
     attachments: [],

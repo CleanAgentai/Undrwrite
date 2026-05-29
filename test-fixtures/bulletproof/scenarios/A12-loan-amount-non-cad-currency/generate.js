@@ -34,7 +34,7 @@ const SCENARIO_ID = 'A12';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Refinance — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nRefi for ${borrower.fullName}. Borrower's investor partner is settling in USD — loan amount: USD $280,000. Property ${property.full}.\n\nLet me know if Vienna can quote in USD or if we need to convert to CAD upfront.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nRefi for ${borrower.fullName}. Borrower's investor partner is settling in USD — loan amount: USD $280,000. Property ${property.full}.\n\nLet me know if Vienna can quote in USD or if we need to convert to CAD upfront.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T13:00:00.000Z',
     attachments: [

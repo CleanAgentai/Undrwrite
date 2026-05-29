@@ -32,7 +32,7 @@ const SCENARIO_ID = 'A16';
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
     subject: `Refinance — ${borrower.fullName}`,
-    textBody: `Hi Franco,\n\nRefi for ${borrower.fullName}, loan amount $280,000. Appraisal is being scheduled — will forward next week. Sending loan application + current mortgage statement now to start the file.\n\n${broker.signoff}`,
+    textBody: `Hi Franco,\n\nRefi for ${borrower.fullName}, loan amount $280,000. Appraisal is being scheduled — will forward next week. Sending loan application + current mortgage statement now to start the file.\n\nExit strategy: borrower intends to sell the property at end of term.\n\n${broker.signoff}`,
     messageId: `${SCENARIO_ID}-intake@bulletproof.synthetic`,
     date: '2026-05-15T10:00:00.000Z',
     attachments: [
