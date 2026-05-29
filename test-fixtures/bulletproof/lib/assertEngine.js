@@ -399,6 +399,7 @@ const matchEmail = (email, kind) => {
     admin_handoff_draft_with_callout: /admin|elevated/i,
     admin_exception_review_notification: /exception|manual review/i,
     admin_construction_loan_notification: /construction|draw/i,
+    admin_material_correction_notice: /Prelim correction|corrected|material.{0,20}correct/i, // FRANCO-Q10 post-prelim re-notification
     admin_sanity_violation_notification: /sanity|exceeds|over.{0,10}100/i,
     preliminary_review_admin_draft_preview: /draft.{0,10}preview|PREVIEW/i,
     broker_facing_admin_handoff_draft: /admin/i,

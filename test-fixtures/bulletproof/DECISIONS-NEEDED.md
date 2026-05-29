@@ -362,6 +362,15 @@ into fixtures (BATCH 7). Each disposition + its commit:
 - **Q8 — joint applicants surfaced in admin Snapshot.** Commit `b20b7cd`.
 - **Q9 — admin-override out of awaiting_collateral** (→ active + audit trail). Commit `f1e944e`.
 
+### Q10 — POST-PRELIM BROKER-CORRECTION ADMIN RE-NOTIFICATION (Franco answered YES, 2026-05-29)
+Was the "Q2 banked" item; Franco resolved YES (with material-change qualifier). Now a
+tenth Franco-disposition (FRANCO-Q10, own commit/harness/revert). When a broker corrects
+a MATERIAL canonical field (requested_loan_amount, subject_property_market_value,
+existing_first_mortgage_balance, mortgage_position, transaction_type, subject_property_address)
+AFTER the admin prelim was sent → Vienna re-notifies the admin with the delta (old→new) +
+audit entry. Non-material (name/contact/housekeeping) → no re-notify. Corrections BEFORE
+the prelim → no re-notify (admin sees it in the first prelim).
+
 ### STILL OPEN — C01 admin-intake routing
 EMERGENT-FIND-D (C01 admin_handoff persistence) remains a Franco/Porter disposition:
 should Vienna set `admin_controlled=true` when `FromName="Admin"` sends the initial
