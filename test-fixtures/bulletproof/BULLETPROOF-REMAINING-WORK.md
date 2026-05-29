@@ -17,7 +17,16 @@ The closure batch is bigger than originally projected — but bounded and concre
 7. **E01/E02 re-probe** — confirm whether the 9b "premature-prelim" diagnosis was actually the
    Bug-3 "$X against $Y" extraction gap (BUG3-SCOPE.md flag).
 8. **Q9 admin-override (C06)** — BATCH-13 live-fire before writing the spec.
-9. Plus any new surfaces BATCH-13's clean full re-run reveals.
+9. **Q5-DOC-ASK-SECOND-SURFACE** (BATCH-12 deploy finding) — the accountant-financials
+   doc-ask (ai.js:2826) self-computes from dealSummary.borrower_name only (no deal.borrower_name
+   fallback; webhook doesn't thread corporateDocAsk) → also fails for corporate deals where
+   dealSummary.borrower_name is empty. Same root as the (fixed) Snapshot-row bug, different
+   surface. See BATCH12-DEPLOY-VERIFICATION.md.
+10. **CORPORATE-DEAL-PRELIM-FLOW + Q5 end-to-end live-fire** — corporate deals rarely reach a
+    prelim (refi→escalate per Q1; non-refi→doc-ask). Need a non-escalating doc-complete corporate
+    scenario to live-fire the Q5 Snapshot row (deferred from BATCH-12; the fix is deployed +
+    unit-verified, end-to-end live-fire pending).
+11. Plus any new surfaces BATCH-13's clean full re-run reveals.
 
 Meta: Q5/Q8 (and Q9) shipped in the Franco-9 bundle with unit harnesses only; BATCH-12
 live-fire probes showed Q5/Q8 don't surface end-to-end. BATCH-13's full re-run should

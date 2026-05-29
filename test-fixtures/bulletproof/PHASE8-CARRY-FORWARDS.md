@@ -49,6 +49,15 @@ FRANCO-Q[N] tag. Q10 is the canonical example of mid-Phase-6 follow-up routing.
 - Vienna's continuation is purely thread-based (In-Reply-To/References → findByMessageId);
   multi-turn replay MUST thread subsequent events or every reply spawns a new deal (BATCH-11 Phase 1).
 
+## Live-fire beats unit-green AT BUNDLE SCALE (BATCH 12, 2026-05-29) — confirmed 3×
+Empirically confirmed three times in BATCH 12: (1) Q10 hook-routing investigation → the
+"gap" was deploy state, not code; (2) Q5 Snapshot render gap (unit-green, doesn't render);
+(3) Q8 detection narrowness (unit-green, doesn't fire for joint-via-name). Pattern: unit-correct
+features shipped in bulk bundles need PER-FEATURE live-fire spot-checks on the canonical
+scenario before "ready." The "bundle scale" qualifier matters — single-feature unit-correct →
+spot-check is light overhead; bundle-of-9 unit-correct → per-feature spot-check is
+methodology-critical, because each feature has INDEPENDENT live-fire failure modes.
+
 ## Raw failure counts ≠ update needs (BATCH 12 Track B, 2026-05-29)
 The over-scoping discipline (banked Batch 5/7) SCALES: at every scale where bulk-editing is
 contemplated, the genuine work decomposes far below the raw count. Empirical baseline:
