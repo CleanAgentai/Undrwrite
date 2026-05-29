@@ -431,3 +431,14 @@ are HELD with explicit re-verification triggers, or were no-ops.
   BATCH-14: broaden the joint feed (or a Franco disposition on what "joint" requires).
 - **Q9 admin-override (C06)** — HELD; shipped unit-only like Q5/Q8, multi-turn. Needs BATCH-13
   live-fire before writing the spec (not asserted blind given Q5/Q8 both failed live-fire).
+
+### BANKED Franco product-design questions (Phase-8 closeout cluster — NOT asked now)
+Both route during Phase 8 docs closeout (cluster-routed when the closeout text is ready):
+- **Q8-DETECTION-MECHANISM** — Should Q8 joint-applicant detection trigger on the intake
+  NAME-CONJUNCTION (the BATCH-12 conservative broadening, FRANCO-PREDICTED-Q8-EXTENSION
+  75d91e2), or wait for credit-bureau-doc confirmation? Shipped with the conservative
+  name-conjunction broadening (display-only; does not affect existing-mortgage suppression);
+  revertible if Franco prefers doc-confirmation-only. Pairs with the original Q8 b20b7cd.
+- **C01-ADMIN-INTAKE-DISPOSITION** — still durably open from the original 9 (admin_handoff
+  persistence when FromName="Admin" sends the initial intake). Routes alongside
+  Q8-DETECTION-MECHANISM in the Phase-8 closeout.
