@@ -361,7 +361,14 @@ const computeCombinedLtv = (canonicalMap) => {
   // get existing additive math preserved.
   const txnTypeTuples = (canonicalMap && canonicalMap.transaction_type) || [];
   const refinanceTuple = txnTypeTuples.find(t => t && t.value === 'refinance');
-  if (refinanceTuple) {
+  // FRANCO-Q1 (2026-05-28): THREE-condition carve-out (was two). Now requires
+  // payoutConfirmed=true (explicit payout language, set at extraction) IN ADDITION
+  // to transaction_type=refinance + lender match. Closes the gap where a refinance
+  // with lender-match but NO explicit payout language was treated as paid-out
+  // (standalone) under a MORE PERMISSIVE condition than Franco's stated rule.
+  // Without payout language the existing 1st is NOT assumed paid-out → additive
+  // combined LTV → escalates for payout clarification (Franco's Q1 rule).
+  if (refinanceTuple && refinanceTuple.payoutConfirmed === true) {
     const payoutLenderTuples = (canonicalMap.existing_first_mortgage_lender || [])
       .filter(t => t && t.classification === 'mortgage_statement' && t.value);
     const payoutLenderCanonicals = Array.from(new Set(
@@ -1109,6 +1116,9 @@ const extractCanonicalFieldsAggregated = (inboundMessages, savedDocs, opts = {})
     preExtractedEmailFields: resolved,
     brokerInitialIntent,
     brokerCorrections,
+    // FRANCO-Q1: thread the real stripped broker body so payout/purchase
+    // language detection works in the aggregated path (emailBody is '' here).
+    brokerBodyText: inbounds.map(m => stripQuotedReplyChain(m.body || '')).join('\n'),
   });
 };
 

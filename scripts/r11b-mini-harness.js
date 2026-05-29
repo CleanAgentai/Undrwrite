@@ -209,10 +209,13 @@ const dE = require('../src/services/discrepancy-engine');
     existing_first_mortgage_lender: [{ value: 'RBC', classification: 'mortgage_statement' }],
     requested_loan_amount: [{ value: 408000, classification: 'broker_initial_intent' }],
     subject_property_market_value: [{ value: 680000 }],
-    transaction_type: [{ value: 'refinance', classification: 'broker_correction', rawPhrase: 'refinancing his existing RBC first mortgage' }],
+    // FRANCO-Q1 (2026-05-28): carve-out now requires payoutConfirmed (3-condition).
+    // Marcus's real production body says "the RBC will be paid out at closing" →
+    // payoutConfirmed=true. Simplified test phrase updated to reflect that reality.
+    transaction_type: [{ value: 'refinance', classification: 'broker_correction', rawPhrase: 'refinancing his existing RBC first mortgage', payoutConfirmed: true }],
   };
   const refLtv1 = dE.computeCombinedLtv(refMap1);
-  expect('(a) refinance + strict lender match (RBC named in phrase) → combined LTV = standalone',
+  expect('(a) refinance + strict lender match + payout language → combined LTV = standalone',
     refLtv1.combined_ltv_percent === 60.0
       && refLtv1.components.existing === 0
       && refLtv1.components.existing_source === 'refinance-paid-out'
@@ -223,11 +226,27 @@ const dE = require('../src/services/discrepancy-engine');
     existing_first_mortgage_lender: [{ value: 'RBC', classification: 'mortgage_statement' }],
     requested_loan_amount: [{ value: 408000, classification: 'broker_initial_intent' }],
     subject_property_market_value: [{ value: 680000 }],
-    transaction_type: [{ value: 'refinance', classification: 'broker_initial_intent', rawPhrase: 'First mortgage refinance' }],
+    transaction_type: [{ value: 'refinance', classification: 'broker_initial_intent', rawPhrase: 'First mortgage refinance', payoutConfirmed: true }],
   };
   const refLtv2 = dE.computeCombinedLtv(refMap2);
-  expect('(b) refinance + implicit single-lender match (rawPhrase lacks lender + 1 mortgage_statement lender) → combined = standalone',
+  expect('(b1) refinance + implicit single-lender match + payout language → combined = standalone',
     refLtv2.combined_ltv_percent === 60.0 && refLtv2.components.existing === 0);
+  // FRANCO-Q1 (2026-05-28): NEW gate-path assertion. Refinance + lender match but
+  // NO payout language (payoutConfirmed falsy) → carve-out GATED OFF → additive
+  // combined LTV → escalates for payout clarification (Franco's Q1 rule). This is
+  // the corrected three-condition behavior; the old two-condition code fired the
+  // carve-out here under a more permissive condition than Franco's stated rule.
+  const refMap2b = {
+    existing_first_mortgage_balance: [{ value: 400000, classification: 'mortgage_statement' }],
+    existing_first_mortgage_lender: [{ value: 'RBC', classification: 'mortgage_statement' }],
+    requested_loan_amount: [{ value: 408000, classification: 'broker_initial_intent' }],
+    subject_property_market_value: [{ value: 680000 }],
+    transaction_type: [{ value: 'refinance', classification: 'broker_initial_intent', rawPhrase: 'First mortgage refinance' }], // no payoutConfirmed
+  };
+  const refLtv2b = dE.computeCombinedLtv(refMap2b);
+  expect('(b2) refinance + lender match but NO payout language → carve-out gated off → additive (escalates)',
+    refLtv2b.combined_ltv_percent === Math.round(((400000 + 408000) / 680000) * 100 * 10) / 10
+      && refLtv2b.components.existing === 400000);
   // Multi-lender + no lender named → no carve-out (conservative)
   const refMap3 = {
     existing_first_mortgage_balance: [

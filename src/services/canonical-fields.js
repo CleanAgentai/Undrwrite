@@ -1435,6 +1435,35 @@ const inferMortgagePositionFromExistingBalance = (canonicalMap) => {
 // call is bypassed and these values feed the `email_body` tuples directly.
 // The wrapper resolves multi-msg latest-non-empty-wins externally and passes
 // the result here. emailBody can be '' when preExtractedEmailFields is used.
+// FRANCO-Q1 (2026-05-28): conservative payout-language detector. Gates the
+// R11-B-3 refinance carve-out — the existing 1st is treated as paid-out (combined
+// LTV = standalone) ONLY when the broker EXPLICITLY states payout-at-closing
+// (Franco's Q1 rule). LEAN FALSE-NEGATIVE: missing a real payout → the deal
+// escalates for clarification (recoverable); a false-positive → carve-out fires on
+// what might be a 2nd-mortgage-add (under-conservative, underwriting-dangerous). So
+// DIRECT payout phrasing only — do NOT infer from "refi"/"replacing"/"consolidating".
+const PAYOUT_LANGUAGE_RE = /\bpaid out at closing\b|\bwill be paid out\b|\bbeing paid out\b|\bto be paid out\b|\bpaying out (?:the |his |her |their |my |our )?existing\b|\brefinanc\w* to pay (?:off|out)\b|\bto pay off (?:the |his |her |their |my |our )?existing\b|\bdischarg\w+ (?:the |his |her |their |my |our )?existing\b/i;
+const detectPayoutLanguage = (text) => {
+  if (!text) return { present: false, phrase: null };
+  const m = String(text).match(PAYOUT_LANGUAGE_RE);
+  return m ? { present: true, phrase: m[0] } : { present: false, phrase: null };
+};
+
+// FRANCO-Q1: purchase-signal detector — used only to decide the DEFAULT when
+// transaction_type has no explicit signal (purchase contract doc, or clear
+// purchase language). "refinance to purchase X" is refinance-context, so a
+// dominant refinance signal suppresses the purchase default.
+const PURCHASE_LANGUAGE_RE = /\bpurchas(?:e|ing)\b|\bbuying\b|\bto buy\b|\bagreement of purchase and sale\b/i;
+const detectPurchaseSignal = (emailBody, savedDocs) => {
+  const hasPurchaseDoc = (savedDocs || []).some(d => /purchase[_\s-]?contract|agreement[_\s-]?of[_\s-]?purchase|^aps$/i.test(d.classification || ''));
+  if (hasPurchaseDoc) return { present: true, signal: 'purchase_contract document on file' };
+  if (emailBody && PURCHASE_LANGUAGE_RE.test(emailBody) && !/\brefinanc/i.test(emailBody)) {
+    const m = emailBody.match(PURCHASE_LANGUAGE_RE);
+    return { present: true, signal: `purchase language: "${m[0]}"` };
+  }
+  return { present: false, signal: null };
+};
+
 const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   const emailSubject = opts.emailSubject || '';
   const map = {
@@ -1812,6 +1841,31 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     }
   }
 
+  // FRANCO-Q1 (2026-05-28): payout-language confirmation + transaction_type default.
+  // (1) Tag every transaction_type tuple with payoutConfirmed — read from the FULL
+  //     email body + doc text (not just the rawPhrase snippet) so an explicit payout
+  //     statement anywhere in the submission qualifies (Marcus: "the RBC will be paid
+  //     out at closing"). This flag GATES the R11-B-3 carve-out in computeCombinedLtv.
+  // (2) Default transaction_type when no explicit signal: refinance unless a purchase
+  //     signal is present (Franco's rule — all files are refinance unless purchase).
+  // Aggregated caller passes emailBody='' but threads the real stripped broker
+  // body via opts.brokerBodyText — prefer it so payout/purchase language is seen.
+  const _q1BrokerText = opts.brokerBodyText != null ? opts.brokerBodyText : (emailBody || '');
+  const _q1PayoutText = `${_q1BrokerText}\n${(savedDocs || []).map(d => d.text || '').join('\n')}`;
+  const _q1Payout = detectPayoutLanguage(_q1PayoutText);
+  for (const t of (map.transaction_type || [])) {
+    if (t) t.payoutConfirmed = _q1Payout.present;
+  }
+  if (!map.transaction_type || map.transaction_type.length === 0) {
+    const _q1Purchase = detectPurchaseSignal(_q1BrokerText, savedDocs);
+    map.transaction_type = map.transaction_type || [];
+    if (_q1Purchase.present) {
+      map.transaction_type.push({ value: 'purchase', source: 'defaulted_purchase_signal', classification: 'defaulted_purchase_signal', rawPhrase: _q1Purchase.signal, payoutConfirmed: false });
+    } else {
+      map.transaction_type.push({ value: 'refinance', source: 'defaulted_from_purchase_absence', classification: 'defaulted_from_purchase_absence', rawPhrase: '', payoutConfirmed: _q1Payout.present });
+    }
+  }
+
   return map;
 };
 
@@ -1921,6 +1975,8 @@ module.exports = {
   normalizeLender,
   detectNonCanadianProperty, // FRANCO-Q7
   extractPropertyRegion,     // FRANCO-Q7 (exported for testing)
+  detectPayoutLanguage,      // FRANCO-Q1
+  detectPurchaseSignal,      // FRANCO-Q1
   findLenderInWindow,
   normalizePostal,
   normalizeMoney,
