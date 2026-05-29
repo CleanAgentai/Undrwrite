@@ -74,3 +74,66 @@ Largest cluster (broker-correction) explained as a BATCH-7 fixture-sequencing in
 2. A28/F02 transaction_type: read intake textBody — does Q1's detectPurchaseSignal mis-fire (A28) / miss (F02)?
 3. discrepancyHold-under-escalation (B02/B03): confirm the gate infer() false-fires when escalation suppresses prelim (Discipline-2 gate-inference refinement).
 4. F06 postal, A20 address: render vs regen.
+
+---
+
+# BATCH 9b — cheap-probe refinements (2026-05-29)
+
+**NET RESULT: 0 confirmed genuine Vienna bugs.** Every BATCH-9 candidate resolved to a
+known root via probes (no fix-cycles). ~$1 (3 isolated runs + offline canonical checks).
+
+## PROBE 1 — premature-prelim: EMPIRICALLY CONFIRMED (load-bearing)
+A01 isolated run, ordered outbound:
+- Turn-1 prelim Snapshot = **$260,000** (intake value; prelim fires at intake because
+  BATCH-7 exit_strategy is now present).
+- Separate outbound = **$295,000** (correction processed CORRECTLY).
+- assertEngine.findSnapshotEmail picks the FIRST Snapshot (turn-1 premature, $260k).
+→ EXIT_STRATEGY-PREMATURE-PRELIM confirmed. The 6 BATCH-9 "explained-by-known-root"
+classifications (A01/A13/A34/C07 + A28 correction) are now EMPIRICALLY-CONFIRMED-EXPLANATIONS.
+Carry-forward grounded. NEW operational note: A01's correction landed as a SECOND deal in
+replay (dedup/replay artifact, not Vienna-logic; correction value still resolves to $295k).
+
+## PROBE 2 — A28 / F02: VERIFICATION-SURFACE-MISMATCH (not bugs)
+Offline canonical (real aggregated extraction) is CORRECT for both:
+- A28 → transaction_type=refinance (broker_correction) ✓ matches expected.
+- F02 → transaction_type=purchase (defaulted_purchase_signal) ✓ matches expected.
+The Batch-8 "actual" read extracted_data (raw pre-canonical: A28 turn-1 "buying"=purchase;
+F02 Claude-raw null) for a CANONICAL request-time field. → matrix-design amendment: assert
+transaction_type via canonical/render, NOT extracted_data (same as fullmatrix-1 CLUSTER-2/3).
+→ LIST-C / harness-fix, NOT a Vienna fix. **0 genuine bugs from the 2 candidates.**
+
+## PROBE 3 — null-loan-amount: NOT bugs
+- E01/E02: loan amount empty-from-email (offline) → DOC-sourced → premature-prelim-before-docs
+  (prelim fires at intake before doc upload → doc field null at render). Same root as Probe 1.
+- A14P: canonical email loan=$460k ✓; isolated run renders $460k+$815k CORRECTLY → the Batch-8
+  null was a TRANSIENT batch-capture-timing artifact, not persistent.
+
+## PROBE 4 — B02/B03/F06: NOT bugs
+- B02/B03: Batch-8 shows escalation (awaiting_collateral) → prelim suppressed →
+  discrepancyHold "not fired" is correct; gate infer() (hasNotif && !hasPrelim) mis-reads
+  suppression → HARNESS-MISREAD-OF-SUPPRESSION-STATE (Discipline-2 gate-inference refinement).
+- F06: postal empty-from-email → cross-doc postal discrepancy needs DOCS → premature-prelim-
+  before-docs (no docs processed → no discrepancy detected). Same root.
+
+## PROBE 5 — A20: NOT a bug
+Address empty-from-email (loan $280k present) → DOC-sourced address → premature-prelim-before-docs.
+
+## UNIFYING ROOTS (all BATCH-9 candidates, 0 Vienna bugs)
+1. **EXIT_STRATEGY-PREMATURE-PRELIM** (dominant) — BATCH-7 exit_strategy fires prelim at
+   intake, before turn-2 corrections AND before doc-processing → captured render misses
+   post-intake data. Fix: FIXTURE-SIDE (exit_strategy timing / capture post-stable-state).
+2. **VERIFICATION-SURFACE-MISMATCH** — extracted_data vs canonical/render for transaction_type
+   (+ the broader canonical-field render-surface rule). Fix: HARNESS/matrix-design.
+3. **HARNESS-MISREAD-OF-SUPPRESSION-STATE** — gate infer() under Franco-9 escalation. Fix: harness.
+4. **BATCH-CAPTURE-TIMING-TRANSIENT** (A14P) — poll-for-stable timing in batch context.
+5. **Known pre-existing residuals** — elevated_ltv_band/R4-RESIDUAL-1; R11-B-2 lender-gap.
+6. **LIST-C casing/wording** — A03/A26/A27/F01.
+
+## FINAL TALLY (BATCH 9 + 9b)
+- Entanglement (b): CONFIRM-CLEAR ×3 (B01, D03, F23); explained-by-known-root ×6 (now
+  empirically confirmed); 0 refute-as-bug.
+- (d): 0 genuine bugs (A28/F02 → verification-surface; null-cluster → premature-prelim/transient;
+  rest → LIST-C/known-residual).
+- **CONFIRMED GENUINE VIENNA BUGS REQUIRING FIX-CYCLES: 0.**
+- Fix work ahead is FIXTURE-SIDE (premature-prelim) + HARNESS-SIDE (verification-surface,
+  suppression-state) + LIST-C spec updates — NOT Vienna code.
