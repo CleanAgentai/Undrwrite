@@ -12,7 +12,7 @@ const SCENARIO_ID = 'E08';
 
 (async () => {
   fs.mkdirSync(DOCS_DIR, { recursive: true });
-  const broker = BROKERS.franco, borrower = BORROWERS.marcus_webb;
+  const broker = BROKERS.jonathan_ferrara, borrower = BORROWERS.marcus_webb;
   const property = ADDRESSES.edmonton_tory, lender = LENDERS.scotia;
   // 3rd mortgage: existing 1st $380k + 2nd $85k + new 3rd $50k. Combined LTV: $515k/$720k = 71.5%
   fs.writeFileSync(path.join(DOCS_DIR, 'loan_application.pdf'), await synthLoanApp({

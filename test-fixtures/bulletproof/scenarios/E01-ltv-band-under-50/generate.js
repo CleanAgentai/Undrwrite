@@ -12,7 +12,7 @@ const SCENARIO_ID = 'E01';
 
 (async () => {
   fs.mkdirSync(DOCS_DIR, { recursive: true });
-  const broker = BROKERS.franco, borrower = BORROWERS.marcus_webb;
+  const broker = BROKERS.jonathan_ferrara, borrower = BORROWERS.marcus_webb;
   const property = ADDRESSES.edmonton_tory, lender = LENDERS.rbc;
   // 40% LTV: $260k / $650k
   fs.writeFileSync(path.join(DOCS_DIR, 'loan_application.pdf'), await synthLoanApp({

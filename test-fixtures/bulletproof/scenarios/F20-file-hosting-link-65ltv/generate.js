@@ -10,7 +10,7 @@ const SCENARIO_ID = 'F20';
 
 (async () => {
   fs.mkdirSync(FIXTURE_DIR, { recursive: true });
-  const broker = BROKERS.franco, borrower = BORROWERS.sarah_chen;
+  const broker = BROKERS.jonathan_ferrara, borrower = BORROWERS.sarah_chen;
   const property = ADDRESSES.vancouver_kingsway;
   const intake = buildPostmarkPayload({
     from: broker.email, fromName: broker.name,
