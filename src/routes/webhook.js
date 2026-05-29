@@ -1350,8 +1350,15 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   }
   // FRANCO-Q5: corporate-entity detection (primary + best-effort multi-entity)
   // for the Snapshot flag. textSources includes doc text (better multi-entity).
+  // FRANCO-Q5 RENDER-PLUMBING FIX (BATCH 12): key detection on the BORROWER identity
+  // — the SAME source the prelim subject uses (borrowerName @ :1514 =
+  // dealSummary.borrower_name || deal.borrower_name) — NOT leadSummaryBrokerName,
+  // which is broker-name-FIRST. For a corporate deal the broker name ("Jason Mercer")
+  // shadowed the corporate borrower ("Webb Holdings Ltd."), so detectCorporateEntities
+  // (L1 keys solely on the borrower-name suffix) saw a non-corporate name → the
+  // Snapshot corporate row + accountant-ask never rendered (F03 BATCH-12 live-fire gap).
   const _q5Corporate = ce.detectCorporateEntities({
-    borrowerName: dealSummary?.borrower_name || leadSummaryBrokerName || '',
+    borrowerName: dealSummary?.borrower_name || deal.borrower_name || '',
     textSources: _q4TextSources,
   });
   if (_q5Corporate.isCorporate) {
@@ -1805,8 +1812,8 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
       detectedBorrowers: _r10iDetect.joint_multi_borrower,
       primaryName: dealSummary?.borrower_name || borrowerName || null,
     }),
-    corporateEntities: ce.detectCorporateEntities({ // FRANCO-Q5
-      borrowerName: dealSummary?.borrower_name || borrowerName || '',
+    corporateEntities: ce.detectCorporateEntities({ // FRANCO-Q5 (render-plumbing fix BATCH 12: borrower identity, deal.borrower_name preferred over the ambiguous param)
+      borrowerName: dealSummary?.borrower_name || deal.borrower_name || borrowerName || '',
       textSources: [..._r10iInboundMessages.map(m => m.body || ''), ...dealDocs.map(d => d?.extracted_data?.text || '')].join('\n'),
     }),
   });
