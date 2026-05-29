@@ -2,6 +2,8 @@
   "scenario_id": "A13",
   "spec_version": "1.0",
   "rationale_source": "F1.PV broker_correction tier wins; appraisal source shadowed by correction",
+  "verification_profile": "broker_correction",
+  "_verification_profile_rationale": "LIST-C-Q10-RENOTIFY (BATCH 12). Post-prelim PV broker_correction: Vienna does NOT re-render the prelim Snapshot (Q10 design); corrected $735k verified via the Q10 [UPDATED] notice + ack (PRIMARY) / extracted_data (SECONDARY) per broker_correction surface (0c826b9). Q10 firing on property_value corrections VERIFIED end-to-end (A13 probe, BATCH 12: '[UPDATED] Prelim correction — Marcus Webb: property value corrected').",
   "layer1_structural": {
     "canonical_map": {
       "property_value": {
@@ -21,7 +23,15 @@
         "kind": "preliminary_review_admin",
         "expected_fire": true,
         "must_include": [
-          { "pattern": "735,000", "rationale": "Final canonical PV per F1.PV broker_correction." }
+          { "pattern": "Marcus Webb", "rationale": "Prelim fires (premature, at intake) and renders the borrower. The corrected $735k is NOT asserted here (premature prelim shows pre-correction $700k; no re-render per Q10 design); corrected value verified via canonical_map broker_correction surface + the Q10 notice below." }
+        ]
+      },
+      {
+        "kind": "admin_material_correction_notice",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "735,000|735000", "rationale": "Q10 (a5c032c) re-notifies admin of the corrected property value. VERIFIED end-to-end (A13 probe, BATCH 12): '[UPDATED] Prelim correction — Marcus Webb: property value corrected'." },
+          { "pattern": "UPDATED|correction", "rationale": "Q10 [UPDATED] Prelim correction notice marker." }
         ]
       }
     ]

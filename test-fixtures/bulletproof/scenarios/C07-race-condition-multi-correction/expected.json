@@ -2,6 +2,8 @@
   "scenario_id": "C07",
   "spec_version": "1.0",
   "rationale_source": "F3.BR multi-correction race: 3 corrections within ~75 minutes to same field; canonical_map resolution per Layer 3 #21",
+  "verification_profile": "broker_correction",
+  "_verification_profile_rationale": "LIST-C-Q10-RENOTIFY (BATCH 12). Multi-correction race: the premature intake prelim shows the event_0 value; Vienna does not re-render post-correction. Final canonical $295k (last-write-wins) verified via the Q10 [UPDATED] notice + ack (PRIMARY) / extracted_data (SECONDARY) per broker_correction surface (0c826b9). Q10 firing on the 3-turn multi-correction VERIFIED end-to-end (C07 probe, BATCH 12: '[UPDATED] Prelim correction — Marcus Webb: requested loan amount corrected', q10fields=['requested loan amount']).",
   "layer1_structural": {
     "intake_classification": {
       "event_0": "broker_initial_intent",
@@ -23,10 +25,16 @@
         "kind": "preliminary_review_admin",
         "expected_fire": true,
         "must_include": [
-          { "pattern": "295,000", "rationale": "Final canonical loan_amount per last-write-wins resolution." }
+          { "pattern": "Marcus Webb", "rationale": "Prelim fires (premature, at intake) and renders the borrower. The final $295k is NOT asserted here — the premature intake prelim shows the event_0 value and Vienna does not re-render post-correction. Final canonical resolution is verified via the broker_correction surface + the Q10 notice below." }
         ],
-        "must_not_include": [
-          { "pattern": "\\$280,000|\\$310,000", "rationale": "Superseded values must not appear as canonical figures." }
+        "must_not_include": []
+      },
+      {
+        "kind": "admin_material_correction_notice",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "295,000|295000", "rationale": "Q10 (a5c032c) re-notifies admin of the final corrected loan amount (last-write-wins). VERIFIED end-to-end (C07 probe, BATCH 12): '[UPDATED] Prelim correction — Marcus Webb: requested loan amount corrected', q10fields=['requested loan amount']. NOTE: superseded values ($280k/$310k) suppression is verified via the canonical broker_correction resolution to $295k, not via the premature prelim (which legitimately renders an intake value)." },
+          { "pattern": "UPDATED|correction", "rationale": "Q10 [UPDATED] Prelim correction notice marker." }
         ]
       }
     ]

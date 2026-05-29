@@ -2,6 +2,8 @@
   "scenario_id": "A01",
   "spec_version": "1.0",
   "rationale_source": "F1.LA broker_correction tier wins per R10-G OBJECTIVE-vs-INTENT framing; loan_app source ($260k) is not suppressed because correction is small (within 30% threshold)",
+  "verification_profile": "broker_correction",
+  "_verification_profile_rationale": "LIST-C-Q10-RENOTIFY (BATCH 12). Post-prelim broker_correction: Vienna does NOT re-render the prelim Snapshot (Q10 design, a5c032c) — the premature intake prelim keeps the pre-correction $260k. Corrected $295k is verified via the Q10 [UPDATED] notice + broker ack (PRIMARY) / extracted_data (SECONDARY) per the broker_correction surface (0c826b9), not a Snapshot re-render. Q10 firing on loan_amount corrections verified end-to-end (A01, BATCH 11).",
   "layer1_structural": {
     "canonical_map": {
       "requested_loan_amount": {
@@ -22,9 +24,17 @@
         "kind": "preliminary_review_admin",
         "expected_fire": true,
         "must_include": [
-          { "pattern": "295,000", "rationale": "Final canonical loan_amount per F1.LA broker_correction tier." }
+          { "pattern": "Marcus Webb", "rationale": "Prelim fires (premature, at intake) and renders the borrower. NOTE: the corrected $295k is NOT asserted here — the premature intake prelim shows the pre-correction $260k and Vienna does not re-render post-correction (Q10 design). The corrected value is verified via the canonical_map broker_correction surface + the Q10 notice below." }
         ],
         "must_not_include": []
+      },
+      {
+        "kind": "admin_material_correction_notice",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "295,000|295000", "rationale": "Q10 (a5c032c) re-notifies admin of the corrected loan amount. VERIFIED end-to-end on A01 (BATCH 11): '[UPDATED] Prelim correction — Marcus Webb: requested loan amount' with delta 260000 → 295000." },
+          { "pattern": "UPDATED|correction", "rationale": "Q10 [UPDATED] Prelim correction notice subject/body marker." }
+        ]
       }
     ]
   },
