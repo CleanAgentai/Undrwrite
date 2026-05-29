@@ -48,3 +48,13 @@ FRANCO-Q[N] tag. Q10 is the canonical example of mid-Phase-6 follow-up routing.
   match buggy code) — tie each update to a ratified rule (r11b Q1 refinement; LIST-C at matrix scale).
 - Vienna's continuation is purely thread-based (In-Reply-To/References → findByMessageId);
   multi-turn replay MUST thread subsequent events or every reply spawns a new deal (BATCH-11 Phase 1).
+
+---
+## LEDGER — Q10 / BATCH 11 closure (2026-05-29)
+Q10 DEPLOYED (origin/main + Render live = 1e35817 @ 2026-05-29T16:26:59Z) and END-TO-END
+VERIFIED on A01: admin re-notification "[UPDATED] Prelim correction — Marcus Webb: requested
+loan amount" fired to Franco with delta "260000 → 295000"; audit _q10_admin_renotified_at set;
+broker-facing C.5 ack ($295k) preserved (Q10 additive). Non-material false-positive guard:
+unit-verified (21/21); clean post-prelim-non-material PRODUCTION probe deferred to BATCH 13
+(A38 reached 'active' not prelim, so didn't exercise the branch). BATCH 11 COMPLETE: Phases
+1-4 + Q10 implemented, unit-verified, deployed, Q10 end-to-end-verified.
