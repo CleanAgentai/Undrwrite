@@ -25,6 +25,15 @@ const GATE_INFERENCE = {
     rationale: 'R10-F asymmetric-gate semantics — discrepancyHold suppresses prelim dispatch + composes admin notification',
     architectural_anchor: 'R10-F + R11-B-1 Layer 1',
     infer: (captured) => {
+      // BATCH-11 Phase 3 — suppression-state awareness: when the deal ESCALATED
+      // (awaiting_collateral) or was DECLINED (rejected) or is awaiting identity,
+      // the absence of a prelim is due to that suppression, NOT a discrepancyHold.
+      // Without this guard the gate false-POSITIVES (hasDiscrepancyNotif && !hasPrelim
+      // → true) and B02/B03 read "discrepancyHold fired" when the prelim was simply
+      // suppressed by Franco-9 escalation. discrepancyHold is meaningful only on the
+      // active/under_review (prelim-eligible) path.
+      const status = captured.finalDealState?.status;
+      if (status === 'awaiting_collateral' || status === 'rejected' || status === 'awaiting_identity_confirmation') return false;
       const emails = captured.outboundEmails || [];
       const hasDiscrepancyNotif = emails.some(e => /discrepancy|conflict|broker.{0,10}correct/i.test(e.Subject || '') || /discrepancy/i.test(e.TextBody || ''));
       const hasPrelim = emails.some(e => /preliminary review|PRELIMINARY/i.test(e.Subject || ''));
