@@ -3238,6 +3238,15 @@ No deal record was created. If this was a legitimate broker submission, please r
           standaloneLtv: _r1InitialStandaloneLtv,
           combinedLtv: _r1InitialCombinedLtv,
         });
+        // FRANCO-Q2 (2026-05-28): >90% canonical-LTV auto-decline. Standalone
+        // always reliable; combined only when payout status is resolved (else an
+        // unconfirmed-refinance additive combined would wrongly decline a deal that
+        // should escalate for payout clarification per Q1).
+        const _q2AutoDecline = dEngine.shouldAutoDeclineOver90({
+          standaloneLtv: _r1InitialStandaloneLtv,
+          combinedLtv: _r1InitialCombinedLtv,
+          combinedResolved: dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap),
+        });
 
         if (dealSummary?.identity_clash) {
           // Group HHH (S15.1): identity gate runs FIRST, before LTV gates. Vienna's
@@ -3247,6 +3256,32 @@ No deal record was created. If this was a legitimate broker submission, please r
           // nothing during this state — same silent-pending pattern as Fix 7.
           console.log('Initial submission identity_clash=true — entering awaiting_identity_confirmation state (HHH)');
           await dealsService.update(deal.id, { status: 'awaiting_identity_confirmation' });
+        } else if (_q2AutoDecline.decline) {
+          // FRANCO-Q2: >90% canonical LTV → auto-decline (polite broker email +
+          // admin alert + status rejected). Fires BEFORE the 80-90 escalation
+          // branch (>90 declines, it does not escalate). Uses canonical LTV.
+          console.log(`Initial submission >90% LTV auto-decline (FRANCO-Q2): ${_q2AutoDecline.basis} — declining + alerting admin`);
+          const _q2Greeting = selectGreetingFirstName({
+            broker_name: dealSummary?.broker_name,
+            sender_name: dealSummary?.sender_name,
+            borrower_name: dealSummary?.borrower_name,
+            sender_type: dealSummary?.sender_type,
+          });
+          const _q2DeclineEmail = await aiService.generateRejectionEmail(
+            dealSummary,
+            'the loan-to-value ratio exceeds our maximum threshold of 90%',
+            { greetingFirstName: _q2Greeting }
+          );
+          const _q2Subject = `Re: ${dealSummary?.borrower_name || 'Your mortgage inquiry'}`;
+          await emailService.sendEmail(deal.email, _q2Subject, _q2DeclineEmail.replace(/<[^>]*>/g, ''), _q2DeclineEmail, [], [], null);
+          await dealsService.saveMessage(deal.id, 'outbound', _q2Subject, _q2DeclineEmail);
+          await dealsService.update(deal.id, { status: 'rejected' });
+          await emailService.sendEmail(
+            config.adminEmail,
+            `[Auto-Decline] LTV over 90% — ${dealSummary?.borrower_name || 'unnamed'}`,
+            `Vienna auto-declined a submission: ${_q2AutoDecline.basis} (canonical LTV; >90% threshold per Franco Q2).\n\nBorrower: ${dealSummary?.borrower_name || '(unknown)'}\nFrom: ${deal.email}\n\nStandalone LTV: ${_r1InitialStandaloneLtv ?? 'n/a'}%\nCombined LTV: ${_r1InitialCombinedLtv ?? 'n/a'}% (resolved=${dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap)})\n\nDeal ${deal.id} status set to rejected. If this LTV is incorrect, reply to the broker directly.\n\n(Automatic — FRANCO-Q2 >90% auto-decline gate.)`,
+            null, [], []
+          );
         } else if (_r1InitialShouldEscalate) {
           // Fix 7 + R4-RESIDUAL-1: do NOT escalate immediately. Set status to
           // 'awaiting_collateral'. ADDITIVE escalation trigger — fires if

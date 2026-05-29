@@ -465,6 +465,38 @@ const shouldEscalateOnAnyLtv = ({ standaloneLtv, combinedLtv, standaloneThreshol
   return stdHit || cmbHit;
 };
 
+// FRANCO-Q2 (2026-05-28): >90% LTV auto-decline. Franco's tier: <=80 normal,
+// 80-90 escalate (existing), >90 AUTO-DECLINE. Uses CANONICAL LTV (Bug-1 gate-
+// hygiene continuation). STRICT > 90: 90.0 does NOT decline; 90.01 does.
+// Standalone is always reliable. Combined is used ONLY when its payout status is
+// RESOLVED — otherwise the provisional additive combined of an UNCONFIRMED
+// refinance (e.g. A14's 103%) would wrongly auto-decline a deal that should first
+// escalate for payout clarification (Q1). isCombinedLtvResolved gates that.
+const AUTO_DECLINE_LTV_THRESHOLD_PCT = 90;
+
+// Combined LTV is "resolved" (trustworthy as true leverage) when payout status is
+// settled: carve-out fired (payoutConfirmed refinance → combined==standalone), OR
+// an explicit 2nd-mortgage signal (transaction_type=2nd_mortgage / broker '2nd'
+// position correction) → combined is genuinely additive. Unresolved → escalate, no decline.
+const isCombinedLtvResolved = (canonicalMap) => {
+  const tt = (canonicalMap && canonicalMap.transaction_type) || [];
+  const payoutResolved = tt.some(t => t && t.value === 'refinance' && t.payoutConfirmed === true);
+  const explicit2nd = tt.some(t => t && t.value === '2nd_mortgage');
+  const pos2nd = ((canonicalMap && canonicalMap.mortgage_position) || [])
+    .some(t => t && t.classification === 'broker_correction' && /2nd|second/i.test(String(t.value)));
+  return payoutResolved || explicit2nd || pos2nd;
+};
+
+const shouldAutoDeclineOver90 = ({ standaloneLtv = null, combinedLtv = null, combinedResolved = false } = {}) => {
+  if (Number.isFinite(standaloneLtv) && standaloneLtv > AUTO_DECLINE_LTV_THRESHOLD_PCT) {
+    return { decline: true, basis: `standalone LTV ${standaloneLtv}% > ${AUTO_DECLINE_LTV_THRESHOLD_PCT}` };
+  }
+  if (combinedResolved && Number.isFinite(combinedLtv) && combinedLtv > AUTO_DECLINE_LTV_THRESHOLD_PCT) {
+    return { decline: true, basis: `combined LTV ${combinedLtv}% > ${AUTO_DECLINE_LTV_THRESHOLD_PCT} (payout status resolved)` };
+  }
+  return { decline: false, basis: null };
+};
+
 // R10-C-2 (2026-05-27): LTV-band classifier. Closes contract Schedule A
 // Stage 1 LTV-routing three-band specification at MVP level.
 //
@@ -1176,6 +1208,9 @@ module.exports = {
   // R4-RESIDUAL-1: combined-LTV escalation trigger
   COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
   shouldEscalateOnAnyLtv,
+  shouldAutoDeclineOver90,      // FRANCO-Q2
+  isCombinedLtvResolved,        // FRANCO-Q2
+  AUTO_DECLINE_LTV_THRESHOLD_PCT, // FRANCO-Q2
   // R10-C-2 (2026-05-27): LTV-band classifier — contract Schedule A Stage 1
   // three-band spec ('over_80' / 'elevated_75_80' / 'standard').
   computeLtvBand,
