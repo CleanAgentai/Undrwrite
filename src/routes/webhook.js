@@ -1544,21 +1544,9 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     reviewAttachments
   );
   await dealsService.saveMessage(deal.id, 'outbound', subject, enforcedLeadSummary, reviewResult.MessageID);
-  // FRANCO-Q10 (2026-05-29): snapshot the material underwriting figures the admin
-  // was just notified of, so a later POST-PRELIM broker correction can detect a
-  // MATERIAL change (vs this snapshot) and re-notify the admin. Stored in
-  // extracted_data (no migration; mirrors the collateral_offered pattern).
-  const _q10LastNotified = {
-    loan_amount_requested: dealSummary?.loan_amount_requested ?? null,
-    property_value: dealSummary?.property_value ?? null,
-    existing_mortgage_balance: dealSummary?.existing_mortgage_balance ?? null,
-    property_address: dealSummary?.property_address ?? null,
-    loan_type: dealSummary?.loan_type ?? null,
-  };
-  await dealsService.update(deal.id, {
-    status: 'under_review',
-    extracted_data: { ...(deal.extracted_data || {}), _q10_last_notified: _q10LastNotified },
-  });
+  await dealsService.update(deal.id, { status: 'under_review' });
+  // FRANCO-Q10 v2: prior material figures are derived from THIS prelim's persisted
+  // outbound at correction time (q10ParsePriorFromPrelim) — no clobber-prone snapshot.
   console.log(`Preliminary review sent to Franco — deal status: under_review (${missingDocs.length} docs missing, clarificationPending=${clarificationPending}, statusFlag=${statusFlag})`);
 };
 
@@ -1576,9 +1564,30 @@ const Q10_MATERIAL_FIELDS = [
 ];
 const q10DetectMaterialChanges = (priorSnapshot, currentSummary) => {
   if (!priorSnapshot || !currentSummary) return [];
+  // Only compare fields present in BOTH (prior!=null) — a field absent from the prior
+  // (e.g. not parseable from the prelim) is NOT a change. This is the false-positive
+  // guard for the prelim-parse prior (Q10 v2).
   return Q10_MATERIAL_FIELDS
-    .filter(([f]) => currentSummary[f] != null && String(currentSummary[f]).trim() !== String(priorSnapshot[f] ?? '').trim())
-    .map(([f, label]) => ({ key: f, field: label, old: priorSnapshot[f] ?? '(none)', new: currentSummary[f] }));
+    .filter(([f]) => currentSummary[f] != null && priorSnapshot[f] != null && String(currentSummary[f]).trim() !== String(priorSnapshot[f]).trim())
+    .map(([f, label]) => ({ key: f, field: label, old: priorSnapshot[f], new: currentSummary[f] }));
+};
+
+// FRANCO-Q10 v2: parse prior material money figures from the most-recent admin PRELIM
+// outbound (immutable Snapshot — avoids the extracted_data snapshot clobber). Covers the
+// primary money decision-drivers (loan amount, appraised value, existing 1st balance);
+// non-money material fields (position/transaction_type/address) are a documented coverage
+// limit pending a richer parse.
+const q10ParsePriorFromPrelim = (prelimBody) => {
+  if (!prelimBody) return null;
+  const money = (label) => {
+    const m = prelimBody.match(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^$]{0,40}\\$([\\d,]+)', 'i'));
+    return m ? Number(m[1].replace(/,/g, '')) : null;
+  };
+  return {
+    loan_amount_requested: money('Loan Amount Requested'),
+    property_value: money('Appraised Value'),
+    existing_mortgage_balance: money('Combined LTV'),
+  };
 };
 const sendAdminMaterialCorrectionNotice = async (deal, changes, summary) => {
   const borrower = summary?.borrower_name || deal.borrower_name || deal.extracted_data?.borrower_name || 'borrower';
@@ -3727,17 +3736,17 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // guard). Pre-prelim corrections never reach this branch. This is the ONE
           // intentional exception to the C.1 zero-admin-emission invariant — scoped to
           // material underwriting changes per Franco's Q10 answer.
-          const _q10Prior = existingDeal.extracted_data?._q10_last_notified || null;
+          // Prior material figures from the most-recent admin PRELIM outbound (immutable).
+          const _q10Msgs = await dealsService.getMessages(existingDeal.id);
+          const _q10LastPrelim = [..._q10Msgs].reverse().find(m => m.direction === 'outbound' && /PRELIMINARY Review/i.test(m.subject || ''));
+          const _q10Prior = _q10LastPrelim ? q10ParsePriorFromPrelim(_q10LastPrelim.body) : null;
           const _q10Changes = q10DetectMaterialChanges(_q10Prior, reviewResult.updatedSummary);
           if (_q10Changes.length > 0) {
             await sendAdminMaterialCorrectionNotice(existingDeal, _q10Changes, reviewResult.updatedSummary);
             const _q10At = new Date().toISOString();
-            const _q10NewSnap = { ..._q10Prior };
-            for (const c of _q10Changes) _q10NewSnap[c.key] = c.new;
             await dealsService.update(existingDeal.id, {
               extracted_data: {
                 ...(existingDeal.extracted_data || {}),
-                _q10_last_notified: _q10NewSnap,
                 _q10_admin_renotified_at: _q10At,
                 _q10_renotified_fields: _q10Changes.map(c => c.field),
               },
@@ -4385,7 +4394,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
 module.exports = router;
 module.exports.__test__ = {
   sendEscalationToAdmin, sendPreliminaryReviewToAdmin, normalizeSenderName,
-  q10DetectMaterialChanges, Q10_MATERIAL_FIELDS, // FRANCO-Q10
+  q10DetectMaterialChanges, Q10_MATERIAL_FIELDS, q10ParsePriorFromPrelim, // FRANCO-Q10
   isUnreliableName, firstNameMatchesAdmin, isDocRequirementSatisfied,
   DOC_SYNONYMS, ADMIN_FIRST_NAME, textToHtml, decideReviewDispatch,
   // Group SSS: tier constants + helpers

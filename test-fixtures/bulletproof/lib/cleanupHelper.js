@@ -50,6 +50,18 @@ const cleanupRun = async (supabase, runTag, opts = {}) => {
     dealIds = [...new Set((msgs || []).map(m => m.deal_id).filter(Boolean))];
   }
 
+  // BATCH-11 Phase 4: ALSO sweep deals whose email carries the runTag subaddress
+  // (broker+runTag@domain). The dealId PRIMARY path cleaned only ONE deal, so any
+  // SECOND deal a multi-turn correction created (the pre-Phase-1 correction-as-second-
+  // deal leak — ~54 deals leaked in BATCH 8) or a deal that slipped dealId correlation
+  // was never cleaned. Union by runTag email so cleanup is exhaustive per scenario.
+  try {
+    const { data: emailDeals } = await supabase.from('deals').select('id').ilike('email', `%${runTag}%`);
+    for (const d of (emailDeals || [])) if (!dealIds.includes(d.id)) dealIds.push(d.id);
+  } catch (e) {
+    if (verbose) console.warn(`[cleanupRun] runTag-email sweep warning: ${e.message}`);
+  }
+
   // Re-query messages for the deal(s) to get count for return-stats
   const { data: msgs } = await supabase
     .from('messages')
