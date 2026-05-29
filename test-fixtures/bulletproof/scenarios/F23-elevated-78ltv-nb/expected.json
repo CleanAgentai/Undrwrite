@@ -8,7 +8,7 @@
     },
     "gate_states": {
       "elevated_ltv_band": { "value": true, "rationale": "ASSERTION-1: LTV 78% triggers F4.EL." },
-      "province_inferred": { "value": "NB", "rationale": "ASSERTION-2: F1.PC E-prefix → NB inference per R10-D." }
+      "province_inferred": { "value": true, "rationale": "ASSERTION-2: F1.PC E-prefix → NB inference fires per R10-D. LIST-C-VERIFICATION-SURFACE-MISC (BATCH 12): gate-form corrected to BOOLEAN — the province_inferred gate observable is whether inference FIRED (a province_inferred_from_postal source tag OR a valid 2-letter province on the Snapshot City/Province row), not the value itself. The province VALUE 'NB' is verified separately via the prelim must_include 'NB|New Brunswick' below (render surface). Previously a non-boolean 'NB' which the engine skipped (could not evaluate)." }
     },
     "workflow_state": { "value": "active", "rationale": "Standard NB refi with elevated callout." }
   },

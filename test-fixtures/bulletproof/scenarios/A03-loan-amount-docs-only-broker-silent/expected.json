@@ -10,9 +10,9 @@
         "rationale": "Broker email omits loan_amount; loan_app shows $340k. F1.LA docs-tier fallback per R6-γ source-hierarchy precedent."
       },
       "transaction_type": {
-        "value": "Purchase",
+        "value": "purchase",
         "source_classification": "loan_application",
-        "rationale": "F1.TT docs-tier; broker silent on TT."
+        "rationale": "F1.TT docs-tier; broker silent on TT. LIST-C-VERIFICATION-SURFACE-MISC (BATCH 12): casing aligned 'Purchase'→'purchase' to match Vienna's canonical lowercase transaction_type output (the lone capitalized outlier vs 4 other 'purchase' specs; per BATCH-9b PROBE 2 transaction_type asserts the canonical value, casing-normalized)."
       }
     },
     "gate_states": {
