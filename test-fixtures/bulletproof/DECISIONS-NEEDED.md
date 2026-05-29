@@ -310,3 +310,61 @@ These are real Vienna behavior findings (NOT machinery issues) surfaced by post-
 - **Symptom**: F25 spec expected preliminary_review_admin fire=true; Vienna correctly did NOT fire because property_value=null → LTV uncomputable → `computeWillReview` ltv-precondition fails.
 - **Disposition pending**: SPEC REVISION (not Vienna bug). F25 should expect prelim NOT fire pending appraisal arrival. Sharpens carry-forward candidate "empirical-trigger validation" — Vienna's automated triggers have multi-precondition gates (LTV computability is one); spec assumptions about "complete docs = prelim fires" need PV-presence qualifier.
 - **Additional F25 fails**: `first_mortgage_balance` $225k vs $226.5k (fixture-doc precision check); `existing_mortgage_lender` undefined (R11-B-2 statement-tier extraction gap; strengthens EMERGENT-FIND-A persistence-extraction pattern).
+
+---
+
+## FRANCO-INPUT — Finding 1b: terse "Refi" refinance recognition (2026-05-28)
+
+**Surfaced by:** Bug 1 investigation (A14). When a broker writes a terse "Refi" /
+"Refinance file" with an existing mortgage statement on file but WITHOUT explicit
+payout language ("paying out the existing at closing"), `transaction_type` stays
+empty → R11-B-3's payout carve-out doesn't fire → `computeCombinedLtv` goes
+additive (existing+new/market) → the deal escalates for collateral.
+
+**The question for Franco:** when a broker sends terse "Refi" + existing mortgage
+statement but no explicit payout statement, should Vienna —
+- (a) **assume refinance-replace** (existing 1st paid out → standalone LTV ~56%, no escalation), or
+- (b) **conservatively treat as potential added leverage** (combined LTV → escalate to confirm collateral/intent)?
+
+**Trade-off:** (a) matches common domain usage ("Refi" usually = replace) but risks
+UNDER-escalating a genuine 2nd-mortgage-add; (b) is R11-B-3's current deliberate
+design (require explicit payout signal + lender match) and errs safe, but
+over-escalates terse-but-legitimate payout-refinances. **A14's escalation is
+plausibly correct-conservative under (b).** Depends on Franco's broker corpus +
+underwriting preference. NOT a confirmed bug — a product-design choice.
+
+**If (a):** broaden `transaction_type` extraction to recognize terse "Refi"/
+"Refinance" (with lender-match gating, mirroring R11-A). **If (b):** A14-shape
+fixtures are under-specified; real payout-refinances state intent explicitly
+(like Marcus 8c404ae0) → no Vienna change.
+
+---
+
+## FRANCO-9 DISPOSITIONS — RESOLVED (2026-05-28/29)
+
+Franco answered Q1–Q7; Q8/Q9 built per Porter's predicted-answer call. All nine
+implemented as the FRANCO-* commit bundle (shipped to staging 2026-05-29) and rolled
+into fixtures (BATCH 7). Each disposition + its commit:
+
+- **Q1 — Finding 1b RESOLVED → conservative payout rule:** default `transaction_type=refinance`
+  unless purchase signals; R11-B-3 carve-out now THREE-condition (refinance + lender
+  match + **explicit payout language**). Terse "Refi" without payout → escalates for
+  clarification. Commit `e8975be`. This SUPERSEDES the Finding-1b open question above.
+- **Q2 — >90% LTV auto-decline** (canonical; standalone always, combined only when
+  payout-resolved). Commit `8b65776`.
+- **Q3 — joint income/debt aggregation** (Option B: deterministic roster + prompt-override).
+  Commit `6a67e59`.
+- **Q4 — cosigner conservative gating** (ambiguous → guarantor-only, not counted). Commit `a35947a`.
+- **Q5 — corporate accountant-financials doc-ask + multi-entity + Snapshot flag.** Commit `1255199`.
+- **Q6 — chase cadence 3→4, escalate-to-admin (no auto-close).** Commit `21ccbe4`.
+- **Q7 — non-Canadian PROPERTY auto-decline** (property-scoped; borrower location not a trigger).
+  Commit `9794d61`.
+- **Q8 — joint applicants surfaced in admin Snapshot.** Commit `b20b7cd`.
+- **Q9 — admin-override out of awaiting_collateral** (→ active + audit trail). Commit `f1e944e`.
+
+### STILL OPEN — C01 admin-intake routing
+EMERGENT-FIND-D (C01 admin_handoff persistence) remains a Franco/Porter disposition:
+should Vienna set `admin_controlled=true` when `FromName="Admin"` sends the initial
+intake (vs only on link-submission flip / per-deal pause)? C01 was NOT in the Franco-9
+set; carried forward as the one remaining product-design open item. Surfaces again in
+BATCH 8's re-run as a mismatch for empirical classification.

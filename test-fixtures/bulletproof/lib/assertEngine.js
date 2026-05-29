@@ -95,8 +95,123 @@ const GATE_INFERENCE = {
     infer: (captured) => (captured.outboundEmails || []).some(e =>
       /follow.{0,3}up|checking in|still waiting|reminder/i.test(e.Subject || '' + e.TextBody || '')),
   },
+  // ──────────────────────────────────────────────────────────────────────
+  // Phase 6 Step 2 (2026-05-28) — gate-observation map additions.
+  // Each entry below was DERIVED from a verified source string (file:line cited
+  // in architectural_anchor) but is UNVERIFIED-EMPIRICALLY until the Phase 6
+  // step-3 post-ship pass observes it firing correctly (Discipline 2: making a
+  // gate observable is NOT the same as confirming it works — some may surface
+  // real gate bugs the harness was previously blind to).
+  // ──────────────────────────────────────────────────────────────────────
+  loan_app_annotations_sanitized: {
+    evidence_pattern: 'Deal Snapshot "Loan Amount Requested" row populated ($N) from loan_app Page-1 annotation extraction',
+    rationale: 'canonical-fields extractFromLoanApplication annotation regex feeds requested_loan_amount; SCOPED to A07/F11 where the annotation is the ONLY loan-amount source (a populated row therefore proves annotation extraction)',
+    architectural_anchor: 'canonical-fields.js:737 [Page 1 annotation] regex + pdfFormExtract.js:8',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /Loan Amount Requested:<\/strong>\s*\$[\d,]+/i.test(e.HtmlBody || e.TextBody || '')),
+  },
+  property_value_missing: {
+    evidence_pattern: 'Deal Snapshot "Appraised Value" row renders "TBD" (no market value and no tax-assessment fallback)',
+    rationale: 'renderSnapshotRow TBD fallback when subject_property_market_value + assessment both empty',
+    architectural_anchor: 'discrepancy-engine.js:263 renderSnapshotRow + :562 Appraised Value row',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /Appraised Value:<\/strong>\s*TBD/i.test(e.HtmlBody || e.TextBody || '')),
+  },
+  collateral_offered: {
+    evidence_pattern: 'deal.extracted_data.collateral_offered === true (persisted boolean)',
+    rationale: 'R10-C-1 collateral-reply branch persists the flag when broker offers additional collateral',
+    architectural_anchor: 'webhook.js:3302 updatedExtracted collateral_offered:true',
+    infer: (captured) => captured.finalDealState?.extracted_data?.collateral_offered === true,
+  },
+  awaiting_collateral_initially_activated: {
+    evidence_pattern: 'high-LTV collateral-ask outbound fired (durable in outboundEmails) OR final status awaiting_collateral',
+    rationale: 'TIMING-OBSERVABILITY: the initial activation may be overwritten by later turns, so the durable signal is the collateral-ask EMAIL (cumulative across turns), not finalDealState.status alone',
+    architectural_anchor: 'webhook.js:3120 initial-branch escalation + ai.js:2354 collateral-ask prompt',
+    infer: (captured) => {
+      const hit = (captured.outboundEmails || []).some(e => {
+        const b = (e.Subject || '') + ' ' + (e.HtmlBody || e.TextBody || '');
+        return /additional collateral/i.test(b) && /combined LTV|bring.{0,15}(down|LTV)/i.test(b);
+      });
+      return hit || captured.finalDealState?.status === 'awaiting_collateral';
+    },
+  },
+  combined_ltv_computed: {
+    evidence_pattern: 'Deal Snapshot contains "Combined LTV (incl. existing 1st):" row (renders only for 2nd-mortgage deals with existing balance + value)',
+    rationale: 'R4-Bucket-C.4 renderDealSnapshot combined row, only emitted when computeCombinedLtv !== null',
+    architectural_anchor: 'discrepancy-engine.js:592 Combined LTV row + :319 computeCombinedLtv',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /Combined LTV \(incl\. existing/i.test(e.HtmlBody || e.TextBody || '')),
+  },
+  mortgage_statement_required: {
+    evidence_pattern: 'outbound doc-request enumerates "Current Mortgage Payout Statement"',
+    rationale: 'refinance/2nd-mortgage deals require the payout statement; surfaced via generateDocumentRequestEmail / DOC_DISPLAY_NAMES. SHARED marker with mortgage_statement_missing + mortgage_statement_now_required (differentiated only by state/timing, not by distinct strings)',
+    architectural_anchor: 'ai.js:2263 DOC_DISPLAY_NAMES "Current Mortgage Payout Statement"',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /current mortgage payout statement/i.test((e.Subject || '') + ' ' + (e.HtmlBody || e.TextBody || ''))),
+  },
+  mortgage_statement_missing: {
+    evidence_pattern: 'outbound doc-request enumerates "Current Mortgage Payout Statement" (payout absent from package)',
+    rationale: 'same observable as mortgage_statement_required — the missing payout is requested via the doc-request list',
+    architectural_anchor: 'ai.js:2263 DOC_DISPLAY_NAMES + deals.js:38 classifyDocument',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /current mortgage payout statement/i.test((e.Subject || '') + ' ' + (e.HtmlBody || e.TextBody || ''))),
+  },
+  mortgage_statement_now_required: {
+    evidence_pattern: 'outbound doc-request enumerates "Current Mortgage Payout Statement" after a position/refi state change',
+    rationale: 'CAVEAT: the "now/transition" semantics are not separately observable; presence of the payout request confirms the requirement fired. Scoped to F14 where the requirement only arises post-transition',
+    architectural_anchor: 'webhook.js:3303 status re-activation + ai.js:2263',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /current mortgage payout statement/i.test((e.Subject || '') + ' ' + (e.HtmlBody || e.TextBody || ''))),
+  },
+  doc_package_incomplete: {
+    evidence_pattern: 'prelim/leadSummary renders one or more "[MISSING]" doc lines',
+    rationale: 'allRequiredForCompletion gates completion; missing docs render as [MISSING] in the admin summary',
+    architectural_anchor: 'ai.js:949/3423 [MISSING] render + dealType.js allRequiredForCompletion',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /\[MISSING\]/.test(e.HtmlBody || e.TextBody || '')),
+  },
+  canonical_map_complete_after_t4: {
+    evidence_pattern: 'status === "under_review" AND a PRELIMINARY email fired with NO "[MISSING]" doc lines',
+    rationale: 'completeness = all intake-required docs satisfied → prelim fires clean (no [MISSING]) + deal advances to under_review',
+    architectural_anchor: 'webhook.js:1514 prelim dispatch + intakeRequiredFor completeness',
+    infer: (captured) => {
+      const prelim = (captured.outboundEmails || []).find(e => /PRELIMINARY|ACTION REQUIRED/i.test(e.Subject || ''));
+      return captured.finalDealState?.status === 'under_review'
+        && !!prelim
+        && !/\[MISSING\]/.test(prelim.HtmlBody || prelim.TextBody || '');
+    },
+  },
+  province_inferred: {
+    evidence_pattern: 'extracted_data carries a province_inferred_from_(postal|city) source tag, OR Snapshot "City / Province" row shows a valid 2-letter province',
+    rationale: 'R10-D inferProvinceFromAddressSignals; the source-tag check is inference-SPECIFIC (preferred), the Snapshot check is a fallback that cannot distinguish inferred from stated',
+    architectural_anchor: 'canonical-fields.js:1208 inferProvinceFromAddressSignals + :1215/:1225 source tags',
+    infer: (captured) => {
+      const ed = JSON.stringify(captured.finalDealState?.extracted_data || {});
+      if (/province_inferred_from_(postal|city)/.test(ed)) return true;
+      return (captured.outboundEmails || []).some(e =>
+        /City \/ Province:<\/strong>\s*[^<]*\/\s*(AB|BC|SK|MB|ON|QC|NB|NS|PE|NL|NT|YT|NU)\b/i.test(e.HtmlBody || e.TextBody || ''));
+    },
+  },
+  broker_clarification_question_detected: {
+    evidence_pattern: 'prelim Subject contains "(clarification pending)" OR body contains banner "PRELIMINARY — BROKER CLARIFICATION PENDING"',
+    rationale: 'welcomeEmailIsAskingClarification flips the prelim banner + subject when Vienna asks the broker a clarification question',
+    architectural_anchor: 'webhook.js:1117 bannerText + :1118 subjectStatus',
+    infer: (captured) => (captured.outboundEmails || []).some(e =>
+      /\(clarification pending\)/i.test(e.Subject || '') ||
+      /BROKER CLARIFICATION PENDING/i.test(e.HtmlBody || e.TextBody || '')),
+  },
   // Catch-all for transient gates not explicitly enumerated: assertEngine
   // marks unknown gates as "inference_unknown" rather than pass/fail.
+  //
+  // INTENTIONALLY LEFT inference_unknown (Phase 6 step 2 — genuinely unobservable;
+  // see GATE-OBSERVATION-MAP.md for coverage-limit rationale + manual check):
+  //   awaiting_collateral_after_admin_override — no code path exists (C06)
+  //   joint_applicants_detected — computed (detectJointMultiBorrower) but DROPPED,
+  //     never persisted/rendered (E11) [Discipline-2 RED FLAG: likely real gap]
+  //   blank_loan_app_detected — no automated detection; Claude eyeballs (E15)
+  //   partial_doc_detected — no discrete flag; implicit in status+missingDocs (E16)
+  //   ocr_quality_warning — no OCR/confidence scoring in codebase (E17)
+  //   section_9_content_detected — admin-summary-internal render, no gate (F21)
 };
 
 // ────────────────────────────────────────────────────────────────────────────
