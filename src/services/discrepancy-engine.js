@@ -997,6 +997,40 @@ const detectJointMultiBorrower = (savedDocs) => {
   return cbBorrowerNames.size >= 2 ? Array.from(cbBorrowerNames) : null;
 };
 
+// FRANCO-PREDICTED-Q8-EXTENSION (BATCH 12, 2026-05-29) — joint-via-name-conjunction
+// detection, broadening the joint SNAPSHOT-ROW signal beyond detectJointMultiBorrower's
+// 2+-credit-report requirement (which the joint fixtures E11/E12/F12 don't satisfy —
+// they express joint via the borrower_name conjunction + joint NOA, no credit reports).
+//
+// DISPLAY-ONLY: this signal feeds the Snapshot Joint-Applicants row + the Q3/Q4
+// qualification roster. It deliberately does NOT drive the existing_first_mortgage_*
+// suppression (that stays scoped to the credit-bureau 2-separate-mortgage case — a
+// SPOUSAL joint shares ONE mortgage on one subject property, so suppressing its balance
+// would be a regression).
+//
+// Conservative (false-negative > false-positive, per Q4 discipline): BOTH sides must be
+// borrower-shaped FULL names (First Last[, + 1]); single first-names ("Tom and Jerry"),
+// lowercase role phrases ("and his accountant"), and conjunctions adjacent to a
+// disqualifying role word (accountant/broker/lawyer/witness/guarantor/cosigner/…) are
+// rejected. Tagged FRANCO-PREDICTED (not Franco-confirmed) → revertible per the banked
+// Q8-DETECTION-MECHANISM product-design question.
+const JOINT_NAME_TOKEN = "[A-Z][a-zA-Z'\\-]+(?:\\s+[A-Z][a-zA-Z'\\-]+){1,2}";
+const JOINT_CONJ_RE = new RegExp('\\b(' + JOINT_NAME_TOKEN + ')\\s+(?:and|&)\\s+(' + JOINT_NAME_TOKEN + ')\\b');
+const JOINT_ROLE_DISQUALIFY_RE = /\b(accountant|broker|lawyer|notar|witness|guarantor|co-?signer|realtor|agent|lender|appraiser|solicitor|trustee)\b/i;
+const detectJointFromNames = (borrowerName, textSources = '') => {
+  for (const src of [String(borrowerName || ''), String(textSources || '')]) {
+    if (!src) continue;
+    const m = JOINT_CONJ_RE.exec(src);
+    if (!m) continue;
+    const ctx = src.slice(Math.max(0, m.index - 30), m.index + m[0].length + 30);
+    if (JOINT_ROLE_DISQUALIFY_RE.test(ctx)) continue; // role-disqualified (named accountant/cosigner/etc.)
+    const a = m[1].trim(), b = m[2].trim();
+    if (a.toLowerCase() === b.toLowerCase()) continue; // same name twice — not joint
+    return [a, b];
+  }
+  return null;
+};
+
 const runDiscrepancyDetection = (emailBody, savedDocs, borrowerName = null, opts = {}) => {
   const { emailSubject = '' } = opts;
   // Commercial / corporate submissions: out-of-scope (residential 2nd-mortgage gate only).
@@ -1027,10 +1061,13 @@ const runDiscrepancyDetection = (emailBody, savedDocs, borrowerName = null, opts
     // joint deals — multiple distinct primary borrowers by definition.
     canonical_map.primary_borrower_full_name = [];
   }
+  // FRANCO-PREDICTED-Q8-EXTENSION: broaden the DISPLAY signal to the name-conjunction
+  // case (does NOT trigger the existing_first_mortgage suppression above).
+  const jointDisplay = jointBorrowers || detectJointFromNames(borrowerName, emailBody);
   const discrepancy_set = computeDiscrepancySet(canonical_map);
   return {
     commercial: false,
-    joint_multi_borrower: jointBorrowers || null,
+    joint_multi_borrower: jointDisplay || null,
     canonical_map,
     discrepancy_set,
   };
@@ -1180,10 +1217,15 @@ const runDiscrepancyDetectionAggregated = (inboundMessages, savedDocs, borrowerN
     canonical_map.existing_first_mortgage_payout_total = [];
     canonical_map.primary_borrower_full_name = [];
   }
+  // FRANCO-PREDICTED-Q8-EXTENSION: broaden the DISPLAY signal to the name-conjunction
+  // case (borrower_name "X and Y" + aggregated inbound text). Does NOT trigger the
+  // existing_first_mortgage suppression above (spousal joint shares one mortgage).
+  const _aggJointText = (inboundMessages || []).map(m => m.body || '').join('\n');
+  const jointDisplay = jointBorrowers || detectJointFromNames(borrowerName, _aggJointText);
   const discrepancy_set = computeDiscrepancySet(canonical_map);
   return {
     commercial: false,
-    joint_multi_borrower: jointBorrowers || null,
+    joint_multi_borrower: jointDisplay || null,
     canonical_map,
     discrepancy_set,
   };
@@ -1234,4 +1276,6 @@ module.exports = {
   stripQuotedReplyChain,
   extractCanonicalFieldsAggregated,
   runDiscrepancyDetectionAggregated,
+  detectJointMultiBorrower,
+  detectJointFromNames, // FRANCO-PREDICTED-Q8-EXTENSION (BATCH 12)
 };
