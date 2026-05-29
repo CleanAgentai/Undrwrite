@@ -178,6 +178,44 @@ const rewriteEventMessageIds = (events, runTag) => events.map((ev, i) => {
 //   fixtureDir: absolute path to scenarios/{ID}-{slug}/
 //   opts: { mockCapture?, timeoutSec?, verbose? }
 //     mockCapture: skip live webhook + use injected state (for smoke-testing assertEngine)
+// BATCH-11 Phase 1: poll a deal's outbound until the count is STABLE for
+// STABILITY_WINDOW (or zero-floor for silent deals), capped at MAX_WAIT. Extracted
+// from the former inline final-capture loop so it can ALSO run BETWEEN events —
+// letting event i's pipeline settle before event i+1 posts (fixes premature-prelim
+// + correction-as-second-deal). Returns the captured outbound array.
+const pollForStableOutbound = async (supabase, dealId, opts = {}) => {
+  const { verbose = false, scenarioId = '', label = 'final' } = opts;
+  const stabilityWindowMs = Number(process.env.BULLETPROOF_STABILITY_WINDOW_MS || 40000);
+  const maxWaitMs = Number(process.env.BULLETPROOF_MAX_WAIT_MS || 150000);
+  const zeroFloorMs = Number(process.env.BULLETPROOF_ZERO_OUTBOUND_FLOOR_MS || 90000);
+  const pollMs = 5000;
+  const start = Date.now();
+  const deadline = start + maxWaitMs;
+  let outboundEmails = [];
+  let lastCount = -1;
+  let lastChangeAt = Date.now();
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, pollMs));
+    try {
+      outboundEmails = await fetchOutboundFromSupabase(supabase, dealId);
+    } catch (e) {
+      if (verbose) console.warn(`[replay ${scenarioId}] fetchOutbound warning (${label}): ${e.message}`);
+    }
+    if (outboundEmails.length !== lastCount) {
+      lastCount = outboundEmails.length;
+      lastChangeAt = Date.now();
+      if (verbose) console.log(`[replay ${scenarioId}] (${label}) outbound count → ${lastCount} @ ${((Date.now() - start) / 1000).toFixed(0)}s`);
+    } else if (lastCount > 0 && (Date.now() - lastChangeAt) >= stabilityWindowMs) {
+      if (verbose) console.log(`[replay ${scenarioId}] (${label}) outbound STABLE at ${lastCount} @ ${((Date.now() - start) / 1000).toFixed(0)}s`);
+      break;
+    } else if (lastCount === 0 && (Date.now() - start) >= zeroFloorMs) {
+      if (verbose) console.log(`[replay ${scenarioId}] (${label}) zero outbound after floor — concluding`);
+      break;
+    }
+  }
+  return outboundEmails;
+};
+
 const runScenario = async (fixtureDir, opts = {}) => {
   const { mockCapture, timeoutSec = 60, verbose = false } = opts;
   const scenario = JSON.parse(fs.readFileSync(path.join(fixtureDir, 'scenario.json'), 'utf8'));
@@ -217,6 +255,33 @@ const runScenario = async (fixtureDir, opts = {}) => {
     const ev = taggedEvents[i];
     // Resolve attachment refs (inline base64 from documents/)
     const resolved = resolveAttachmentRefs(ev.postmark, fixtureDir);
+    // BATCH-11 Phase 1: thread subsequent events (corrections/replies) to the
+    // existing deal via In-Reply-To. Vienna's continuation lookup is PURELY
+    // thread-based (webhook.js:2024 "No thread match = new deal") — without an
+    // In-Reply-To header a correction spawns a SECOND deal (the premature-prelim /
+    // correction-as-second-deal root). Use Vienna's latest outbound MessageID on
+    // the deal (settled by the prior inter-event poll); findByMessageId matches the
+    // deal by ANY of its message IDs. Mirrors production "Re:" replies.
+    if (i > 0 && dealRecord?.id) {
+      try {
+        const prior = await fetchOutboundFromSupabase(supabase, dealRecord.id);
+        const withId = prior.filter(m => m.external_message_id);
+        const latest = withId.length ? withId[withId.length - 1].external_message_id : null;
+        if (latest) {
+          const refs = withId.map(m => `<${m.external_message_id}>`).join(' ');
+          resolved.Headers = [
+            ...((resolved.Headers || []).filter(h => !/^(In-Reply-To|References)$/i.test(h.Name))),
+            { Name: 'In-Reply-To', Value: `<${latest}>` },
+            { Name: 'References', Value: refs },
+          ];
+          if (verbose) console.log(`[replay ${scenario.id}] event ${i} threaded via In-Reply-To <${latest}>`);
+        } else if (verbose) {
+          console.warn(`[replay ${scenario.id}] event ${i}: no prior outbound MessageID to thread to`);
+        }
+      } catch (e) {
+        if (verbose) console.warn(`[replay ${scenario.id}] event ${i} threading warning: ${e.message}`);
+      }
+    }
     if (verbose) console.log(`[replay ${scenario.id}] event ${i} (${ev.kind}) → POST webhook (from=${resolved.From})`);
     await postToWebhook(resolved);
     // Poll for deal after first event via +tag email correlation
@@ -228,15 +293,19 @@ const runScenario = async (fixtureDir, opts = {}) => {
         if (verbose) console.warn(`[replay ${scenario.id}] pollForDeal warning: ${e.message}`);
       }
     }
-    // Inter-event settle (multi-event sequencing fix, Sub-phase 6): Vienna's
-    // async pipeline (~30-50s) must COMPLETE for event i before event i+1 posts
-    // — otherwise a broker correction (event 1) races event 0's still-running
-    // prelim render, and the post-correction canonical value never renders.
-    // Default 500ms (legacy single-event behaviour); raise via
-    // BULLETPROOF_INTER_EVENT_MS for correction-sequencing correctness.
+    // Inter-event poll-for-stable (BATCH-11 Phase 1): Vienna's async pipeline
+    // (~30-50s) must COMPLETE for event i before event i+1 posts — otherwise a
+    // broker correction (event 1) races event 0's still-running prelim render
+    // → the correction's dedup can't find the still-forming deal (creates a 2nd
+    // deal) AND the post-correction canonical value never renders. Wait for event
+    // i's outbound to STABILIZE on the known deal before posting i+1. Falls back
+    // to a short fixed wait only if the deal isn't known yet.
     if (i < taggedEvents.length - 1) {
-      const interMs = Number(process.env.BULLETPROOF_INTER_EVENT_MS || 500);
-      await new Promise(r => setTimeout(r, interMs));
+      if (dealRecord?.id) {
+        await pollForStableOutbound(supabase, dealRecord.id, { verbose, scenarioId: scenario.id, label: `inter-event-${i}` });
+      } else {
+        await new Promise(r => setTimeout(r, Number(process.env.BULLETPROOF_INTER_EVENT_MS || 500)));
+      }
     }
   }
 
@@ -247,43 +316,10 @@ const runScenario = async (fixtureDir, opts = {}) => {
     if (refetched) finalDealState = refetched;
   }
 
-  // Poll-for-stable-outbound (Sub-phase 6 — replaces fixed wait, fixes B4).
-  // Vienna's pipeline emits outbound over time. Calibration (A01, 2026-05-28):
-  // welcome ~19s, prelim ~46s after deal creation; welcome→prelim gap ~27s.
-  // A fixed 30s wait captured the welcome but missed the prelim (~50% B4
-  // flakiness). Poll until the outbound count is STABLE for STABILITY_WINDOW
-  // (> the observed ~27s inter-outbound gap, safety margin) before concluding,
-  // capped at MAX_WAIT. A zero-outbound floor avoids waiting MAX_WAIT on
-  // legitimately-silent scenarios (e.g. silent escalation). Env-tunable.
+  // Final-capture poll-for-stable (BATCH-11 Phase 1: now via the shared helper).
   let outboundEmails = [];
   if (finalDealState?.id) {
-    const stabilityWindowMs = Number(process.env.BULLETPROOF_STABILITY_WINDOW_MS || 40000);
-    const maxWaitMs = Number(process.env.BULLETPROOF_MAX_WAIT_MS || 150000);
-    const zeroFloorMs = Number(process.env.BULLETPROOF_ZERO_OUTBOUND_FLOOR_MS || 90000);
-    const pollMs = 5000;
-    const start = Date.now();
-    const deadline = start + maxWaitMs;
-    let lastCount = -1;
-    let lastChangeAt = Date.now();
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, pollMs));
-      try {
-        outboundEmails = await fetchOutboundFromSupabase(supabase, finalDealState.id);
-      } catch (e) {
-        if (verbose) console.warn(`[replay ${scenario.id}] fetchOutboundFromSupabase warning: ${e.message}`);
-      }
-      if (outboundEmails.length !== lastCount) {
-        lastCount = outboundEmails.length;
-        lastChangeAt = Date.now();
-        if (verbose) console.log(`[replay ${scenario.id}] outbound count → ${lastCount} (stability timer reset @ ${((Date.now() - start) / 1000).toFixed(0)}s)`);
-      } else if (lastCount > 0 && (Date.now() - lastChangeAt) >= stabilityWindowMs) {
-        if (verbose) console.log(`[replay ${scenario.id}] outbound STABLE at ${lastCount} (${(stabilityWindowMs / 1000)}s no-change) @ ${((Date.now() - start) / 1000).toFixed(0)}s`);
-        break;
-      } else if (lastCount === 0 && (Date.now() - start) >= zeroFloorMs) {
-        if (verbose) console.log(`[replay ${scenario.id}] zero outbound after ${(zeroFloorMs / 1000)}s floor — concluding silent`);
-        break;
-      }
-    }
+    outboundEmails = await pollForStableOutbound(supabase, finalDealState.id, { verbose, scenarioId: scenario.id, label: 'final' });
   }
 
   const executionDurationMs = Date.now() - startTime;

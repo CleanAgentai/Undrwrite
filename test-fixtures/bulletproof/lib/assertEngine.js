@@ -242,8 +242,15 @@ const SNAPSHOT_ROW_LABELS = {
 };
 const RENDER_SURFACE_FIELDS = new Set(Object.keys(SNAPSHOT_ROW_LABELS));
 
-const findSnapshotEmail = (captured) =>
-  (captured.outboundEmails || []).find(e => /Deal Snapshot/i.test(e.HtmlBody || e.TextBody || ''));
+// BATCH-11 Phase 1: pick the LAST Deal Snapshot, not the first. When a multi-turn
+// scenario (broker correction / post-doc) re-renders the prelim, the FINAL Snapshot
+// reflects the resolved canonical state (post-correction, post-doc); the first
+// Snapshot is the premature intake render. Pairs with the inter-event poll-for-stable
+// in replay.js so the post-correction prelim actually exists to be picked.
+const findSnapshotEmail = (captured) => {
+  const snaps = (captured.outboundEmails || []).filter(e => /Deal Snapshot/i.test(e.HtmlBody || e.TextBody || ''));
+  return snaps.length ? snaps[snaps.length - 1] : undefined;
+};
 
 // Parse one Snapshot row "<p><strong>LABEL:</strong> VALUE</p>". Returns the
 // FIRST value (canonical-resolved value renders first; multi-value only when
