@@ -1,21 +1,20 @@
 {
   "scenario_id": "A33",
   "spec_version": "1.0",
-  "rationale_source": "F1.FB loan_app fallback when mortgage_statement absent; docs-tier next-best",
+  "rationale_source": "F1.FB loan_app fallback when mortgage_statement absent. LIST-C (Franco 2026-05-30): A33 is a confident terse refinance → FRANCO-Q1-RULE-REFINEMENT carve-out → standalone 62% → active+prelim. Existing-mortgage EXISTENCE deterministically surfaced via the BUG-5 'Existing 1st Mortgage Balance' row.",
   "layer1_structural": {
-    "canonical_map": {
-      "first_mortgage_balance": {
-        "value": 410000,
-        "source_classification": "loan_application",
-        "rationale": "No mortgage_statement; loan_app sole balance source within docs-tier. F1.FB fallback per R11-B-2 hierarchy when statement absent."
-      }
-    },
     "gate_states": { "discrepancyHold": { "value": false, "rationale": "Single source." } },
-    "workflow_state": { "value": "active", "rationale": "Awaiting mortgage_statement." }
+    "workflow_state": { "value": "active", "rationale": "Confident refinance carve-out → standalone 62% ≤ 80 → active, prelim fires." }
   },
   "layer2_semantic": {
     "outbound_emails": [
-      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "410,000", "rationale": "F1.FB loan_app fallback value." }] }
+      {
+        "kind": "preliminary_review_admin",
+        "expected_fire": true,
+        "must_include": [
+          { "pattern": "Existing 1st Mortgage Balance", "rationale": "BUG-5 (792775c) deterministic existing-mortgage row — surfaces the existence regardless of LLM narrative (fixes A33's batch-context silent-omission transient). Value renders 'TBD' here: the $410k VALUE is LLM-narrative-sourced; canonical loan_app existing-balance extraction (part-b) is DEFERRED with rationale — it conflicts with the documented loan_app-not-extracted conservatism (canonical-fields.js:1702) + has broad combined-LTV risk for marginal benefit; BUG-5's visible-TBD already prevents silent omission." }
+        ]
+      }
     ]
   },
   "layer3_pending_decisions": []

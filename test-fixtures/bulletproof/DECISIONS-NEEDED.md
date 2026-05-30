@@ -9,16 +9,37 @@
 
 The historical Layer-3 ledger is preserved below; this index is the current decision status.
 
-## OPEN — Franco's clustered-text response (3 + 1 dependent)
-- **Q1-escalation-rate** — is escalating ~41/125 (33%) of deals for "no explicit payout
-  language" the intended conservatism, or too aggressive? Gates Track-4 LIST-C cat-1 bulk.
-  (Surfaced BATCH-13; detail in §"BATCH 12 — LIST-C" + BATCH13-RESULTS.md.)
-- **C01 — admin-intake routing** — `admin_controlled=true` when `FromName="Admin"` sends the
-  initial intake? (EMERGENT-FIND-D below; never in Franco-9.)
-- **Q8-detection-extension keep-or-revert** — name-conjunction broadening (`75d91e2`)
-  vs credit-bureau-doc-confirmation-only. (§"BANKED Franco product-design questions".)
-- **A33 part (b)** [DEPENDENT on Q1-escalation-rate] — canonical loan_app existing-balance
-  extraction; flips A33 → Q1-escalation, so unblocks only once Q1-rate is ratified.
+## OPEN — NONE. All clustered-text items dispositioned by Franco (2026-05-30).
+
+## RESOLVED by Franco's clustered-text answers (2026-05-30)
+- **Q1-escalation-rate → FRANCO-Q1-RULE-REFINEMENT** (`915193c`). Franco: "If it is a refinance,
+  there is no other option than to pay out the existing mortgage — that IS refinancing." Sharper
+  than "ease for clear refis": refinance and payout are DEFINITIONALLY equivalent. A CONFIDENT
+  refinance (not ambiguous vs purchase, no explicit non-payout contraindication) + lender match
+  now fires the R11-B-3 carve-out WITHOUT explicit payout language → the ~41/125 escalating set
+  (the confident refis with standalone ≤80) routes BACK to active. The payoutConfirmed branch is
+  preserved (defense-in-depth). The held Track-4 cat-1 bulk thus largely DISSOLVES — the original
+  active specs are restored; only genuinely-high-standalone (>80) refis + 2nd-mortgages stay
+  escalating (confirmed on the final re-run). A14 reverted active (LIST-C).
+- **C01 → FRANCO-C01-ADMIN-INTAKE-AS-BROKER-SUBMITTED** (`bec178f`). Franco: process admin-sent
+  intake as broker-submitted (no acknowledgment gate). Investigation: the code ALREADY did this
+  (admin_controlled set only on link-submission, never on admin intake); only the C01 spec was
+  stale (admin_handoff → active). No routing change needed.
+- **Q8-detection-extension → KEEP** (`75d91e2`, Franco-ratified — no revert). The name-conjunction
+  joint detection stays. PLUS a NEW substantive rule:
+- **Q11 — FRANCO-Q11-REGISTERED-PROPERTY-OWNER-RULE** (`94acb72`). Franco: "Whoever is/are the
+  registered property owner(s) must be on the application regardless. If there's only one
+  registered property owner, the other applicant would be a guarantor." Detector +
+  qualification-roster integration; Q11 (definitive owner test) SUPERSEDES Q4 (ambiguous cosigner).
+
+## DEFERRED-DOCUMENTED (Franco-closure)
+- **A33 part (b) — canonical loan_app existing-balance extraction.** Under the refined Q1 rule
+  A33 routes to active (carve-out), so part-(b) is no longer Q1-escalation-blocked — but it is
+  DEFERRED on its own merits: it conflicts with the documented loan_app-not-extracted conservatism
+  (canonical-fields.js:1702) + carries broad combined-LTV risk (loan_app vs mortgage_statement
+  source) for marginal benefit. BUG-5's deterministic "Existing 1st Mortgage Balance: TBD" row
+  already prevents the silent-omission failure mode; the $410k VALUE stays LLM-narrative-sourced.
+  Asymmetric-risk: the broad-change risk outweighs the value-determinism benefit.
 
 ## RESOLVED — with Franco answer / Porter direction + implementing commit
 - **Franco-9 dispositions Q1–Q10** — all answered + shipped (§"FRANCO-9 DISPOSITIONS"):
