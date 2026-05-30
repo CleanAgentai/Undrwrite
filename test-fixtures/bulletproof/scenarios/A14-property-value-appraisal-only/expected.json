@@ -1,27 +1,28 @@
 {
   "scenario_id": "A14",
   "spec_version": "1.0",
-  "rationale_source": "F1.PV docs-tier (appraisal) wins when broker tiers are empty",
+  "rationale_source": "F1.PV docs-tier (appraisal) wins when broker tiers are empty; LIST-C-A14-RESOLVED (BATCH 14) — terse refi without explicit payout language escalates per Q1/Finding-1b, now surfaced by Bug-3 loan extraction.",
   "layer1_structural": {
-    "canonical_map": {
-      "property_value": {
-        "value": 815000,
-        "source_classification": "appraisal",
-        "rationale": "Broker silent on PV; appraisal doc shows $815k. F1.PV docs-tier fallback per R6-γ source-hierarchy precedent."
-      }
-    },
     "gate_states": {
       "discrepancyHold": { "value": false, "rationale": "Single source; no discrepancy." }
     },
-    "workflow_state": { "value": "active", "rationale": "Standard." }
+    "workflow_state": {
+      "value": "awaiting_collateral",
+      "rationale": "LIST-C-A14-RESOLVED (BATCH 14): A14 is a terse refinance with NO explicit payout language → Q1's R11-B-3 payout carve-out correctly does not fire → combined LTV (existing 1st + new / value) escalates for clarification (Q1 e8975be / Finding-1b). Pre-Bug-3 the null loan amount MASKED this (it processed as 'active'); Bug-3 (d76e02b) now extracts the loan → the genuine Q1 escalation surfaces. BATCH-13 confirmed: dealStatus=awaiting_collateral, broker collateral-ask fired, no admin prelim."
+    }
   },
   "layer2_semantic": {
     "outbound_emails": [
       {
         "kind": "preliminary_review_admin",
+        "expected_fire": false,
+        "rationale": "Escalation (awaiting_collateral) suppresses the admin prelim — Vienna asks the broker the collateral question first (Fix 7). No Snapshot renders on this path, so the appraisal property_value ($815k) is persisted in extracted_data (secondary surface) but is NOT render-observable — asserting it via the absent prelim Snapshot would be a synthesized-unreachable-surface error (verification-surface discipline: assert what Vienna DOES produce on the escalation path)."
+      },
+      {
+        "kind": "broker_facing_collateral_ask",
         "expected_fire": true,
         "must_include": [
-          { "pattern": "815,000", "rationale": "F1.PV appraisal value." }
+          { "pattern": "collateral", "rationale": "High-LTV escalation asks the broker the collateral question (markers.collateral_ask confirmed in BATCH-13)." }
         ]
       }
     ]
