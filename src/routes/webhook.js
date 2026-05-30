@@ -3306,6 +3306,18 @@ No deal record was created. If this was a legitimate broker submission, please r
           combinedLtv: _r1InitialCombinedLtv,
           combinedResolved: dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap),
         });
+        // BUG-4 (BATCH 14): canonical-incompleteness guard. A rare transient leaves
+        // combined-LTV null even though the deal HAS the inputs that should compute it
+        // (mortgage_statement on file + loan amount present) and payout is NOT confirmed
+        // (so the null isn't the legitimate Q1 carve-out). Silently proceeding to 'active'
+        // on that incomplete state is underwriting-dangerous → escalate for clarification.
+        // Composed as an OR with the normal Fix-7 escalation below.
+        const _bug4IncompleteCanonical = dEngine.shouldEscalateOnIncompleteCanonical({
+          hasMortgageStatement: initialClassifications.includes('mortgage_statement'),
+          combinedLtv: _r1InitialCombinedLtv,
+          payoutConfirmed: (_r1InitialCanonicalMap.transaction_type || []).some(t => t && t.payoutConfirmed === true),
+          hasLoanAmount: (_r1InitialCanonicalMap.requested_loan_amount || []).length > 0,
+        });
 
         if (dealSummary?.identity_clash) {
           // Group HHH (S15.1): identity gate runs FIRST, before LTV gates. Vienna's
@@ -3341,17 +3353,19 @@ No deal record was created. If this was a legitimate broker submission, please r
             `Vienna auto-declined a submission: ${_q2AutoDecline.basis} (canonical LTV; >90% threshold per Franco Q2).\n\nBorrower: ${dealSummary?.borrower_name || '(unknown)'}\nFrom: ${deal.email}\n\nStandalone LTV: ${_r1InitialStandaloneLtv ?? 'n/a'}%\nCombined LTV: ${_r1InitialCombinedLtv ?? 'n/a'}% (resolved=${dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap)})\n\nDeal ${deal.id} status set to rejected. If this LTV is incorrect, reply to the broker directly.\n\n(Automatic — FRANCO-Q2 >90% auto-decline gate.)`,
             null, [], []
           );
-        } else if (_r1InitialShouldEscalate) {
+        } else if (_r1InitialShouldEscalate || _bug4IncompleteCanonical) {
           // Fix 7 + R4-RESIDUAL-1: do NOT escalate immediately. Set status to
           // 'awaiting_collateral'. ADDITIVE escalation trigger — fires if
           // standalone > 80 (existing behavior, S4 Ryan preserved) OR
           // combined > COMBINED_LTV_ESCALATION_THRESHOLD_PCT (NEW — captures
           // the dangerous-leverage case a 2nd mortgage with standalone ≤80 but
-          // combined >80 was previously not flagging).
+          // combined >80 was previously not flagging) OR BUG-4 canonical-incompleteness.
           const _r1Reason = (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv > 80)
             ? `standalone LTV ${_r1InitialStandaloneLtv}% > 80`
-            : `combined LTV ${_r1InitialCombinedLtv}% > ${dEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT} (standalone ${_r1InitialStandaloneLtv ?? 'null'}% under threshold)`;
-          console.log(`Initial submission escalation gate triggered (Fix 7 + R4-RESIDUAL-1): ${_r1Reason} — entering awaiting_collateral state`);
+            : _r1InitialShouldEscalate
+              ? `combined LTV ${_r1InitialCombinedLtv}% > ${dEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT} (standalone ${_r1InitialStandaloneLtv ?? 'null'}% under threshold)`
+              : `BUG-4 canonical-incompleteness guard (mortgage_statement on file + loan present + combined-LTV null + payout unconfirmed → suspect-incomplete state, escalating for clarification rather than silent active)`;
+          console.log(`Initial submission escalation gate triggered (Fix 7 + R4-RESIDUAL-1${_bug4IncompleteCanonical && !_r1InitialShouldEscalate ? ' + BUG-4' : ''}): ${_r1Reason} — entering awaiting_collateral state`);
           await dealsService.update(deal.id, { status: 'awaiting_collateral' });
         } else if (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv <= 80 && initialHasReviewableDoc) {
           // R5-B-2 (2026-05-21): discrepancy-resolution gate at the initial-

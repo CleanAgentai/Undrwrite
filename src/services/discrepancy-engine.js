@@ -465,6 +465,29 @@ const shouldEscalateOnAnyLtv = ({ standaloneLtv, combinedLtv, standaloneThreshol
   return stdHit || cmbHit;
 };
 
+// BUG-4 (BATCH 14, 2026-05-29): canonical-incompleteness escalation guard
+// (defense-in-depth, Bug-1 lineage). Returns true when the canonical state is
+// SUSPECT-INCOMPLETE for a deal that SHOULD be combined-LTV-evaluatable:
+//   - an existing-mortgage doc (mortgage_statement) is on file → a combined LTV
+//     is expected to be computable, AND
+//   - combinedLtv came back null (the canonical state couldn't produce it), AND
+//   - payoutConfirmed === false (the null is NOT the legitimate Q1 payout carve-out
+//     — for a payout-confirmed refi, combined==null is correct), AND
+//   - a loan amount is present (the null is NOT "no loan to evaluate against").
+// Silently falling through to 'active' on this state is underwriting-DANGEROUS
+// (a deal whose true combined leverage was never evaluated could reach an approval
+// path); escalating for clarification is RECOVERABLE (broker confirms, deal proceeds).
+// ASYMMETRIC-RISK: the conservative direction is durably correct even if the rare
+// upstream transient (F03/A33 canonical-state-incompleteness) is later root-caused.
+// VERIFICATION NOTE: the production transient is rarer than any repetition probe can
+// reliably reproduce (F03 escalates ~85% without this guard), so empirical "always
+// escalates" CANNOT validate the fix — this PURE function's unit harness is the
+// deterministic verification surface; production-transient elimination is a
+// defense-in-depth claim, not an empirically-provable one.
+const shouldEscalateOnIncompleteCanonical = ({ hasMortgageStatement = false, combinedLtv = null, payoutConfirmed = false, hasLoanAmount = false } = {}) => {
+  return !!(hasMortgageStatement && combinedLtv == null && !payoutConfirmed && hasLoanAmount);
+};
+
 // FRANCO-Q2 (2026-05-28): >90% LTV auto-decline. Franco's tier: <=80 normal,
 // 80-90 escalate (existing), >90 AUTO-DECLINE. Uses CANONICAL LTV (Bug-1 gate-
 // hygiene continuation). STRICT > 90: 90.0 does NOT decline; 90.01 does.
@@ -1250,6 +1273,7 @@ module.exports = {
   // R4-RESIDUAL-1: combined-LTV escalation trigger
   COMBINED_LTV_ESCALATION_THRESHOLD_PCT,
   shouldEscalateOnAnyLtv,
+  shouldEscalateOnIncompleteCanonical, // BUG-4 (BATCH 14)
   shouldAutoDeclineOver90,      // FRANCO-Q2
   isCombinedLtvResolved,        // FRANCO-Q2
   AUTO_DECLINE_LTV_THRESHOLD_PCT, // FRANCO-Q2
