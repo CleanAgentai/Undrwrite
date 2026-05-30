@@ -1,57 +1,78 @@
-# Bulletproof — Operational Debt / Remaining Work
+# Bulletproof — Remaining Work (consolidated 2026-05-30)
 
-## BATCH 14 — EXPANDED FIX-CYCLE SCOPE (set during BATCH 12, 2026-05-29)
-The closure batch is bigger than originally projected — but bounded and concrete:
-1. **Bug-3** — canonical money-extraction robustness (5 broker-shorthand patterns). Full
-   spec + per-pattern harness in BUG3-SCOPE.md. ~11 affected scenarios.
-2. **Q5 corporate Snapshot row not rendering** (BATCH-12 finding) — trace the render-time
-   borrower_name plumbing into detectCorporateEntities; F03 probe = clean repro.
-3. **Q8 joint-applicants row not rendering for joint-via-name deals** (BATCH-12 finding) —
-   broaden the joint feed beyond detectJointMultiBorrower's 2+-credit-report requirement
-   (or a Franco disposition on the definition of "joint"). E11/E12/F12 = repros.
-4. **HELD LIST-C cat 1 (Q1 escalation) + cat 2 (Q2 decline)** — re-verify against the clean
-   BATCH-13 dataset (post-Bug-3, post-Finding-1b), then apply spec updates. See DECISIONS-NEEDED.md.
-5. **HELD combined-LTV / 2nd-mortgage spec updates** — unblock after Bug-3 (E07/E08/A24/E13/
-   E23/E28/E29/F03/F06/F07/F14 + F04/F13).
-6. **A14-specific** — re-classify after Bug-3 (word-order intake) + Finding-1b resolution.
-7. **E01/E02 re-probe** — confirm whether the 9b "premature-prelim" diagnosis was actually the
-   Bug-3 "$X against $Y" extraction gap (BUG3-SCOPE.md flag).
-8. **Q9 admin-override (C06)** — BATCH-13 live-fire before writing the spec.
-9. **Q5-DOC-ASK-SECOND-SURFACE** (BATCH-12 deploy finding) — the accountant-financials
-   doc-ask (ai.js:2826) self-computes from dealSummary.borrower_name only (no deal.borrower_name
-   fallback; webhook doesn't thread corporateDocAsk) → also fails for corporate deals where
-   dealSummary.borrower_name is empty. Same root as the (fixed) Snapshot-row bug, different
-   surface. See BATCH12-DEPLOY-VERIFICATION.md.
-10. **CORPORATE-DEAL-PRELIM-FLOW + Q5 end-to-end live-fire** — corporate deals rarely reach a
-    prelim (refi→escalate per Q1; non-refi→doc-ask). Need a non-escalating doc-complete corporate
-    scenario to live-fire the Q5 Snapshot row (deferred from BATCH-12; the fix is deployed +
-    unit-verified, end-to-end live-fire pending).
-11. **A33 part (b) — canonical loan_app existing-balance extraction (DEFERRED, Franco-entangled).**
-    BUG-5 (792775c) made A33's existing-mortgage EXISTENCE deterministically visible (the
-    "Existing 1st Mortgage Balance: TBD" row, 3/3 deploy-confirmed) — fixing the silent-omission
-    failure mode. But the $410k VALUE is canonical-absent: extractFromLoanApplication
-    (canonical-fields.js:820) extracts only loan_amount + term, NOT existing_first_mortgage_balance,
-    even though A33's loan_app PDF carries existingFirstMortgageBalance=410000. Adding that
-    extraction would upgrade the BUG-5 row TBD→$410k — BUT it would ALSO give A33 a canonical
-    existing balance → for a refi without confirmed payout, computeCombinedLtv would then compute
-    (410+525)/850=110% → A33 flips active→escalation (Q1). That is ENTANGLED with the held
-    Q1-escalation-scale disposition. → defer part (b) until Franco's Q1 answer lands; if Q1
-    escalation is ratified at scale, add the canonical extraction (A33 then escalates correctly).
-12. Plus any new surfaces BATCH-13's clean full re-run reveals.
-
-Meta: Q5/Q8 (and Q9) shipped in the Franco-9 bundle with unit harnesses only; BATCH-12
-live-fire probes showed Q5/Q8 don't surface end-to-end. BATCH-13's full re-run should
-live-fire-verify ALL Franco-9 rendering features, not just the deterministic logic.
+Staging LIVE on `792775c`. Consolidated by status. Methodology + carry-forwards:
+PHASE-8-METHODOLOGY.md. Decisions ledger: DECISIONS-NEEDED.md.
 
 ---
 
-## Infra debt (non-blocking)
+## OPEN — gated on Franco's clustered-text response (4)
 
-### Batch-replay cleanup correlation unreliable at scale
-`scripts/bulletproof-replay-batch.js` cleans each scenario's synthetic deal via
-`cleanupRun(runTag, {dealId})` after evaluate. In the BATCH 8 sequential 125-run,
-this LEAKED ~54 of 125 deals (manual sweep required to restore staging hygiene).
-Before the next 100+ scenario run (likely rerun-until-clean iterations), HARDEN the
-correlation logic so cleanup is automatic — candidate causes: dealId not always
-captured from runScenario; multi-event scenarios creating deals under alternate
-correlation; runTag subaddressing mismatch. Not blocking; real infra debt.
+1. **Track 4 — Q1-escalation cat-1 LIST-C bulk.** The 41/125 awaiting_collateral scenarios
+   (15 newly escalating from Bug-3 × Q1 composition; BATCH-13). Bulk expected.json update to
+   workflow=awaiting_collateral + collateral-ask is HELD on Franco's **Q1-escalation-rate
+   disposition** (is escalating ~1/3 of deals for "no explicit payout language" intended, or
+   too aggressive?). Newly-escalating set: A06 A17 D06 D08 E02 E03 E28 E29 F01 F06 F07 F12 F14
+   F23 F24. Expected outcome: spec-aligned (not bugs) → Bug-N count unchanged.
+2. **C01 — admin-intake disposition.** Should Vienna set `admin_controlled=true` when
+   `FromName="Admin"` sends the initial intake? The one product-design item never in Franco-9.
+3. **Q8-detection-extension keep-or-revert.** FRANCO-PREDICTED-Q8-EXTENSION (`75d91e2`) broadened
+   joint detection to the name-conjunction; revertible if Franco prefers credit-bureau-doc-
+   confirmation-only. Pairs with the original Q8 (`b20b7cd`).
+4. **A33 part (b) — canonical loan_app existing-balance extraction.** BUG-5 (`792775c`) fixed
+   A33's silent-omission (deterministic "Existing 1st Mortgage Balance: TBD" row, 3/3). The $410k
+   VALUE is canonical-absent (extractFromLoanApplication doesn't extract existing-balance).
+   Adding it upgrades the row TBD→$410k BUT flips A33 active→Q1-escalation (refi, no confirmed
+   payout → combined 110%). **Entangled with item 1** — unblocks once Q1-rate is ratified.
+
+---
+
+## POST-CLOSURE (1)
+
+5. **Final full-matrix verification re-run** (post-Track-4). Confirms: the 41-escalation set is
+   spec-aligned (eval=PASS, not bugs); Q9 admin-override (C06) + any remaining multi-turn
+   features live-fire-verify on the clean dataset; final Bug-N tally; cleanup 100% holds. This is
+   the closure batch's single deploy + re-run event.
+
+---
+
+## COMPLETED (with commit + final disposition)
+
+### Confirmed Vienna bugs (defense-in-depth / extraction)
+- **Bug-1** gate-input hygiene — `d749b1e` (Phase 6). Gates consume canonical LTV.
+- **Bug-2** magnitude-suffix money — `2238952` (Phase 6). Centralized normalizeMoney + sanity bound.
+- **Bug-3** broker-shorthand extraction — `d76e02b`; **EXT** `b427906` (2nd-mortgage + Pattern-A FP).
+- **Bug-4** escalation-gate canonical-incompleteness guard — `988badd`.
+- **Bug-5** prelim-render existing-balance determinism — `792775c`.
+
+### Franco-9 + follow-ups (all shipped + live)
+- Q1 `e8975be`, Q2 `8b65776`, Q3 `6a67e59`, Q4 `a35947a`, Q5 `1255199`, Q6 `21ccbe4`,
+  Q7 `9794d61`, Q8 `b20b7cd`, Q9 `f1e944e`, Q10 `a5c032c`.
+- **Q5 render-plumbing** `d4bd476` + **Q5 doc-ask second-surface** `2734032` (audit consolidated
+  3 same-root borrower-identity sites).
+- **Q8 detection broadening** `75d91e2` (name-conjunction; keep/revert = OPEN item 3).
+
+### LIST-C (per-update Franco-rule justification)
+- Verification-surface broker_correction mechanism `0c826b9`; Q10-renotify A01/A13/C07 `14989bc`.
+- E07 combined-LTV `abef24f`; A14 escalation `c4c3d3c`; F04/F13 combined-LTV `6481363`.
+- A03 casing + F23 province-form `2b3ba10`. (A34 held — no prelim → correct.)
+
+### Operational debt — CLOSED (re-measured at full scale)
+- **Cleanup-correlation:** BATCH-8 ~43% leak → BATCH-13/14 **100% auto-cleaned, 0 residual**.
+  Phase-1 threading `db0ccb6` (correction-as-second-deal eliminated) + Phase-4 runTag-email
+  sweep `ca8d948`.
+- **Multi-turn replay threading + poll-for-stable** — `db0ccb6`.
+
+### Verification ceilings — DOCUMENTED (not defects)
+- Q5 corporate-row + Q8 joint-via-name on escalating flow shapes — VERIFICATION-CEILING-Q5-Q8-
+  FLOW-GATED.md (`5e76b71`). Unit-harness is the ceiling for flow-gated subsets; E11 is the Q8
+  end-to-end confirmation.
+
+### Discipline-1 reclassifications — CONFIRMED
+- E01/E07 were the Bug-3 extraction gap, NOT premature-prelim (the 9b diagnosis, corrected by
+  BATCH-13 empirical isolation).
+
+---
+
+## CARRY-FORWARDS
+
+Consolidated index in **PHASE-8-METHODOLOGY.md §f** (source detail: PHASE8-CARRY-FORWARDS.md).
