@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-05-30 — superseded by PHASE-8-METHODOLOGY.md §c (cluster-triage→confirmation arc). Preserved for evidence lineage; not load-bearing.**
+
 # BATCH 9 — Discipline-1 confirm/refute + (d)-candidate isolation (2026-05-29)
 
 Classification only — NO fix-cycles. Dataset: bulletproof-fullmatrix-results-2.json.

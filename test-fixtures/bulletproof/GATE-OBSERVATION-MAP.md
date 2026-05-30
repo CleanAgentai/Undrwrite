@@ -112,10 +112,10 @@ Tracks whether each predicted entanglement / gate actually clears. NOT a formali
 - **GENUINE-CANDIDATES (BATCH 9, NOT confirmed bugs):** A28 (transaction_type
   refinance→purchase) + F02 (purchase→null) — Q1 purchase-detector interaction; deferred
   to BATCH 9b cheap probe before any fix-cycle.
-- Full per-scenario classification: see BATCH9-CLASSIFICATION.md.
+- Full per-scenario classification: see archive/BATCH9-CLASSIFICATION.md.
 
 ### Gate-observation verifications (Discipline 2 — VERIFIED BATCH 12 Track A, 2026-05-29)
-Full classification + evidence: BATCH12-TRACKA-GATE-VERIFICATION.md. Method: BATCH-8
+Full classification + evidence: archive/BATCH12-TRACKA-GATE-VERIFICATION.md. Method: BATCH-8
 dataset + offline reasoning + 2 cheap deployed-code probes (E06, E07).
 - **VERIFIED FIRED/NOT-FIRED CORRECTLY (5):** loan_app_annotations_sanitized (A07 pos /
   F11 neg), awaiting_collateral_initially_activated (C06), mortgage_statement_missing
@@ -137,7 +137,7 @@ dataset + offline reasoning + 2 cheap deployed-code probes (E06, E07).
 - **GENUINE-CANDIDATE → BATCH-14 fix-cycle (1):** combined_ltv_computed (E07) — Discipline-2
   VINDICATED. Surfaced a real loan-amount extraction gap (canonical regex misses "New 2nd
   mortgage request: $X" + bare "Loan $X" shorthand). Surfaced to Porter 2026-05-29. See
-  BATCH12-TRACKA-GATE-VERIFICATION.md §FLAGGED for blast radius + the Vienna-vs-fixture fork.
+  archive/BATCH12-TRACKA-GATE-VERIFICATION.md §FLAGGED for blast radius + the Vienna-vs-fixture fork.
 - 4 §2 unobservables: deferred to BATCH-13 manual checks (unchanged).
 
 ### §3 red flags — ROUTED AS FRANCO-DISPOSITIONS (2026-05-28, no longer pending-empirical)

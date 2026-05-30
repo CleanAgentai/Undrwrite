@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-05-30 — superseded by PHASE-8-METHODOLOGY.md §a/§b (Bug-3 surfacing + Discipline-2). Preserved for evidence lineage; not load-bearing.**
+
 # BATCH 12 — Track A: Discipline-2 gate verification (2026-05-29)
 
 Empirical test of the Discipline-2 thesis ("unobserved ≠ verified — making gates

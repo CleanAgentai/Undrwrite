@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-05-30 — superseded by PHASE-8-METHODOLOGY.md §d + later deploy records. Preserved for evidence lineage; not load-bearing.**
+
 # BATCH 12 bundle — deploy + post-deploy sanity check (2026-05-29)
 
 **Deployed:** origin/main 53f5773, Render LIVE @ 2026-05-29T18:10:00Z. One bundle =

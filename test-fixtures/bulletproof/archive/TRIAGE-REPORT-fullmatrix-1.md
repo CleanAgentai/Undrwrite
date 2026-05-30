@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-05-30 — superseded by PHASE-8-METHODOLOGY.md §c (pre-empirical hypothesis). Preserved for evidence lineage; not load-bearing.**
+
 # Bulletproof Matrix Triage Report
 
 Generated: 2026-05-28T03:14:32.236Z
