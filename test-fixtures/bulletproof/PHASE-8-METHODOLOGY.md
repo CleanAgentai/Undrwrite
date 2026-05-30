@@ -87,9 +87,20 @@ distinguish a real bug from a rare transient.
 ### The layer progression
 `Bug-1 gate-INPUT → Bug-2 PARSE → Bug-3 EXTRACTION → Bug-4 escalation-GATE state → Bug-5
 prelim-RENDER state`. Bugs surfaced at increasingly-specific layers precisely because each
-prior layer's observability had to be in place first. Bug-4 and Bug-5 are the same symptom
-class (canonical-state-incompleteness) at two different layers — separate gates, separate
-Bug-N, by design.
+prior layer's observability had to be in place first: you cannot see an escalation-gate
+incompleteness (Bug-4) until the extraction that feeds the gate works (Bug-3), and you cannot
+see a parse gap (Bug-2) until the gate consumes the right input (Bug-1). Bug-4 and Bug-5 are the
+same symptom class (canonical-state-incompleteness) at two different layers — separate gates,
+separate Bug-N, by design.
+
+### Revert paths (each Bug-N is independently revertible)
+The Bug-N namespace was chosen for clean revert lineage. Each bug is a **single discrete commit**
+(d749b1e / 2238952 / d76e02b + b427906 / 988badd / 792775c) with its **own dedicated harness** —
+reverting any one Bug-N restores the prior behavior without touching the others, and its harness
+is the regression gate confirming the revert. The defense-in-depth bugs (1, 4, 5) revert to a
+*less-conservative* prior state (the asymmetric-risk direction is additive); the extraction bugs
+(2, 3) revert to *narrower* matching (strict-superset widening, so a revert is a strict subset).
+No Bug-N entangles another's revert.
 
 ---
 
@@ -144,6 +155,18 @@ verification-surface, suppression-state, known residuals), not bugs.
   because the gate was unobservable). LIST-C 85→~10 over-count.
 - BATCH-13: clean matrix re-run; Bug-3 × Q1 composition surfaced at scale (41/125 escalation).
 - BATCH-14: **Bug-4 + Bug-5** surfaced (canonical-state-incompleteness, two layers).
+
+**The arc as a narrative, not a date list:** the program's first six batches (8→9→9b→11)
+*tightened the net* — re-running, classifying, and proving that every cluster mismatch reduced to
+a known root. That sustained 0-bug result was not a dead end; it was the prerequisite. Each
+"explained-away" mismatch removed a hiding place, and the machinery built to explain them
+(observable gates, threaded multi-turn replay, the verification-surface mechanism) is exactly
+what made the *real* bugs visible. The moment observability crossed a threshold — BATCH-12's
+gate-observation work — the first genuine independent bug (Bug-3) fell out immediately; the
+clean dataset it enabled (BATCH-13) exposed the composition effect; and the repeated-isolation
+discipline that dataset demanded (BATCH-14) surfaced the two canonical-incompleteness transients
+(Bug-4, Bug-5). The cluster-triage's job was to *exhaust the entanglements so the residue was
+real* — and the residue was exactly five bugs.
 
 **Final tally — confirmed Vienna bugs:** Bug-1, Bug-2 (Phase 6) + Bug-3/3-EXT, Bug-4, Bug-5
 (Discipline-1/2-surfaced). **NOT** the dozens of cluster-triage hypotheses — those were
@@ -222,14 +245,21 @@ PHASE8-CARRY-FORWARDS.md.)
 
 ## g) The over-scoping discipline — four empirical confirmations
 
-The ~10:1 ratio between raw-flagged count and genuine-need is the empirical methodology baseline:
+The ratio between raw-flagged count and genuine-need is the empirical methodology baseline. The
+**delta** (raw − genuine) is the work the over-scoping discipline *prevented* — edits that, had
+they been made mechanically, would have churned correct fixtures or matched buggy code:
 
-| Confirmation | Raw flagged | Genuine need | Batch |
-|---|---|---|---|
-| Q1 terse-refi rewrite | 107 | a few | BATCH 5 |
-| Annotation-fidelity | 17 | 1 (A03) | BATCH 7 |
-| B3 sequencing | 1 | 0 | BATCH 7 |
-| LIST-C stale-spec | ~85 | ~10 | BATCH 12 |
+| Confirmation | Raw flagged | Genuine need | Delta avoided | Ratio | Batch |
+|---|---|---|---|---|---|
+| Q1 terse-refi rewrite | 107 | "a few" (~5) | ~102 | ~20:1 | BATCH 5 |
+| Annotation-fidelity | 17 | 1 (A03) | 16 | 17:1 | BATCH 7 |
+| B3 sequencing | 1 | 0 | 1 | — (all noise) | BATCH 7 |
+| LIST-C stale-spec | ~85 | ~10 | ~75 | ~8.5:1 | BATCH 12 |
+
+Across the four, **~194 raw-flagged → ~16 genuine** (≈12:1 aggregate). The delta is not "work
+saved" in a convenience sense — each avoided edit was a *correctness hazard* (a fixture churned
+to match a transient, or a test relaxed toward buggy code). The discipline's value is the
+false-edit risk it removed, measured in the ~178 edits not made.
 
 **Lesson:** at every scale where bulk-editing is contemplated, the genuine work decomposes far
 below the raw count. Per-category grep against actual ENCODED behavior + the rule fingerprint
