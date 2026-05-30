@@ -361,37 +361,50 @@ const computeCombinedLtv = (canonicalMap) => {
   // get existing additive math preserved.
   const txnTypeTuples = (canonicalMap && canonicalMap.transaction_type) || [];
   const refinanceTuple = txnTypeTuples.find(t => t && t.value === 'refinance');
-  // FRANCO-Q1 (2026-05-28): THREE-condition carve-out (was two). Now requires
-  // payoutConfirmed=true (explicit payout language, set at extraction) IN ADDITION
-  // to transaction_type=refinance + lender match. Closes the gap where a refinance
-  // with lender-match but NO explicit payout language was treated as paid-out
-  // (standalone) under a MORE PERMISSIVE condition than Franco's stated rule.
-  // Without payout language the existing 1st is NOT assumed paid-out → additive
-  // combined LTV → escalates for payout clarification (Franco's Q1 rule).
-  if (refinanceTuple && refinanceTuple.payoutConfirmed === true) {
-    const payoutLenderTuples = (canonicalMap.existing_first_mortgage_lender || [])
-      .filter(t => t && t.classification === 'mortgage_statement' && t.value);
+  // Shared lender-match test (R11-B-3 modes): STRICT (broker rawPhrase names a lender
+  // matching the mortgage_statement source canonical lender) OR IMPLICIT SINGLE-LENDER
+  // (no named lender + exactly one mortgage_statement lender). Used by BOTH carve-out
+  // branches below.
+  const refinanceLenderMatches = (() => {
+    if (!refinanceTuple) return false;
     const payoutLenderCanonicals = Array.from(new Set(
-      payoutLenderTuples.map(t => cf.normalizeLender(t.value)).filter(Boolean),
+      (canonicalMap.existing_first_mortgage_lender || [])
+        .filter(t => t && t.classification === 'mortgage_statement' && t.value)
+        .map(t => cf.normalizeLender(t.value)).filter(Boolean),
     ));
     const refinanceLenderInPhrase = cf.findLenderInWindow(refinanceTuple.rawPhrase || '');
     const strictMatch = refinanceLenderInPhrase && payoutLenderCanonicals.includes(refinanceLenderInPhrase);
     const implicitMatch = !refinanceLenderInPhrase && payoutLenderCanonicals.length === 1;
-    if (strictMatch || implicitMatch) {
-      // Refinance pays out existing 1st at closing → combined LTV = standalone LTV
-      const standalone = (requested / market) * 100;
-      return {
-        combined_ltv_percent: Math.round(standalone * 10) / 10,
-        components: {
-          existing: 0, // refinance: existing first being paid out, treated as 0 for combined-LTV math
-          requested,
-          market,
-          existing_source: 'refinance-paid-out',
-          existing_lender: null,
-          transaction_type: 'refinance',
-        },
-      };
-    }
+    return !!(strictMatch || implicitMatch);
+  })();
+  const carveOutStandalone = (existingSource) => {
+    const standalone = (requested / market) * 100;
+    return {
+      combined_ltv_percent: Math.round(standalone * 10) / 10,
+      components: {
+        existing: 0, // refinance: existing first being paid out, treated as 0 for combined-LTV math
+        requested,
+        market,
+        existing_source: existingSource,
+        existing_lender: null,
+        transaction_type: 'refinance',
+      },
+    };
+  };
+  // BRANCH 1 (FRANCO-Q1, 2026-05-28; PRESERVED as defense-in-depth): explicit payout
+  // language (payoutConfirmed=true) + lender match → carve-out fires.
+  if (refinanceTuple && refinanceTuple.payoutConfirmed === true && refinanceLenderMatches) {
+    return carveOutStandalone('refinance-paid-out');
+  }
+  // BRANCH 2 (FRANCO-Q1-RULE-REFINEMENT, Franco 2026-05-30): a CONFIDENTLY-determined
+  // refinance implies payout — "refinance and pay-out the existing mortgage are the same
+  // thing." So refinance + refinanceConfident + lender match → carve-out fires WITHOUT
+  // requiring explicit payout language. SUPERSEDES the BATCH-13 "require explicit payout"
+  // reading (which escalated ~33% of deals). The confidence guards (ambiguous refi-vs-
+  // purchase, explicit non-payout contraindication) are tagged at extraction and leave
+  // those cases on the additive path below → escalate for clarification (the safety case).
+  if (refinanceTuple && refinanceTuple.refinanceConfident === true && refinanceLenderMatches) {
+    return carveOutStandalone('refinance-implicit-payout');
   }
 
   const combined = ((existing + requested) / market) * 100;

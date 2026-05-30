@@ -58,8 +58,10 @@ ok('refinance + lender match + payoutConfirmed → carve-out fires (60%, existin
 const gated = dE.computeCombinedLtv({ ...baseMap, transaction_type: [{ value: 'refinance', classification: 'broker_correction', rawPhrase: 'refinancing existing RBC mortgage', payoutConfirmed: false }] });
 ok('refinance + lender match but NO payout → carve-out GATED → additive (118.8%)', gated.combined_ltv_percent === Math.round(((400000 + 408000) / 680000) * 100 * 10) / 10 && gated.components.existing === 400000);
 
-console.log('\n[7] A14-shape end-to-end — terse Refi, no payout → escalates (additive)');
-// A14 numbers: loan 460k, value 815k, existing balance 380k → standalone 56%, additive 103%.
+console.log('\n[7] A14-shape end-to-end — terse Refi, no payout → NOW carve-out fires (FRANCO-Q1-RULE-REFINEMENT 2026-05-30: confident refinance = payout-implicit)');
+// A14 numbers: loan 460k, value 815k, existing balance 380k → standalone 56.4%.
+// PRE-REFINEMENT this escalated (additive 103%, require explicit payout); Franco's refined
+// rule ("refinance IS payout") fires the carve-out for a confident refinance + lender match.
 const a14Map = cf.extractCanonicalFields('Refi for Sarah Chen at 4421 Kingsway. Loan amount $460,000.', [
   { classification: 'mortgage_statement', text: 'Lender: BMO\nBalance: $380,000' },
 ]);
@@ -68,8 +70,8 @@ a14Map.existing_first_mortgage_lender = [{ value: 'BMO', classification: 'mortga
 a14Map.requested_loan_amount = [{ value: 460000, classification: 'broker_initial_intent' }];
 a14Map.subject_property_market_value = [{ value: 815000 }];
 const a14Combined = dE.computeCombinedLtv(a14Map);
-ok('A14 transaction_type defaulted refinance, payoutConfirmed false', (a14Map.transaction_type || []).some(t => t.value === 'refinance') && (a14Map.transaction_type || []).every(t => !t.payoutConfirmed));
-ok('A14 carve-out does NOT fire → additive 103% (escalates, not standalone 56%)', a14Combined.combined_ltv_percent === 103.1 && a14Combined.components.existing === 380000);
+ok('A14 transaction_type defaulted refinance, payoutConfirmed false, refinanceConfident true', (a14Map.transaction_type || []).some(t => t.value === 'refinance' && !t.payoutConfirmed && t.refinanceConfident === true));
+ok('A14 carve-out NOW fires → standalone 56.4% (active, not escalate) per Franco-Q1-rule-refinement', a14Combined.combined_ltv_percent === 56.4 && a14Combined.components.existing === 0 && a14Combined.components.existing_source === 'refinance-implicit-payout');
 
 console.log(`\n[franco-q1-harness] ${pass} pass / ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);

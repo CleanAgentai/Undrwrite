@@ -1917,6 +1917,24 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       map.transaction_type.push({ value: 'refinance', source: 'defaulted_from_purchase_absence', classification: 'defaulted_from_purchase_absence', rawPhrase: '', payoutConfirmed: _q1Payout.present });
     }
   }
+  // FRANCO-Q1-RULE-REFINEMENT (Franco 2026-05-30): "If it is a refinance, there is no
+  // other option than to pay out the existing mortgage — that IS refinancing." So a
+  // CONFIDENTLY-determined refinance implies payout (the R11-B-3 carve-out in
+  // computeCombinedLtv fires WITHOUT requiring explicit payout language). This SUPERSEDES
+  // the original BATCH-13 reading (require explicit payout language → 33% escalation) with
+  // Franco's sharper articulation. Confidence guards — these stay escalate-for-clarification:
+  //   - AMBIGUOUS refi-vs-purchase (broker uncommitted: "either refinancing or buying,
+  //     depending on the appraisal") → NOT confident.
+  //   - explicit NON-PAYOUT contraindication ("second mortgage", "existing stays in place")
+  //     → NOT confident (the existing 1st is NOT being paid out).
+  // The payoutConfirmed flag is preserved (defense-in-depth: explicit payout still fires
+  // via its own branch); this ADDS a refinanceConfident tag the new branch consumes.
+  const _q1AmbiguousRefiPurchase = /\beither\b[^.]*\b(?:refinanc|purchas|buy)|(?:refinanc\w*|purchas\w*)\s+or\s+(?:a\s+)?(?:purchas|refinanc|buy|new)|depend\w*\s+on\s+(?:the\s+)?appraisal/i.test(_q1BrokerText);
+  const _q1NonPayoutContra = /\bsecond\s+mortgage\b|\b2nd\s+mortgage\b|\bexisting\b[^.]{0,40}\b(?:stays?|remain(?:s|ing)?)\s+in\s+place\b/i.test(_q1BrokerText);
+  const _q1RefiConfident = !_q1AmbiguousRefiPurchase && !_q1NonPayoutContra;
+  for (const t of (map.transaction_type || [])) {
+    if (t && t.value === 'refinance') t.refinanceConfident = _q1RefiConfident;
+  }
 
   return map;
 };
