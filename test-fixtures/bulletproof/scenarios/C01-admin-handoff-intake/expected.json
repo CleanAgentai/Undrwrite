@@ -1,23 +1,23 @@
 {
   "scenario_id": "C01",
   "spec_version": "1.0",
-  "rationale_source": "F3.AH admin-handoff intake classification: admin-direction subject pattern → admin handler path; broker_initial_intent path BYPASSED",
+  "rationale_source": "FRANCO-C01 DISPOSITION (2026-05-30): admin-sent intake is treated as broker-submitted and proceeds through NORMAL intake — NOT routed to a paused admin_handoff state and NOT requiring explicit acknowledgment first. Supersedes the original F3.AH admin-handoff-state assumption.",
   "layer1_structural": {
     "intake_classification": {
-      "value": "admin_handoff",
-      "rationale": "F3.AH classification triggered by subject pattern matching admin-direction signal."
+      "value": "broker_submitted",
+      "rationale": "FRANCO-C01: admin-from-Franco intake classified as broker-submitted (process normally). Investigation confirmed Vienna does NOT set admin_controlled on admin intake — admin_controlled is set ONLY on the link-submission path (webhook.js:3007), never on admin-sender intake."
     },
     "workflow_state": {
-      "value": "admin_handoff",
-      "rationale": "Deal created in admin_handoff state per F3.AH routing."
+      "value": "active",
+      "rationale": "FRANCO-C01: processed as a normal broker submission (active), NOT a paused admin_handoff state. BATCH-13 actual was already 'active' — the code already implemented Franco's answer; only this spec was stale."
     }
   },
   "layer2_semantic": {
     "outbound_emails": [
       {
-        "kind": "broker_facing_intake_acknowledgment",
+        "kind": "preliminary_review_admin",
         "expected_fire": false,
-        "rationale": "Admin-handoff path does NOT trigger broker-facing auto-response."
+        "rationale": "C01's body is admin draft-feedback (not a complete broker submission), so no admin prelim on this turn — but the deal is processed (active), not paused. The Franco-ratified property is 'process normally / no admin_controlled pause', verified via workflow_state=active + the no-pause source invariant."
       }
     ]
   },
