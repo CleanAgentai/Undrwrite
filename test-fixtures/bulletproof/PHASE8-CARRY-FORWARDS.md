@@ -49,6 +49,26 @@ FRANCO-Q[N] tag. Q10 is the canonical example of mid-Phase-6 follow-up routing.
 - Vienna's continuation is purely thread-based (In-Reply-To/References → findByMessageId);
   multi-turn replay MUST thread subsequent events or every reply spawns a new deal (BATCH-11 Phase 1).
 
+## Ratified rules get REFINED by deeper client conversation — receive it gracefully (Franco closure, 2026-05-30)
+Franco's Q1 answer in BATCH-13 ("require explicit payout language") was empirically scaled to 33%
+escalation, surfaced to him as a product-design question; his refined answer ("refinance and payout
+are definitionally the same thing") is a SHARPER articulation of his actual underwriting view — not
+a reversal. The spec-refinement discipline applies at the RULE layer too: the original ratification
+wasn't wrong, it was incomplete; the refinement is the client's clearer expression. Mechanics:
+apply the DUAL-PATH preservation discipline — preserve the original branch (payoutConfirmed) as
+defense-in-depth, ADD the refined branch (refinanceConfident) rather than replacing — so no test
+coverage is lost and the original behavior remains reachable. Also: empirical SCALE (the 33% rate)
+is what prompted the sharper articulation — surfacing the measured rate to the client, in plain
+language, is what produced the better rule. (Canonical: FRANCO-Q1-RULE-REFINEMENT `915193c`.)
+
+## "Already-correct" is a valid investigation outcome (Franco closure, 2026-05-30)
+C01: Franco's answer ("process admin-intake as broker-submitted") turned out to be ALREADY the
+deployed behavior — admin_controlled was set only on the link-submission path, never on admin
+intake. The disciplined output was a SPEC update + a no-pause source-invariant + honest commit
+documentation that no routing change was needed — NOT a manufactured code change to look like work.
+Investigate-first can correctly conclude "the code already does this; the stale artifact was the
+spec." Don't manufacture a fix to match an expectation of a code commit.
+
 ## Same-root bugs surface across MULTIPLE call sites — audit them ALL (BATCH 14, 2026-05-30)
 Q5-render-plumbing (d4bd476) fixed 2 Snapshot call sites; the doc-ask (3rd) was missed until
 BATCH-12's live-fire probe, and an audit then surfaced 2 MORE (Q3/Q4 roster primaryName). Lesson:

@@ -267,11 +267,40 @@ BEFORE bulk-editing. Never bulk-edit to hit a count target.
 
 ---
 
-## CLOSURE-UPDATE PASS (PENDING FRANCO CLOSURE)
-Adds when Franco's clustered-text answers land + Track-4 completes:
-- Track-4 Q1-escalation cat-1 LIST-C bulk outcome (41 scenarios → spec-aligned, expected Bug-N
-  count unchanged at 5).
-- C01 admin-intake final disposition + Q8-detection keep/revert outcome.
-- A33 part-(b) resolution (canonical loan_app extraction, if Q1-escalation ratified).
-- Final post-Track-4 full-matrix verification re-run tally.
-- Any final carry-forward additions from the closure batch.
+## CLOSURE — Franco's clustered-text answers (2026-05-30)
+
+All three product-design items dispositioned. Confirmed Vienna **bug count stays at 5**
+(Bug-1…Bug-5) — the closure items were a rule REFINEMENT, an already-correct routing, and a
+NEW product rule, none of them a bug.
+
+- **Q1-escalation-rate → FRANCO-Q1-RULE-REFINEMENT (`915193c`).** Franco: "refinance and pay-out
+  the existing mortgage are definitionally the same thing." A confident refinance + lender match
+  now fires the carve-out without explicit payout language → the ~41/125 escalating set (confident
+  refis, standalone ≤80) routes back to active. The held Track-4 bulk thus **largely dissolved** —
+  the original active specs were restored, not bulk-rewritten (the over-scoping discipline §g, one
+  more time: the "85→~10→~0 net new" trajectory). A14 reverted active. This is the canonical
+  example of the **rules-get-refined-by-deeper-conversation** carry-forward: surfacing the measured
+  33% rate to the client, in plain language, produced the sharper rule. Dual-path preservation
+  (payoutConfirmed branch kept as defense-in-depth; refinanceConfident branch added).
+- **C01 → FRANCO-C01-ADMIN-INTAKE-AS-BROKER-SUBMITTED (`bec178f`).** "Already-correct is a valid
+  outcome": investigation found the code already processed admin-intake normally
+  (admin_controlled set only on link-submission); only the C01 spec was stale. Spec update +
+  no-pause source invariant, no routing change.
+- **Q8-detection-extension → KEEP (`75d91e2`, Franco-ratified).** No revert.
+- **Q11 — FRANCO-Q11-REGISTERED-PROPERTY-OWNER-RULE (`94acb72`).** New (11th) Franco product rule:
+  registered owners must be on the application; a non-owner applicant on a single-owner deal is a
+  guarantor (Q11 supersedes Q4's ambiguous default). Detector + roster integration, 12/12.
+- **A33 part-(b) — DEFERRED-DOCUMENTED.** Canonical loan_app existing-balance extraction conflicts
+  with documented conservatism + carries broad combined-LTV risk for marginal benefit; BUG-5's
+  deterministic visible-TBD already prevents the silent-omission failure mode. Asymmetric-risk:
+  declined. (DECISIONS-NEEDED.md.)
+
+### Franco-rule lineage (now 11)
+Q1–Q10 (Franco-9 + Q10) + **Q11** (registered-owner). Q1 carries the only post-ratification
+**refinement** (Q1-RULE-REFINEMENT) — the lineage records both the original rule and its sharper
+re-articulation, per the spec-refinement-at-the-rule-layer discipline.
+
+### Remaining → the final verification re-run (Porter-sequenced, Franco heads-up)
+The one open mechanical step: a final full-matrix re-run on the closure bundle, confirming the
+~41-set routes to active (carve-out) except genuinely-high-standalone (>80) refis + 2nd-mortgages,
+and the Bug-N tally holds at 5. Not a decision — a confirmation.
