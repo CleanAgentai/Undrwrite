@@ -48,6 +48,14 @@ eq('down for the purchase (down breaks adjacency)', 'Purchase. $252k down for th
 eq('hypothetical other-deal ref', 'Last deal they did $400k for closing costs elsewhere.', 'requested_loan_amount', null);
 eq('balance figure not loan', 'RBC first mortgage, balance $225k per attached payout.', 'requested_loan_amount', null);
 
+console.log('[F] BUG-3-EXTENSION (BATCH 14) — 2nd-mortgage "$X behind" + "$X property"');
+eq('F04 "$185k behind existing 1st" → loan', '$185k behind existing Royal Bank of Canada 1st ($380k balance).', 'requested_loan_amount', 185000);
+eq('F13 "($145k) behind existing 1st" → loan', 'New 2nd from Centum ($145k) behind existing 1st with RBC.', 'requested_loan_amount', 145000);
+eq('F04 "on $720k property" → value', 'Combined LTV 78% on $720k property.', 'subject_property_market_value', 720000);
+eq('NEG "$20k behind on payments" → not loan', 'borrower is $20k behind on payments currently.', 'requested_loan_amount', null);
+eq('NEG "$8k property tax" → not value', 'property tax assessment shows $8k property tax owing.', 'subject_property_market_value', null);
+eq('NEG existing-balance not loan via behind', 'existing first mortgage $380k balance, no payoff.', 'requested_loan_amount', null);
+
 console.log('[REGRESSION] pre-Bug-3 formal/informal still work');
 eq('Loan Amount Requested', 'Loan Amount Requested: $295,000.', 'requested_loan_amount', 295000);
 eq('requesting $X', 'We are requesting $68,000 for a small second.', 'requested_loan_amount', 68000);

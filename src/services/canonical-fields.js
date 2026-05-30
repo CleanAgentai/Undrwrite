@@ -495,14 +495,24 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
     '\\*?\\s*(?:Mortgage\\s+Amount\\s+Requested|Loan\\s+Amount\\s+Requested|Mortgage\\s+Amount|Loan\\s+Amount|Requested\\s+Loan(?:\\s+Amount)?)\\s*:?\\s*\\*?\\s*\\$?\\s*' + MONEY,
     // informal "requesting $X" (pre-Bug-3, unchanged — $ required)
     '\\brequesting\\s+\\$\\s*' + MONEY,
-    // Bug-3 A: "[New] Nth mortgage [request]: $X" ($ required, adjacent)
-    '\\b(?:new\\s+)?(?:first|second|third|fourth|1st|2nd|3rd|4th)\\s+mortgage(?:\\s+request(?:ed)?)?\\s*:?\\s*\\$\\s*' + MONEY,
+    // Bug-3 A: "New Nth mortgage [request]: $X" OR "Nth mortgage request[ed]: $X"
+    // ($ required, adjacent). REQUIRES the new-loan signal ("new" or "request") —
+    // BATCH-14 FP fix: bare "first mortgage $X" is ambiguous (often the EXISTING
+    // balance, e.g. "existing first mortgage $380k") and must NOT be captured as
+    // the new loan. Legit cases (E07/E08) all carry "new" or "request".
+    '\\b(?:new\\s+(?:first|second|third|fourth|1st|2nd|3rd|4th)\\s+mortgage(?:\\s+request(?:ed)?)?|(?:first|second|third|fourth|1st|2nd|3rd|4th)\\s+mortgage\\s+request(?:ed)?)\\s*:?\\s*\\$\\s*' + MONEY,
     // Bug-3 B: bare "Loan $X" / "Loan: $X" ($ required — excludes "Loan application")
     '\\bLoan\\s*:?\\s*\\$\\s*' + MONEY,
     // Bug-3 C: word-order "$X loan" / "$X requested" / "$X for <financing-purpose>"
     '\\$\\s*' + MONEY + '\\s+(?:loan\\b|requested\\b|for\\s+(?:a\\s+|the\\s+)?(?:refinanc|refi\\b|purchase|renovat|construction|payout|consolidat|debt))',
     // Bug-3 E (loan side): "$X against $Y" — loan is the FIRST amount ($ leads)
     '\\$\\s*' + MONEY + '\\s+against\\s+\\$\\s*[\\d,]+',
+    // Bug-3-EXTENSION F (BATCH 14): 2nd-mortgage "$X behind [the] existing/first/1st"
+    // (F04 "$185k behind existing RBC 1st", F13 "($145k) behind existing 1st"). The
+    // optional ")" tolerates the parenthetical form. "behind <existing|first|1st>"
+    // guard excludes "$X behind on payments". Captures the NEW 2nd amount, not the
+    // existing balance (which is "$X balance", no "behind" adjacency).
+    '\\$\\s*' + MONEY + '\\s*\\)?\\s+behind\\s+(?:the\\s+)?(?:existing|first|1st)\\b',
   ];
   for (const p of loanPatterns) {
     const m = emailBody.match(new RegExp(p, 'i'));
@@ -529,6 +539,13 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   if (out.subject_property_market_value == null) {
     const againstM = emailBody.match(/\$\s*[\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?\s+against\s+\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i);
     if (againstM) out.subject_property_market_value = normalizeMoney(againstM[1]);
+  }
+  // Bug-3-EXTENSION (BATCH 14): "[on] $X property" — 2nd-mortgage value phrasing
+  // (F04/F13 "Combined LTV 78% on $720k property"). Negative lookahead excludes
+  // "property tax". Only when PV not already extracted.
+  if (out.subject_property_market_value == null) {
+    const propM = emailBody.match(/(?:on\s+)?\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s+property\b(?!\s+tax)/i);
+    if (propM) out.subject_property_market_value = normalizeMoney(propM[1]);
   }
   return out;
 };
