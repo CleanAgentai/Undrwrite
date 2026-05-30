@@ -5,10 +5,10 @@
   "layer1_structural": {
     "canonical_map": {
       "existing_mortgage_lender": { "value": "Royal Bank of Canada", "source_classification": "mortgage_statement", "rationale": "F1.EL existing 1st per R11-B-2." },
-      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.MP new 2nd; new 2nd lender (Centum Private) is separate from existing 1st (RBC)." }
+      "mortgage_position": { "value": "2nd", "source_classification": "broker_initial_intent", "rationale": "F1.MP new 2nd; new 2nd lender (Centum Private) is separate from existing 1st (RBC). LIST-C (BATCH 14): render-surface value '2nd'." }
     },
     "gate_states": {
-      "combined_ltv_computed": { "value": "0.729", "rationale": "($380k existing 1st + $145k new 2nd) / $720k = 73% per R4-RESIDUAL-1 math (also tests R4-RESIDUAL-2 PNW-only extraction)." }
+      "combined_ltv_computed": { "value": true, "rationale": "LIST-C-COMBINED-LTV-BUG-3-RESOLVED (BATCH 14): BUG-3-EXTENSION (b427906) extracts the new-2nd amount from '($145k) behind existing 1st' → the Combined-LTV row now RENDERS (deploy-confirmed 72.9% — (RBC $380,000 + $145,000)/$720,000). Gate-form non-boolean '0.729'→boolean true; the value verified via the prelim must_include." }
     },
     "workflow_state": { "value": "active", "rationale": "Standard 2nd mortgage." }
   },

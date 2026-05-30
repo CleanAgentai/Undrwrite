@@ -4,12 +4,12 @@
   "rationale_source": "R4-RESIDUAL-1 combined-LTV escalation × F1.MP correction × elevated-band interaction",
   "layer1_structural": {
     "canonical_map": {
-      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_correction", "rationale": "F1.MP confirmed via R11-A asterisk-tolerance correction." },
+      "mortgage_position": { "value": "2nd", "source_classification": "broker_correction", "rationale": "F1.MP confirmed via R11-A asterisk-tolerance correction. LIST-C (BATCH 14): render-surface value '2nd' (Snapshot row), not '2nd mortgage'." },
       "first_mortgage_balance": { "value": 380000, "source_classification": "mortgage_statement", "rationale": "F1.FB existing 1st per R11-B-2." },
       "requested_loan_amount": { "value": 185000, "source_classification": "broker_initial_intent", "rationale": "F1.LA new 2nd amount." }
     },
     "gate_states": {
-      "combined_ltv_computed": { "value": "0.785", "rationale": "($380k + $185k) / $720k = 78.5% per R4-RESIDUAL-1 math." },
+      "combined_ltv_computed": { "value": true, "rationale": "LIST-C-COMBINED-LTV-BUG-3-RESOLVED (BATCH 14): BUG-3-EXTENSION (b427906) extracts the new-2nd amount from '$185k behind existing 1st' → the Combined-LTV row now RENDERS (deploy-confirmed 78.5% — (RBC $380,000 + $185,000)/$720,000). Gate-form non-boolean '0.785'→boolean true; the 78.5% value verified via the prelim must_include." },
       "elevated_ltv_band": { "value": true, "rationale": "Combined LTV 78.5% triggers F4.EL per R4-RESIDUAL-1 escalation. R4-RESIDUAL-1 carry-forward watch." }
     },
     "workflow_state": { "value": "active", "rationale": "Standard 2nd mortgage with elevated combined-LTV." }

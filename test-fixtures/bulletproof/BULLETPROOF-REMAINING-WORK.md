@@ -26,7 +26,18 @@ The closure batch is bigger than originally projected — but bounded and concre
     prelim (refi→escalate per Q1; non-refi→doc-ask). Need a non-escalating doc-complete corporate
     scenario to live-fire the Q5 Snapshot row (deferred from BATCH-12; the fix is deployed +
     unit-verified, end-to-end live-fire pending).
-11. Plus any new surfaces BATCH-13's clean full re-run reveals.
+11. **A33 part (b) — canonical loan_app existing-balance extraction (DEFERRED, Franco-entangled).**
+    BUG-5 (792775c) made A33's existing-mortgage EXISTENCE deterministically visible (the
+    "Existing 1st Mortgage Balance: TBD" row, 3/3 deploy-confirmed) — fixing the silent-omission
+    failure mode. But the $410k VALUE is canonical-absent: extractFromLoanApplication
+    (canonical-fields.js:820) extracts only loan_amount + term, NOT existing_first_mortgage_balance,
+    even though A33's loan_app PDF carries existingFirstMortgageBalance=410000. Adding that
+    extraction would upgrade the BUG-5 row TBD→$410k — BUT it would ALSO give A33 a canonical
+    existing balance → for a refi without confirmed payout, computeCombinedLtv would then compute
+    (410+525)/850=110% → A33 flips active→escalation (Q1). That is ENTANGLED with the held
+    Q1-escalation-scale disposition. → defer part (b) until Franco's Q1 answer lands; if Q1
+    escalation is ratified at scale, add the canonical extraction (A33 then escalates correctly).
+12. Plus any new surfaces BATCH-13's clean full re-run reveals.
 
 Meta: Q5/Q8 (and Q9) shipped in the Franco-9 bundle with unit harnesses only; BATCH-12
 live-fire probes showed Q5/Q8 don't surface end-to-end. BATCH-13's full re-run should
