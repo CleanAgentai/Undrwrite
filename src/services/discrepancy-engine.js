@@ -700,16 +700,18 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
   // (borrower-qualification.buildQualificationRoster output).
   if (qualificationRoster && qualificationRoster.multiParty && Array.isArray(qualificationRoster.roster)) {
     const dispo = (r) => r.role === 'guarantor_only'
-      ? `${r.name} — guarantor-only (liable on default; NOT counted toward qualification)`
+      ? `${r.name} — guarantor-only (liable on default; NOT counted toward qualification)${r.q11 ? ' [registered-owner rule]' : ''}`
       : `${r.name} — counted (${r.role === 'primary' ? 'primary' : 'co-applicant'})`;
     lines.push(`<p><strong>Qualification basis:</strong> combined across ${qualificationRoster.countingCount} borrower(s)</p>`);
     for (const r of qualificationRoster.roster) {
       lines.push(`<p>&nbsp;&nbsp;• ${dispo(r)}</p>`);
     }
-    // FRANCO-Q4: surface unconfirmed-cosigner clarification on the admin surface.
-    if (qualificationRoster.clarificationPending && qualificationRoster.clarificationMessage) {
-      lines.push(`<p><strong>⚠ Cosigner role — clarification needed:</strong> ${qualificationRoster.clarificationMessage}</p>`);
-    }
+  }
+  // FRANCO-Q4 + Q11: surface the applicant-role / registered-owner clarification on the admin
+  // surface — INDEPENDENT of multiParty (a single-applicant deal can omit a registered owner,
+  // which still needs the broker ask).
+  if (qualificationRoster && qualificationRoster.clarificationPending && qualificationRoster.clarificationMessage) {
+    lines.push(`<p><strong>⚠ Applicant clarification needed:</strong> ${qualificationRoster.clarificationMessage}</p>`);
   }
   lines.push(`<p><strong>Borrower Type:</strong> ${isCommercial ? 'Corporate' : 'Personal'}</p>`);
   // FRANCO-Q5 (2026-05-28): corporate-borrower flag — entity count, per-entity

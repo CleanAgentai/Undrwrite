@@ -27,6 +27,7 @@ const dEngine = require('../services/discrepancy-engine');
 const cFields = require('../services/canonical-fields');
 const bq = require('../services/borrower-qualification'); // FRANCO-Q3/Q4 multi-party qualification roster
 const ce = require('../services/corporate-entities'); // FRANCO-Q5 corporate-entity detection
+const ro = require('../services/registered-owner'); // FRANCO-Q11 registered-property-owner rule
 // ADMIN-HANDOFF LINK-SUBMISSION (2026-05-20): pure detection of file-hosting
 // links in inbound broker body. No URL fetching, no link-following.
 const { detectFileHostingLinksInBody } = require('../lib/linkDetector');
@@ -1339,6 +1340,10 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     ..._bInboundMessages.map(m => m.body || ''),
     ...dealDocs.map(d => d?.extracted_data?.text || ''),
   ].join('\n');
+  // FRANCO-Q11 (BATCH 14): registered-property-owner detection — owners must be on the
+  // application; on a single-registered-owner deal a non-owner applicant is a guarantor.
+  const _q11Candidates = [dealSummary?.borrower_name || deal.borrower_name, ...(_bDetectAdmin.joint_multi_borrower || [])].filter(Boolean);
+  const _q11Owners = ro.detectRegisteredOwners(_q4TextSources, _q11Candidates);
   const _q3Roster = bq.buildQualificationRoster({
     detectedBorrowers: _bDetectAdmin.joint_multi_borrower,
     // Q5-DOC-ASK-SECOND-SURFACE audit (BATCH 14): borrower IDENTITY, not leadSummaryBrokerName
@@ -1347,6 +1352,8 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     primaryName: dealSummary?.borrower_name || deal.borrower_name || null,
     textSources: _q4TextSources,
     resolvedRoles: {}, // FRANCO-Q4: broker-reply → resolvedRoles wiring is the deferred deepening (see commit note)
+    registeredOwners: _q11Owners.owners, // FRANCO-Q11
+    registeredOwnerSignal: _q11Owners.signalPresent, // FRANCO-Q11
   });
   if (_q3Roster.clarificationPending) {
     console.log(`FRANCO-Q4: cosigner role ambiguous (${_q3Roster.clarificationMessage}) — defaulted to guarantor-only (not counted); surfaced on admin Snapshot.`);
@@ -1811,9 +1818,11 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
     ownershipType: deal.ownership_type || null,
     isCommercial: !!_r10iDetect.commercial,
     jointBorrowers: _r10iDetect.joint_multi_borrower, // FRANCO-PREDICTED-Q8
-    qualificationRoster: bq.buildQualificationRoster({ // FRANCO-Q3/Q4
+    qualificationRoster: bq.buildQualificationRoster({ // FRANCO-Q3/Q4 + Q11
       detectedBorrowers: _r10iDetect.joint_multi_borrower,
       primaryName: dealSummary?.borrower_name || deal.borrower_name || borrowerName || null, // Q5 audit (BATCH 14): borrower identity preferred over the ambiguous param
+      textSources: [..._r10iInboundMessages.map(m => m.body || ''), ...dealDocs.map(d => d?.extracted_data?.text || '')].join('\n'),
+      ...(() => { const _o = ro.detectRegisteredOwners([..._r10iInboundMessages.map(m => m.body || ''), ...dealDocs.map(d => d?.extracted_data?.text || '')].join('\n'), [dealSummary?.borrower_name || deal.borrower_name || borrowerName, ...(_r10iDetect.joint_multi_borrower || [])].filter(Boolean)); return { registeredOwners: _o.owners, registeredOwnerSignal: _o.signalPresent }; })(), // FRANCO-Q11
     }),
     corporateEntities: ce.detectCorporateEntities({ // FRANCO-Q5 (render-plumbing fix BATCH 12: borrower identity, deal.borrower_name preferred over the ambiguous param)
       borrowerName: dealSummary?.borrower_name || deal.borrower_name || borrowerName || '',

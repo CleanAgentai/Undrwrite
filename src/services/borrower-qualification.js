@@ -63,10 +63,22 @@ const classifyRole = (name, textSources, resolvedRole) => {
 //   { multiParty, roster:[{name, role, countsTowardQualification}],
 //     countingCount, aggregationDirective:string|null }
 // Pure function — no side effects (R9-B pattern; testable independently of the prompt).
-const buildQualificationRoster = ({ detectedBorrowers = null, primaryName = null, textSources = '', resolvedRoles = {} } = {}) => {
+const buildQualificationRoster = ({ detectedBorrowers = null, primaryName = null, textSources = '', resolvedRoles = {}, registeredOwners = [], registeredOwnerSignal = false } = {}) => {
   const names = Array.isArray(detectedBorrowers) ? detectedBorrowers.filter(Boolean) : [];
 
-  // 0 or 1 borrower → no aggregation; passthrough (qualification flow unchanged).
+  // FRANCO-Q11: a registered owner not listed on the application must be added — this check
+  // applies regardless of applicant count (even a single-applicant deal can omit the owner).
+  const _ownerKey = (n) => String(n).toLowerCase().trim().replace(/\.+$/, '');
+  const _q11Active = registeredOwnerSignal && Array.isArray(registeredOwners) && registeredOwners.length > 0;
+  const q11OwnerMissing = _q11Active
+    ? registeredOwners.filter(o => !names.some(n => _ownerKey(n) === _ownerKey(o)))
+    : [];
+  const _q11MissingClar = q11OwnerMissing.length
+    ? `${q11OwnerMissing.join(', ')} ${q11OwnerMissing.length > 1 ? 'are registered property owners' : 'is a registered property owner'} but not listed on the application — per policy the registered owner(s) must be on the application; please add ${q11OwnerMissing.length > 1 ? 'them' : q11OwnerMissing[0]}.`
+    : '';
+
+  // 0 or 1 borrower → no aggregation; passthrough (qualification flow unchanged) — EXCEPT
+  // a Q11 missing-owner clarification still fires (the owner must be added to the app).
   if (names.length < 2) {
     return {
       multiParty: false,
@@ -75,8 +87,8 @@ const buildQualificationRoster = ({ detectedBorrowers = null, primaryName = null
         : [],
       countingCount: names.length,
       aggregationDirective: null,
-      clarificationPending: false,
-      clarificationMessage: null,
+      clarificationPending: q11OwnerMissing.length > 0,
+      clarificationMessage: _q11MissingClar || null,
     };
   }
 
@@ -94,13 +106,32 @@ const buildQualificationRoster = ({ detectedBorrowers = null, primaryName = null
     roster[0] = { ...roster[0], role: ROLE.PRIMARY, countsTowardQualification: true, ambiguous: false };
   }
 
+  // FRANCO-Q11 (Franco 2026-05-30): registered-property-owner override. When a registered-
+  // owner signal is present and there is exactly ONE registered owner, any non-primary
+  // applicant who is NOT that owner is a GUARANTOR by definition — this SUPERSEDES Q4's
+  // ambiguous/co-applicant inference (a definitive owner-vs-not test beats a role-language
+  // guess). Registered owners NOT on the application are flagged for broker clarification
+  // (Franco: "must be on the application regardless").
+  if (_q11Active && registeredOwners.length === 1) {
+    const ownerSet = new Set(registeredOwners.map(_ownerKey));
+    for (let i = 0; i < roster.length; i++) {
+      const r = roster[i];
+      if (r.role === ROLE.PRIMARY) continue;
+      if (!ownerSet.has(_ownerKey(r.name))) {
+        roster[i] = { ...r, role: ROLE.GUARANTOR_ONLY, countsTowardQualification: false, ambiguous: false, q11: 'non-owner on single-registered-owner deal → guarantor (FRANCO-Q11)' };
+      }
+    }
+  }
+
   const counting = roster.filter(r => r.countsTowardQualification);
   const guarantors = roster.filter(r => r.role === ROLE.GUARANTOR_ONLY);
   const ambiguousParties = roster.filter(r => r.ambiguous);
-  const clarificationPending = ambiguousParties.length > 0;
-  const clarificationMessage = clarificationPending
+  const clarificationPending = ambiguousParties.length > 0 || q11OwnerMissing.length > 0;
+  const _q4Clar = ambiguousParties.length
     ? `This deal lists ${ambiguousParties.map(r => r.name).join(', ')} as cosigner${ambiguousParties.length > 1 ? 's' : ''} — confirming whether ${ambiguousParties.length > 1 ? 'they should' : ambiguousParties[0].name + ' should'} be counted as a co-applicant for qualification (income and credit contribute), or treated as guarantor-only (on the hook for default, but not counted toward qualification). Defaulted to guarantor-only pending confirmation.`
-    : null;
+    : '';
+  // FRANCO-Q11 missing-owner clarification computed at the top (_q11MissingClar).
+  const clarificationMessage = clarificationPending ? [_q4Clar, _q11MissingClar].filter(Boolean).join(' ') : null;
 
   const guarantorClause = guarantors.length
     ? `\n- Parties marked GUARANTOR-ONLY (disclose as liable-on-default, do NOT count income/credit toward qualification): ${guarantors.map(r => r.name).join(', ')}.`

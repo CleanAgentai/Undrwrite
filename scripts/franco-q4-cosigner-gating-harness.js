@@ -58,7 +58,7 @@ const cmap = { requested_loan_amount: [{ value: 260000, source: 'loan_applicatio
 const snapGuar = dEngine.renderDealSnapshot(cmap, { qualificationRoster: guar });
 ok('guarantor-only disposition rendered', /Sarah Chen — guarantor-only \(liable on default; NOT counted/.test(snapGuar));
 const snapAmbig = dEngine.renderDealSnapshot(cmap, { qualificationRoster: ambig });
-ok('clarification note rendered on ambiguous', /Cosigner role — clarification needed:/.test(snapAmbig));
+ok('clarification note rendered on ambiguous', /Applicant clarification needed:/.test(snapAmbig)); // FRANCO-Q11: label generalized from "Cosigner role" to cover registered-owner clarifications too
 
 console.log(`\n[franco-q4-harness] ${pass} pass / ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);
