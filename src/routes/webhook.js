@@ -1341,7 +1341,10 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   ].join('\n');
   const _q3Roster = bq.buildQualificationRoster({
     detectedBorrowers: _bDetectAdmin.joint_multi_borrower,
-    primaryName: dealSummary?.borrower_name || leadSummaryBrokerName || null,
+    // Q5-DOC-ASK-SECOND-SURFACE audit (BATCH 14): borrower IDENTITY, not leadSummaryBrokerName
+    // (broker-first) — same shadow class as the Q5 Snapshot bug; the roster's primary applicant
+    // is the borrower, not the broker.
+    primaryName: dealSummary?.borrower_name || deal.borrower_name || null,
     textSources: _q4TextSources,
     resolvedRoles: {}, // FRANCO-Q4: broker-reply → resolvedRoles wiring is the deferred deepening (see commit note)
   });
@@ -1810,7 +1813,7 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
     jointBorrowers: _r10iDetect.joint_multi_borrower, // FRANCO-PREDICTED-Q8
     qualificationRoster: bq.buildQualificationRoster({ // FRANCO-Q3/Q4
       detectedBorrowers: _r10iDetect.joint_multi_borrower,
-      primaryName: dealSummary?.borrower_name || borrowerName || null,
+      primaryName: dealSummary?.borrower_name || deal.borrower_name || borrowerName || null, // Q5 audit (BATCH 14): borrower identity preferred over the ambiguous param
     }),
     corporateEntities: ce.detectCorporateEntities({ // FRANCO-Q5 (render-plumbing fix BATCH 12: borrower identity, deal.borrower_name preferred over the ambiguous param)
       borrowerName: dealSummary?.borrower_name || deal.borrower_name || borrowerName || '',
@@ -2446,7 +2449,7 @@ ${draftEmail}
             existingDeal.has_pnw_statement,
             existingDocs,
             dealMessages,
-            { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim, isPostApproval: true, greetingFirstName: _r8aDocReqGreeting }
+            { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelim, isPostApproval: true, greetingFirstName: _r8aDocReqGreeting, dealBorrowerName: existingDeal.borrower_name }
           );
           await saveDraftAndPreview(sweepBrokerFacingDraft(docRequestEmail), borrowerSubject, 'approval_doc_request');
           // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at
@@ -2522,7 +2525,7 @@ ${draftEmail}
             existingDeal.has_pnw_statement,
             existingDocs,
             dealMessages,
-            { isPostApproval: true, greetingFirstName: _q9DocGreeting }
+            { isPostApproval: true, greetingFirstName: _q9DocGreeting, dealBorrowerName: existingDeal.borrower_name }
           );
           await saveDraftAndPreview(sweepBrokerFacingDraft(docRequestEmail), borrowerSubject, 'approval_doc_request');
         } else if (intent === 'rejected') {
@@ -2620,7 +2623,7 @@ ${draftEmail}
               existingDeal.has_pnw_statement,
               existingDocs,
               dealMessages,
-              { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial, isPostApproval: true, greetingFirstName: _r8aDocReqGreetingPartial }
+              { brokerRepliedSinceLastViennaOutbound: _zRepliedPrelimPartial, isPostApproval: true, greetingFirstName: _r8aDocReqGreetingPartial, dealBorrowerName: existingDeal.borrower_name }
             );
             await saveDraftAndPreview(sweepBrokerFacingDraft(docRequestEmail), borrowerSubject, 'approval_doc_request');
             // R6-κ: first-stamp-wins. Mirrors prelim_approved_at + conditions_sent_at.

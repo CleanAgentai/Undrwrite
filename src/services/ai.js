@@ -2798,7 +2798,7 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
 
   // Generate Stage 3 document request email — different checklist for personal vs corporate,
   // and different items for purchase vs refinance
-  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true, isPostApproval = false, greetingFirstName = null, corporateDocAsk = null } = {}) => {
+  generateDocumentRequestEmail: async (dealSummary, ownershipType, hasApp, hasPnw, existingDocs, conversationHistory = [], { brokerRepliedSinceLastViennaOutbound = true, isPostApproval = false, greetingFirstName = null, corporateDocAsk = null, dealBorrowerName = null } = {}) => {
     try {
       // R6-ζ (2026-05-21): forbidden-non-sequitur-openers block — see
       // buildForbiddenOpenersBlock docblock at module scope. Admin-approval
@@ -2823,7 +2823,14 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
       let _q5CorporateDocAsk = corporateDocAsk;
       if (!_q5CorporateDocAsk) {
         const _q5Text = (conversationHistory || []).map(m => m.body || m.textBody || m.content || '').join('\n');
-        const _q5Detect = detectCorporateEntities({ borrowerName: dealSummary?.borrower_name || '', textSources: _q5Text });
+        // FRANCO-Q5-DOC-ASK-SECOND-SURFACE-FIX (BATCH 14): key corporate detection on the
+        // BORROWER identity — dealSummary.borrower_name (the LLM summary) || dealBorrowerName
+        // (the persisted deal.borrower_name, threaded from the webhook call sites). Pre-fix
+        // this used dealSummary.borrower_name ONLY, so a corporate deal where the LLM summary
+        // lacked the corporate name (Webb Holdings Ltd.) self-computed against '' → no
+        // accountant-financials doc-ask. Sibling to the Snapshot-row fix (d4bd476); the
+        // doc-ask was the third same-root call site that fix didn't cover.
+        const _q5Detect = detectCorporateEntities({ borrowerName: dealSummary?.borrower_name || dealBorrowerName || '', textSources: _q5Text });
         _q5CorporateDocAsk = _q5Detect.isCorporate ? _q5Detect.docAskLines : null;
       }
       // Group MMMM: canonical purchase/refinance signal via dealType.js
