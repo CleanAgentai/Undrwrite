@@ -49,6 +49,23 @@ FRANCO-Q[N] tag. Q10 is the canonical example of mid-Phase-6 follow-up routing.
 - Vienna's continuation is purely thread-based (In-Reply-To/References → findByMessageId);
   multi-turn replay MUST thread subsequent events or every reply spawns a new deal (BATCH-11 Phase 1).
 
+## Same-root bugs surface across MULTIPLE call sites — audit them ALL (BATCH 14, 2026-05-30)
+Q5-render-plumbing (d4bd476) fixed 2 Snapshot call sites; the doc-ask (3rd) was missed until
+BATCH-12's live-fire probe, and an audit then surfaced 2 MORE (Q3/Q4 roster primaryName). Lesson:
+when applying a same-root fix, audit ALL call sites of the affected source field (here: borrower_name
+reads) IN the commit — not just the call sites the symptom surfaced through. d4bd476's narrow scope was
+correct given what was visible, but the audit step would have caught the third+ surfaces. (Q5-DOC-ASK-
+SECOND-SURFACE-FIX consolidated 3 sites.)
+
+## Defense-in-depth spans ARCHITECTURAL LAYERS (BATCH 14, 2026-05-30)
+Canonical-state-incompleteness manifests at different layers: BUG-4 guards the escalation-GATE layer
+(combined null → escalate); BUG-5 the prelim-RENDER layer (existing balance had no deterministic
+surface — appeared only in the LLM narrative / carve-out-suppressed combined row → A33's rare omission;
+fix = render it deterministically, value-or-TBD). Same symptom class, different points → separate
+Bug-N gates, each at its layer. Also: investigate-first beats the upstream fix-shape menu — Option A
+(poll-for-stable) was a HARNESS concept that couldn't fix production; the probe redirected to the
+render-layer determinism fix (Option B-shaped) that actually addresses production.
+
 ## Discipline-1 applies RECURSIVELY — even to upstream direction (BATCH 14, 2026-05-29)
 F03's initial "4/5 race condition" framing (from the Track-2 addendum) was refuted by deeper
 isolation: ~85% natural escalation rate, saveAttachments awaited, docs parse deterministically.

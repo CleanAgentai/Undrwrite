@@ -652,6 +652,24 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     const c = combined.components;
     const lenderTag = c.existing_lender ? `${c.existing_lender} ` : '';
     lines.push(`<p><strong>Combined LTV (incl. existing 1st):</strong> ${combined.combined_ltv_percent}% — (${lenderTag}${formatMoney(c.existing)} + ${formatMoney(c.requested)}) / ${formatMoney(c.market)}</p>`);
+  } else {
+    // BUG-5 (BATCH 14): deterministic Existing 1st Mortgage Balance row. The existing
+    // balance is underwriting-critical but had NO deterministic Snapshot surface when the
+    // Combined-LTV row is absent — for REFINANCES the payout carve-out suppresses the
+    // combined row, so the balance appeared ONLY in the LLM narrative (variable). A33's
+    // rare "missing $410k" transient was exactly that narrative omission. When an existing
+    // 1st mortgage IS indicated (refinance / 2nd-position / balance or lender on file) but
+    // no combined row rendered, surface the balance deterministically — the canonical value,
+    // or "TBD" if the canonical state is incomplete (visible-incompleteness > silent-omission;
+    // asymmetric-risk, Bug-1/BUG-4 lineage). Not rendered for clean first-mortgage / purchase
+    // deals (no existing-mortgage signal → no row, no noise).
+    const _bug5HasBalance = (canonicalMap.existing_first_mortgage_balance || []).length > 0;
+    const _bug5HasLender = (canonicalMap.existing_first_mortgage_lender || []).length > 0;
+    const _bug5IsRefiOr2nd = ((canonicalMap.transaction_type || []).some(t => t && /refinance|2nd|second/i.test(String(t.value))))
+      || ((canonicalMap.mortgage_position || []).some(t => t && /2nd|second/i.test(String(t.value))));
+    if (_bug5HasBalance || _bug5HasLender || _bug5IsRefiOr2nd) {
+      lines.push(renderSnapshotRow('Existing 1st Mortgage Balance', canonicalMap.existing_first_mortgage_balance, { format: 'money' }));
+    }
   }
 
   lines.push(renderSnapshotRow('Loan Term Requested', canonicalMap.requested_loan_term_months, { suffix: ' months' }));
