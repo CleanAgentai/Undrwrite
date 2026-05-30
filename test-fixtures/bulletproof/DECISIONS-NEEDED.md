@@ -3,6 +3,54 @@
 **Status:** in-progress (Phase 4 spec authoring underway; items added as scenarios surface them).
 **Resolution mechanism:** Phase 4.5 working session — Porter batches Porter-decidable items; Franco-input-required items folded into next acceptance-cycle conversation.
 
+---
+
+# FINAL STATE — consolidated index (2026-05-30, staging 792775c)
+
+The historical Layer-3 ledger is preserved below; this index is the current decision status.
+
+## OPEN — Franco's clustered-text response (3 + 1 dependent)
+- **Q1-escalation-rate** — is escalating ~41/125 (33%) of deals for "no explicit payout
+  language" the intended conservatism, or too aggressive? Gates Track-4 LIST-C cat-1 bulk.
+  (Surfaced BATCH-13; detail in §"BATCH 12 — LIST-C" + BATCH13-RESULTS.md.)
+- **C01 — admin-intake routing** — `admin_controlled=true` when `FromName="Admin"` sends the
+  initial intake? (EMERGENT-FIND-D below; never in Franco-9.)
+- **Q8-detection-extension keep-or-revert** — name-conjunction broadening (`75d91e2`)
+  vs credit-bureau-doc-confirmation-only. (§"BANKED Franco product-design questions".)
+- **A33 part (b)** [DEPENDENT on Q1-escalation-rate] — canonical loan_app existing-balance
+  extraction; flips A33 → Q1-escalation, so unblocks only once Q1-rate is ratified.
+
+## RESOLVED — with Franco answer / Porter direction + implementing commit
+- **Franco-9 dispositions Q1–Q10** — all answered + shipped (§"FRANCO-9 DISPOSITIONS"):
+  Q1 `e8975be`, Q2 `8b65776`, Q3 `6a67e59`, Q4 `a35947a`, Q5 `1255199` (+ render `d4bd476`,
+  doc-ask `2734032`), Q6 `21ccbe4`, Q7 `9794d61`, Q8 `b20b7cd` (+ ext `75d91e2`), Q9 `f1e944e`,
+  Q10 `a5c032c`.
+- **Finding-1b (terse "Refi" recognition)** — RESOLVED by Q1's conservative payout rule
+  (`e8975be`); supersedes the open Finding-1b question below.
+- **Porter-decidable Layer-3 items implemented** — e.g. #13 outside-Canada → property-scoped
+  decline (Q7 `9794d61`); #18 non-CAD reject; #6 chase timing (Q6 `21ccbe4`). Per-item
+  resolution in the historical ledger below.
+- **BATCH-12 LIST-C surgical set** — broker_correction mechanism `0c826b9`, Q10-renotify
+  `14989bc`, casing/province `2b3ba10`, E07/A14/F04/F13 combined+escalation (`abef24f`/
+  `c4c3d3c`/`6481363`).
+- **Confirmed Vienna bugs** (not product-design, but decision-adjacent): Bug-1 `d749b1e`,
+  Bug-2 `2238952`, Bug-3 `d76e02b` + EXT `b427906`, Bug-4 `988badd`, Bug-5 `792775c`.
+
+## DEFERRED-DOCUMENTED — not pursued, with rationale
+- **Q5 corporate-row / Q8 joint-via-name end-to-end on escalating flows** — verification ceiling
+  ACCEPTED (corporate/joint high-LTV correctly gate before prelim; unit harness is the ceiling).
+  Not a defect. (VERIFICATION-CEILING-Q5-Q8-FLOW-GATED.md, `5e76b71`.)
+- **A34 broker-correction Q10** — no prelim at intake → not a post-prelim correction → Q10
+  correctly does not fire. Held, correct-as-is.
+- **R4-RESIDUAL-1 elevated-band callout** — pre-existing residual (matrix-wide), not a Bug-N
+  regression. Tracked in [[project_residual_narrative_fab]] / BUG3-SCOPE context.
+- **Architecture-amendment candidates** (#2 3rd-mortgage, #3 construction, #4 private-specific,
+  #5 wrong-doc) — out of the current matrix scope; surface empirical anchor before any amendment.
+
+---
+
+## (historical Layer-3 ledger — preserved below)
+
 ## Categories
 
 - **PORTER-DECIDABLE**: validation policies, workflow timing for low-stakes paths, when-required field rules, name precedence, etc. Porter handles in working session.
