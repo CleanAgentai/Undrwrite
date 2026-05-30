@@ -5,12 +5,12 @@
   "layer1_structural": {
     "canonical_map": {
       "transaction_type": { "value": "2nd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.TT." },
-      "mortgage_position": { "value": "2nd mortgage", "source_classification": "broker_initial_intent", "rationale": "F1.MP." },
+      "mortgage_position": { "value": "2nd", "source_classification": "broker_initial_intent", "rationale": "F1.MP. LIST-C (BATCH 14): render-surface value is '2nd' (Snapshot Mortgage Position row), not '2nd mortgage' — verified via the rendered Snapshot post-Bug-3." },
       "requested_loan_amount": { "value": 120000, "source_classification": "broker_initial_intent", "rationale": "F1.LA — new 2nd mortgage amount." },
       "first_mortgage_balance": { "value": 380000, "source_classification": "mortgage_statement", "rationale": "F1.FB existing 1st per R11-B-2." }
     },
     "gate_states": {
-      "combined_ltv_computed": { "value": "0.694", "rationale": "($380k + $120k) / $720k = 69.4% combined LTV per R4-RESIDUAL-1 math." },
+      "combined_ltv_computed": { "value": true, "rationale": "LIST-C-COMBINED-LTV-BUG-3-RESOLVED (BATCH 14): Bug-3 (d76e02b) enables canonical loan-amount extraction ('New 2nd mortgage request: $120,000') → the Combined-LTV row now RENDERS. Gate-form corrected non-boolean '0.694'→boolean true (observable = row present); the 69.4% value is verified via the prelim must_include below. BATCH-13 confirmed: Snapshot row '69.4% — (Scotiabank $380,000 + $120,000) / $720,000'." },
       "elevated_ltv_band": { "value": false, "rationale": "Combined LTV 69% in standard band." }
     },
     "workflow_state": { "value": "active", "rationale": "Standard 2nd mortgage." }
