@@ -49,6 +49,57 @@ FRANCO-Q[N] tag. Q10 is the canonical example of mid-Phase-6 follow-up routing.
 - Vienna's continuation is purely thread-based (In-Reply-To/References → findByMessageId);
   multi-turn replay MUST thread subsequent events or every reply spawns a new deal (BATCH-11 Phase 1).
 
+## Discipline-1 applies RECURSIVELY — even to upstream direction (BATCH 14, 2026-05-29)
+F03's initial "4/5 race condition" framing (from the Track-2 addendum) was refuted by deeper
+isolation: ~85% natural escalation rate, saveAttachments awaited, docs parse deterministically.
+The addendum's race-architecture options were all built on an incomplete picture. Lesson: even
+directives from outside the immediate investigator get evidence-tested by the next probe. The
+investigator's job includes refuting upstream classifications when the data contradicts them.
+
+## Verification criteria can be FALSELY-VALIDATING (BATCH 14, 2026-05-29)
+When the bug is rarer than the verification probe count, repetition passes by chance regardless
+of any fix. F03's ~15% transient → 5 "all escalate" probes pass ~98% of the time with or without
+a fix. Design criteria that DETERMINISTICALLY distinguish fixed-from-unfixed: for rare transients,
+unit-harness the bug CLASS (canonical-state-incompleteness) rather than reproduce the trigger.
+The pure-function harness is the verification; production-transient elimination is a defense-in-
+depth claim, not empirically provable. (BUG-4 is the canonical example.)
+
+## Defense-in-depth on incomplete state — ASYMMETRIC-RISK (BATCH 14, 2026-05-29)
+When the upstream cause isn't cheaply pinnable, harden against the SYMPTOM CLASS not the trigger
+(Bug-1, Bug-4). Asymmetric-risk reasoning: silent-fall-through-to-active on incomplete canonical
+state = underwriting-dangerous (approval path on an unevaluated deal); escalate-on-incomplete =
+recoverable (broker clarifies, deal proceeds). The conservative direction is durably correct even
+if the trigger is later root-caused. Don't conflate distinct manifestations: BUG-4 catches F03's
+escalation-gate incompleteness but NOT A33's prelim-render incompleteness (no mortgage_statement,
+different surface) — surface distinct triggers separately.
+
+## Verification ceiling can be a FLOW-ARCHITECTURE finding, not a defect (BATCH 14, 2026-05-29)
+Some features render only on prelim (Q5 corporate-row, Q8 joint-row); some scenarios correctly
+gate before prelim (corporate/joint high-LTV escalation, collateral-ask). The end-to-end
+reachability gap is correct Franco-9 design, not a missing verification. The unit harness IS the
+ceiling for flow-gated subsets — document honestly rather than synthesize unreachable test
+surfaces or relax gates for verification convenience.
+
+## Operational discipline validated AT SCALE (BATCH 13, 2026-05-29)
+BATCH-13 cleanup hit 100% (125/125 auto-cleaned, 0 sweep residual) vs BATCH-8's ~43%
+(54-deal leak). The cleanup-correlation hardening (Phase-1 threading db0ccb6 + Phase-4
+runTag-email sweep ca8d948) is CLOSED — a methodology accomplishment, not just project
+completion. Lesson: an infra-debt item is only "closed" when re-measured at full scale.
+
+## Discipline-1 reclassification is HEALTHY (BATCH 13, 2026-05-29)
+Empirical isolation has now reclassified TWO BATCH-9b findings: E01 was the Bug-3 extraction
+gap ("$X against $Y"), NOT premature-prelim-before-docs; E07 was the extraction gap, not just
+a rendering issue. The investigation discipline's value is NOT being right first — it's being
+CORRECTABLE by later evidence. A classification banked with a re-verification trigger (the
+BUG3-SCOPE E01/E02 flag) is stronger than one asserted as final.
+
+## Bug × Q-rule COMPOSITION is a matrix-scale product-design question (BATCH 13, 2026-05-29)
+F03's sanity check predicted matrix-wide behavior; BATCH-13's 41/125 (33%) escalation rate
+confirmed it (Bug-3 extracting loan amounts × Q1's payout-carve-out → mass refi escalation).
+Composed rule effects need EMPIRICAL SCALE MEASUREMENT before production confidence, even when
+each individual rule is unit-verified. A rule correct in isolation can be too aggressive in
+composition at scale — only the full clean re-run surfaces the rate.
+
 ## Live-fire beats unit-green AT BUNDLE SCALE (BATCH 12, 2026-05-29) — confirmed 3×
 Empirically confirmed three times in BATCH 12: (1) Q10 hook-routing investigation → the
 "gap" was deploy state, not code; (2) Q5 Snapshot render gap (unit-green, doesn't render);
