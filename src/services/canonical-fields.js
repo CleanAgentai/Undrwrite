@@ -1108,16 +1108,18 @@ const parseBrokerCorrections = (messageBody) => {
   const transactionTypePatterns = [
     // "refinancing his/her/their/the/an existing X mortgage"
     { re: /\brefinanc(?:e|ing)\s+(?:his|her|their|the|this|an?|my|our)?\s*(?:existing\s+)?(?:[A-Z][A-Za-z]*\s+)?(?:first |1st )?mortgage\b/i, value: 'refinance' },
-    // "this is a refinance"
-    { re: /\bthis\s+is\s+(?:a |the )?refinance\b/i, value: 'refinance' },
+    // "this is a refinance" / "this is actually a refinance" (BUG-7 BATCH 15:
+    // optional "actually" — F14 "this is actually a refinance, not a purchase".
+    // Strict superset; hedging/question guards above still suppress non-assertions.)
+    { re: /\bthis\s+is\s+(?:actually\s+)?(?:a |the )?refinance\b/i, value: 'refinance' },
     // "first mortgage refinance" / "refinance to pay out existing X"
     { re: /\b(?:first\s+|1st\s+)?mortgage\s+refinance\b/i, value: 'refinance' },
     /* purchase patterns */
     { re: /\bpurchas(?:e|ing)\s+(?:this\s+|the\s+|a\s+|an\s+|new\s+|the\s+new\s+)?(?:home|property|house|condo)\b/i, value: 'purchase' },
-    { re: /\bthis\s+is\s+(?:a |the )?purchase\b/i, value: 'purchase' },
+    { re: /\bthis\s+is\s+(?:actually\s+)?(?:a |the )?purchase\b/i, value: 'purchase' },
     /* second-mortgage patterns */
     { re: /\bsecond\s+mortgage\s+application\b/i, value: '2nd_mortgage' },
-    { re: /\bthis\s+is\s+(?:a |the )?(?:second|2nd)\s+mortgage\b/i, value: '2nd_mortgage' },
+    { re: /\bthis\s+is\s+(?:actually\s+)?(?:a |the )?(?:second|2nd)\s+mortgage\b/i, value: '2nd_mortgage' },
   ];
   for (const { re, value } of transactionTypePatterns) {
     const m = asteriskStripped.match(re);

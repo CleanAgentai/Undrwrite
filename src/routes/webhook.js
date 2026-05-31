@@ -3543,35 +3543,54 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
       //   - 'ambiguous' → no DB state change; in-memory route through active branch so Vienna
       //                   re-asks via generateBrokerResponse. Next broker reply gets re-parsed.
       if (existingDeal.status === 'awaiting_collateral') {
-        console.log('Awaiting-collateral broker reply — parsing for yes/no/ambiguous');
-        const { disposition } = await aiService.parseCollateralReply(email.textBody);
-        console.log(`Collateral disposition: ${disposition}`);
-
-        if (disposition === 'no') {
-          console.log('No additional collateral offered — escalating silently to admin');
-          // Defensively normalize the stored summary before passing in (Bug B Layer A + F2).
-          const escalationSummary = normalizeSenderName(existingDeal.extracted_data, email.fromName);
-          await sendEscalationToAdmin(existingDeal, escalationSummary, existingDeal.ltv);
-          return; // Silent — no broker-facing reply
-        }
-
-        if (disposition === 'yes') {
-          console.log('Additional collateral offered — flipping status to active, marking collateral_offered');
-          // Persist the collateral_offered flag so the active-branch LTV gate below does
-          // NOT re-route this deal back to awaiting_collateral (which would otherwise
-          // create a state loop, since the LTV value itself hasn't changed yet).
-          const updatedExtracted = { ...(existingDeal.extracted_data || {}), collateral_offered: true };
-          await dealsService.update(existingDeal.id, { status: 'active', extracted_data: updatedExtracted });
-          existingDeal.status = 'active';
-          existingDeal.extracted_data = updatedExtracted;
+        // BUG-7 (BATCH 15): correction-intent pre-check. A broker reply that is a
+        // CORRECTION (transaction_type / loan / position / purpose) — NOT a collateral
+        // disposition — must not be funneled through parseCollateralReply, which would
+        // mis-classify it as yes/no/ambiguous and LOSE the correction (e.g. C06-shape
+        // 'no' → silent escalation; F14-shape purchase→refi → stuck re-asking for
+        // collateral). Reuse parseBrokerCorrections (the R10-G classifier — COMPOSED,
+        // not duplicated; hedging/question-guarded, so it only fires on confident
+        // corrections). On a detected correction, route deterministically to the active
+        // branch: its discrepancy pipeline (also via parseBrokerCorrections) applies the
+        // correction through R10-G + the LTV/escalation gate re-evaluates with the
+        // recomputed canonical (Bug-4 incompleteness guard still escalates on incomplete
+        // canonical — the hold exits only if the correction genuinely resolves it).
+        // Genuine collateral replies (no correction signal) fall through UNCHANGED.
+        const _bug7Corrections = cFields.parseBrokerCorrections(email.textBody);
+        if (_bug7Corrections.length > 0) {
+          console.log(`BUG-7: correction-intent in awaiting_collateral (${_bug7Corrections.map(c => `${c.field}=${c.value}`).join('; ')}) — routing to active-branch correction-processing (R10-G + gate re-eval), NOT parseCollateralReply`);
+          existingDeal.status = 'active'; // in-memory route to active branch; DB re-written by the active-branch LTV gate (exits hold iff the correction resolves it)
         } else {
-          console.log('Ambiguous collateral reply — staying in awaiting_collateral, re-asking via conversational handler');
-          // In-memory route through the active branch so generateBrokerResponse runs and
-          // re-asks via the high-LTV prompt block. DB status stays 'awaiting_collateral',
-          // so the next broker reply is parsed for collateral disposition again. The
-          // active-branch LTV gate WILL re-write status='awaiting_collateral' to the DB
-          // (idempotent — already that value).
-          existingDeal.status = 'active';
+          console.log('Awaiting-collateral broker reply — parsing for yes/no/ambiguous');
+          const { disposition } = await aiService.parseCollateralReply(email.textBody);
+          console.log(`Collateral disposition: ${disposition}`);
+
+          if (disposition === 'no') {
+            console.log('No additional collateral offered — escalating silently to admin');
+            // Defensively normalize the stored summary before passing in (Bug B Layer A + F2).
+            const escalationSummary = normalizeSenderName(existingDeal.extracted_data, email.fromName);
+            await sendEscalationToAdmin(existingDeal, escalationSummary, existingDeal.ltv);
+            return; // Silent — no broker-facing reply
+          }
+
+          if (disposition === 'yes') {
+            console.log('Additional collateral offered — flipping status to active, marking collateral_offered');
+            // Persist the collateral_offered flag so the active-branch LTV gate below does
+            // NOT re-route this deal back to awaiting_collateral (which would otherwise
+            // create a state loop, since the LTV value itself hasn't changed yet).
+            const updatedExtracted = { ...(existingDeal.extracted_data || {}), collateral_offered: true };
+            await dealsService.update(existingDeal.id, { status: 'active', extracted_data: updatedExtracted });
+            existingDeal.status = 'active';
+            existingDeal.extracted_data = updatedExtracted;
+          } else {
+            console.log('Ambiguous collateral reply — staying in awaiting_collateral, re-asking via conversational handler');
+            // In-memory route through the active branch so generateBrokerResponse runs and
+            // re-asks via the high-LTV prompt block. DB status stays 'awaiting_collateral',
+            // so the next broker reply is parsed for collateral disposition again. The
+            // active-branch LTV gate WILL re-write status='awaiting_collateral' to the DB
+            // (idempotent — already that value).
+            existingDeal.status = 'active';
+          }
         }
       }
 
