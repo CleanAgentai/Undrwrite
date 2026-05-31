@@ -18,7 +18,7 @@
     },
     "workflow_state": {
       "value": "active",
-      "rationale": "F2.AC exit path: collateral_offered=true transitions back to active per R10-C-1 inverse."
+      "rationale": "F2.AC exit path: collateral_offered=true transitions back to active per R10-C-1 inverse. HARNESS-CAPTURE NOTE (Bug-7 diagnosis, 2026-05-31): Vienna processes this correctly — parseCollateralReply='yes' → status flipped to 'active' + collateral_offered=true PERSISTED (confirmed via direct Supabase read: dbStatus=active, collateral_offered=true). The replay capture layer mis-read 'awaiting_collateral' (capture-ordering: read around the in-flight status update). The broker-silence is the legitimate Group-L behavior (deal proceeds; admin gets the prelim). B07 is a canonical harness-capture-ordering example, NOT a Vienna defect — same class as E05. The assertion must read terminal-stable state."
     }
   },
   "layer2_semantic": {

@@ -1,24 +1,25 @@
 {
   "scenario_id": "E05",
-  "spec_version": "1.0",
-  "rationale_source": "F1.LA × F2.AC at LTV>85% per Layer 3 #14 recommended-default (b) escalate for manual exception review",
+  "spec_version": "1.1",
+  "rationale_source": "F1.LA × FRANCO-Q2 (>90% canonical-LTV auto-decline). Supersedes the pre-Q2 Layer-3 #14 (b)-escalate placeholder: Franco ratified Q2 (>90% auto-decline), so a 92% standalone refi DECLINES, it does not escalate for manual exception review.",
   "layer1_structural": {
     "canonical_map": {
-      "requested_loan_amount": { "value": 846000, "source_classification": "broker_initial_intent", "rationale": "F1.LA." }
+      "requested_loan_amount": { "value": 846000, "source_classification": "broker_initial_intent", "rationale": "F1.LA. Standalone canonical LTV = 846000/920000 = 92% (broker also states 92% explicitly)." }
     },
     "gate_states": {
-      "extreme_ltv_detected": { "value": true, "rationale": "LTV 92% > 85% ceiling. Per Layer 3 #14 (b): escalate to admin for manual exception review." },
-      "high_ltv_detected": { "value": true, "rationale": "LTV >80% also triggers F4.HL." }
+      "q2_auto_decline": { "value": true, "rationale": "FRANCO-Q2: canonical standalone LTV 92% > 90% → auto-decline (webhook.js:3342 _q2AutoDecline branch). Fires BEFORE the 80-90 escalation branch." },
+      "high_ltv_detected": { "value": true, "rationale": "LTV >80% (subsumed by the >90 auto-decline)." }
     },
-    "workflow_state": { "value": "awaiting_collateral", "rationale": "F2.AC activated; admin manual review required per Layer 3 #14 (b)." }
+    "workflow_state": {
+      "value": "rejected",
+      "rationale": "FRANCO-Q2 >90% auto-decline sets status=rejected (webhook.js:3361). HARNESS-CAPTURE NOTE (Bug-7 diagnosis, 2026-05-31): the replay capture layer can read deal.status PRE-finalization (it observed 'active' mid-update) — the PERSISTED status is correctly 'rejected' (confirmed via direct Supabase read, stable at 0/15/30s). The assertion must read terminal-stable state; E05 is a canonical harness-capture-ordering example, NOT a Vienna defect. See PHASE-8-METHODOLOGY.md §d + POST-CLOSURE-FOLLOWUP-ITEMS.md."
+    }
   },
   "layer2_semantic": {
     "outbound_emails": [
-      { "kind": "admin_exception_review_notification", "expected_fire": true, "must_include": [{ "pattern": "92%|over.{0,10}85%|exception|manual review", "rationale": "Admin exception flag per Layer 3 #14 (b)." }] },
-      { "kind": "broker_facing_collateral_ask", "expected_fire": true, "rationale": "F4.HL still fires for collateral discussion." }
+      { "kind": "broker_facing_q2_decline", "expected_fire": true, "must_include": [{ "pattern": "unable to proceed|exceeds.{0,20}(maximum|90)|loan-to-value", "rationale": "FRANCO-Q2 polite broker decline (generateRejectionEmail, 'exceeds our maximum threshold of 90%')." }] },
+      { "kind": "admin_auto_decline_alert", "expected_fire": true, "must_include": [{ "pattern": "Auto-Decline|over 90|FRANCO-Q2", "rationale": "Admin alert on Q2 auto-decline (webhook.js:3362-3367)." }] }
     ]
   },
-  "layer3_pending_decisions": [
-    { "reference": "DECISIONS-NEEDED.md#14", "scope": "LTV >85% policy: decline vs escalate vs F4.HL-with-extra-collateral", "phase5_placeholder": "spec assumes (b) escalate for manual exception review" }
-  ]
+  "layer3_pending_decisions": []
 }
