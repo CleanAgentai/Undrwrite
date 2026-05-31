@@ -37,8 +37,8 @@
     "delayFromPreviousMs": 86400000,
     "kind": "broker_followup",
     "postmark": {
-      "From": "admin@privatemortgagelink.com",
-      "FromName": "Admin",
+      "From": "franco@privatemortgagelink.com",
+      "FromName": "Franco Maione",
       "To": "info@privatemortgagelink.com",
       "Subject": "Re: Refinance — David Okafor (high LTV)",
       "TextBody": "Vienna,\n\nManual exception approved on this file — proceed without collateral. Borrower business income supports the LTV via DSCR override. Treat as standard prelim path going forward.\n\nAdmin",
