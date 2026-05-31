@@ -1,9 +1,12 @@
 # Phase 8 — Bulletproof Program Methodology Writeup
 
-**Status: ~70% finalized (DRAFT).** Sections marked `PENDING FRANCO CLOSURE` await
-Franco's clustered-text answers (Q1-escalation-rate, C01, Q8-detection keep/revert) +
-the final Track-4 LIST-C bulk + the post-closure verification re-run. Everything else is
-empirically settled as of staging `792775c` (2026-05-30).
+**Status: FINAL (2026-05-31).** Program complete. All Franco clustered-text items
+dispositioned, the final verification re-run + Bug-7/Bug-3-EXT-2 fix-cycle landed and
+deploy-verified, all `PENDING` markers replaced with closure content. Final tallies:
+**7 confirmed Vienna bugs** (Bug-1…Bug-5 + Bug-7; Bug-6 is the lineage-preserved
+ruled-out E05 harness-capture candidate), **11 Franco product rules** (Q1…Q11),
+**6 over-scoping confirmations** (~15:1 aggregate). Empirically settled as of staging
+`fb19a3f` (2026-05-31).
 
 The Bulletproof program hardened Vienna (Claude-driven mortgage-underwriting email agent for
 Private Mortgage Link) via a synthetic 124/125-scenario test matrix. This writeup is the
@@ -84,9 +87,58 @@ distinguish a real bug from a rare transient.
   (extractFromLoanApplication doesn't extract existing-balance); adding it flips A33 → Q1
   escalation → part (b) held on Franco's Q1-rate answer.
 
+### Bug-3-EXTENSION-2 — private-2nd-mortgage extraction (BATCH 15, commit `f6bb964`)
+- **Surfacing:** the BATCH-15 final-re-run bucket-(d) probe — E09 (private 2nd mortgage) reached
+  `active` while its deterministic FRANCO-Q2 combined-LTV gate stayed silent; the LLM safety-net
+  declined the deal. Investigation: E09's realistic private-lender phrasing escaped canonical
+  extraction (`Private 2nd request: $425,000` lacks the word "mortgage" Bug-3 A requires;
+  `2nd mortgage` numeric-ordinal prose missed by the spelled-out-only position fallback).
+- **Fix (BOUNDED, Option A):** two strict-superset extensions — loan label `Private Nth [mortgage]
+  [request]: $X` (lowest-priority alternation, FP-guarded on `private`+ordinal+`$`) and
+  numeric-ordinal position prose (behind/existing reference guard). Harness `bug3-ext2` 21/21.
+- **Deliberately NOT extended:** broker-prose `existing_first_mortgage_balance`. Architectural
+  conservatism — broker-stated existing balances are UNTRUSTED for a decision-driving auto-decline
+  (document-verified only, same as PV-from-loan-app). E09's combined-decline correctly DEFERS to a
+  doc-verified balance; the LLM safety net handles the broker-prose case.
+- **Positive side-effect (observed in Phase-5 spot-check):** E09 moved from
+  "LLM-saved-via-decline-while-the-deterministic-gate-stayed-silent" to "deterministic gate
+  correctly escalates (94.7% combined) matching its ORIGINAL spec `awaiting_collateral`." Closing
+  the extraction gap produced behavior-correctness alignment, not just safety-net redundancy —
+  the Bug-3 family's load-bearing contribution: surfacing extraction gaps closes the
+  LLM-dependency-on-safety-net failure mode by enabling correct deterministic firing.
+
+### Bug-7 — correction-intent routing from awaiting_collateral (BATCH 15, commit `54c45e6`)
+- **Surfacing:** the BATCH-15 bucket-(d) diagnosis (3 candidates B07/C06/F14 → 1 genuine).
+  In `awaiting_collateral`, the broker-reply branch routed EVERY reply through `parseCollateralReply`
+  (yes/no/ambiguous), so a broker CORRECTION (F14 purchase→refi) was mis-classified and LOST —
+  Vienna stayed re-asking for collateral. Continuation works from active/under_review (A01) but not
+  `awaiting_collateral`.
+- **Fix (COMPOSED against existing machinery):** (1) strict-superset extension to the R10-G classifier
+  `parseBrokerCorrections` — optional "actually" in the transaction_type patterns (F14 "this is
+  actually a refinance"); (2) a correction-intent PRE-CHECK in the `awaiting_collateral` branch that
+  reuses `parseBrokerCorrections` (not duplicated) and routes a detected correction to the active
+  branch, where R10-G applies it + the LTV/escalation gate re-evaluates. Genuine collateral replies
+  fall through unchanged. Harness `bug7` 12/12; verified firing via staging logs.
+- **Bug-7 + Bug-4 compose correctly (F14):** the correction routes (transaction_type→refinance), then
+  the deal CORRECTLY re-escalates because Bug-4's canonical-incompleteness guard fires on still-null
+  property value (89.6%, no value to recompute). F14's original spec `active` was optimistic — a
+  correction that doesn't resolve the gate inputs correctly re-triggers the gate. Spec realigned to
+  `awaiting_collateral`.
+- **Build-time scope expansion (honest record):** the diagnosis sized Bug-7 as a "single-function
+  pre-check." Building it revealed parseBrokerCorrections did not detect F14's "actually"-phrasing
+  (needed the classifier extension) and that the fix must route to the active branch's R10-G + gate
+  re-eval rather than apply the correction inline (the correction email alone lacks accumulated
+  canonical — value/loan live in event[0]). Final shape composes against existing R10-G + the
+  active-branch recompute infrastructure — sibling discipline to Q11's composition against existing
+  roster integration. **Demonstrates the architecture's compositional health:** late-stage
+  defense-in-depth fixes leverage already-built infrastructure rather than introducing new patterns.
+
 ### The layer progression
-`Bug-1 gate-INPUT → Bug-2 PARSE → Bug-3 EXTRACTION → Bug-4 escalation-GATE state → Bug-5
-prelim-RENDER state`. Bugs surfaced at increasingly-specific layers precisely because each
+`Bug-1 gate-INPUT → Bug-2 PARSE → Bug-3 EXTRACTION (+ Bug-3-EXT/EXT-2 widenings) → Bug-4
+escalation-GATE state → Bug-5 prelim-RENDER state → Bug-7 continuation-state routing`. The
+correction-intent routing (Bug-7) sits at the multi-turn CONTINUATION layer — a state-machine
+transition gap, the deepest layer surfaced, reachable only once every prior layer's observability
+was in place. Bugs surfaced at increasingly-specific layers precisely because each
 prior layer's observability had to be in place first: you cannot see an escalation-gate
 incompleteness (Bug-4) until the extraction that feeds the gate works (Bug-3), and you cannot
 see a parse gap (Bug-2) until the gate consumes the right input (Bug-1). Bug-4 and Bug-5 are the
@@ -95,12 +147,17 @@ separate Bug-N, by design.
 
 ### Revert paths (each Bug-N is independently revertible)
 The Bug-N namespace was chosen for clean revert lineage. Each bug is a **single discrete commit**
-(d749b1e / 2238952 / d76e02b + b427906 / 988badd / 792775c) with its **own dedicated harness** —
-reverting any one Bug-N restores the prior behavior without touching the others, and its harness
-is the regression gate confirming the revert. The defense-in-depth bugs (1, 4, 5) revert to a
-*less-conservative* prior state (the asymmetric-risk direction is additive); the extraction bugs
-(2, 3) revert to *narrower* matching (strict-superset widening, so a revert is a strict subset).
-No Bug-N entangles another's revert.
+(d749b1e / 2238952 / d76e02b + b427906 / 988badd / 792775c / f6bb964 [Bug-3-EXT-2] / 54c45e6 [Bug-7])
+with its **own dedicated harness** — reverting any one Bug-N restores the prior behavior without
+touching the others, and its harness is the regression gate confirming the revert. The
+defense-in-depth bugs (1, 4, 5) revert to a *less-conservative* prior state (the asymmetric-risk
+direction is additive); the extraction bugs (2, 3, 3-EXT, 3-EXT-2) revert to *narrower* matching
+(strict-superset widening, so a revert is a strict subset); Bug-7 reverts to the prior
+collateral-only awaiting_collateral handling (its classifier extension + pre-check are additive).
+No Bug-N entangles another's revert. **Lineage note:** Bug-6 is intentionally PRESERVED as a
+ruled-out slot — it was the E05 status-transition candidate, dismissed as a harness capture-ordering
+artifact (persisted status was correctly `rejected`); keeping the number records the honest
+discovery sequence (Bug-7 is the next *genuine* bug).
 
 ---
 
@@ -136,6 +193,28 @@ No Bug-N entangles another's revert.
 - **Spec-refinement vs test-fudging:** update tests to a *corrected ratified rule*, never relax
   them to match buggy code. *Canonical:* the r11b Q1 refinement (57→58) tied to e8975be; LIST-C
   at matrix scale tied to specific Q[N]/Bug commits.
+- **Build-time stop-and-surface:** diagnose-then-build sometimes reveals complexity the diagnosis
+  couldn't see; STOP and surface the scope-expansion rather than push through with under-scoped
+  code. *Canonical:* BATCH-15 — Bug-3-EXT-2's architectural fork (broker-prose existing-balance =
+  matrix-wide risk vs doc-sourced conservatism) and Bug-7's scope-expansion (single-function
+  pre-check → classifier extension + active-branch R10-G routing) were both surfaced mid-build
+  for a decision, not silently absorbed.
+- **Harness-capture vs Vienna-behavior distinction:** capture-ordering / harness-mechanism
+  artifacts MIMIC real Vienna bugs; read the persisted DB value (or trace the harness path)
+  before classifying as Vienna behavior. *Canonical:* E05 (persisted `rejected`, captured
+  `active`) + B07 (persisted `active`+collateral_offered, captured `awaiting_collateral`) +
+  C06 (replay From-tagging breaks admin match → admin email mis-routed as broker). Three of the
+  nine BATCH-15 bucket-(d) candidates were this class — none a Vienna defect.
+- **Architectural conservatism as a Discipline-2 refinement:** "make gates observable" does NOT
+  mean "every gate must fire on every scenario." A gate that correctly does NOT fire (because its
+  inputs require verification absent in the scenario) is valid behavior; verify the not-firing is
+  *principled* (conservatism) not *accidental* (regex gap). *Canonical:* E09 — the Q2 combined
+  auto-decline correctly defers to a doc-verified existing balance; the LLM safety net handles the
+  broker-prose case. Observable-AND-correctly-not-firing.
+- **Reuse existing infrastructure for late-stage fixes:** mature-architecture fixes should compose
+  against already-built machinery, not introduce new patterns — a signal of compositional health.
+  *Canonical:* Bug-7 composes against R10-G `parseBrokerCorrections` + the active-branch recompute;
+  Q11 composes against the existing qualification-roster integration.
 
 ---
 
@@ -155,6 +234,12 @@ verification-surface, suppression-state, known residuals), not bugs.
   because the gate was unobservable). LIST-C 85→~10 over-count.
 - BATCH-13: clean matrix re-run; Bug-3 × Q1 composition surfaced at scale (41/125 escalation).
 - BATCH-14: **Bug-4 + Bug-5** surfaced (canonical-state-incompleteness, two layers).
+- BATCH-15: final verification re-run (results-4) → bucket-(d) probe of 9 routing-divergence
+  candidates → **Bug-7** (correction-intent routing from awaiting_collateral) + **Bug-3-EXT-2**
+  (private-2nd extraction). The other 7 candidates dissolved: F25 known-residual, F02 batch-timing
+  artifact, A16/F19 defensible-or-spec-stale, E05/B07 harness-capture-ordering, C06 fixture+harness
+  limitation. The diagnose-before-classify discipline (direct DB reads, staging-log traces) held:
+  9 candidates → 1 genuine new Vienna bug (+ 1 extraction widening).
 
 **The arc as a narrative, not a date list:** the program's first six batches (8→9→9b→11)
 *tightened the net* — re-running, classifying, and proving that every cluster mismatch reduced to
@@ -165,14 +250,17 @@ what made the *real* bugs visible. The moment observability crossed a threshold 
 gate-observation work — the first genuine independent bug (Bug-3) fell out immediately; the
 clean dataset it enabled (BATCH-13) exposed the composition effect; and the repeated-isolation
 discipline that dataset demanded (BATCH-14) surfaced the two canonical-incompleteness transients
-(Bug-4, Bug-5). The cluster-triage's job was to *exhaust the entanglements so the residue was
-real* — and the residue was exactly five bugs.
+(Bug-4, Bug-5); and the final verification re-run (BATCH-15) surfaced the deepest layer — the
+continuation-state routing gap (Bug-7) — plus an extraction widening (Bug-3-EXT-2). The
+cluster-triage's job was to *exhaust the entanglements so the residue was real* — and across the
+whole program the residue was exactly **seven bugs**, surfaced at progressively deeper layers as
+observability accumulated.
 
-**Final tally — confirmed Vienna bugs:** Bug-1, Bug-2 (Phase 6) + Bug-3/3-EXT, Bug-4, Bug-5
-(Discipline-1/2-surfaced). **NOT** the dozens of cluster-triage hypotheses — those were
-entanglements, exactly as predicted. `PENDING FRANCO CLOSURE: Track-4 LIST-C bulk may confirm
-the 41-escalation set as spec-aligned (not bugs) once Q1-rate is ratified; final Bug-N count
-expected to stay at 5.`
+**Final tally — confirmed Vienna bugs (7):** Bug-1, Bug-2 (Phase 6) + Bug-3/3-EXT/3-EXT-2, Bug-4,
+Bug-5, **Bug-7** (Discipline-1/2-surfaced across BATCH-12→15). **NOT** the dozens of cluster-triage
+hypotheses — those were entanglements, exactly as predicted. Bug-6 is the lineage-preserved
+ruled-out slot (E05 harness-capture candidate). Track-4 (the 41-escalation set) resolved as
+spec-aligned (not bugs) once Q1-rate was ratified — the held bulk dissolved (§g 5th confirmation).
 
 **Methodology validation:** cluster-triage's diagnostic accuracy was high (the entanglement
 predictions held); investigation discipline added small marginal cost relative to the
@@ -194,6 +282,26 @@ have been far costlier than the probe time).
 - **assertEngine broker_correction mechanism (`0c826b9`):** harness-side verification-surface
   closure — broker_correction render fields verify via PRIMARY (Q10 notice + ack) / SECONDARY
   (extracted_data), not a non-existent Snapshot re-render. Harness 6/6; A01/A13 → eval=PASS.
+- **Harness deal-status capture-ordering (BATCH-15, FOLLOWUP-3):** the `finalDealState` re-fetch
+  can read `deal.status` around an in-flight finalization update, capturing a transient. E05
+  (persisted `rejected`, captured `active`) + B07 (persisted `active`+collateral_offered, captured
+  `awaiting_collateral`) were both this — confirmed via direct Supabase reads (stable at 0/15/30s).
+  The fix is a harness extension (poll-for-status-stable before recording, mirroring
+  `pollForStableOutbound`); deal-state reads should wait for status-stable, not capture around the
+  finalization write. Logged for follow-up engagement (not a Vienna defect).
+- **Replay admin-reply From-tagging (BATCH-15, C06, FOLLOWUP-5):** the replay tags every event's
+  From with `+runTag` (`replay.js:165`) for deal correlation; for an ADMIN event this breaks
+  Vienna's `ADMIN_EMAIL` match (`franco@…` → `franco+bulletproof-C06-RUNID@…`), so the admin
+  override is routed through the broker path. Q9 admin-override is correctly implemented; the
+  replay machinery cannot exercise admin-reply flows. The unit harness IS the verification ceiling
+  for admin-reply behavior. Follow-up: tag-bypass for `ADMIN_EMAIL` local-part in the replay.
+- **AI-backend-unavailable (BATCH-15 credit incident, FOLLOWUP-1):** during the final re-run the
+  staging Anthropic account exhausted its credit balance; the AI pipeline 402-failed → 0 outbound
+  captured in 123/125, deal records created but `extracted_data` empty. NOT a Vienna/code/harness
+  defect (routing was actually MORE correct: 97/125). Credits restored (+ auto-reload); the run was
+  redone clean. Surfaced a production-resilience gap (silent orphan-deal on AI failure — FOLLOWUP-1)
+  and a kill-process-verification operational lesson (FOLLOWUP-6: a `kill` on the launch pid missed
+  the reparented worker — verify via `pgrep`). The credit-starved dataset is archived as evidence.
 
 ---
 
@@ -208,6 +316,10 @@ VERIFICATION-CEILING-Q5-Q8-FLOW-GATED.md).
   (correct) → unit-ceiling for the escalating subset.
 - **A33 part (b):** known rare transient at the value layer; BUG-5 fixed the existence
   (deterministic), value-determinism deferred (Franco-entangled). Documented, not silently open.
+- **Q9 admin-override (C06, BATCH-15):** the replay tags admin From with `+runTag`, so admin-reply
+  flows route through the broker path and cannot run end-to-end via the harness (FOLLOWUP-5). Q9 is
+  correctly implemented (webhook.js:2495); the **unit harness IS the ceiling** for admin-reply
+  behavior until the replay gains an admin tag-bypass.
 - **Principle:** never synthesize an unreachable test surface or relax a correct gate to make a
   feature observable. Document the ceiling; the unit harness verifies the logic.
 
@@ -239,11 +351,17 @@ PHASE8-CARRY-FORWARDS.md.)
 | Operational | Infra-debt "closed" only when re-measured at full scale | cleanup 43%→100% |
 | Architecture | Redesign within the existing architecture, not retrofit it to the design | Q3/Q4 Option B roster |
 | Multi-turn | Vienna continuation is purely thread-based — replay MUST thread | Phase-1 threading `db0ccb6` |
+| Multi-turn | Continuation routing is state-specific — a correction must be recognized per-state | Bug-7 awaiting_collateral routing `54c45e6` |
 | Render vs gate | Harmless-for-gate ≠ harmless-for-rendered | state-LTV / Snapshot capture |
+| Build discipline | Stop-and-surface scope-expansion at build time, don't push under-scoped | Bug-3-EXT-2 fork / Bug-7 expansion |
+| Harness vs Vienna | Read persisted DB / trace harness path before classifying as Vienna behavior | E05/B07 capture-ordering, C06 From-tagging |
+| Discipline-2 refinement | Observable-AND-correctly-not-firing is valid; verify principled vs accidental | E09 conservative existing-balance |
+| Compositional health | Late-stage fixes compose against existing infrastructure, not new patterns | Bug-7 ↔ R10-G, Q11 ↔ roster |
+| Operational | Verify a kill hit the real worker (`pgrep`), not just the launch pid | BATCH-15 partial-run waste |
 
 ---
 
-## g) The over-scoping discipline — four empirical confirmations
+## g) The over-scoping discipline — six empirical confirmations
 
 The ratio between raw-flagged count and genuine-need is the empirical methodology baseline. The
 **delta** (raw − genuine) is the work the over-scoping discipline *prevented* — edits that, had
@@ -255,11 +373,19 @@ they been made mechanically, would have churned correct fixtures or matched bugg
 | Annotation-fidelity | 17 | 1 (A03) | 16 | 17:1 | BATCH 7 |
 | B3 sequencing | 1 | 0 | 1 | — (all noise) | BATCH 7 |
 | LIST-C stale-spec | ~85 | ~10 | ~75 | ~8.5:1 | BATCH 12 |
+| Track-4 dissolution | 41 | 0 | 41 | — (all spec-aligned) | closure |
+| BATCH-15 bucket-(d) | 9 | 1 (Bug-7) | 8 | ~9:1 | BATCH 15 |
 
-Across the four, **~194 raw-flagged → ~16 genuine** (≈12:1 aggregate). The delta is not "work
+Across the six, **~260 raw-flagged → ~17 genuine** (≈15:1 aggregate). The delta is not "work
 saved" in a convenience sense — each avoided edit was a *correctness hazard* (a fixture churned
 to match a transient, or a test relaxed toward buggy code). The discipline's value is the
-false-edit risk it removed, measured in the ~178 edits not made.
+false-edit risk it removed. The two closing confirmations sharpen the pattern at both extremes:
+**Track-4 (41→0)** — an entire held bulk dissolved to zero genuine bugs once Franco's Q1-rate
+refinement landed (the 41 escalating refis were spec-aligned, never bugs); **BATCH-15 (9→1)** —
+nine routing-divergence candidates in the final re-run reduced to a single genuine new bug, the
+rest dissolving to harness artifacts (3), defensible-or-stale specs (2), a fixture issue (1), a
+batch-timing artifact (1), and a known residual (1). At every scale — 107, 85, 41, 9 — the
+genuine work decomposed far below the raw count.
 
 **Lesson:** at every scale where bulk-editing is contemplated, the genuine work decomposes far
 below the raw count. Per-category grep against actual ENCODED behavior + the rule fingerprint
@@ -269,9 +395,11 @@ BEFORE bulk-editing. Never bulk-edit to hit a count target.
 
 ## CLOSURE — Franco's clustered-text answers (2026-05-30)
 
-All three product-design items dispositioned. Confirmed Vienna **bug count stays at 5**
-(Bug-1…Bug-5) — the closure items were a rule REFINEMENT, an already-correct routing, and a
-NEW product rule, none of them a bug.
+All three product-design items dispositioned. The closure items themselves were a rule REFINEMENT,
+an already-correct routing, and a NEW product rule — none a bug (the bug count moved at the final
+re-run, not here). The subsequent **final verification re-run (BATCH-15)** then surfaced the last
+two findings, bringing the confirmed Vienna **bug count to 7** (Bug-1…Bug-5 + Bug-7; Bug-6 = the
+ruled-out E05 harness-capture candidate).
 
 - **Q1-escalation-rate → FRANCO-Q1-RULE-REFINEMENT (`915193c`).** Franco: "refinance and pay-out
   the existing mortgage are definitionally the same thing." A confident refinance + lender match
@@ -300,7 +428,26 @@ Q1–Q10 (Franco-9 + Q10) + **Q11** (registered-owner). Q1 carries the only post
 **refinement** (Q1-RULE-REFINEMENT) — the lineage records both the original rule and its sharper
 re-articulation, per the spec-refinement-at-the-rule-layer discipline.
 
-### Remaining → the final verification re-run (Porter-sequenced, Franco heads-up)
-The one open mechanical step: a final full-matrix re-run on the closure bundle, confirming the
-~41-set routes to active (carve-out) except genuinely-high-standalone (>80) refis + 2nd-mortgages,
-and the Bug-N tally holds at 5. Not a decision — a confirmation.
+### BATCH-15 — the final verification re-run (COMPLETE, 2026-05-31)
+The final full-matrix re-run on the closure bundle ran twice. The first run was **invalidated** by
+an Anthropic credit exhaustion mid-run (AI pipeline 402-failed; archived as evidence — FOLLOWUP-1).
+After credits were restored (+ auto-reload), the **valid re-run** (`results-4.json`, staging
+`8de2dad`) completed: 125 scenarios, capture healthy (0 zero-outbound, 100% cleanup, 3.42h),
+routing-correct 102/125 (up from baseline 76 — the Q1 refinement confirmed working). The
+bucket-(d) probe of 9 routing-divergence candidates was isolated diagnose-before-classify:
+
+- **F25** known narrative-fab residual; **F02** batch-timing artifact (isolation matched expected);
+  **A16/F19** defensible-or-spec-stale; **E05/B07** harness capture-ordering (persisted DB correct —
+  §d, FOLLOWUP-3); **C06** fixture sender + replay From-tagging (Q9 correct, not replayable —
+  FOLLOWUP-5); **F14** → the one genuine new bug (**Bug-7**).
+- Bug-3-EXT-2 closed the E09 extraction gap (positive side-effect: E09 now escalates correctly).
+
+Fix-cycle: Bug-7 + Bug-3-EXT-2 + C06 fixture + E05/B07 spec-realign committed, bundled, deployed
+(`fb19a3f`), and Phase-5 targeted spot-checks confirmed: Bug-7 firing (staging-log-verified),
+B07/F08/A01 unregressed, E09 escalates, 0 leaked. The 41-set routes to active (carve-out) except
+genuinely-high-standalone refis + 2nd-mortgages (F08 85% escalates), as predicted.
+
+**Program-complete.** Confirmed Vienna bug tally: **7** (Bug-1…Bug-5 + Bug-7; Bug-6 ruled-out).
+Franco product rules: **11** (Q1…Q11). Five+ POST-CLOSURE follow-up items logged
+(POST-CLOSURE-FOLLOWUP-ITEMS.md) — all UX / test-infrastructure / operational, none a Vienna
+decision-logic defect. Strict-zero on Vienna correctness: hit.

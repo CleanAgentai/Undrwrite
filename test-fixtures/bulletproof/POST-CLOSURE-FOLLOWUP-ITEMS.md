@@ -100,3 +100,68 @@ before classifying as Vienna behavior") catches them, but the harness should not
 
 **Code location:** `test-fixtures/bulletproof/lib/replay.js` final-state capture (the
 `finalDealState` re-fetch after the final `pollForStableOutbound`).
+
+---
+
+## FOLLOWUP-4 — Correction-acknowledgment outbound (F14-shape silent re-escalation)
+
+**Status:** OPEN (UX-layer; not a routing defect)
+
+**What:** When a broker correction is processed from `awaiting_collateral` (Bug-7 routing) and
+the deal **re-escalates** because the gate inputs still aren't fully resolved (e.g. F14: refi
+correction applied, but property value still null → Bug-4 re-escalates at 89.6%), **no outbound
+acknowledges the correction**. The broker sees the original collateral-ask and then silence —
+nothing confirming the correction was received or that the deal is now classified differently.
+
+**Why it matters:** Bug-7 fixes the *routing* (the correction is recognized + applied via R10-G,
+no longer mis-classified as a collateral disposition) — verified via staging logs. But the
+broker-facing experience is unchanged (silent). This is architecturally separate from the
+routing fix.
+
+**Candidate remediation:** an acknowledgment outbound on awaiting_collateral correction-processed
+cases — e.g. *"We received your correction; the deal is now classified as a refinance. We still
+need [missing info, e.g. property value] to proceed."* UX-layer addition; composes on top of the
+Bug-7 routing without changing it.
+
+---
+
+## FOLLOWUP-5 — Admin-reply replay capability (C06)
+
+**Status:** OPEN (test-infrastructure; not a Vienna concern)
+
+**What:** The replay machinery tags **every** event's From header with `+runTag` subaddressing
+for deal correlation (`test-fixtures/bulletproof/lib/replay.js:165`, `tagBrokerEmail`). For an
+ADMIN event this breaks Vienna's admin-email match: `franco@privatemortgagelink.com` →
+`franco+bulletproof-C06-RUNID@privatemortgagelink.com` ≠ `config.adminEmail`. Combined with
+subject-pattern-based admin-reply detection (`isAdminReplySubject`), the replay routes admin
+emails through the **broker** path, so **admin-reply flows (Q9 admin-override) cannot be
+exercised end-to-end** via the harness.
+
+**Demonstration:** C06 (admin manual-exception override on an awaiting_collateral deal) → the
+tagged `franco+…` sender is not recognized as admin → broker path → `parseCollateralReply='no'` →
+`ltv_escalated`, instead of the Q9 path (→ `active` + `collateral_override_at`). Q9 is correctly
+implemented (webhook.js:2495 FRANCO-PREDICTED-Q9); the harness can't replay it. **The unit
+harness IS the verification ceiling for admin-reply behavior.**
+
+**Candidate remediation:** preserve original admin emails in the replay (or a deterministic
+tag-bypass for `From` addresses matching `ADMIN_EMAIL`'s local-part), so admin-reply scenarios
+run end-to-end. C06 is the canonical case requiring this.
+
+---
+
+## FOLLOWUP-6 — Kill-process-verification operational discipline
+
+**Status:** OPEN (operator discipline; process note)
+
+**What:** During the BATCH-15 final re-run setup, a `kill <pid>` on a `nohup`-launched node
+batch hit the subshell, not the reparented node child — the leaner run survived and ran to
+67/125 (~2h / ~$17 of model spend) before dying, **unpersisted**. The kill was assumed effective
+(`kill -0` reported the subshell gone) but the actual worker kept running.
+
+**Why it matters:** wasted compute + a confusing background state. The lesson: **verify a kill by
+checking the actual worker (`pgrep -f <script>`), not just `kill -0 <pid>`** on the launch pid;
+and prefer the harness's tracked background mechanism over bare `nohup &` for long runs so the
+process is addressable.
+
+**Candidate remediation:** wrap long batch runs in a launcher that records and kills the real
+worker PID, or use the harness `run_in_background` tracking (addressable + auto-notified).

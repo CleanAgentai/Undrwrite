@@ -5,11 +5,18 @@
 
 ---
 
-# FINAL STATE — consolidated index (2026-05-30, staging 792775c)
+# FINAL STATE — consolidated index (2026-05-31, staging fb19a3f) — PROGRAM COMPLETE
 
 The historical Layer-3 ledger is preserved below; this index is the current decision status.
 
-## OPEN — NONE. All clustered-text items dispositioned by Franco (2026-05-30).
+## OPEN — NONE. All product-design items dispositioned; program complete.
+
+**BATCH-15 final-re-run closure (2026-05-31):** the final verification re-run surfaced two
+technical findings (Bug-7 correction-routing, Bug-3-EXT-2 private-2nd extraction) + spec/harness
+items (E05/F14 spec realignment, C06 fixture + replay-tagging limitation) — **none required a new
+product-design decision**. Bug-7/Bug-3-EXT-2 are bugs (fixed, deployed `fb19a3f`); E09's
+deterministic-gate-defers-to-doc-verified-balance reaffirms the existing architectural conservatism
+(no new decision). All resolved or logged as out-of-charter follow-ups (POST-CLOSURE-FOLLOWUP-ITEMS.md).
 
 ## RESOLVED by Franco's clustered-text answers (2026-05-30)
 - **Q1-escalation-rate → FRANCO-Q1-RULE-REFINEMENT** (`915193c`). Franco: "If it is a refinance,

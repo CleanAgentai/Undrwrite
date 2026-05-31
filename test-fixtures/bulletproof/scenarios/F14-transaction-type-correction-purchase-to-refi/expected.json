@@ -1,19 +1,20 @@
 {
   "scenario_id": "F14",
-  "spec_version": "1.0",
-  "rationale_source": "R11-A inferential canonical field × broker_correction × workflow-state transition (purchase→refi changes doc requirements)",
+  "spec_version": "1.1",
+  "rationale_source": "R11-A inferential canonical field × broker_correction × BUG-7 correction-from-awaiting_collateral routing × BUG-4 canonical-incompleteness guard",
   "layer1_structural": {
     "canonical_map": {
-      "transaction_type": { "value": "refinance", "source_classification": "broker_correction", "rationale": "F1.TT broker_correction wins per R11-A inferential field hierarchy." }
+      "transaction_type": { "value": "refinance", "source_classification": "broker_correction", "rationale": "F1.TT broker_correction wins per R11-A inferential field hierarchy. BUG-7 (BATCH 15): the correction now ROUTES correctly from awaiting_collateral (parseBrokerCorrections detects transaction_type=refinance → routed to active-branch R10-G), instead of being mis-classified as a collateral disposition." }
     },
     "gate_states": {
-      "mortgage_statement_now_required": { "value": true, "rationale": "ASSERTION-2: After TT correction to refinance, mortgage_statement requirement activates (was N/A for purchase per E06)." }
+      "mortgage_statement_now_required": { "value": true, "rationale": "ASSERTION-2: After TT correction to refinance, mortgage_statement requirement activates (was N/A for purchase per E06)." },
+      "bug4_canonical_incompleteness_reescalate": { "value": true, "rationale": "BUG-4: property value is null from ALL sources (event[0] purchase + event[1] correction both omit it). The refi correction does not resolve the missing gate input, so the high-LTV escalation correctly re-fires (LLM ltv 89.6% > 80%)." }
     },
-    "workflow_state": { "value": "active", "rationale": "Standard refi after correction." }
+    "workflow_state": { "value": "awaiting_collateral", "rationale": "SPEC REALIGNMENT (BATCH 15, BUG-7): the original spec 'active' was optimistic — it assumed the purchase→refi correction resolves everything. Reality: Bug-7 routes the correction correctly (transaction_type→refinance via R10-G), but the deal then re-escalates because Bug-4's canonical-incompleteness guard correctly fires on still-null property value (89.6% standalone, no value to recompute). Corrections that don't resolve the underlying gate inputs correctly re-trigger the gate — Bug-7 + Bug-4 composing as designed. Verified via staging logs (BUG-7 pre-check fires: 'correction-intent in awaiting_collateral (transaction_type=refinance) — routing to active-branch')." }
   },
   "layer2_semantic": {
     "outbound_emails": [
-      { "kind": "preliminary_review_admin", "expected_fire": true, "must_include": [{ "pattern": "[Rr]efinance", "rationale": "ASSERTION-1: F1.TT broker_correction." }, { "pattern": "Royal Bank|RBC|mortgage statement|payout", "rationale": "ASSERTION-2: refi-specific content (existing-mortgage context) now applicable post-correction." }] }
+      { "kind": "high_ltv_collateral_ask", "expected_fire": true, "must_include": [{ "pattern": "collateral|LTV|80%", "rationale": "Re-escalation collateral-ask (89.6% high LTV, value still missing). FOLLOWUP: a correction-acknowledgment outbound is a documented UX gap (POST-CLOSURE-FOLLOWUP-ITEMS.md)." }] }
     ]
   },
   "layer3_pending_decisions": []

@@ -1,48 +1,43 @@
-# Bulletproof — Remaining Work (consolidated 2026-05-30)
+# Bulletproof — Remaining Work → PROGRAM COMPLETE (2026-05-31)
 
-Staging LIVE on `792775c`. Consolidated by status. Methodology + carry-forwards:
-PHASE-8-METHODOLOGY.md. Decisions ledger: DECISIONS-NEEDED.md.
-
----
-
-## OPEN — gated on Franco's clustered-text response (4)
-
-1. **Track 4 — Q1-escalation cat-1 LIST-C bulk.** The 41/125 awaiting_collateral scenarios
-   (15 newly escalating from Bug-3 × Q1 composition; BATCH-13). Bulk expected.json update to
-   workflow=awaiting_collateral + collateral-ask is HELD on Franco's **Q1-escalation-rate
-   disposition** (is escalating ~1/3 of deals for "no explicit payout language" intended, or
-   too aggressive?). Newly-escalating set: A06 A17 D06 D08 E02 E03 E28 E29 F01 F06 F07 F12 F14
-   F23 F24. Expected outcome: spec-aligned (not bugs) → Bug-N count unchanged.
-2. **C01 — admin-intake disposition.** Should Vienna set `admin_controlled=true` when
-   `FromName="Admin"` sends the initial intake? The one product-design item never in Franco-9.
-3. **Q8-detection-extension keep-or-revert.** FRANCO-PREDICTED-Q8-EXTENSION (`75d91e2`) broadened
-   joint detection to the name-conjunction; revertible if Franco prefers credit-bureau-doc-
-   confirmation-only. Pairs with the original Q8 (`b20b7cd`).
-4. **A33 part (b) — canonical loan_app existing-balance extraction.** BUG-5 (`792775c`) fixed
-   A33's silent-omission (deterministic "Existing 1st Mortgage Balance: TBD" row, 3/3). The $410k
-   VALUE is canonical-absent (extractFromLoanApplication doesn't extract existing-balance).
-   Adding it upgrades the row TBD→$410k BUT flips A33 active→Q1-escalation (refi, no confirmed
-   payout → combined 110%). **Entangled with item 1** — unblocks once Q1-rate is ratified.
+Staging LIVE on `fb19a3f`. **All work items closed.** Methodology + carry-forwards:
+PHASE-8-METHODOLOGY.md. Decisions ledger: DECISIONS-NEEDED.md. Follow-up engagement items
+(out of charter): POST-CLOSURE-FOLLOWUP-ITEMS.md.
 
 ---
 
-## POST-CLOSURE (1)
+## OPEN — NONE. Program complete.
 
-5. **Final full-matrix verification re-run** (post-Track-4). Confirms: the 41-escalation set is
-   spec-aligned (eval=PASS, not bugs); Q9 admin-override (C06) + any remaining multi-turn
-   features live-fire-verify on the clean dataset; final Bug-N tally; cleanup 100% holds. This is
-   the closure batch's single deploy + re-run event.
+All previously-open items closed at the Franco closure + the BATCH-15 final verification re-run:
+1. **Track 4 — Q1-escalation LIST-C bulk → DISSOLVED.** Franco's Q1-rate refinement (`915193c`)
+   routed the 41-set back to active; the held bulk was spec-aligned, not bugs (§g 5th confirmation,
+   41→0). No bulk rewrite needed.
+2. **C01 — admin-intake → ALREADY-CORRECT** (`bec178f`). Code already processed admin-intake
+   normally; only the spec was stale.
+3. **Q8-detection-extension → KEEP** (`75d91e2`, Franco-ratified). No revert.
+4. **A33 part (b) → DEFERRED-DOCUMENTED.** Broker-prose existing-balance extraction conflicts with
+   documented conservatism; BUG-5's visible-TBD prevents silent omission. (Same architectural
+   conservatism reaffirmed by Bug-3-EXT-2's E09 scoping — broker-prose existing-balance is untrusted
+   for decision-driving gates.)
+5. **Final full-matrix verification re-run → COMPLETE** (BATCH-15, `results-4.json`). Valid run on
+   `8de2dad` (after a credit-starved invalid run, archived). Bucket-(d) probe (9→1) surfaced Bug-7
+   + Bug-3-EXT-2; fix-cycle deployed (`fb19a3f`) + Phase-5 spot-check-verified. Cleanup 100%.
 
 ---
 
 ## COMPLETED (with commit + final disposition)
 
-### Confirmed Vienna bugs (defense-in-depth / extraction)
+### Confirmed Vienna bugs (defense-in-depth / extraction / continuation) — 7 total
 - **Bug-1** gate-input hygiene — `d749b1e` (Phase 6). Gates consume canonical LTV.
 - **Bug-2** magnitude-suffix money — `2238952` (Phase 6). Centralized normalizeMoney + sanity bound.
-- **Bug-3** broker-shorthand extraction — `d76e02b`; **EXT** `b427906` (2nd-mortgage + Pattern-A FP).
+- **Bug-3** broker-shorthand extraction — `d76e02b`; **EXT** `b427906`; **EXT-2** `f6bb964`
+  (BATCH-15: private-2nd "Private Nth: $X" loan label + numeric-ordinal position).
 - **Bug-4** escalation-gate canonical-incompleteness guard — `988badd`.
 - **Bug-5** prelim-render existing-balance determinism — `792775c`.
+- **Bug-6** — RULED OUT (lineage-preserved): E05 status-transition candidate dismissed as a harness
+  capture-ordering artifact (persisted status correctly `rejected`).
+- **Bug-7** correction-intent routing from awaiting_collateral — `54c45e6` (BATCH-15). Composes
+  against R10-G `parseBrokerCorrections` + active-branch gate re-eval.
 
 ### Franco-9 + follow-ups (all shipped + live)
 - Q1 `e8975be`, Q2 `8b65776`, Q3 `6a67e59`, Q4 `a35947a`, Q5 `1255199`, Q6 `21ccbe4`,
