@@ -362,11 +362,24 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
       const v = bodyPosM[1].toLowerCase();
       out.mortgage_position = (v === 'first' || v === '1st') ? '1st' : (v === 'second' || v === '2nd') ? '2nd' : '3rd';
     } else {
-      // Fallback: "second mortgage on" / "first mortgage for" prose.
+      // Fallback: "second mortgage on" / "first mortgage for" prose (spelled-out;
+      // pre-Bug-3-EXT-2 — unchanged).
       const proseM = emailBody.match(/\b(first|second|third)\s+mortgage\b/i);
       if (proseM) {
         const v = proseM[1].toLowerCase();
         out.mortgage_position = (v === 'first') ? '1st' : (v === 'second') ? '2nd' : '3rd';
+      } else {
+        // Bug-3-EXTENSION-2 (BATCH 15): numeric-ordinal prose "2nd mortgage"
+        // (E09 "Private 2nd mortgage submission"). STRICT SUPERSET — fires only
+        // when the spelled-out form above did NOT match. FP guard: skip occurrences
+        // that REFERENCE an existing mortgage ("behind [the] existing 1st mortgage",
+        // "existing 2nd mortgage") rather than the deal's own position; take the
+        // first non-reference ordinal-mortgage occurrence.
+        const numM = [...emailBody.matchAll(/\b(behind\s+(?:the\s+)?(?:existing\s+)?|(?:the\s+)?existing\s+)?(1st|2nd|3rd)\s+mortgage\b/gi)].find(m => !m[1]);
+        if (numM) {
+          const v = numM[2].toLowerCase();
+          out.mortgage_position = (v === '1st') ? '1st' : (v === '2nd') ? '2nd' : '3rd';
+        }
       }
     }
   }
@@ -513,6 +526,14 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
     // guard excludes "$X behind on payments". Captures the NEW 2nd amount, not the
     // existing balance (which is "$X balance", no "behind" adjacency).
     '\\$\\s*' + MONEY + '\\s*\\)?\\s+behind\\s+(?:the\\s+)?(?:existing|first|1st)\\b',
+    // Bug-3-EXTENSION-2 G (BATCH 15): private-lender Nth-mortgage formal-label
+    // phrasing "Private Nth [mortgage] [request]: $X" (E09 "Private 2nd request:
+    // $425,000"). Differs from Bug-3 A (which REQUIRES the word "mortgage" between
+    // ordinal and request) — private-lender shorthand often drops "mortgage"
+    // ("Private 2nd request:", "Private 2nd:"). FP-guarded: REQUIRES the "private"
+    // qualifier + an ordinal + a "$" anchor, so generic "private ... request: $X"
+    // (no ordinal) cannot match. Captures the NEW private 2nd amount.
+    '\\bprivate\\s+(?:first|second|third|fourth|1st|2nd|3rd|4th)(?:\\s+mortgage)?(?:\\s+request(?:ed)?)?\\s*:?\\s*\\$\\s*' + MONEY,
   ];
   for (const p of loanPatterns) {
     const m = emailBody.match(new RegExp(p, 'i'));

@@ -190,3 +190,20 @@ broker-facing C.5 ack ($295k) preserved (Q10 additive). Non-material false-posit
 unit-verified (21/21); clean post-prelim-non-material PRODUCTION probe deferred to BATCH 13
 (A38 reached 'active' not prelim, so didn't exercise the branch). BATCH 11 COMPLETE: Phases
 1-4 + Q10 implemented, unit-verified, deployed, Q10 end-to-end-verified.
+
+---
+## Discipline-2 REFINEMENT — observable-AND-correctly-not-firing (BATCH 15, 2026-05-31)
+Discipline-2 "make gates observable" does NOT mean "every gate must fire on every scenario."
+Some gates correctly DON'T fire when their inputs require document verification not present in
+the scenario. Observable-AND-correctly-not-firing is valid behavior; the discipline is to
+verify the not-firing is **principled** (architectural conservatism) rather than **accidental**
+(regex gap). E09 is the canonical example: the deterministic FRANCO-Q2 >90% combined-LTV
+auto-decline correctly does NOT fire because the existing-first-mortgage balance is broker-PROSE-
+stated, and broker-prose existing balances are intentionally UNTRUSTED for a decision-driving
+auto-decline (document-verified only — same conservatism as PV-from-loan-app). The LLM safety-net
+layer declines the deal; broker outcome is correct. This refines the Bug-3 family scoping:
+**extend extraction where the field's broker-prose source is trusted (loan amount, position);
+do NOT extend where architectural conservatism applies (existing-balance for auto-decline).**
+Bug-3-EXT-2 added the trusted-source fields (Private-Nth loan label, numeric-ordinal position)
+and deliberately did NOT add broker-prose existing-first — the gate's not-firing on E09 is the
+architecture working as designed, not a defense-in-depth gap.
