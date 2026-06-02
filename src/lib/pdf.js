@@ -1,3 +1,5 @@
+const { countFilledDataFields } = require('./pdfFormExtract');
+
 const MIN_TEXT_LENGTH = 200;
 
 // Detect if pdf-parse text looks like a form template (only field labels, no real content)
@@ -57,12 +59,38 @@ const buildContentBlocks = async (attachments, savedDocs = []) => {
           }
         }
       } else if (preExtractedText && isFormLikeText(preExtractedText)) {
-        // Form-like PDF (AcroForm) — pdf-parse only gets template labels, not filled values
-        console.log(`  [PDF] ${att.Name}: form-like document detected, sending as base64 for full field reading`);
-        blocks.push({
-          type: 'document',
-          source: { type: 'base64', media_type: 'application/pdf', data: att.Content },
-        });
+        // Form-like PDF (AcroForm) — pdf-parse only gets template labels, not filled values.
+        //
+        // BLANK-FORM GATE (Bug-1 fix): before sending the PDF to the vision model "for
+        // full field reading", verify the form actually carries FILLED data. The form-like
+        // signal alone cannot tell a FILLED AcroForm (labels via pdf-parse, real values in
+        // the form metadata) from a BLANK template (labels only, no values) — both look
+        // form-like. Sending a BLANK form to vision makes the model hallucinate plausible
+        // values for the empty fields (fabricated existing-mortgage balance, loan purpose,
+        // etc.). Gate: form-like text AND zero filled DATA fields → do NOT send to the
+        // model; emit an explicit "unfilled form" text block so extraction treats the
+        // application as not-yet-provided and escalates (E15 empty-intake behavior).
+        // FAIL OPEN: any read error (dataFields < 0) routes to the unchanged vision path,
+        // so a genuine submission is never blocked.
+        let fill = { dataFields: -1 };
+        try {
+          fill = await countFilledDataFields(Buffer.from(att.Content, 'base64'));
+        } catch (e) {
+          console.log(`  [PDF] ${att.Name}: blank-form check threw (${e.message}) — failing open to vision path`);
+        }
+        if (fill.dataFields === 0) {
+          console.log(`  [PDF] ${att.Name}: UNFILLED form detected (0 filled data fields) — NOT sending to model; emitting unfilled-form signal (no field reading)`);
+          blocks.push({
+            type: 'text',
+            text: `=== Document: ${att.Name} ===\n[UNFILLED FORM — this document was submitted as a blank/empty form template with NO field values entered (only blank labels and unchecked boxes). Do NOT infer, extract, read, or fabricate ANY values (loan amount, mortgage balances, loan purpose, names, dates, employer, or any figure) from it. Treat this application/form as NOT PROVIDED — the broker must submit a completed version.]`,
+          });
+        } else {
+          console.log(`  [PDF] ${att.Name}: form-like document with ${fill.dataFields >= 0 ? fill.dataFields : 'unknown'} filled field(s), sending as base64 for full field reading`);
+          blocks.push({
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: att.Content },
+          });
+        }
       } else {
         // Scanned/image PDF — send as base64 for Claude to read visually
         console.log(`  [PDF] ${att.Name}: scanned document, sending as base64`);

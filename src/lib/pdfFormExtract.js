@@ -77,4 +77,76 @@ const extractFormValues = async (buffer) => {
   return `\n\n=== Form fields and annotations (extracted via pdf-lib) ===\n${lines.join('\n')}`;
 };
 
-module.exports = { extractFormValues };
+// BLANK-FORM GATE (Bug-1 fix): count the FILLED DATA fields in an AcroForm — i.e. the
+// fields that carry real submitted content. Checkboxes are EXCLUDED: a blank template
+// emits "No" for every unchecked box, so counting them would mask a blank form. A form
+// with zero filled data fields is an UNFILLED template — it must NOT be sent to the
+// vision model for "field reading" (the model hallucinates plausible values for the
+// empty fields). Returns { dataFields, hasAcroForm }. On any read error, returns
+// { dataFields: -1 } so callers can FAIL OPEN (treat as filled / send to vision) and
+// never block a genuine submission.
+const countFilledDataFields = async (buffer) => {
+  let pdfDoc;
+  try {
+    pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  } catch (err) {
+    return { dataFields: -1, hasAcroForm: false }; // unreadable → fail open
+  }
+
+  let dataFields = 0;
+  let hasAcroForm = false;
+
+  // AcroForm text / dropdown / radio / option-list values (NOT checkboxes)
+  try {
+    const form = pdfDoc.getForm();
+    const fields = form.getFields();
+    hasAcroForm = fields.length > 0;
+    for (const field of fields) {
+      let value = null;
+      if (field instanceof PDFTextField) {
+        value = field.getText();
+      } else if (field instanceof PDFRadioGroup) {
+        value = field.getSelected();
+      } else if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
+        const selected = field.getSelected();
+        value = Array.isArray(selected) ? selected.join(', ') : selected;
+      }
+      // PDFCheckBox intentionally excluded — see docblock.
+      if (value !== null && value !== undefined && String(value).trim().length > 0) {
+        dataFields++;
+      }
+    }
+  } catch (err) {
+    // no form / read error — continue to annotations
+  }
+
+  // Non-empty annotation contents also count as real submitted data
+  try {
+    const pages = pdfDoc.getPages();
+    pages.forEach((page) => {
+      const annots = page.node.Annots && page.node.Annots();
+      if (!annots) return;
+      const arr = annots.asArray ? annots.asArray() : [];
+      arr.forEach((annotRef) => {
+        try {
+          const annot = pdfDoc.context.lookup(annotRef);
+          if (!annot || typeof annot.get !== 'function') return;
+          const contentsObj = annot.get(require('pdf-lib').PDFName.of('Contents'));
+          if (!contentsObj) return;
+          const text = typeof contentsObj.decodeText === 'function'
+            ? contentsObj.decodeText()
+            : (contentsObj.value && contentsObj.value()) || String(contentsObj);
+          if (text && String(text).trim().length > 0) dataFields++;
+        } catch (innerErr) {
+          // skip malformed annotation
+        }
+      });
+    });
+  } catch (err) {
+    // no annotations / read error
+  }
+
+  return { dataFields, hasAcroForm };
+};
+
+module.exports = { extractFormValues, countFilledDataFields };
