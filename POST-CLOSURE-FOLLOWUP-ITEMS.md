@@ -39,3 +39,29 @@ field state has not changed since the last notification (deduplicate on
 consecutive identical deltas).
 
 **Disposition:** out-of-scope for Bug 3b; small fix for next maintenance pass.
+
+---
+
+## OBS-3 — Active-deal admin-DECLINE greetings still read From-header broker_name
+**Surfaced by:** Fix 2 (decline-email greeting, commit `e08ca96`)
+**Severity:** low (greeting personalization only)
+
+Fix 2 threaded the body-signature broker name (`parseBrokerFirstName(email.textBody)`)
+into the **initial-submission** auto-decline greeting (webhook.js ~3362) — the path
+Franco actually hit ("Hi there!" → "Hi Victoria!"). The **active-deal admin-DECLINE**
+paths (webhook.js ~2482 / ~2543 / ~2652, where an admin replies "DECLINE" on an
+existing deal) still resolve the greeting from `selectGreetingFirstName(existingDeal.
+extracted_data)`, i.e. the stored `broker_name`. When that stored value carries the
+From-header / proxy name (e.g. Franco testing via his own address → "Franco Maione"),
+those declines would still fall back to a generic greeting. The triggering message on
+those paths is the **admin's** reply (no broker body in scope), so the body-signature
+threading used in Fix 2 doesn't directly apply.
+
+**Likely fix (deeper, extraction-layer):** prefer the broker's body-signature name
+over the From header at `broker_name` EXTRACTION time (processInitialEmail), so the
+stored `broker_name` is correct for every downstream consumer (all decline/escalation/
+follow-up greetings), not just the path threaded tonight. Anti-collision against the
+admin first name is retained.
+
+**Disposition:** out of scope for tonight (the body-signature threading covers the path
+Franco is testing); deeper extraction-layer fix for a future maintenance pass.
