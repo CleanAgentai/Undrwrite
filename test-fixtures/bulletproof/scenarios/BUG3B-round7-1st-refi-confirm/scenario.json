@@ -1,0 +1,11 @@
+{
+  "id": "BUG3B",
+  "name": "round7-1st-refi-confirm",
+  "group": "BUG",
+  "dimensions": { "BC": "S", "TT": "R", "LTV": "50-75", "DQ": "CL", "DS": "CM", "BW": "ML", "CV": "3", "GE": "AB" },
+  "families": ["F1.MP", "F1.EL", "F1.FB"],
+  "bugHint": "BUG3B",
+  "anchor": "Bug3b staging replay — mortgage-position re-flagging loop (Round 7/8). R10-E source-hierarchy filter + R11-A refinance carve-out + Bug-1 blank-form gate are all deployed.",
+  "rationale": "Reproduces the Round-7 failure shape end-to-end on staging (covers the LLM-prose path the offline engine test cannot reach). Clean 1st-refi: explicit 'first mortgage refinance — refinancing existing RBC mortgage' in email + loan_application; real filled RBC mortgage statement ($225k balance, lender-match present); 60% standalone LTV ($390k/$650k). Two bare confirmation turns ('yes, it's a first mortgage' / 'correct, 1st position') that do NOT re-state refinance language. OBSERVE: does any turn (a) flag a mortgage_position discrepancy in the deterministic engine, or (b) emit 'email shows 1st, inferred 2nd' (or equivalent) in the LLM-generated outbound prose, or (c) fail to clear on broker confirmation. Reproduces → scope a targeted fix to the confirmed path. Does not reproduce → close Bug3b as resolved-by-R10E+Bug1.",
+  "notes": "Three-event sequence. Replay-only diagnostic fixture (not part of the bulletproof assertion matrix)."
+}

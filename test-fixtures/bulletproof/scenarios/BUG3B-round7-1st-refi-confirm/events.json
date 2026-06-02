@@ -1,0 +1,69 @@
+[
+  {
+    "sequenceIndex": 0,
+    "delayFromPreviousMs": 0,
+    "kind": "broker_intake",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Refinance — Marcus Webb",
+      "TextBody": "Hi Franco,\n\nNew file for Marcus Webb. This is a first mortgage refinance — we're refinancing the existing Royal Bank of Canada mortgage into a new first-position mortgage. Property at 1142 Tory Road NW, Edmonton, AB T6R 2K8.\n\nLoan amount $390,000. Property value $650,000 (appraisal attached), so we're at 60% LTV. Existing Royal Bank of Canada balance is about $225k — payout statement attached.\n\nFull package attached.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "BUG3B-intake@bulletproof.synthetic",
+      "Date": "2026-05-15T10:00:00.000Z",
+      "Headers": [],
+      "Attachments": [
+        {
+          "Name": "LoanApplication_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/loan_application.pdf"
+        },
+        {
+          "Name": "MortgageStatement_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/mortgage_statement.pdf"
+        },
+        {
+          "Name": "Appraisal_Webb.pdf",
+          "ContentType": "application/pdf",
+          "documentRef": "documents/appraisal.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "sequenceIndex": 1,
+    "delayFromPreviousMs": 3600000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Refinance — Marcus Webb",
+      "TextBody": "Hi Franco,\n\nYes, it's a first mortgage. Confirming first position on title.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "BUG3B-confirm1@bulletproof.synthetic",
+      "Date": "2026-05-15T14:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  },
+  {
+    "sequenceIndex": 2,
+    "delayFromPreviousMs": 3600000,
+    "kind": "broker_correction",
+    "postmark": {
+      "From": "jferrara@ferrarafinancial.example.com",
+      "FromName": "Jonathan Ferrara",
+      "To": "info@privatemortgagelink.com",
+      "Subject": "Re: Refinance — Marcus Webb",
+      "TextBody": "Hi Franco,\n\nCorrect, 1st position. Nothing subordinate on title. Let me know if you need anything else from me.\n\nJonathan Ferrara\nFerrara Financial\nLic. #M16002271",
+      "HtmlBody": null,
+      "MessageID": "BUG3B-confirm2@bulletproof.synthetic",
+      "Date": "2026-05-15T16:00:00.000Z",
+      "Headers": [],
+      "Attachments": []
+    }
+  }
+]
