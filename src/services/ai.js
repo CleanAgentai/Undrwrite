@@ -121,7 +121,7 @@ LTV:
 HIGH LTV (over 80%) — when the broker has stated an LTV above 80%, OR when our calculation shows above 80%:
 - Acknowledge directly that the LTV is outside our usual 80% threshold.
 - Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
-- Do NOT reject the deal. Do NOT promise it will be approved either. Just flag the threshold and ask about collateral options. Franco will make the final call.
+- Do NOT reject the deal. Do NOT promise it will be approved either. Just flag the threshold and ask about collateral options. Our underwriting team will make the final call.
 - CRITICAL — DO NOT REQUEST DOCUMENTS IN A HIGH-LTV INITIAL EMAIL: when LTV > 80%, the ONLY ask in this email is the collateral question. Do NOT include a document request list in this email — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. The full doc package will be requested LATER, after the lender decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 
 IDENTITY CLASH MINIMAL-ASK BLOCK (TASK-1 SELF-SUFFICIENT — S15 hardened, Anna Bergstrom 2026-05-18 production bug):
@@ -1574,6 +1574,42 @@ const ROUTING_LEAK_PATTERNS = [
     replace: '' },
 ];
 
+// BUG-2 Layer 2 (defense): admin-as-decision-maker leak guard for broker-facing prose.
+// Keyed to the ADMIN_EMAIL first name (config.adminEmail) — NOT a literal "Franco" — so it
+// tracks the configured underwriter. Catches ONLY the actor / decision-maker leak shapes
+// ("<admin> will/can make the call|decision", "<admin> decides", "<admin>'s call|decision|
+// review|approval", "<admin> reviewed|approved|decided|passed|declined|rejected") and redacts
+// to role language. It deliberately does NOT match the intentional broker-facing uses of the
+// admin's name — "book a call with <admin>", "schedule with <admin>", "contact <admin> at
+// <email>", "use <admin>'s template" — none of which fit these patterns. enforceNoRoutingLeak
+// runs ONLY on broker-facing outbound; admin-facing prelims never call it, so the underwriter
+// is still named in admin-facing prose. Appended to ROUTING_LEAK_PATTERNS so the existing
+// sweep applies it.
+(() => {
+  // typeof guard: production loads ai.js with `config` defined (top of file); the
+  // routing-leak harness eval-extracts this region without config in scope — guard so
+  // it no-ops there instead of throwing (the harness doesn't exercise these patterns).
+  const cfg = (typeof config !== 'undefined' && config) ? config : {};
+  const local = (cfg.adminEmail || '').split('@')[0] || '';
+  const adminFirstName = (local.split(/[._+-]/)[0] || '').trim();
+  if (!adminFirstName) return;
+  const F = adminFirstName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  ROUTING_LEAK_PATTERNS.push(
+    { match: new RegExp(`\\b${F}\\s+(?:will|can|'?ll)\\s+make\\s+(?:the|that|a)\\s+(?:final\\s+)?(?:call|decision)\\b`, 'gi'),
+      replace: 'our underwriting team will make the final call' },
+    { match: new RegExp(`\\b${F}\\s+(?:will|can|'?ll)\\s+decide\\b`, 'gi'),
+      replace: 'our underwriting team will decide' },
+    { match: new RegExp(`\\b${F}\\s+decides\\b`, 'gi'),
+      replace: 'our underwriting team decides' },
+    { match: new RegExp(`\\b${F}\\s+makes\\s+(?:that|the|a)\\s+(?:final\\s+)?(?:call|decision)\\b`, 'gi'),
+      replace: 'our underwriting team makes that call' },
+    { match: new RegExp(`\\b${F}'?s\\s+((?:final\\s+)?(?:call|decision|review|approval))\\b`, 'gi'),
+      replace: "our underwriting team's $1" },
+    { match: new RegExp(`\\b${F}\\s+(reviewed|approved|decided|passed|declined|rejected)\\b`, 'gi'),
+      replace: 'our underwriting team $1' },
+  );
+})();
+
 const enforceNoRoutingLeak = (html) => {
   if (!html || typeof html !== 'string') return { swept: html, sweptAny: false };
   let out = html;
@@ -2355,7 +2391,7 @@ ${existingSummary?.collateral_offered
   : `- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
 - CRITICAL — DO NOT REQUEST DOCUMENTS IN THIS EMAIL: when LTV > 80% and additional collateral has NOT yet been confirmed by the broker, the ONLY ask in this email is the collateral question. Do NOT include a document request list — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. Document requests will follow LATER, after Franco decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 - If the broker's most recent reply was unclear about collateral (questions back, "let me check", off-topic), re-ask the collateral question in different words — give concrete examples of what would qualify (a second piece of real estate, an investment property, a vacation home with equity). Stay firm: the doc package is NOT requested until collateral is resolved.`}
-- Do NOT reject the deal, do NOT promise it will be approved. Just flag the threshold and ${existingSummary?.collateral_offered ? 'proceed with normal intake.' : 'ask about collateral options.'} Franco will make the final call.
+- Do NOT reject the deal, do NOT promise it will be approved. Just flag the threshold and ${existingSummary?.collateral_offered ? 'proceed with normal intake.' : 'ask about collateral options.'} Our underwriting team will make the final call.
 
 CRITICAL — NO INVENTED CONTACT INFO:
 - Do NOT share any phone number for Franco, Private Mortgage Link, or any other contact. You do not have a phone number — do not guess, invent, or fabricate one.
@@ -3900,7 +3936,7 @@ YOUR ENTIRE TASK — write ONLY the collateral-question email, nothing else:
 - Greet the broker with: "${greeting}"
 - Acknowledge directly that the LTV ${ltvDescriptor} is outside our usual 80% threshold. Be honest about it — no hedging, no "approximately" qualifiers if the LTV is given.
 - Ask the SINGLE question: is there any additional collateral the borrower can include to bring the combined LTV down? Give concrete examples: "a second piece of real estate, an investment property, a vacation home with equity, or another asset that could be used as security." Mention that this may give us room to work with the deal.
-- Close with one sentence acknowledging that Franco will make the final call on whether the deal is workable. Sign off as Vienna / Private Mortgage Link.
+- Close with one sentence acknowledging that our underwriting team will make the final call on whether the deal is workable. Sign off as Vienna / Private Mortgage Link.
 
 That is the ENTIRE email. Three short paragraphs at most: greeting + LTV acknowledgment, collateral question with examples, signoff.
 
