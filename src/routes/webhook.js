@@ -3359,12 +3359,22 @@ No deal record was created. If this was a legitimate broker submission, please r
           // admin alert + status rejected). Fires BEFORE the 80-90 escalation
           // branch (>90 declines, it does not escalate). Uses canonical LTV.
           console.log(`Initial submission >90% LTV auto-decline (FRANCO-Q2): ${_q2AutoDecline.basis} — declining + alerting admin`);
-          const _q2Greeting = selectGreetingFirstName({
-            broker_name: dealSummary?.broker_name,
-            sender_name: dealSummary?.sender_name,
-            borrower_name: dealSummary?.borrower_name,
-            sender_type: dealSummary?.sender_type,
-          });
+          // Fix 2 (Franco 2026-06-02): prefer the body-signature broker name (the
+          // same source the welcome + collateral paths use via parseBrokerFirstName)
+          // over the From-header-derived broker_name/sender_name. When the sender's
+          // From name collides with the admin's first name (Franco testing via his
+          // own address, or a brokerage shared inbox), selectGreetingFirstName
+          // returns null → generic "Hi there!" — even though the true broker (e.g.
+          // "Victoria Ashworth") is in the email body signature. Body preferred;
+          // From-derived as fallback. Empirical: 5d1479ea declined with "Hi there!"
+          // while the collateral-ask one message earlier correctly said "Hi Victoria!".
+          const _q2Greeting = aiService.parseBrokerFirstName(email.textBody)
+            || selectGreetingFirstName({
+              broker_name: dealSummary?.broker_name,
+              sender_name: dealSummary?.sender_name,
+              borrower_name: dealSummary?.borrower_name,
+              sender_type: dealSummary?.sender_type,
+            });
           const _q2DeclineEmail = await aiService.generateRejectionEmail(
             dealSummary,
             'the loan-to-value ratio exceeds our maximum threshold of 90%',
