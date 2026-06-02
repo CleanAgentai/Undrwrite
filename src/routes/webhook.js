@@ -487,7 +487,20 @@ const computeStillMissingForReview = ({ deal, summary, classifications, identity
   const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
   const hasExitStrategy = !!(summary?.exit_strategy && String(summary.exit_strategy).trim());
 
-  if (!ltv) items.push('a current property appraisal (so we can confirm LTV)');
+  // (2026-06-02) Removed an orphaned `if (!ltv) items.push('a current property
+  // appraisal ...')` line: `ltv` was never a parameter of this function (the
+  // signature has always been { deal, summary, classifications,
+  // identityClashUnresolved, highLtv }), so the line threw ReferenceError when
+  // reached, crashing the active-deal continuation response generation (Franco
+  // 87a83f83 — silence after broker clarification). It was newly reachable
+  // because the Option-C refinance fix stopped this scenario from auto-declining
+  // at the initial gate. The line was incoherent either way: if `ltv` had merely
+  // existed-as-undefined, `!ltv` is always true → it would push "need appraisal"
+  // on EVERY active-continuation deal regardless of an appraisal being present.
+  // Appraisal presence is already covered by the hasReviewableDoc check below
+  // (which includes 'appraisal'); LTV-computability is gated separately at the
+  // prelim/escalation layer (canonical market_value + shouldEscalateOnIncomplete-
+  // Canonical). No working behavior is lost.
   if (!hasReviewableDoc) items.push('a reviewable document (current appraisal, NOA, or proof of income)');
   if (!hasExitStrategy) items.push('exit strategy (how the borrower plans to repay or refinance out at maturity)');
 
