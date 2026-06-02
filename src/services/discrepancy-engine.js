@@ -391,20 +391,54 @@ const computeCombinedLtv = (canonicalMap) => {
       },
     };
   };
-  // BRANCH 1 (FRANCO-Q1, 2026-05-28; PRESERVED as defense-in-depth): explicit payout
-  // language (payoutConfirmed=true) + lender match → carve-out fires.
-  if (refinanceTuple && refinanceTuple.payoutConfirmed === true && refinanceLenderMatches) {
-    return carveOutStandalone('refinance-paid-out');
-  }
-  // BRANCH 2 (FRANCO-Q1-RULE-REFINEMENT, Franco 2026-05-30): a CONFIDENTLY-determined
-  // refinance implies payout — "refinance and pay-out the existing mortgage are the same
-  // thing." So refinance + refinanceConfident + lender match → carve-out fires WITHOUT
-  // requiring explicit payout language. SUPERSEDES the BATCH-13 "require explicit payout"
-  // reading (which escalated ~33% of deals). The confidence guards (ambiguous refi-vs-
-  // purchase, explicit non-payout contraindication) are tagged at extraction and leave
-  // those cases on the additive path below → escalate for clarification (the safety case).
-  if (refinanceTuple && refinanceTuple.refinanceConfident === true && refinanceLenderMatches) {
-    return carveOutStandalone('refinance-implicit-payout');
+  // OPTION C (FRANCO 2026-06-02): a plainly-stated first-mortgage refinance
+  // (payoutConfirmed OR refinanceConfident) pays out the existing 1st, so
+  // combined LTV = standalone — Franco's rule: "when a file is a first mortgage
+  // refinance, calculate LTV as new loan amount / appraised value only."
+  //
+  // Lender match is NO LONGER a firing precondition. The prior R11-B-3 design
+  // (BRANCH 1/2) required refinanceLenderMatches, which sourced the payout
+  // lender ONLY from a mortgage_statement document. Clean refinances whose
+  // existing-mortgage lender was sourced from credit_report / loan_application /
+  // pnw_statement (no payout statement attached) could NEVER match → under-fired
+  // → additive math → false auto-decline. Empirical anchor — Franco 5d1479ea:
+  // email "first mortgage refinance — refinancing existing RBC mortgage" ($408k),
+  // existing $318k Scotiabank sourced from credit_report, NO mortgage_statement →
+  // refinanceLenderMatches=false → ($318k + $408k)/$680k = 106.8% additive →
+  // wrong >90% auto-decline. Correct: $408k/$680k = 60%.
+  //
+  // SOURCE-CONFLICT DISCIPLINE (survey lesson — flag contradictions, don't
+  // cross-wire them into decision math): a lender disagreement between the
+  // refinance phrase and the existing-mortgage document is a REAL contradiction,
+  // but it is surfaced as a SEPARATE admin discrepancy flag
+  // (computeExistingLenderRefinanceMismatch → injectExistingLenderMismatchCallout
+  // at the prelim), NOT by stacking additive leverage into an auto-decline.
+  // Compute the correct refinance LTV AND tell the admin the sources disagree.
+  //
+  // SAFETY (true-2nd / ambiguous): the carve-out still requires
+  // transaction_type='refinance' AND (payoutConfirmed OR refinanceConfident).
+  // Ambiguous refi-vs-purchase and explicit non-payout contraindications are
+  // tagged at extraction (refinanceConfident=false) and stay on the additive
+  // path below. A genuine 2nd mortgage is transaction_type='2nd_mortgage' (not
+  // refinance) or carries a broker_correction '2nd' position — neither reaches
+  // here. refinanceLenderMatches is retained ONLY as the existing_source label
+  // selector (transparency), no longer as a firing gate. This change is
+  // MONOTONIC: every case that fired under R11-B-3 still fires.
+  //
+  // PAYOUT-CAPABILITY GUARD (requested >= existing): a refinance pays out the
+  // existing 1st, so the new loan must be able to cover it. If requested <
+  // existing the new loan structurally CANNOT be a simple first-mortgage-payout
+  // refinance — it reads as a 2nd mortgage (e.g. $100k new behind a $342k
+  // existing 1st) or an incoherent submission — so fall through to additive (the
+  // safe escalate-for-review direction). This scopes Option C to genuine
+  // first-mortgage refinances and preserves R10-E true-2nd detection for the
+  // new<existing case. Empirical: 5d1479ea $408k>=$318k ✓; A14 $460k>=$380k ✓;
+  // A26 $280k>=$225k ✓; true-2nd $100k<$342k → additive ✓.
+  if (refinanceTuple && (refinanceTuple.payoutConfirmed === true || refinanceTuple.refinanceConfident === true)
+    && requested >= existing) {
+    return carveOutStandalone(refinanceLenderMatches
+      ? (refinanceTuple.payoutConfirmed === true ? 'refinance-paid-out' : 'refinance-implicit-payout')
+      : 'refinance-stated-lender-unconfirmed');
   }
 
   const combined = ((existing + requested) / market) * 100;
@@ -418,6 +452,46 @@ const computeCombinedLtv = (canonicalMap) => {
       existing_lender: balances[0].lender_canonical || null,
     },
   };
+};
+
+// OPTION C (FRANCO 2026-06-02): existing-mortgage lender / refinance-phrase
+// mismatch detector. Sibling to the computeCombinedLtv carve-out: when a
+// first-mortgage refinance fires the carve-out (LTV computed as standalone) but
+// the lender named in the broker's refinance phrase does NOT match the
+// borrower's existing-mortgage lender from the documents (ANY doc source —
+// mortgage_statement, loan_application, pnw_statement, credit_report), that is a
+// real source contradiction worth surfacing to the admin — WITHOUT blocking the
+// carve-out (the LTV is correct; the admin is told which existing mortgage the
+// sources disagree on). Composes the existing JS-INJECTED ADMIN RISK FACTORS
+// CALLOUT flagging pattern (renders via ai.injectExistingLenderMismatchCallout),
+// not new flag mechanics. Returns { phrase_lender, document_lenders:[{lender,
+// source}] } or null when there is nothing to flag (no refinance, carve-out not
+// firing, no named phrase lender, no doc lender, or they match).
+const computeExistingLenderRefinanceMismatch = (canonicalMap) => {
+  const txnTypeTuples = (canonicalMap && canonicalMap.transaction_type) || [];
+  const refinanceTuple = txnTypeTuples.find(t => t && t.value === 'refinance');
+  if (!refinanceTuple) return null;
+  // Only flag when the carve-out actually fires (plainly-stated refinance).
+  if (!(refinanceTuple.payoutConfirmed === true || refinanceTuple.refinanceConfident === true)) return null;
+  const phraseLender = cf.findLenderInWindow(refinanceTuple.rawPhrase || '');
+  if (!phraseLender) return null; // no lender named in the refinance phrase → nothing to compare
+  const docLenderTuples = ((canonicalMap && canonicalMap.existing_first_mortgage_lender) || [])
+    .filter(t => t && t.value)
+    .map(t => ({ lender: cf.normalizeLender(t.value), source: t.classification || t.source || 'document' }))
+    .filter(t => t.lender);
+  if (docLenderTuples.length === 0) return null; // no existing-mortgage doc lender → nothing to compare
+  const docCanon = new Set(docLenderTuples.map(t => t.lender));
+  if (docCanon.has(phraseLender)) return null; // a doc lender matches the phrase lender → no contradiction
+  // Dedup by lender+source for a clean callout.
+  const seen = new Set();
+  const document_lenders = [];
+  for (const t of docLenderTuples) {
+    const key = `${t.lender}|${t.source}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    document_lenders.push(t);
+  }
+  return { phrase_lender: phraseLender, document_lenders };
 };
 
 // Canonical STANDALONE LTV (new loan / market value) from the resolved-winner
@@ -1302,6 +1376,7 @@ module.exports = {
   // tuples) or normalized-address string (legacy backward-compat).
   deriveCityProvince,
   computeCombinedLtv,
+  computeExistingLenderRefinanceMismatch,
   computeStandaloneLtv,
   // R4-RESIDUAL-1: combined-LTV escalation trigger
   COMBINED_LTV_ESCALATION_THRESHOLD_PCT,

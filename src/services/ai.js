@@ -838,6 +838,47 @@ const injectPostalCodeDiscrepancyCallout = (html, postalTuples) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════
+// OPTION C (FRANCO 2026-06-02): injectExistingLenderMismatchCallout
+// ══════════════════════════════════════════════════════════════════════════
+// 3rd instance of the JS-INJECTED ADMIN RISK FACTORS CALLOUT sub-pattern (after
+// R10-C-2 injectElevatedLtvBandCallout + R11-C injectPostalCodeDiscrepancyCallout).
+// When a first-mortgage refinance carve-out fires (LTV computed as standalone —
+// Franco's rule) but the lender named in the broker's refinance phrase does NOT
+// match the borrower's existing-mortgage lender from the documents, surface the
+// contradiction for admin review. The LTV is computed correctly; the admin is
+// told the sources disagree on which existing mortgage is being paid out. This
+// COMPOSES the existing flagging discipline — it does NOT block the carve-out
+// (the survey lesson: flag contradictions, don't cross-wire them into LTV math).
+// Triggered by dEngine.computeExistingLenderRefinanceMismatch. Marker-pattern
+// idempotent for [UPDATED] prelim re-renders.
+const EXISTING_LENDER_MISMATCH_CALLOUT_MARKER = 'OPTION-C-EXISTING-LENDER-MISMATCH-CALLOUT';
+const EXISTING_LENDER_MISMATCH_CALLOUT_PATTERN = new RegExp(
+  `<p[^>]*data-marker="${EXISTING_LENDER_MISMATCH_CALLOUT_MARKER}"[^>]*>[\\s\\S]*?<\\/p>\\s*`,
+  'gi',
+);
+const injectExistingLenderMismatchCallout = (html, mismatch) => {
+  if (!html || typeof html !== 'string') return html;
+  if (!mismatch || !mismatch.phrase_lender
+    || !Array.isArray(mismatch.document_lenders) || mismatch.document_lenders.length === 0) return html;
+  let out = html.replace(EXISTING_LENDER_MISMATCH_CALLOUT_PATTERN, '');
+  const docLabel = mismatch.document_lenders
+    .map(d => `${d.lender} (per ${(d.source || 'document').replace(/\.pdf$/i, '').replace(/_/g, ' ')})`)
+    .join(', ');
+  const callout = `<p data-marker="${EXISTING_LENDER_MISMATCH_CALLOUT_MARKER}"><strong>Existing-Mortgage Lender Discrepancy:</strong> the refinance request names ${mismatch.phrase_lender} as the existing lender, but the documents show ${docLabel}. The refinance LTV is computed on the stated payout (new loan ÷ value); confirm which existing mortgage is being refinanced.</p>`;
+  // Inject AFTER the Deal Snapshot block (sibling placement convention).
+  const snapshotBlockMatch = out.match(/<h2[^>]*>\s*Deal Snapshot\s*<\/h2>[\s\S]*?(?=<h2|<hr|$)/i);
+  if (snapshotBlockMatch) {
+    const insertAt = snapshotBlockMatch.index + snapshotBlockMatch[0].length;
+    return out.slice(0, insertAt) + '\n' + callout + '\n' + out.slice(insertAt);
+  }
+  const fileStatusM = out.match(/^(\s*<p>\s*<strong>\s*FILE STATUS[^<]*<\/strong>[^<]*<\/p>\s*)/i);
+  if (fileStatusM) {
+    return fileStatusM[1] + callout + '\n\n' + out.slice(fileStatusM[0].length);
+  }
+  return callout + '\n\n' + out;
+};
+
+// ══════════════════════════════════════════════════════════════════════════
 // R10-I (2026-05-27): composeBrokerLenderPackageEmail
 // ══════════════════════════════════════════════════════════════════════════
 // JS-deterministic broker-facing closing email for sendCompletionHandoff.
@@ -4524,6 +4565,11 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // sub-pattern. JS-deterministic backstop for empirically-probabilistic
   // LLM narrative postal-code visibility gap.
   injectPostalCodeDiscrepancyCallout,
+  // OPTION C (2026-06-02): existing-mortgage lender / refinance-phrase mismatch
+  // callout injector. 3rd instance of the JS-INJECTED ADMIN RISK FACTORS CALLOUT
+  // sub-pattern. Surfaces a refinance lender contradiction for admin review
+  // WITHOUT blocking the refinance carve-out (compute correct LTV + flag).
+  injectExistingLenderMismatchCallout,
   // R10-I (2026-05-27): broker-facing lender-package composer for
   // sendCompletionHandoff close-out.
   composeBrokerLenderPackageEmail,

@@ -1482,6 +1482,35 @@ const inferMortgagePositionFromExistingBalance = (canonicalMap) => {
   const txnTypeTuples = canonicalMap.transaction_type || [];
   const refinanceTuple = txnTypeTuples.find(t => t && t.value === 'refinance');
   if (refinanceTuple) {
+    // OPTION C (Franco 2026-06-02): a plainly-stated first-mortgage refinance
+    // (payoutConfirmed OR refinanceConfident) pays out the existing 1st — the new
+    // mortgage IS the 1st position, so the derived "2nd" inference is wrong.
+    // Suppress it REGARDLESS of whether a mortgage_statement is attached to
+    // confirm the lender. Mirrors the computeCombinedLtv Option-C carve-out
+    // (discrepancy-engine.js): resolve correctly; a lender disagreement is
+    // surfaced as a SEPARATE admin discrepancy flag, not by leaving a wrong "2nd"
+    // position to drive a mortgage-position discrepancy / escalation. Empirical
+    // anchor — Franco 5d1479ea: existing $318k Scotiabank from credit_report (no
+    // mortgage_statement) inferred "2nd" → false position discrepancy on a clean
+    // RBC first-mortgage refinance.
+    //
+    // PAYOUT-CAPABILITY GUARD (mirrors computeCombinedLtv): only suppress the
+    // derived "2nd" when the new loan can actually pay out the existing 1st
+    // (requested >= existing). If requested is absent or < existing, the existing
+    // balance is NOT being paid out by this loan → it reads as a 2nd mortgage →
+    // KEEP the derived "2nd" (preserves R10-E true-2nd detection for bare-balance
+    // / new<existing shapes — e.g. a $100k loan behind a $342k existing 1st, or a
+    // credit_report-only submission with no loan amount).
+    const _requestedTuples = canonicalMap.requested_loan_amount || [];
+    const _requested = (_requestedTuples[0] && Number.isFinite(_requestedTuples[0].value)) ? _requestedTuples[0].value : null;
+    const _maxExisting = Math.max(0, ...balances.filter(t => t && Number.isFinite(t.value)).map(t => t.value));
+    const _payoutCapable = _requested != null && _requested >= _maxExisting;
+    if ((refinanceTuple.payoutConfirmed === true || refinanceTuple.refinanceConfident === true) && _payoutCapable) {
+      return null;
+    }
+    // Fallback (ambiguous refinance — neither payout-confirmed nor confidence-
+    // tagged): retain the prior R11-A mortgage_statement lender-match suppression
+    // as defense-in-depth.
     const payoutLenderTuples = (canonicalMap.existing_first_mortgage_lender || [])
       .filter(t => t && t.classification === 'mortgage_statement' && t.value);
     const payoutLenderCanonicals = Array.from(new Set(
@@ -1957,6 +1986,23 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   const _q1RefiConfident = !_q1AmbiguousRefiPurchase && !_q1NonPayoutContra;
   for (const t of (map.transaction_type || [])) {
     if (t && t.value === 'refinance') t.refinanceConfident = _q1RefiConfident;
+  }
+
+  // OPTION C (Franco 2026-06-02) ORDERING RECONCILIATION: the derived
+  // mortgage_position "2nd" inference (inferMortgagePositionFromExistingBalance,
+  // pushed earlier in this function) ran BEFORE transaction_type's
+  // payoutConfirmed/refinanceConfident flags were tagged (set just above in this
+  // pass). So a plainly-stated first-mortgage refinance could not suppress the
+  // derived "2nd" at push time, leaving a stale "2nd" tuple that the objective
+  // filter would resolve over the broker/email "1st" → false position
+  // discrepancy + wrong 2nd. Re-run the now-fully-flagged suppression decision
+  // and remove the stale derived tuple if the refinance carve-out applies. The
+  // re-check reuses inferMortgagePositionFromExistingBalance verbatim (no
+  // duplicated logic) and is idempotent: null return = suppress (no non-zero
+  // balance OR carve-out fires) → strip any derived tuple; truthy = keep.
+  if (inferMortgagePositionFromExistingBalance(map) === null) {
+    map.mortgage_position = (map.mortgage_position || [])
+      .filter(t => !(t && t.source === 'mortgage_position_inferred_from_existing_balance'));
   }
 
   return map;

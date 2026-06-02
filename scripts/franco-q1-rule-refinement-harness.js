@@ -41,8 +41,14 @@ ok('BRANCH 2 NEW: refinanceConfident + lender, NO payout → carve-out (standalo
    de.computeCombinedLtv(mk()).combined_ltv_percent === stand);
 ok('ambiguous (refinanceConfident=false, no payout) → ADDITIVE (escalate path)',
    de.computeCombinedLtv(mk({ transaction_type: [{ value: 'refinance', rawPhrase: '', payoutConfirmed: false, refinanceConfident: false }] })).combined_ltv_percent === additive);
-ok('confident refinance but NO lender match → ADDITIVE (lender-match still required)',
-   de.computeCombinedLtv(mk({ existing_first_mortgage_lender: [] })).combined_ltv_percent === additive);
+// OPTION C (Franco 2026-06-02) SUPERSEDES R11-B-3 lender-match precondition:
+// a confident/payout refinance that is payout-capable (requested >= existing —
+// here $510k >= $400k) now fires the carve-out REGARDLESS of lender match. A
+// lender disagreement is surfaced as a SEPARATE admin discrepancy flag
+// (computeExistingLenderRefinanceMismatch), not by stacking additive leverage
+// into a false escalation. Was: ADDITIVE (lender-match required). Now: STANDALONE.
+ok('OPTION C: confident refinance, payout-capable, NO lender match → STANDALONE (carve-out fires; mismatch flagged separately)',
+   de.computeCombinedLtv(mk({ existing_first_mortgage_lender: [] })).combined_ltv_percent === stand);
 ok('purchase (no refinance tuple) → ADDITIVE',
    de.computeCombinedLtv(mk({ transaction_type: [{ value: 'purchase', payoutConfirmed: false }] })).combined_ltv_percent === additive);
 ok('explicit 2nd_mortgage → ADDITIVE',

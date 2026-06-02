@@ -1504,6 +1504,21 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     leadSummary = aiService.injectPostalCodeDiscrepancyCallout(leadSummary, _r11cPostalTuples);
     console.log(`R11-C: postal-code discrepancy (${Array.from(_r11cDistinctPostals).join(' / ')}) — admin prelim callout injected.`);
   }
+  // OPTION C (Franco 2026-06-02): existing-mortgage lender / refinance-phrase
+  // mismatch callout. 3rd instance of the JS-INJECTED ADMIN RISK FACTORS CALLOUT
+  // sub-pattern. When the refinance carve-out fires (computeCombinedLtv =
+  // standalone) but the refinance-phrase lender doesn't match the existing-
+  // mortgage doc lender, surface the contradiction for admin review — the LTV is
+  // computed correctly via the carve-out; the admin is told the sources disagree.
+  // Reads transaction_type + existing_first_mortgage_lender from the SAME filtered
+  // canonical_map driving Snapshot + LTV (existing_first_mortgage_lender is not
+  // touched by the position/purpose/loan-amount filter chain → credit_report /
+  // pnw_statement / loan_application lenders survive for the comparison).
+  const _optCLenderMismatch = dEngine.computeExistingLenderRefinanceMismatch(_bFilteredCanonicalMap);
+  if (_optCLenderMismatch) {
+    leadSummary = aiService.injectExistingLenderMismatchCallout(leadSummary, _optCLenderMismatch);
+    console.log(`Option C: existing-mortgage lender mismatch (refinance phrase names ${_optCLenderMismatch.phrase_lender}; docs show ${_optCLenderMismatch.document_lenders.map(d => d.lender).join(', ')}) — admin prelim callout injected (LTV unchanged; flag only).`);
+  }
   // R4-Bucket-C.6 (Grace 5f8e4921 T4 fix): strip Claude's Documents Included
   // section + inject JS-rendered authoritative one. Claude probabilistically
   // dropped items from Section 9 (Grace lost T4 from [RECEIVED] + gov_id +
