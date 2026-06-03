@@ -105,3 +105,63 @@ doc-only [UPDATED] re-fire, the placeholder shortcut could recur. The two-layer 
 placeholder guard) remains the scope if that ever surfaces.
 
 **Disposition:** closed; documentation only.
+
+---
+
+## OBS-6 — Path-B-doc-completion bulletproof fixture (Fix 1 / Bundle 1)
+**Surfaced by:** Franco Scenario-2 Bundle 1 (commit `e2019d1`)
+**Severity:** low (regression-coverage methodology)
+
+Fix 1 (Path B existing-balance gap) has durable regression coverage already in-repo:
+`scripts/verify-pathb-prelim-refire.js` **Check 6** (the deterministic 0→value suppression
++ asymmetry guard, runs offline) and `scripts/replay-franco-s2-bundle1.js` (the staging-replay
+script that confirmed deployed behavior — turn-0 prelim, turn-1 doc-only SUPPRESSED, Snapshot
+address carries the house number). A full PDF-generating bulletproof *scenario* would duplicate
+this verification at materially higher authoring/maintenance cost and only validates via Supabase
+replay (not offline CI).
+
+**Recommendation:** next maintenance pass — decide whether the existing regression surface
+(Check 6 + replay script) is sufficient, or whether a heavyweight bulletproof fixture is warranted
+for parity with other Bug-N coverage. Lean: existing surface is sufficient.
+
+**Disposition:** out of scope for Bundle 1; methodology decision for next maintenance pass.
+
+---
+
+## OBS-7 — D05 + B09 fixture expected.json updates (Bundle 2 product change)
+**Surfaced by:** Franco Scenario-2 Bundle 2 (commit `3cbd82b`)
+**Severity:** low (test-asserts-repudiated-behavior cleanup)
+
+Bundle 2 repudiated R10-I's broker-lender-package closing (reverted to the fixed-language
+`generateCompletionEmail`). Two bulletproof fixtures encode the now-repudiated R10-I behavior:
+- `scenarios/D05-broker-package-composer/expected.json` — asserts a `Snapshot`/`Deal Snapshot`
+  block AND `expected_attachments.min_count: 1` on the broker closing. Post-Bundle-2 the broker
+  closing is fixed-language-only with NO snapshot and NO attachment → both assertions now fail.
+- `scenarios/B09-prelim-approved-broker-package/expected.json` — `must_include` asserts
+  `Snapshot|Deal Snapshot|deal summary` on the broker closing (now absent). The gate still
+  fires (broker still gets a closing); only the content assertion + the `broker_facing_lender_package`
+  kind label are stale.
+
+**Recommendation:** small bulletproof-fixture maintenance commit updating both `expected.json`
+to assert the new fixed-language-only closing (no snapshot, no broker attachment, Franco-pointer
+present). The Bundle-2 verification was NOT auto-applied to these fixtures pending Porter's call
+on bundling vs. deferral.
+
+**Disposition:** methodology debt; schedule for next bulletproof-fixture maintenance pass.
+
+---
+
+## OBS-8 — r10i-mini-harness.js / r10i-find.js — superseded dev scripts (Bundle 2)
+**Surfaced by:** Franco Scenario-2 Bundle 2 (commit `3cbd82b`)
+**Severity:** low (dead dev-script cleanup; no production impact)
+
+`scripts/r10i-mini-harness.js` (and the `r10i-find.js` corpus grep) are the historical R10-I
+acceptance harness, validating the `composeBrokerLenderPackageEmail` composer + its wiring at
+`sendCompletionHandoff` (Snapshot insert, zip-to-broker, admin-text). Bundle 2 repudiated that
+wiring, so these scripts now assert obsolete behavior. They are dev/acceptance scripts, NOT CI
+regression gates — no production impact either way.
+
+**Recommendation:** either delete in a cleanup commit or annotate the script headers as obsolete
+(superseded by Bundle 2). Defer to maintenance pass.
+
+**Disposition:** dead-script cleanup; next maintenance pass.
