@@ -879,6 +879,43 @@ const injectExistingLenderMismatchCallout = (html, mismatch) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════
+// BUG 2 (FRANCO 2026-06-03): injectClassificationMismatchCallout
+// ══════════════════════════════════════════════════════════════════════════
+// 4th instance of the JS-INJECTED ADMIN RISK FACTORS CALLOUT sub-pattern (after
+// R10-C-2 elevated-LTV, R11-C postal-code, Option-C lender-mismatch). When a
+// submitted file's CONTENT confidently reads as a different document type than its
+// FILENAME implies (detectClassificationMismatch in deals.js), surface it on the
+// admin prelim so the reviewer sees an explicit "file content doesn't match its
+// name" flag instead of the silent contradiction Franco hit ([RECEIVED] credit_report
+// alongside "no credit reports provided"). Filename-based classification is kept for
+// downstream code; this is flag-only. Marker-pattern idempotent for [UPDATED] re-renders.
+const CLASSIFICATION_MISMATCH_CALLOUT_MARKER = 'BUG2-CLASSIFICATION-MISMATCH-CALLOUT';
+const CLASSIFICATION_MISMATCH_CALLOUT_PATTERN = new RegExp(
+  `<[a-z]+[^>]*data-marker="${CLASSIFICATION_MISMATCH_CALLOUT_MARKER}"[^>]*>[\\s\\S]*?<\\/[a-z]+>\\s*`,
+  'gi',
+);
+const injectClassificationMismatchCallout = (html, mismatches) => {
+  if (!html || typeof html !== 'string') return html;
+  if (!Array.isArray(mismatches) || mismatches.length === 0) return html;
+  const display = module.exports.DOC_DISPLAY_NAMES || {};
+  let out = html.replace(CLASSIFICATION_MISMATCH_CALLOUT_PATTERN, '');
+  const lines = mismatches.map(m =>
+    `<li>"${m.fileName}" was provided as a <strong>${display[m.fileClass] || m.fileClass}</strong>, but its content reads as a <strong>${display[m.contentClass] || m.contentClass}</strong>. Please confirm the correct document.</li>`,
+  ).join('');
+  const callout = `<p data-marker="${CLASSIFICATION_MISMATCH_CALLOUT_MARKER}"><strong>Document Classification Mismatch:</strong></p>\n<ul data-marker="${CLASSIFICATION_MISMATCH_CALLOUT_MARKER}">${lines}</ul>`;
+  const snapshotBlockMatch = out.match(/<h2[^>]*>\s*Deal Snapshot\s*<\/h2>[\s\S]*?(?=<h2|<hr|$)/i);
+  if (snapshotBlockMatch) {
+    const insertAt = snapshotBlockMatch.index + snapshotBlockMatch[0].length;
+    return out.slice(0, insertAt) + '\n' + callout + '\n' + out.slice(insertAt);
+  }
+  const fileStatusM = out.match(/^(\s*<p>\s*<strong>\s*FILE STATUS[^<]*<\/strong>[^<]*<\/p>\s*)/i);
+  if (fileStatusM) {
+    return fileStatusM[1] + callout + '\n\n' + out.slice(fileStatusM[0].length);
+  }
+  return callout + '\n\n' + out;
+};
+
+// ══════════════════════════════════════════════════════════════════════════
 // R10-I (2026-05-27): composeBrokerLenderPackageEmail
 // ══════════════════════════════════════════════════════════════════════════
 // JS-deterministic broker-facing closing email for sendCompletionHandoff.
@@ -4570,6 +4607,9 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // sub-pattern. Surfaces a refinance lender contradiction for admin review
   // WITHOUT blocking the refinance carve-out (compute correct LTV + flag).
   injectExistingLenderMismatchCallout,
+  // BUG 2 (2026-06-03): document filename-vs-content classification mismatch
+  // callout. 4th JS-INJECTED ADMIN RISK FACTORS CALLOUT instance.
+  injectClassificationMismatchCallout,
   // R10-I (2026-05-27): broker-facing lender-package composer for
   // sendCompletionHandoff close-out.
   composeBrokerLenderPackageEmail,

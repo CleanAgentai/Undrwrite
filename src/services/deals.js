@@ -6,6 +6,31 @@ const { extractFormValues } = require('../lib/pdfFormExtract');
 const IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
 
 // Classify a document based on filename and extracted text content
+// Content-only classification (the document's actual text, ignoring its filename).
+// Extracted from classifyDocument's former inline fallback so it can ALSO be used by
+// the filename-vs-content cross-check (detectClassificationMismatch). Returns a
+// specific class on a confident content match, else 'other' (ambiguous content —
+// e.g. a scanned ID or a tax bill — never forces a class). Behaviour identical to
+// the prior inline block; classifyDocument still calls it as its fallback.
+const classifyByContent = (extractedText) => {
+  const text = (extractedText || '').toLowerCase();
+  if (!text) return 'other';
+  if (/personal net worth|total assets.*total liabilities|net worth statement/i.test(text)) return 'pnw_statement';
+  if (/loan application|borrower.*information.*property|mortgage application/i.test(text) && /loan amount|mortgage/i.test(text)) return 'loan_application';
+  if (/apprais(al|ed value)|market value.*opinion|comparable.*sales/i.test(text)) return 'appraisal';
+  if (/credit score|credit bureau|equifax|transunion|experian|beacon score/i.test(text)) return 'credit_report';
+  if (/notice of assessment|canada revenue|income tax.*return/i.test(text)) return 'noa';
+  if (/anti-money laundering|proceeds of crime|fintrac/i.test(text)) return 'aml';
+  if (/politically exposed person/i.test(text)) return 'pep';
+  if (/payoff amount|payout amount|prepayment penalty|interest to.*date|validity (period|date|window)|payout statement|payout letter|mortgage payout|discharge statement|mortgage discharge/i.test(text)) return 'mortgage_statement';
+  if (/mortgage balance|outstanding balance.*mortgage|current balance/i.test(text)) return 'mortgage_balance_statement';
+  if (/corporate financial|balance sheet.*income statement|fiscal year/i.test(text) && /corporation|inc\.|ltd\.|corp\./i.test(text)) return 'corporate_financials';
+  if (/t1 general|tax return|taxable income.*federal/i.test(text)) return 'tax_return';
+  if (/resume|curriculum vitae|professional experience|building experience|development experience/i.test(text)) return 'borrower_resume';
+  if (/agreement of purchase and sale|purchase price.*vendor|offer to purchase|purchase contract/i.test(text)) return 'purchase_contract';
+  return 'other';
+};
+
 const classifyDocument = (fileName, extractedText) => {
   const name = fileName.toLowerCase();
   const text = (extractedText || '').toLowerCase();
@@ -54,28 +79,30 @@ const classifyDocument = (fileName, extractedText) => {
   if (/purchase.?contract|purchase.?agreement|agreement.?of.?purchase|aps\b|sale.?agreement/i.test(name)) return 'purchase_contract';
   if (/down.?payment|deposit.?proof|proof.?of.?down/i.test(name)) return 'down_payment_proof';
 
-  // Fall back to content analysis
-  if (text) {
-    if (/personal net worth|total assets.*total liabilities|net worth statement/i.test(text)) return 'pnw_statement';
-    if (/loan application|borrower.*information.*property|mortgage application/i.test(text) && /loan amount|mortgage/i.test(text)) return 'loan_application';
-    if (/apprais(al|ed value)|market value.*opinion|comparable.*sales/i.test(text)) return 'appraisal';
-    if (/credit score|credit bureau|equifax|transunion|experian|beacon score/i.test(text)) return 'credit_report';
-    if (/notice of assessment|canada revenue|income tax.*return/i.test(text)) return 'noa';
-    if (/anti-money laundering|proceeds of crime|fintrac/i.test(text)) return 'aml';
-    if (/politically exposed person/i.test(text)) return 'pep';
-    // Group OOO: text-content layer mirrors the filename split. Sufficient-first
-    // here — strong markers (payoff amount, prepayment penalty, interest-to-date,
-    // validity, discharge) reliably indicate a real payout/discharge statement.
-    // Balance-only content without those markers routes to mortgage_balance_statement.
-    if (/payoff amount|payout amount|prepayment penalty|interest to.*date|validity (period|date|window)|payout statement|payout letter|mortgage payout|discharge statement|mortgage discharge/i.test(text)) return 'mortgage_statement';
-    if (/mortgage balance|outstanding balance.*mortgage|current balance/i.test(text)) return 'mortgage_balance_statement';
-    if (/corporate financial|balance sheet.*income statement|fiscal year/i.test(text) && /corporation|inc\.|ltd\.|corp\./i.test(text)) return 'corporate_financials';
-    if (/t1 general|tax return|taxable income.*federal/i.test(text)) return 'tax_return';
-    if (/resume|curriculum vitae|professional experience|building experience|development experience/i.test(text)) return 'borrower_resume';
-    if (/agreement of purchase and sale|purchase price.*vendor|offer to purchase|purchase contract/i.test(text)) return 'purchase_contract';
-  }
+  // Fall back to content analysis (extracted to classifyByContent above — identical
+  // patterns; the OOO mortgage payout-vs-balance content split lives there too).
+  return classifyByContent(extractedText);
+};
 
-  return 'other';
+// CLASSIFICATION CROSS-CHECK (Bug 2, Franco 2026-06-03): after filename-based
+// classification, independently classify by CONTENT. When the filename drove a
+// classification that the content confidently contradicts (e.g. a file named
+// "Credit_Bureau_*.pdf" whose text reads as a Personal Net Worth Statement —
+// Daniel Kim 875af304), return the mismatch so the admin prelim can surface it
+// explicitly instead of producing a silent contradiction ([RECEIVED] credit_report
+// alongside "no credit reports provided"). Conservative: fires ONLY when the
+// content classifies as a SPECIFIC type DIFFERENT from the filename class. Content
+// 'other' (ambiguous: scanned ID, tax bill, etc.) never flags, and when the filename
+// matched nothing the file class IS the content class → no false positive. The
+// filename-based classification is KEPT for downstream code (no behaviour change);
+// this only adds a flag.
+const detectClassificationMismatch = (fileName, extractedText) => {
+  const fileClass = classifyDocument(fileName, extractedText);
+  const contentClass = classifyByContent(extractedText);
+  if (contentClass !== 'other' && contentClass !== fileClass) {
+    return { fileName, fileClass, contentClass };
+  }
+  return null;
 };
 
 module.exports = {
@@ -715,8 +742,14 @@ const decideExistingDealMatch = (candidates, extractedFields, now = Date.now()) 
 // TEMPORAL_CARVEOUT_DAYS + decideExistingDealMatch for the R9-F' truth-table
 // matrices. decideExistingDealMatch is the pure decision tree; the async
 // findExistingDealForBorrower wraps it with the supabase SELECT.
+// Bug 2 (2026-06-03): filename-vs-content classification cross-check, used by the
+// admin-prelim mismatch callout. Top-level so webhook.js can call it directly.
+module.exports.detectClassificationMismatch = detectClassificationMismatch;
+
 module.exports.__test__ = {
   classifyDocument,
+  classifyByContent,
+  detectClassificationMismatch,
   canonicalizeProperty,
   propertyFuzzyMatch,
   TEMPORAL_CARVEOUT_DAYS,

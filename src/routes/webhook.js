@@ -1532,6 +1532,21 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     leadSummary = aiService.injectExistingLenderMismatchCallout(leadSummary, _optCLenderMismatch);
     console.log(`Option C: existing-mortgage lender mismatch (refinance phrase names ${_optCLenderMismatch.phrase_lender}; docs show ${_optCLenderMismatch.document_lenders.map(d => d.lender).join(', ')}) — admin prelim callout injected (LTV unchanged; flag only).`);
   }
+  // BUG 2 (Franco 2026-06-03): document filename-vs-content classification mismatch
+  // callout. 4th JS-INJECTED ADMIN RISK FACTORS CALLOUT instance. When a submitted
+  // file's content confidently reads as a different document type than its filename
+  // implies (e.g. "Credit_Bureau_*.pdf" whose text is a Personal Net Worth Statement —
+  // Daniel Kim 875af304), surface it for admin review instead of the silent
+  // contradiction ([RECEIVED] credit_report + "no credit reports provided"). Reads
+  // dealDocs (with text) fetched at the top of this function; filename-based
+  // classification is unchanged downstream — flag only.
+  const _bug2Mismatches = (dealDocs || [])
+    .map(d => dealsService.detectClassificationMismatch(d.file_name, d?.extracted_data?.text || ''))
+    .filter(Boolean);
+  if (_bug2Mismatches.length > 0) {
+    leadSummary = aiService.injectClassificationMismatchCallout(leadSummary, _bug2Mismatches);
+    console.log(`Bug 2: ${_bug2Mismatches.length} document classification mismatch(es) — ${_bug2Mismatches.map(m => `${m.fileName}: filename=${m.fileClass} vs content=${m.contentClass}`).join('; ')} — admin prelim callout injected (classification unchanged; flag only).`);
+  }
   // R4-Bucket-C.6 (Grace 5f8e4921 T4 fix): strip Claude's Documents Included
   // section + inject JS-rendered authoritative one. Claude probabilistically
   // dropped items from Section 9 (Grace lost T4 from [RECEIVED] + gov_id +
