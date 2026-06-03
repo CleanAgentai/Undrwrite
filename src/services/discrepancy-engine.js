@@ -759,7 +759,17 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     }
   }
 
-  lines.push(renderSnapshotRow('Loan Term Requested', canonicalMap.requested_loan_term_months, { suffix: ' months' }));
+  // FRANCO Scenario-2 small fix (2026-06-02 / Bug 1(c)): when the loan term is unknown,
+  // OMIT the row rather than rendering "Loan Term Requested: TBD". Loan term is rarely
+  // stated at intake and is not underwriting-blocking, so a "TBD" placeholder is pure
+  // noise — and it reached the broker-facing surface (the closing snapshot). Render the
+  // row only when a real term value is on file. (Unlike the existing-balance row above,
+  // visible-incompleteness has no value here — there's no asymmetric risk in omitting an
+  // unstated optional term.)
+  const _loanTermTuples = canonicalMap.requested_loan_term_months || [];
+  if (_loanTermTuples.some(t => t && t.value != null)) {
+    lines.push(renderSnapshotRow('Loan Term Requested', _loanTermTuples, { suffix: ' months' }));
+  }
   // FRANCO-PREDICTED-Q8 (2026-05-28): surface joint/multi-borrower deals so
   // Franco sees the structure at a glance. detectJointMultiBorrower already
   // runs in runDiscrepancyDetection(Aggregated) but its result was previously

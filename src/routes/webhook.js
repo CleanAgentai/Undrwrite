@@ -1628,7 +1628,20 @@ const q10DetectMaterialChanges = (priorSnapshot, currentSummary) => {
   // (e.g. not parseable from the prelim) is NOT a change. This is the false-positive
   // guard for the prelim-parse prior (Q10 v2).
   return Q10_MATERIAL_FIELDS
-    .filter(([f]) => currentSummary[f] != null && priorSnapshot[f] != null && String(currentSummary[f]).trim() !== String(priorSnapshot[f]).trim())
+    .filter(([f]) => {
+      if (currentSummary[f] == null || priorSnapshot[f] == null) return false;
+      // FRANCO Scenario-2 Fix 1 (2026-06-02 / Bug 1 double-prelim): the prior
+      // existing_first_mortgage_balance is parsed from the prelim's "Combined LTV"
+      // line, which renders $0 under the R11-A paid-off carve-out — i.e. a prior
+      // value of 0 means "not yet known" (the payout statement hadn't arrived),
+      // NOT "balance is genuinely zero". A 0 → value transition is therefore the
+      // payout statement ARRIVING on a doc-completion turn, not a broker
+      // correction. Treat prior 0 like absent for this one field so Path B keeps
+      // suppressing doc-only completion turns (real corrections on a 2nd-mortgage
+      // deal still fire — there the Combined LTV prior parses to a positive number).
+      if (f === 'existing_mortgage_balance' && Number(priorSnapshot[f]) === 0) return false;
+      return String(currentSummary[f]).trim() !== String(priorSnapshot[f]).trim();
+    })
     .map(([f, label]) => ({ key: f, field: label, old: priorSnapshot[f], new: currentSummary[f] }));
 };
 

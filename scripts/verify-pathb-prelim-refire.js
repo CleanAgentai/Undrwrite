@@ -51,6 +51,28 @@ const ok = (n, c) => { if (c) { pass++; console.log(`  PASS ${n}`); } else { fai
   const mixed = t.q10DetectMaterialChanges(prior2, { ...prior2, loan_amount_requested: 410000 });
   ok('material delta present on a doc-bearing turn → fires (single [UPDATED] reflecting both)', mixed.length === 1 && mixed[0].key === 'loan_amount_requested');
 
+  // ===== CHECK 6 (FRANCO Scenario-2 Fix 1): doc-completion existing-balance population → SUPPRESS =====
+  // Laura Chen 9da89a81 regression: prior prelim's Combined LTV renders $0 (R11-A paid-off
+  // carve-out) → q10ParsePriorFromPrelim parses prior existing_mortgage_balance = 0. The BMO
+  // payout statement arrives at turn 1 and populates existing_mortgage_balance = 350000. This
+  // is doc completion, NOT a broker correction — Path B must SUPPRESS. Pre-fix this fired a
+  // false [UPDATED] (the double prelim Franco reported).
+  console.log('\n[Check 6] doc-completion existing-balance population (0 → value) → SUPPRESS (Fix 1)');
+  // (a) parse a real paid-off-refi prelim body → prior existing balance is 0
+  const paidOffPrelimBody = 'Loan Amount Requested: $357,000\nAppraised Value: $595,000\nCombined LTV (incl. existing 1st): 60% — ($0 + $357,000) / $595,000';
+  const lcPrior = t.q10ParsePriorFromPrelim(paidOffPrelimBody);
+  ok('prior parse: Combined LTV "$0" → existing_mortgage_balance parses to 0 (the paid-off display)', lcPrior.existing_mortgage_balance === 0);
+  // (b) payout arrives → summary existing balance = 350000, no money correction
+  const lcAfterPayout = { loan_amount_requested: 357000, property_value: 595000, existing_mortgage_balance: 350000 };
+  const lcChanges = t.q10DetectMaterialChanges(lcPrior, lcAfterPayout);
+  ok('existing balance 0 → 350000 on doc completion → q10DetectMaterialChanges = [] → SUPPRESS (no 2nd prelim)', lcChanges.length === 0);
+  // (c) asymmetry guard: a GENUINE 2nd-mortgage existing-balance correction (prior > 0) STILL fires
+  const realBalCorrection = t.q10DetectMaterialChanges({ existing_mortgage_balance: 300000 }, { existing_mortgage_balance: 340000 });
+  ok('genuine 2nd-mortgage existing-balance correction (300k → 340k, prior > 0) → STILL FIRES', realBalCorrection.length === 1 && realBalCorrection[0].key === 'existing_mortgage_balance');
+  // (d) non-existing-balance fields are unaffected by the prior-0 guard
+  const loanStillFires = t.q10DetectMaterialChanges({ loan_amount_requested: 0, existing_mortgage_balance: 0 }, { loan_amount_requested: 400000, existing_mortgage_balance: 350000 });
+  ok('loan-amount 0 → 400000 still fires (prior-0 guard is scoped to existing_mortgage_balance only)', loanStillFires.some(c => c.key === 'loan_amount_requested') && !loanStillFires.some(c => c.key === 'existing_mortgage_balance'));
+
   // ===== CHECK 4 + 5: bulletproof fixture impact =====
   console.log('\n[Check 4/5] bulletproof fixture impact');
   const scen = path.join(__dirname, '../test-fixtures/bulletproof/scenarios');

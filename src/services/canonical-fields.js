@@ -215,9 +215,19 @@ const normalizeAddress = (str) => {
 };
 
 // Extract the street-number + street-name + suffix portion of a longer address string.
-// Strict: requires <digits>(1-5) <space> <name (≤6 words, no digit-only)> <recognized suffix word>
-// Optional trailing directional (NW/NE/SW/SE/N/S/E/W).
-const ADDR_LINE_RE = /\b(\d{1,5})\s+((?:[A-Za-z][A-Za-z'\-]*\s+){0,6}?(?:Boulevard|Drive|Street|Avenue|Road|Circle|Court|Lane|Place|Crescent|Way|Square|Terrace|Close|Highway|Parkway|Trail|Park|Heights|Hill|Hills|Mews|Park|Pointe|Promenade|Ridge|Run|Walk)(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?)\b/i;
+// Strict: requires <digits>(1-5) <sep> <name (≤5 alpha words + optional one numeric
+// pre-suffix token) <recognized suffix word> with optional trailing directional.
+//
+// FRANCO Scenario-2 Fix 2 (2026-06-02 / Bug 1(d) "116 street nw"): Alberta/Prairie grid
+// addresses put a NUMERIC street name before the suffix ("4412 116 Street NW" = house
+// 4412 on 116th Street). The old name token required [A-Za-z], so the regex skipped the
+// real house number 4412 and captured 116 as the number → "116 Street NW" (house number
+// dropped). Two changes: (1) the house/street separator accepts a hyphen ("4412-116
+// Street"); (2) an OPTIONAL single numeric token is allowed in the immediately-pre-suffix
+// slot — the numbered-street name. Bounding the numeric to that one slot (not a general
+// name token) prevents a unit/range number from leaking into the captured house number
+// (e.g. "Unit 5 1234 Jasper Avenue NW" still captures 1234, not 5).
+const ADDR_LINE_RE = /\b(\d{1,5})[\s-]+((?:[A-Za-z][A-Za-z'\-]*\s+){0,5}?(?:\d{1,4}\s+)?(?:Boulevard|Drive|Street|Avenue|Road|Circle|Court|Lane|Place|Crescent|Way|Square|Terrace|Close|Highway|Parkway|Trail|Park|Heights|Hill|Hills|Mews|Park|Pointe|Promenade|Ridge|Run|Walk)(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?)\b/i;
 
 const extractAddressLine = (text) => {
   if (!text) return null;
