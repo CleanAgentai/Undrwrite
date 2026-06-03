@@ -918,6 +918,19 @@ const injectClassificationMismatchCallout = (html, mismatches) => {
 // ══════════════════════════════════════════════════════════════════════════
 // R10-I (2026-05-27): composeBrokerLenderPackageEmail
 // ══════════════════════════════════════════════════════════════════════════
+// ⛔ REPUDIATED — NO LONGER CALLED (BUNDLE 2, FRANCO Scenario-2 / Round 8,
+// 2026-06-02). R10-I was built on the premise that the BROKER forwards a
+// portable lender package (this Deal Snapshot + R9-G zip) to lenders. Franco's
+// Scenario-2 report clarified the actual workflow: PML (Franco) handles lender
+// outreach, NOT the broker — so a broker-side lender package is incoherent, and
+// the "feel free to copy this into your lender outreach" framing reflects a
+// workflow misunderstanding. sendCompletionHandoff reverted to the original
+// fixed-language closing (generateCompletionEmail, below). This function +
+// docblock are RETAINED in-repo (not deleted) per Porter's "don't aggressively
+// delete" call, but have NO live call site. Do not re-wire without a product
+// decision that the broker forwards to lenders.
+// ──────────────────────────────────────────────────────────────────────────
+// (Original R10-I docblock follows, for historical context.)
 // JS-deterministic broker-facing closing email for sendCompletionHandoff.
 // Closes Bug 6-? + 7-6 (Franco R10 Round-6 Scenarios 6+7): broker received
 // generic "file is complete and submitted" close-out with NO structured

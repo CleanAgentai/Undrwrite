@@ -1789,16 +1789,16 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   const infoBodyLead = conditionsFulfilled
     ? `Broker submitted the remaining condition docs for <strong>${borrowerName}</strong>. The file is now complete.`
     : `Broker submitted the remaining required docs for <strong>${borrowerName}</strong>. The file is now complete.`;
-  // R10-I (2026-05-27): admin info-notice text updated to reflect that
-  // the broker NOW ALSO receives the complete document package (R10-I
-  // wire-extension at L1631 broker emailService.sendEmail). Pre-R10-I,
-  // only admin received the zip; broker got generic close-out with no
-  // attachments. Admin still receives the zip (for reference / fallback)
-  // — same _r9gPackageAttachments array passed to both admin info notice
-  // here AND broker lender-package email downstream.
+  // BUNDLE 2 (FRANCO Scenario-2): admin info-notice wording reflects the ACTUAL
+  // PML workflow — PML (Franco) handles lender outreach, the broker does not. The
+  // broker is notified the file is complete and directed to Franco for further
+  // questions; the complete document package is attached HERE for the lender
+  // submission PML performs. (R10-I's prior wording said the lender-package was
+  // "sent to the broker for lender submission" — repudiated; the broker no longer
+  // receives the zip.)
   const _r9gPackageLine = _r9gPackageAttachments.length > 0
-    ? `<p>The lender-package closing email + complete document package has been sent to the broker for lender submission. Admin copy of the package is attached for your records.</p>`
-    : `<p>The closing email has been sent to the broker.</p>`;
+    ? `<p>The broker has been notified the file is complete and directed to you for further questions. The complete document package is attached for lender submission.</p>`
+    : `<p>The broker has been notified the file is complete and directed to you for further questions.</p>`;
   const infoBody = `<p>${infoBodyLead}</p>${_r9gPackageLine}`;
   const infoResult = await emailService.sendEmail(
     config.adminEmail,
@@ -1851,54 +1851,20 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   // reviseEmailWithEdits) — sendCompletionHandoff is Vienna-autonomous
   // by call-site so sweep applies cleanly.
   //
-  // BROKER SNAPSHOT — reuses the SAME filtered canonical_map driving the
-  // admin Snapshot upstream (filterCanonicalMortgagePosition + Purpose +
-  // LoanAmount + Lender chain). No drift between admin-prelim Snapshot
-  // and broker-lender-package Snapshot. R10-E/R10-G OBJECTIVE-vs-INTENT
-  // source-hierarchy preserved.
-  const _r10iInboundMessages = dealMessages.filter(m => m.direction === 'inbound');
-  const _r10iDetect = dEngine.runDiscrepancyDetectionAggregated(
-    _r10iInboundMessages,
-    dealDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
-    dealSummary?.broker_name || dealSummary?.sender_name || borrowerName,
-    { emailSubject: _r10iInboundMessages[0]?.subject || '' }
-  );
-  const _r10iFilteredMap = dEngine.filterCanonicalMortgagePositionForObjectiveAuthoritative(
-    dEngine.filterCanonicalPurposeForBrokerAuthoritative(
-      dEngine.filterCanonicalLoanAmountForDocAuthoritative(
-        dEngine.filterCanonicalLenderForPayoutOnly(_r10iDetect.canonical_map)
-      )
-    )
-  );
-  const _r10iSnapshotHtml = dEngine.renderDealSnapshot(_r10iFilteredMap, {
-    ownershipType: deal.ownership_type || null,
-    isCommercial: !!_r10iDetect.commercial,
-    jointBorrowers: _r10iDetect.joint_multi_borrower, // FRANCO-PREDICTED-Q8
-    qualificationRoster: bq.buildQualificationRoster({ // FRANCO-Q3/Q4 + Q11
-      detectedBorrowers: _r10iDetect.joint_multi_borrower,
-      primaryName: dealSummary?.borrower_name || deal.borrower_name || borrowerName || null, // Q5 audit (BATCH 14): borrower identity preferred over the ambiguous param
-      textSources: [..._r10iInboundMessages.map(m => m.body || ''), ...dealDocs.map(d => d?.extracted_data?.text || '')].join('\n'),
-      ...(() => { const _o = ro.detectRegisteredOwners([..._r10iInboundMessages.map(m => m.body || ''), ...dealDocs.map(d => d?.extracted_data?.text || '')].join('\n'), [dealSummary?.borrower_name || deal.borrower_name || borrowerName, ...(_r10iDetect.joint_multi_borrower || [])].filter(Boolean)); return { registeredOwners: _o.owners, registeredOwnerSignal: _o.signalPresent }; })(), // FRANCO-Q11
-    }),
-    corporateEntities: ce.detectCorporateEntities({ // FRANCO-Q5 (render-plumbing fix BATCH 12: borrower identity, deal.borrower_name preferred over the ambiguous param)
-      borrowerName: dealSummary?.borrower_name || deal.borrower_name || borrowerName || '',
-      textSources: [..._r10iInboundMessages.map(m => m.body || ''), ...dealDocs.map(d => d?.extracted_data?.text || '')].join('\n'),
-    }),
-  });
-  const _r10iBrokerGreeting = selectGreetingFirstName({
-    broker_name: dealSummary?.broker_name,
-    sender_name: dealSummary?.sender_name,
-    borrower_name: dealSummary?.borrower_name,
-    sender_type: dealSummary?.sender_type,
-  });
-  const _r10iBorrowerSafeName = (borrowerName || 'Unknown').replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
-  let closingEmail = aiService.composeBrokerLenderPackageEmail({
-    borrowerName,
-    brokerGreetingName: _r10iBrokerGreeting,
-    snapshotHtml: _r10iSnapshotHtml,
-    packageAttached: _r9gPackageAttachments.length > 0,
-    borrowerSafeName: _r10iBorrowerSafeName,
-  });
+  // BUNDLE 2 (FRANCO Scenario-2 / Round 8, 2026-06-02) — R10-I REPUDIATED.
+  // R10-I (2026-05-27) replaced the original fixed-language closing with a
+  // broker-lender-package email (Deal Snapshot + zip + "feel free to copy this
+  // into your lender outreach") on the assumption that the BROKER forwards a
+  // portable package to lenders. Franco's S2 report clarified the workflow:
+  // PML handles lender outreach, NOT the broker — so the broker-side portable
+  // artifact is incoherent. Revert to the original deterministic closing,
+  // generateCompletionEmail (intact since BBB/S9.3, ai.js:2800), whose fixed
+  // language IS what Franco specified: "The file is now complete and submitted.
+  // Please direct any further questions to Franco at franco@privatemortgagelink.com."
+  // The broker-side zip is also removed below (the admin keeps the package for the
+  // lender submission PML performs). composeBrokerLenderPackageEmail + the R10-I
+  // snapshot machinery remain in-repo (not deleted) but are no longer called here.
+  let closingEmail = await aiService.generateCompletionEmail(dealSummary, [], dealDocs);
   // R10-H cascade-composition sweep — Vienna-autonomous broker-facing
   // outbound discipline preserved. No-op in the clean JS-deterministic
   // composition case (composer is structurally sweep-safe by
@@ -1906,12 +1872,12 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   {
     const _eSweep = aiService.enforceNoRoutingLeak(closingEmail);
     closingEmail = _eSweep.swept;
-    if (_eSweep.sweptAny) console.log(`R10-I: enforceNoRoutingLeak fired on broker lender-package email (unexpected — composer should be sweep-safe by construction)`);
+    if (_eSweep.sweptAny) console.log(`BUNDLE2: enforceNoRoutingLeak fired on broker closing email (unexpected — generateCompletionEmail is sweep-safe by construction)`);
   }
   {
     const _r8bSweep = aiService.stripPerfectOpener(closingEmail);
     closingEmail = _r8bSweep.swept;
-    if (_r8bSweep.sweptAny) console.log(`R10-I: stripPerfectOpener fired on broker lender-package email (unexpected — composer hardcodes "Hi {Name}," opener)`);
+    if (_r8bSweep.sweptAny) console.log(`BUNDLE2: stripPerfectOpener fired on broker closing email (unexpected — generateCompletionEmail hardcodes "Hi {Name}," opener)`);
   }
   const allMessages = await dealsService.getMessages(deal.id);
   const brokerInputs = buildBrokerThreadInputs(allMessages);
@@ -1934,14 +1900,15 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
     anchorSubject,
     closingEmail.replace(/<[^>]*>/g, ''),
     closingEmail,
-    // R10-I (2026-05-27): attach R9-G zip to broker email. Previously `[]`
-    // (admin-only). Broker now ALSO receives the complete document
-    // package for lender forwarding.
-    _r9gPackageAttachments,
+    // BUNDLE 2 (FRANCO S2): NO broker-side zip. R10-I attached the R9-G package
+    // here for "broker forwards to lenders" — repudiated (PML handles lender
+    // outreach). The admin info notice above keeps the package; the broker gets
+    // only the fixed-language closing.
+    [],
     brokerHeaders
   );
   await dealsService.saveMessage(deal.id, 'outbound', anchorSubject, closingEmail, brokerSendResult.MessageID);
-  console.log(`R10-I: lender-package closing email auto-sent to broker (LLLL: threaded into broker conversation, subject="${anchorSubject}", headers=${brokerHeaders.length}, attachments=${_r9gPackageAttachments.length})`);
+  console.log(`BUNDLE2: fixed-language closing email auto-sent to broker (LLLL: threaded into broker conversation, subject="${anchorSubject}", headers=${brokerHeaders.length}, no broker attachments)`);
 
   // 3. Atomic status transition — R9-A co-location with the action that
   // triggers it (Q3-(a) verdict). Mirrors R6-κ first-stamp-wins pattern.
