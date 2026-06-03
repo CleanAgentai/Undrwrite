@@ -65,3 +65,19 @@ admin first name is retained.
 
 **Disposition:** out of scope for tonight (the body-signature threading covers the path
 Franco is testing); deeper extraction-layer fix for a future maintenance pass.
+
+---
+
+## OBS-4 — E20 fixture expected.json: assert the new classification-mismatch callout
+**Surfaced by:** Bug 2 (classification cross-check, commit `3afdd45`)
+**Severity:** low (methodology / test-asserts-old-behavior cleanup)
+
+`E20-doc-set-wrong/mortgage_statement_mislabeled.pdf` intentionally tests a mislabeled
+document (loan-application content under a mortgage filename). Pre-Bug-2-fix, the
+fixture's `expected.json` asserted Vienna's behavior on the silent-contradiction path.
+Post-fix, Vienna now correctly surfaces the mismatch via the classification-mismatch
+admin callout (the one fixture out of 363 docs that — correctly — flags). The fixture's
+`expected.json` should be updated to assert the new callout content.
+
+**Disposition:** methodology work (test-asserts-old-behavior cleanup), not a product bug
+— defer to the next bulletproof-fixture maintenance pass.
