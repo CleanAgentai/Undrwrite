@@ -3846,11 +3846,31 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         } else if (dispatch.action === 'escalation-update') {
           await sendEscalationToAdmin(existingDeal, reviewResult.updatedSummary, reviewLtv, { isUpdate: true });
         } else {
-          // 'preliminary-update' — under_review + !allDocsInNow + hasNewDocs=true
-          // Cluster D: pass the generated-but-NNN-suppressed reviewResult.responseEmail
-          // so the gate can still detect a pending clarification ask even though the
-          // broker doesn't see Vienna's reply directly on this turn.
-          await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true, brokerFacingReplyText: reviewResult.responseEmail || '' });
+          // 'preliminary-update' — under_review + !allDocsInNow + hasNewDocs=true.
+          // PATH B (Franco 2026-06-03) — the [UPDATED] full-prelim re-fire here is what
+          // produced Franco's double-prelim (Daniel Kim 875af304: incomplete PRELIM #1
+          // at intake, then [UPDATED] PRELIM #2 when the remaining docs arrived).
+          // Suppress the re-fire when this turn is DOC-ONLY — new documents satisfying
+          // previously-missing items, with NO material underwriting change. The deal's
+          // internal state was already persisted at L3740 (extracted_data + ltv + docs),
+          // so doc completion is reflected SILENTLY with no second admin email. Re-fire
+          // the [UPDATED] prelim ONLY when a MATERIAL field changed — reusing the Q10
+          // discriminator (loan amount, property value, existing first-mortgage balance,
+          // property address, transaction type / mortgage position). Mixed turns
+          // (material change + new docs) fire ONE [UPDATED] prelim reflecting both. The
+          // Q10 delta-notice path (text-only-noop branch) is unaffected.
+          const _pbMsgs = await dealsService.getMessages(existingDeal.id);
+          const _pbLastPrelim = [..._pbMsgs].reverse().find(m => m.direction === 'outbound' && /PRELIMINARY Review/i.test(m.subject || ''));
+          const _pbChanges = q10DetectMaterialChanges(_pbLastPrelim ? q10ParsePriorFromPrelim(_pbLastPrelim.body) : null, reviewResult.updatedSummary);
+          if (_pbChanges.length > 0) {
+            // Cluster D: pass the generated-but-NNN-suppressed reviewResult.responseEmail
+            // so the gate can still detect a pending clarification ask even though the
+            // broker doesn't see Vienna's reply directly on this turn.
+            await sendPreliminaryReviewToAdmin(existingDeal, reviewResult.updatedSummary, reviewOwnership, reviewLtv, { isUpdate: true, brokerFacingReplyText: reviewResult.responseEmail || '' });
+            console.log(`Path B: [UPDATED] prelim re-fired — material change on a doc-bearing turn (${_pbChanges.map(c => `${c.field} ${c.old}→${c.new}`).join('; ')}); the single notice reflects the new docs too.`);
+          } else {
+            console.log(`Path B: doc-only completion on under_review deal (hasNewDocs=true, no material field change) — [UPDATED] prelim SUPPRESSED. Internal state already persisted (L3740); no second admin email. Eliminates the double-prelim.`);
+          }
         }
 
         // Group NNN: Vienna goes silent across the whole under_review/ltv_escalated
