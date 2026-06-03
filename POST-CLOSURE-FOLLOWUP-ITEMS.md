@@ -81,3 +81,27 @@ admin callout (the one fixture out of 363 docs that — correctly — flags). Th
 
 **Disposition:** methodology work (test-asserts-old-behavior cleanup), not a product bug
 — defer to the next bulletproof-fixture maintenance pass.
+
+---
+
+## OBS-5 — Bug 3 (placeholder in [UPDATED] prelim) — resolved-by-Path-B, empirically constrained
+**Surfaced by:** Bug 3 reproduction check + Phase 1 confirmation replay (2026-06-03)
+**Severity:** resolved (no action needed; documentation only)
+
+Franco's Bug 3 was a placeholder string ("[Full preliminary review content with deal
+snapshot, borrower overview, …]") in the [UPDATED] prelim body (deal 875af304 turn-1).
+Root cause: the [UPDATED] full-prelim re-render passes the prior prelim into
+generateLeadSummary's conversation history; on a DOC-ONLY turn (no material field
+change) the LLM had no salient new content and abbreviated the prior prelim into a
+placeholder instead of re-rendering. EMPIRICALLY CONSTRAINED to the doc-only [UPDATED]
+path: a Phase 1 confirmation replay of a MATERIAL-change [UPDATED] (loan $372k→$400k +
+doc, deal cc0618f8) rendered FULL content with no placeholder. Path B (commit 699029a)
+suppresses the doc-only [UPDATED] re-fire entirely, so the only path that produced the
+placeholder no longer fires. Bug 3 closes as resolved-by-Path-B. No code change.
+
+**Residual (very low risk, not currently reachable):** if a future change re-enables a
+doc-only [UPDATED] re-fire, the placeholder shortcut could recur. The two-layer fix
+(strip prior prelim from the re-render's LLM context + a deterministic post-gen
+placeholder guard) remains the scope if that ever surfaces.
+
+**Disposition:** closed; documentation only.
