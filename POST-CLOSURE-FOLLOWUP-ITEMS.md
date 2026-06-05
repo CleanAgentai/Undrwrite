@@ -165,3 +165,64 @@ regression gates — no production impact either way.
 (superseded by Bundle 2). Defer to maintenance pass.
 
 **Disposition:** dead-script cleanup; next maintenance pass.
+
+---
+
+## OBS-9 — Loan Purpose canonical-extractor false-positive guard
+**Surfaced by:** Thomas Bergqvist Bug 2 (commit `67ae33a`)
+**Severity:** resolved (fix shipped); methodology note for next pass
+
+`parseBrokerInitialIntent`'s "Loan Request" purpose capture group (`[^.\n]{3,80}`,
+`canonical-fields.js:1165/1171`) was greedy: it grabbed everything after `$amount —` up to the
+newline, swallowing a trailing run-on field the broker appends on the same line — e.g.
+"refinancing existing TD Bank mortgage **Existing mortgage: TD Bank (matures March 2028)**". That
+dirty value became the canonical `purpose` (source `broker_initial_intent`), and the R10-G
+corrections override then pinned the prelim Loan Purpose to it verbatim.
+
+**Fix (shipped):** a conservative post-capture trim that strips trailing run-on field markers —
+`Existing/Current mortgage|lender|loan …` and `(matures …)` / `maturity …` clauses. Clean purposes
+pass through unchanged (verified: zero purpose-extraction diff across all 125 bulletproof fixtures /
+178 events).
+
+**Methodology note:** this is innovation IV(c) (broker-prose canonical extraction with
+false-positive guards) extended with a previously-missing guard for trailing run-on capture. The
+post-match trailer-trim pattern is reusable; worth scanning other phrase-capturing canonical
+extractors for the same greedy-capture-without-FP-guard shape in the next maintenance pass.
+
+**Disposition:** resolved; reusable-pattern scan deferred to next maintenance pass.
+
+---
+
+## OBS-10 — Offline/deployed verification-path divergence
+**Surfaced by:** Thomas Bergqvist Bug 2 (the incomplete first fix, commit `73b6489`)
+**Severity:** methodology (process lesson)
+
+The first Bug-2 fix (`73b6489`) pinned the Loan Purpose section in `generateLeadSummary` and passed
+an offline test — but that test called `generateLeadSummary` with a manually-set, already-clean
+`dealSummary.purpose`, bypassing the canonical-extraction stage. On deployed code, extraction runs
+first and produced the dirty canonical value, and the fix's defer-to-corrections-block path meant it
+never fired. The post-deploy staging replay caught it.
+
+**Lesson:** an offline test must exercise the same pipeline stages the fix's correctness depends on.
+When the deployed path runs an upstream stage (here, canonical extraction) that the offline test
+skips, the offline result is not a valid verification. Trace which stages a fix depends on, and make
+the offline test cover them — or rely on the deployed staging replay.
+
+**Disposition:** process lesson; no code action.
+
+---
+
+## OBS-11 — stripAdminClosing as an architectural addition (audience symmetry)
+**Surfaced by:** Thomas Bergqvist Bug 3 (commit `73b6489`)
+**Severity:** resolved (fix shipped); methodology note
+
+Pre-fix, deterministic post-generation sweeps existed for broker-facing outbounds
+(`enforceNoRoutingLeak`, `stripPerfectOpener`) but there was no admin-side equivalent, so a
+broker-style closing the model appended to the admin-internal prelim reached the admin document.
+`stripAdminClosing` (admin-prelim path only) was added as the admin-side equivalent, completing the
+layered-defense symmetry — both audiences now have a dedicated post-gen guard.
+
+**Methodology note:** worth scanning for other audience-asymmetric defensive gaps — failure modes
+where broker-facing output has a guard but admin-facing doesn't, or vice versa.
+
+**Disposition:** resolved; asymmetry scan deferred to next maintenance pass.
