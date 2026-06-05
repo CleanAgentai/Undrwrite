@@ -1459,6 +1459,14 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       multiPartyQualificationOverride: _q3Roster.aggregationDirective, // FRANCO-Q3/Q4
     }
   );
+  // THOMAS-BERGQVIST Bug 3 (Layer 2): strip any broker-style closing the LLM appended to
+  // this ADMIN-INTERNAL prelim ("Looking forward to hearing from you! / Vienna / Private
+  // Mortgage Link"). Admin-prelim path ONLY — broker-facing outbounds keep their sign-off.
+  const _adminClosingSweep = aiService.stripAdminClosing(leadSummary);
+  leadSummary = _adminClosingSweep.swept;
+  if (_adminClosingSweep.sweptAny) {
+    console.log('THOMAS-BERGQVIST Bug 3: stripAdminClosing removed a broker-style closing from the admin prelim narrative.');
+  }
   // Post-Claude: strip any residual Vienna-emitted Snapshot block + prepend the JS canonical Snapshot.
   const _snapStrip = aiService.stripVienna_DealSnapshot(leadSummary);
   leadSummary = aiService.prependDealSnapshot(_snapStrip.stripped, _bSnapshotHtml);

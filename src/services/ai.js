@@ -1813,6 +1813,38 @@ const stripPerfectOpener = (html) => {
   return { swept: html, sweptAny: false };
 };
 
+// THOMAS-BERGQVIST Bug 3 (Layer 2 post-sweep) — strip broker-style closings from the
+// ADMIN-INTERNAL preliminary review. generateLeadSummary's prompt generalizes a friendly
+// sign-off from the broker-facing prompt corpus and appends "Looking forward to hearing
+// from you! / Vienna / Private Mortgage Link" to the admin prelim narrative. Layer 1 (the
+// prompt prohibition) discourages it; this deterministic sweep guarantees it never reaches
+// the admin document. Structurally a sibling of stripPerfectOpener (openers); this targets
+// CLOSINGS. Wired to the admin prelim path ONLY (sendPreliminaryReviewToAdmin) — broker-
+// facing outbounds keep their sign-off by construction. Conservative by design: removes
+// only whole <p> blocks that are unambiguous email closings, never sentence-internal text.
+const stripAdminClosing = (html) => {
+  if (!html || typeof html !== 'string') return { swept: html, sweptAny: false };
+  let out = html;
+  const closingPatterns = [
+    // "Vienna<br>Private Mortgage Link" / "Vienna | Private Mortgage Link" sign-off block
+    /<p>\s*Vienna\s*(?:<br\s*\/?>\s*|\|\s*)Private Mortgage Link\.?\s*<\/p>/gi,
+    // "Looking forward to hearing from you!" (and other "Looking forward …") closings
+    /<p>\s*Looking forward[^<]*<\/p>/gi,
+    // standalone "Vienna" sign-off paragraph (the whole paragraph is just the name)
+    /<p>\s*Vienna\.?\s*<\/p>/gi,
+    // "We look forward to working with you" style closings
+    /<p>\s*We look forward[^<]*<\/p>/gi,
+  ];
+  let sweptAny = false;
+  for (const re of closingPatterns) {
+    const before = out;
+    out = out.replace(re, '');
+    if (out !== before) sweptAny = true;
+  }
+  if (sweptAny) out = out.replace(/\n{3,}/g, '\n\n').trim();
+  return { swept: out, sweptAny };
+};
+
 // JS-enforced banner substitution. Strips Claude's FILE STATUS paragraph
 // and prepends the JS-determined banner. Also strips the trailing
 // "This file is COMPLETE…" self-consistency line when the banner says
@@ -3529,7 +3561,12 @@ A short paragraph explaining who the borrower is:
 This is context, not a life story.
 
 === SECTION 3: LOAN PURPOSE ===
-Clearly and plainly stated. Examples: Refinance to consolidate debt, bridge financing, equity take-out, etc.
+${(canonicalCorrectionsOverride && canonicalCorrectionsOverride.purpose)
+  ? '' /* correction-turn: the Loan Purpose is pinned to canonical via the corrections override block above */
+  : (dealSummary && dealSummary.purpose && String(dealSummary.purpose).trim())
+    ? `[DETERMINISTIC — USE THIS VERBATIM]: "${String(dealSummary.purpose).trim()}"
+Use the deterministic value above as the loan purpose, verbatim — it is the canonical extracted purpose for this deal. Do NOT copy raw text from the broker's email "Loan Request" line, and do NOT append the existing-mortgage lender / maturity run-on (e.g. "Existing mortgage: <lender> (matures <date>)") that may follow the purpose in the email body.\n`
+    : `No canonical purpose was extracted. Infer the purpose from the loan application document content — NOT from the broker's email body run-on.\n`}Clearly and plainly stated. Examples: Refinance to consolidate debt, bridge financing, equity take-out, etc.
 Ambiguity here creates immediate friction — be specific.
 
 === SECTION 4: EXIT STRATEGY ===
@@ -3630,6 +3667,7 @@ ${messages.length > 0 ? messages.map(m => `[${m.senderLabel || (m.direction === 
 - Group UUU (S3.4) — CATEGORICAL/PURPOSE MISMATCHES MUST FLAG: if the email body states a loan purpose category that meaningfully differs from the loan application's stated purpose (e.g. "home renovations" vs "business working capital and equipment purchase", "investment property" vs "primary residence", "debt consolidation" vs "purchase down payment"), you MUST flag this as a discrepancy in the Risk Factors section. These are NOT soft mismatches to gloss over — purpose drives underwriting category (consumer vs commercial vs investment) and cannot silently default to the loan-app value. Same rule for lender names, employer names, property addresses, ownership type, occupancy status — when the value DIFFERS materially between sources, flag it.
 - Use underwriting language, not marketing language
 - Be thorough but scannable — a lender should understand the deal from this summary alone
+- This is an ADMIN-INTERNAL underwriting document for Franco, NOT a broker-facing email. Do NOT include any closing sign-off, "Looking forward to hearing from you" (or similar) language, or a "Vienna / Private Mortgage Link" signature. The document ends after the Email Conversation / Action Required sections — there is NO sign-off.
 - ${!isComplete ? 'Start the summary with a clear banner: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"' : 'Start the summary with: "FILE STATUS: COMPLETE — Ready for Review"'}
 
 Return only the HTML. Do not include a subject line.`,
@@ -4631,6 +4669,8 @@ ${JSON.stringify(summaryData, null, 2)}`,
   ROUTING_LEAK_PATTERNS,
   // R8-B (2026-05-22) — JS-side "Perfect"-opener post-gen sweep.
   stripPerfectOpener,
+  // THOMAS-BERGQVIST Bug 3 (2026-06-05) — JS-side broker-closing sweep for the admin prelim.
+  stripAdminClosing,
   // R4-Bucket-C.6 — Documents Included JS render + strip+inject (Grace T4 fix)
   renderDocumentsIncludedSection,
   stripAndInjectDocumentsIncluded,
