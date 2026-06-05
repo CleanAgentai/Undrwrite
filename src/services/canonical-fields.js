@@ -1168,7 +1168,18 @@ const parseBrokerInitialIntent = (messageBody) => {
     if (amount != null && amount > 0 && amount < 100_000_000) {
       intents.push({ field: 'requested_loan_amount', value: amount, source: 'broker_initial_intent', rawPhrase: loanRequestM[0] });
     }
-    const purpose = loanRequestM[2].trim().replace(/[,.]+$/, '');
+    // THOMAS-BERGQVIST Bug 2 (2026-06-05): the broker frequently runs a SEPARATE field onto the
+    // same line after the purpose with no delimiter — e.g. "... refinancing existing TD Bank
+    // mortgage Existing mortgage: TD Bank (matures March 2028)". The greedy capture above swallows
+    // that trailing clause, so the canonical purpose became a truncated run-on that the R10-G
+    // override then pinned into the prelim Loan Purpose verbatim. Cut the captured value at a
+    // trailing capitalized "Label:" field or a parenthetical maturity clause so only the purpose
+    // itself is canonical. Conservative — only trims when a new run-on field marker appears.
+    const purpose = loanRequestM[2]
+      .replace(/\s+(?:Existing|Current)\s+(?:mortgage|lender|loan)\b.*$/i, '') // trailing "Existing mortgage: TD Bank ..." run-on field
+      .replace(/\s*\(?\bmatur(?:es|ing|ity)\b.*$/i, '')                         // trailing "(matures ...)" / "maturity ..." clause
+      .trim()
+      .replace(/[,.:;]+$/, '');
     if (purpose.length >= 3 && purpose.length <= 100) {
       intents.push({ field: 'purpose', value: purpose, source: 'broker_initial_intent', rawPhrase: loanRequestM[0] });
     }
