@@ -1,7 +1,8 @@
 {
   "name": "undrwrite-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Vienna — autonomous mortgage-underwriting email agent for Private Mortgage Link. Proprietary; all rights reserved.",
+  "private": true,
   "main": "index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -10,7 +11,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "UNLICENSED",
   "type": "commonjs",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.73.0",
