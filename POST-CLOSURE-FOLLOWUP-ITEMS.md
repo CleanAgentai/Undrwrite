@@ -226,3 +226,72 @@ layered-defense symmetry — both audiences now have a dedicated post-gen guard.
 where broker-facing output has a guard but admin-facing doesn't, or vice versa.
 
 **Disposition:** resolved; asymmetry scan deferred to next maintenance pass.
+
+---
+
+## OBS-12 — Loan Term field repudiation
+**Surfaced by:** Jennifer Okafor Bug 2 (commit `35a34ed`)
+**Severity:** resolved (shipped); methodology note
+
+Pre-removal, `requested_loan_term_months` was a structured canonical field with two extractor
+patterns (email-body + AcroForm Page-1 annotation), a Snapshot row, and TBD-suppression logic.
+Per Franco's direction it was removed comprehensively: lenders set the loan term post-approval,
+so it drives no underwriting decision and shouldn't be in the system. Natural-language mentions of
+loan duration in narrative prompt sections were left untouched. The DB column (if persisted) is
+left in place unused — no migration.
+
+**Pattern:** feature-repudiation when a structured field doesn't drive decisions — same shape as
+the R10-I broker-package repudiation. Features added for completeness rather than necessity can be
+removed cleanly once the underlying workflow assumption clarifies.
+
+**Methodology note:** worth scanning other structured canonical fields for "added because the
+document has the field, not because it drives a decision" candidates. Lighter canonical = less
+maintenance debt, fewer edge cases.
+
+**Disposition:** resolved; structured-field audit deferred to next maintenance pass.
+
+---
+
+## OBS-13 — Title-case render-layer formatting (canonical-vs-render boundary)
+**Surfaced by:** Jennifer Okafor Bug 3 (commit `35a34ed`)
+**Severity:** resolved (shipped); methodology note
+
+The Snapshot Property Address row rendered the lowercased canonical value (lowercased by
+`normalizeAddress` for internal cross-source comparison). Added `renderAddress()` — a render-layer
+helper that title-cases for display (directionals NW/NE/SW/SE and province codes stay uppercase;
+postal tokens uppercase; numbers/numeric street names preserved), wired via a `format:'address'`
+on `renderSnapshotRow`. Canonical value stays lowercased for internal use; only display changes.
+
+**Pattern:** canonical-vs-render boundary discipline — canonical stores the comparison-normalized
+form; the render layer applies audience-appropriate formatting.
+
+**Methodology note:** worth scanning other Snapshot rows for similar canonical-vs-render formatting
+gaps — borrower names, brokerage names, and lender names may have normalization-vs-display
+mismatches.
+
+**Disposition:** resolved; render-formatting scan deferred to next maintenance pass.
+
+---
+
+## OBS-14 — Existing-balance canonical conservatism documented
+**Surfaced by:** Jennifer Okafor extra investigation (commit `35a34ed`)
+**Severity:** resolved (documentation only; behavior unchanged)
+
+The Snapshot's "Existing 1st Mortgage Balance: TBD" (despite `extracted_data.existing_mortgage_balance`
+being populated) is deliberate, not a bug: the canonical field is populated only from
+document-confirmed sources (credit-bureau tradelines / payout statement); a broker-stated or
+LLM-extracted value is intentionally NOT accepted for this adverse figure (it drives the refinance
+carve-out / combined-LTV decision, which per Q1 conservatism requires document confirmation). The
+"TBD" is the deliberate visible-incompleteness signal. A clarifying comment was added at the render
+site so future engineers (and future sessions) don't mistake it for a defect.
+
+**Pattern:** document deliberate architectural decisions at the failure-surface where someone might
+mistake them for bugs.
+
+**Methodology note:** this is the SECOND time this engagement that deliberate architecture was
+mistaken for a bug (first: the loan_purpose corrections-block gotcha, banked in
+project_thomas_bergqvist_round8.md). Worth a systematic pass: where else might intentional behavior
+be misread as a defect by a future investigator?
+
+**Disposition:** resolved (documented); intentional-behavior-documentation pass deferred to next
+maintenance pass.
