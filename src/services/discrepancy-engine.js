@@ -258,11 +258,32 @@ const deriveCityProvince = (input) => {
 
 const formatMoney = (n) => '$' + Number(n).toLocaleString('en-US');
 
+// FRANCO Round-8 Bug 3 (2026-06-06): render-layer title-casing for addresses. The canonical
+// subject_property_address is lowercased by normalizeAddress (canonical-fields.js) for
+// cross-source comparison — correct for canonical, but wrong for display. renderAddress
+// title-cases for the audience while the canonical value stays lowercased for internal use.
+// Directionals (NW/NE/SW/SE) and province codes stay uppercase; postal-code tokens uppercase;
+// numbers (incl. numeric street names like "116") preserved.
+const _ADDR_PROVINCES = new Set(['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT']);
+const _ADDR_DIRECTIONALS = new Set(['NW', 'NE', 'SW', 'SE']);
+const renderAddress = (value) => {
+  if (!value || typeof value !== 'string') return value;
+  return value.split(/(\s+|,)/).map((tok) => {
+    if (tok === ',' || /^\s+$/.test(tok)) return tok; // preserve separators
+    const upper = tok.toUpperCase();
+    if (_ADDR_DIRECTIONALS.has(upper)) return upper;
+    if (_ADDR_PROVINCES.has(upper)) return upper;
+    if (/^[a-z]\d[a-z]$/i.test(tok) || /^\d[a-z]\d$/i.test(tok)) return upper; // postal FSA / LDU
+    if (/^\d/.test(tok)) return tok; // numbers + numeric street names preserved
+    return tok.charAt(0).toUpperCase() + tok.slice(1).toLowerCase();
+  }).join('');
+};
+
 // Render a single Snapshot row. Handles single-value, multi-value-with-discrepancy,
 // and missing cases. Uses canonical sources for source attribution.
 const renderSnapshotRow = (label, tuples, opts = {}) => {
   const { format = 'string', suffix = '', fallback = null, fallbackLabel = null } = opts;
-  const formatValue = (v) => format === 'money' ? formatMoney(v) : String(v) + suffix;
+  const formatValue = (v) => format === 'money' ? formatMoney(v) : format === 'address' ? renderAddress(String(v)) : String(v) + suffix;
   if (!tuples || tuples.length === 0) {
     if (fallback && fallback.length > 0) {
       const v = formatValue(fallback[0].value);
@@ -690,7 +711,7 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
   // filterBrokerFacing does NOT include postal-code in MARKET_DELTA_FIELDS
   // → broker-facing surface renders postal-code clarification when
   // multi-value. R11-C is admin-side scoped only.
-  lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address));
+  lines.push(renderSnapshotRow('Property Address', canonicalMap.subject_property_address, { format: 'address' }));
 
   // City / Province — R6-δ two-tier: prefer canonical_map.subject_property_city
   // + subject_property_province tuples (populated by extractFromEmailBody's
@@ -750,6 +771,17 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     // or "TBD" if the canonical state is incomplete (visible-incompleteness > silent-omission;
     // asymmetric-risk, Bug-1/BUG-4 lineage). Not rendered for clean first-mortgage / purchase
     // deals (no existing-mortgage signal → no row, no noise).
+    // FRANCO Round-8 (Jennifer Okafor, 2026-06-06) — canonical-vs-extracted_data divergence
+    // is INTENTIONAL, not a bug. This row renders from canonicalMap.existing_first_mortgage_balance,
+    // which is populated only from document-confirmed sources (credit-bureau tradelines / payout
+    // statement). When the canonical value is null but extracted_data.existing_mortgage_balance
+    // contains an LLM-extracted value (e.g. from broker prose or a loan-application liabilities
+    // table), the canonical map intentionally does NOT accept that value for this adverse figure.
+    // The "TBD" rendering is the deliberate visible-incompleteness signal: existing balance drives
+    // the refinance carve-out / combined-LTV decision, and per the Q1 architectural conservatism
+    // those decisions require document confirmation rather than broker-stated values. See innovation
+    // IV(a) (canonical gate-input discipline) and the Option C refinance carve-out (compute
+    // correctly + flag contradictions; never cross-wire broker claims into adverse decision math).
     const _bug5HasBalance = (canonicalMap.existing_first_mortgage_balance || []).length > 0;
     const _bug5HasLender = (canonicalMap.existing_first_mortgage_lender || []).length > 0;
     const _bug5IsRefiOr2nd = ((canonicalMap.transaction_type || []).some(t => t && /refinance|2nd|second/i.test(String(t.value))))
@@ -759,17 +791,10 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
     }
   }
 
-  // FRANCO Scenario-2 small fix (2026-06-02 / Bug 1(c)): when the loan term is unknown,
-  // OMIT the row rather than rendering "Loan Term Requested: TBD". Loan term is rarely
-  // stated at intake and is not underwriting-blocking, so a "TBD" placeholder is pure
-  // noise — and it reached the broker-facing surface (the closing snapshot). Render the
-  // row only when a real term value is on file. (Unlike the existing-balance row above,
-  // visible-incompleteness has no value here — there's no asymmetric risk in omitting an
-  // unstated optional term.)
-  const _loanTermTuples = canonicalMap.requested_loan_term_months || [];
-  if (_loanTermTuples.some(t => t && t.value != null)) {
-    lines.push(renderSnapshotRow('Loan Term Requested', _loanTermTuples, { suffix: ' months' }));
-  }
+  // FRANCO Round-8 (2026-06-06): the Loan Term Requested Snapshot row is REMOVED. Lenders
+  // set the loan term post-approval, so a broker-stated term drives no underwriting
+  // decision and has no place in the system (product simplification). The earlier
+  // Scenario-2 "OMIT when TBD" suppression is superseded by full removal of the field.
   // FRANCO-PREDICTED-Q8 (2026-05-28): surface joint/multi-borrower deals so
   // Franco sees the structure at a glance. detectJointMultiBorrower already
   // runs in runDiscrepancyDetection(Aggregated) but its result was previously
@@ -1289,7 +1314,6 @@ const extractCanonicalFieldsAggregated = (inboundMessages, savedDocs, opts = {})
     subject_property_market_value: null,
     requested_loan_amount: null,
     mortgage_position: null,
-    requested_loan_term_months: null,
   };
 
   // Per-msg in ascending order: strip + extract + latest-non-empty resolution.

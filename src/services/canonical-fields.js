@@ -74,7 +74,8 @@
 //     primary_borrower_full_name
 //   Display-only fields (Commit-2 Snapshot completeness, NOT in discrepancy compute):
 //     mortgage_position (1st / 2nd / 3rd)
-//     requested_loan_term_months (numeric)
+//   (requested_loan_term_months removed FRANCO Round-8 2026-06-06 — Loan Term is no longer
+//    a structured field; lenders set the term post-approval.)
 
 // ════════════════════════════════════════════════════════════════════
 // LENDER_SYNONYMS — hardcoded entity-resolution map
@@ -357,7 +358,6 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
     requested_loan_amount: null,
     subject_property_market_value: null,
     mortgage_position: null,
-    requested_loan_term_months: null,
   };
   if (!emailBody && !emailSubject) return out;
   // Mortgage position — anchored to email subject ("Second Mortgage —", "First Mortgage Inquiry —")
@@ -393,14 +393,9 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
       }
     }
   }
-  // Loan term — broker template "*Term:* 12 months" or prose mention.
-  if (emailBody) {
-    const termM = emailBody.match(/\*?\s*(?:Loan\s+)?Term(?:\s+Requested)?\s*:?\s*\*?\s*(\d+)\s*(?:[-\s]?month|mo\.?)/i);
-    if (termM) {
-      const n = parseInt(termM[1], 10);
-      if (n >= 1 && n <= 60) out.requested_loan_term_months = n;
-    }
-  }
+  // FRANCO Round-8 (2026-06-06): Loan Term removed as a structured field. Lenders set the
+  // term post-approval, so the broker-stated term drives no underwriting decision. The
+  // email-body and loan-application term extractors + the Snapshot row are all removed.
   if (!emailBody) return out;
   // Property block: between `*Property:*` and next `*`
   const propM = emailBody.match(/\*\s*Property\s*:\s*\*\s*([\s\S]+?)\*/i);
@@ -850,7 +845,7 @@ const extractFromPnwStatement = (doc) => {
 // PNW template attachment. Two clusters compose cleanly; no interaction.
 const extractFromLoanApplication = (doc) => {
   const text = doc?.text || doc?.extracted_data?.text || '';
-  const out = { requested_loan_amount: null, requested_loan_term_months: null };
+  const out = { requested_loan_amount: null };
   if (!text) return out;
   // First Page-1 annotation matching money shape (optional `$`, digits with
   // commas, optional decimal). The `m` flag makes `$` match line-end so we
@@ -867,25 +862,8 @@ const extractFromLoanApplication = (doc) => {
       out.requested_loan_amount = amount;
     }
   }
-  // R6-δ (2026-05-21): Loan Term extraction. Q3 verdict: shape-keyed (not
-  // positional) — scan ALL Page-1 annotations; FIRST that matches
-  // `^\d{1,2}\s+months?$` wins. Robust to PML template field reorderings.
-  // Cross-corpus verified on 4/4 fixtures (Patricia/Kevin/Sandra/Ryan — all
-  // produce 12 months as the 3rd Page-1 annotation in current template).
-  // Sanity bound 1-60 months matches the email-body extractor's range.
-  //
-  // Distinguishes the broker-filled annotation from form-template boilerplate
-  // ("Requested Term (eg. 6, 12 or 18 months):" appears in unwrapped text but
-  // NOT inside `[Page 1 annotation]` markers).
-  const annTermRe = /\[Page\s+1\s+annotation\]\s*(\d{1,2})\s+months?\s*$/gm;
-  let termMatch;
-  while ((termMatch = annTermRe.exec(text)) !== null) {
-    const n = parseInt(termMatch[1], 10);
-    if (n >= 1 && n <= 60) {
-      out.requested_loan_term_months = n;
-      break;
-    }
-  }
+  // FRANCO Round-8 (2026-06-06): Loan Term extraction removed (see header note) — lenders
+  // set the term post-approval, so it drives no underwriting decision.
   return out;
 };
 
@@ -1610,7 +1588,6 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     primary_borrower_full_name: [],
     // Display-only fields (Snapshot completeness — NOT in discrepancy compute list):
     mortgage_position: [],
-    requested_loan_term_months: [],
     // R10-G (2026-05-27): purpose canonical field. Intent-type (broker's
     // stated reason for the loan); pushed from broker_initial_intent
     // (first inbound), broker_correction (subsequent explicit corrections),
@@ -1667,7 +1644,6 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
   // sources present). Existing source field preserved for backward-compat
   // with any pre-R10-E consumers reading source directly.
   push('mortgage_position', email.mortgage_position, 'email_subject_or_body', { classification: 'email_subject_or_body' });
-  push('requested_loan_term_months', email.requested_loan_term_months, 'email_body');
 
   // Per-doc
   for (const doc of (savedDocs || [])) {
@@ -1731,19 +1707,14 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       push('purpose', r.purpose, doc.file_name, { classification: cls });
     } else if (cls === 'loan_application') {
       // R6-β-A (2026-05-21): Page-1 annotation extraction of requested_loan_amount.
-      // R6-δ (2026-05-21): same extractor extended for requested_loan_term_months
-      // via shape-keyed Page-1 annotation matching `^\d{1,2}\s+months?$`. Both
-      // values come from the PML loan_application template's Page-1 annotations.
-      // Cross-corpus verified on 4/4 fixtures (Patricia/Kevin/Sandra/Ryan — all
-      // 12-month terms). See extractFromLoanApplication header for full
-      // diagnosis + corpus convention + cross-cluster cascade notes.
       // R6-α (2026-05-21): thread classification:'loan_application' onto the
       // requested_loan_amount push so the consumer-side filter can identify
       // doc-source-authoritative tuples and strip conflicting email_body
       // tuples from prompt context (Derek S3 dce308c8 fix).
+      // (FRANCO Round-8 2026-06-06: the requested_loan_term_months push was removed here —
+      // Loan Term is no longer a structured field.)
       const r = extractFromLoanApplication(doc);
       push('requested_loan_amount', r.requested_loan_amount, doc.file_name, { classification: cls });
-      push('requested_loan_term_months', r.requested_loan_term_months, doc.file_name);
       // R10-G (2026-05-27): purpose from loan_application Page-1 annotation
       const loanAppPurpose = extractPurposeFromLoanApplication(doc);
       push('purpose', loanAppPurpose, doc.file_name, { classification: cls });

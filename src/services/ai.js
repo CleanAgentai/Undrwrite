@@ -3548,7 +3548,6 @@ Fields to render (in this order):
 - Mortgage Position (1st / 2nd / etc.)
 - Appraised Value (or Tax Assessment if appraisal pending)
 - LTV (combined if applicable)
-- Loan Term Requested
 - Borrower Type (Personal / Corporate / Trust)
 - Ownership Type: ${ownershipType || 'TBD'}`}
 
