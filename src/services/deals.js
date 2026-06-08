@@ -16,8 +16,17 @@ const classifyByContent = (extractedText) => {
   const text = (extractedText || '').toLowerCase();
   if (!text) return 'other';
   if (/personal net worth|total assets.*total liabilities|net worth statement/i.test(text)) return 'pnw_statement';
-  if (/loan application|borrower.*information.*property|mortgage application/i.test(text) && /loan amount|mortgage/i.test(text)) return 'loan_application';
-  if (/apprais(al|ed value)|market value.*opinion|comparable.*sales/i.test(text)) return 'appraisal';
+  // Bug 1 (Grantham 55b3a48c, 2026-06-08) — defense-in-depth partner to the appraisal
+  // tightening below. The \s+ (which matches newlines) lets the line-broken title
+  // "MORTGAGE LOAN\nAPPLICATION" satisfy this clause; pre-fix the literal-space
+  // /loan application/ failed on the newline, dropping through to the appraisal line.
+  if (/loan\s+application|mortgage\s+loan\s+application|borrower.*information.*property|mortgage\s+application/i.test(text) && /loan amount|mortgage/i.test(text)) return 'loan_application';
+  // Bug 1: require a STRUCTURAL appraisal signal (report header / appraiser identification
+  // / certification / comparable sales / valuation methodology / opinion-of-value) — NOT a
+  // bare "appraised value" field. A loan application carries an incidental "Appraised Value:
+  // $X" line in its mortgage-request section; pre-fix that bare substring over-matched here
+  // and produced a false filename-vs-content mismatch callout on the Grantham loan app.
+  if (/apprais(?:al\s+report|er|al\s+certification)|comparable\s+sales?\b|uspap|(?:sales|direct)\s+comparison\s+approach|opinion\s+of\s+(?:market\s+)?value/i.test(text)) return 'appraisal';
   if (/credit score|credit bureau|equifax|transunion|experian|beacon score/i.test(text)) return 'credit_report';
   if (/notice of assessment|canada revenue|income tax.*return/i.test(text)) return 'noa';
   if (/anti-money laundering|proceeds of crime|fintrac/i.test(text)) return 'aml';

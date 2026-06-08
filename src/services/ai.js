@@ -1701,12 +1701,64 @@ const ROUTING_LEAK_PATTERNS = [
   );
 })();
 
+// R11 (Grantham 55b3a48c, 2026-06-08) — post-sweep artifact cleanup. Retires the
+// deferred "future cleanup pass" the routing-leak sweeps left as TODO (R10-H cascade
+// comment ~L1630: "bare-period paragraph ... future cleanup pass can collapse"; R10-H-d
+// PARTIAL-STRIP DISCIPLINE ~L1655: "minor grammar artifact accepted"). The sweep
+// patterns deliberately prioritize leak removal over grammar and leave THREE artifact
+// shapes, all observed empirically on the Grantham AML/PEP draft across LLM generation
+// variance:
+//   (1) ORPHAN TEMPORAL CLAUSE — a subordinating "Once/When/After (we|I) (have|receive|
+//       get) these[ items]." left with no main clause after a sweep stripped the clause
+//       it introduced (e.g. R6-η-c reduced "Once I receive these, I'll have everything
+//       I need to proceed." → "Once I receive these."). Removed as a unit.
+//   (2) DOUBLED / STRANDED PERIOD — "..", ". .", or " ." where a '.'/''-replacement met
+//       an adjacent terminator. Collapsed to a single ".".
+//   (3) EMPTY / BARE-PERIOD PARAGRAPH — "<p></p>" or "<p>.</p>" left when the swept
+//       clause was a paragraph's sole content. Removed.
+// CONSERVATIVE BY CONSTRUCTION — TWO orphan signatures, both NOUN/VERB-AGNOSTIC (the
+// R10-H-d comment warns enumerating trailing tails over-couples; these key on structure):
+//   (1a) SENTENCE-INITIAL orphan — "Once/When/After (we|I) <verb> …<terminator>" with NO
+//        comma and NO second subject-pronoun after the verb (either signals a real main
+//        clause). Removes "Once I receive these." / "Once we have everything together.";
+//        leaves "Once we have these, please confirm." (comma) and "Once we have these
+//        forms we can proceed." (pronoun "we" → main clause).
+//   (1b) STRANDED-PERIOD orphan — a sweep-stranded "." directly before a LOWERCASE temporal
+//        conjunction. Normal prose capitalizes after a period, so a lowercase once/when/
+//        after here is unambiguously a clause the sweep severed (".once we've completed our
+//        review." / ".once we have everything together."). Object/verb-agnostic.
+// Both run ONLY when a sweep fired (caller gates on sweptAny), so leak-free outbounds stay
+// byte-identical. Neither modifies the sweep patterns themselves.
+const ORPHAN_TEMPORAL_INITIAL = /\s*\b(?:once|when|after|as\s+soon\s+as)\s+(?:we|I)\s+(?:have|receive|get|had)\b(?![^.!?<]*\b(?:we|i|you)\b)[^.,!?<]*[.!]/gi;
+const ORPHAN_TEMPORAL_STRANDED = /\.\s*(?:once|when|after|as\s+soon\s+as)\b[^.!?<]*[.!]/g; // case-SENSITIVE: lowercase conjunction only
+const cleanupSweepArtifacts = (html) => {
+  if (!html || typeof html !== 'string') return html;
+  return html
+    .replace(ORPHAN_TEMPORAL_INITIAL, '')    // (1a) sentence-initial orphan, no main clause
+    .replace(ORPHAN_TEMPORAL_STRANDED, '')   // (1b) ".<lowercase-temporal> …." stranded orphan
+    .replace(/ +([.!?])/g, '$1')             // (2a) space(s) before a terminator
+    .replace(/([.!?])(?:\s*\.)+/g, '$1')     // (2b) terminator + stray period(s) → terminator (".." "!." "?." ". .")
+    .replace(/<p>\s*[.!?]?\s*<\/p>/gi, '')   // (3) empty / bare-terminator paragraph
+    .replace(/<p>[ \t]+/gi, '<p>')           // leading space a removal stranded in a <p>
+    .replace(/[ \t]+<\/p>/gi, '</p>')        // trailing space a removal stranded in a <p>
+    .replace(/\n{3,}/g, '\n\n');             // collapse the blank-line gap a removal leaves
+};
+
 const enforceNoRoutingLeak = (html) => {
   if (!html || typeof html !== 'string') return { swept: html, sweptAny: false };
   let out = html;
   const before = out;
   for (const { match, replace } of ROUTING_LEAK_PATTERNS) {
     out = out.replace(match, replace);
+  }
+  // R11 (Grantham 55b3a48c, 2026-06-08) — retire the deferred "future cleanup pass"
+  // (noted at the R10-H cascade comment ~L1639 and R10-H-d ~L1664). Routing-leak
+  // patterns intentionally prioritize leak removal over grammatical cleanliness and
+  // leave artifact shards (bare-period paragraphs, stranded temporal fragments). Run
+  // a single conservative cleanup ONLY when a sweep actually fired, so untouched
+  // outbounds are byte-identical.
+  if (out !== before) {
+    out = cleanupSweepArtifacts(out);
   }
   return { swept: out, sweptAny: out !== before };
 };
@@ -2259,9 +2311,9 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
       const postApprovalAmlPepBlock = postApprovalAmlPepAsk
         ? `
 
-POST-APPROVAL AML/PEP ASK (Group KKKK — load-bearing for the conversational follow-up flow): the deal has passed prelim approval, all intake documents are on file, and the only remaining items before funding are the broker compliance forms. Your reply MUST explicitly request:
-- AML form (Anti-Money Laundering — broker compliance, required)
-- PEP form (Politically Exposed Person — broker compliance, required)
+POST-APPROVAL AML/PEP ASK (Group KKKK — load-bearing for the conversational follow-up flow): the deal has passed prelim approval, all intake documents are on file, and the only remaining items before funding are the FINTRAC compliance forms (AML and PEP), which we collect through the broker on the borrower's behalf. Your reply MUST explicitly request:
+- AML form (Anti-Money Laundering — FINTRAC compliance, collected via broker on the borrower's behalf)
+- PEP form (Politically Exposed Person — FINTRAC compliance, collected via broker on the borrower's behalf)
 
 Acknowledge what's already received (intake is complete) and request AML + PEP as the final items needed. Do NOT skip this — the pre-KKKK conversational flow omitted AML/PEP because the STANDARD DOCUMENT CHECKLIST below doesn't include them. This block is the explicit instruction for the post-approval-intake-complete state and OVERRIDES any prior rule about "AML/PEP not asked at intake" (this is not intake — this is the post-approval compliance ask).`
         : '';
@@ -2999,7 +3051,10 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
         ? `- Purchase Contract / Agreement of Purchase and Sale (required for purchase transactions)
 - Proof of Down Payment Source`
         : `- Current Mortgage Payout Statement (do NOT ask "what is currently owing" as a question — just request the actual payout statement document)`;
-      // AML/PEP only apply when the SUBMITTER is a broker (broker compliance documents).
+      // AML/PEP are FINTRAC compliance documents (lender obligations under the Proceeds
+      // of Crime / Terrorist Financing Act, satisfied by collecting borrower information).
+      // They only apply when the SUBMITTER is a broker — the broker is the conduit that
+      // collects them on the borrower's behalf, not the responsible party.
       // For borrower-direct submissions, skip — lender or broker can pull these later.
       const reqSenderIsBroker = dealSummary?.sender_type === 'broker';
       // Group KKKK (S1.1/S2.1/S5.1): AML/PEP request gated behind "all intake
@@ -3034,7 +3089,7 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
       // for legacy callers (initial-submission path, strict-superset widening).
       const intakeComplete = allIntakeReceived(receivedClassifications, reqIsPurchase);
       const complianceDocs = (reqSenderIsBroker && (intakeComplete || isPostApproval))
-        ? `\n- AML form (Anti-Money Laundering — broker compliance, required)\n- PEP form (Politically Exposed Person — broker compliance, required)`
+        ? `\n- AML form (Anti-Money Laundering — FINTRAC compliance, collected via broker on the borrower's behalf)\n- PEP form (Politically Exposed Person — FINTRAC compliance, collected via broker on the borrower's behalf)`
         : '';
 
       const response = await callClaude({

@@ -295,3 +295,76 @@ be misread as a defect by a future investigator?
 
 **Disposition:** resolved (documented); intentional-behavior-documentation pass deferred to next
 maintenance pass.
+
+## OBS-15 — Appraisal classifier discrimination tightening
+**Surfaced by:** Robert Grantham Round-8 Scenario-2 Bug 1 (deal `55b3a48c`)
+**Severity:** resolved (fix deployed in this commit)
+
+Pre-fix, the `classifyByContent` appraisal pattern (`deals.js`) matched a bare `appraised value`
+substring, so a loan application carrying an incidental "Appraised Value: $X" field in its
+mortgage-request section content-classified as `appraisal` — producing a FALSE filename-vs-content
+mismatch callout on a genuine loan application. Post-fix the appraisal pattern requires a STRUCTURAL
+signal (appraisal report header / appraiser / certification / comparable sales / USPAP / valuation
+methodology / opinion-of-value), and the `loan_application` pattern was loosened (`\s+` crosses the
+line-broken `MORTGAGE LOAN\nAPPLICATION` title) as defense-in-depth.
+
+**Pattern:** innovation IV(c) (inclusion-pattern + discrimination-signal) extended to the
+content-CLASSIFICATION layer, not just field extraction. The classifier needs both an inclusion
+pattern AND discriminating signals; a bare substring without discrimination over-matches.
+
+**Methodology note:** THIRD instance of the FP-guard lesson in recent rounds (after Daniel Kim and
+Jennifer Okafor, both at the field-extraction layer). Worth a systematic scan of the other
+`classifyByContent` branches for bare-substring patterns that should carry discrimination
+requirements (e.g. `mortgage balance`, `current balance` → could over-match; `resume` keywords).
+
+**Disposition:** resolved (fixed). Follow-up scan of sibling classifier branches deferred.
+
+## OBS-16 — AML/PEP FINTRAC framing correction
+**Surfaced by:** Robert Grantham Round-8 Scenario-2 Bug 2 (deal `55b3a48c`)
+**Severity:** resolved (fix deployed in this commit)
+
+Pre-fix the post-approval AML/PEP doc-request prompt encoded a `broker compliance, required`
+parenthetical on each form line (`ai.js` complianceDocs + the Group KKKK conversational block),
+which the LLM faithfully paraphrased into the factually-wrong "These are broker compliance
+requirements." AML/PEP are FINTRAC compliance requirements (lender obligations under the Proceeds of
+Crime / Terrorist Financing Act, collected through the broker on the borrower's behalf). Post-fix
+all three sites encode the accurate framing.
+
+**Pattern:** prompt-level product-knowledge accuracy. The AI faithfully paraphrases prompt framing —
+when output is factually wrong about a regulatory/product-domain claim, the prompt's
+product-knowledge encoding is usually the actual source, not an AI-behavior issue.
+
+**Methodology note:** when AI output is factually wrong about a regulatory or product-domain claim,
+check the prompt's product-knowledge encoding BEFORE assuming a model-behavior problem. The exact
+wrong phrase often appears nowhere in code (it's a paraphrase) — trace to the framing the prompt
+fed the model.
+
+**Disposition:** resolved (fixed).
+
+## OBS-17 — Routing-leak orphan cleanup (deferred debt retired)
+**Surfaced by:** Robert Grantham Round-8 Scenario-2 Bug 3 (deal `55b3a48c`)
+**Severity:** resolved (fix deployed in this commit)
+
+Pre-fix the routing-leak sweeps (`ROUTING_LEAK_PATTERNS`) deliberately prioritized leak removal over
+grammatical cleanliness and left artifact shards — bare-period paragraphs, doubled terminators, and
+stranded temporal-clause fragments (e.g. "Once we have these." / ".once we've completed our review.")
+— which the codebase EXPLICITLY tolerated ("minor visual artifact … future cleanup pass can
+collapse"; "minor grammar artifact accepted"). Franco's report ("Once we have these.") was one
+instance of this class. Post-fix a single conservative `cleanupSweepArtifacts` post-pass
+(`ai.js`, gated on `sweptAny`) retires the whole class: it removes orphaned temporal clauses
+(sentence-initial via a comma/pronoun main-clause guard; stranded via the lowercase-after-period
+signature — both noun/verb-agnostic), collapses doubled/stranded terminators, and drops empty/
+bare-terminator paragraphs. The sweep PATTERNS themselves are unchanged.
+
+**Pattern:** deferred maintenance debt retired under verification rigor. The codebase's own
+"future cleanup pass can collapse" comment WAS the retirement signal; handling instances one at a
+time across future Franco rounds would compound the debt.
+
+**Methodology note:** when codebase comments explicitly defer cleanup as future work, those notes are
+durable maintenance-debt signals. A periodic pass to retire such debt under stable verification
+conditions (here: 16-run live-generation variance + deterministic positive/negative cases) prevents
+the debt from compounding into recurring per-round reports. Design the retirement to be agnostic to
+the leaf-shape (object/verb) the debt manifests as — enumerating tails over-couples (the R10-H-d
+comment's own warning).
+
+**Disposition:** resolved (fixed).
