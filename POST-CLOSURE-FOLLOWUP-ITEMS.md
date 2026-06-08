@@ -368,3 +368,103 @@ the leaf-shape (object/verb) the debt manifests as — enumerating tails over-co
 comment's own warning).
 
 **Disposition:** resolved (fixed).
+
+## OBS-18 — Annotation-gating is a systemic extractor pattern (third instance)
+**Surfaced by:** Michael Thornton Round-8 Scenario-2 Bug 1 (deal `8c024006`)
+**Severity:** resolved for loan_amount; broader audit deferred
+
+Thornton's `requested_loan_amount` ($88,600) was TBD because `extractFromLoanApplication` matched
+ONLY a `[Page 1 annotation]`-prefixed line — those markers appear on scanned/broker-filled forms,
+not the DIGITAL plain-text PML template. This is the THIRD instance of the same class: Thomas
+Bergqvist loan_term, Jennifer Okafor loan_term (which led to the field's removal), now Thornton
+loan_amount. Fixed by adding a plain-text fallback alongside the annotation pattern.
+
+**Pattern:** a new field extractor should support BOTH annotation and plain-text formats from the
+start; an annotation-only regex silently misses the digital template.
+
+**Methodology note (deferred maintenance pass):** audit ALL canonical extractors for
+annotation-gating and add plain-text fallbacks systematically, rather than one field per Franco
+round. Candidates: any extractor whose regex contains `\[Page\s+\d+\s+annotation\]`.
+
+**Disposition:** loan_amount fixed (commit `d52df3c`). Systematic audit deferred.
+
+## OBS-19 — sweptAny gate was an unsound optimization (architectural correction)
+**Surfaced by:** Michael Thornton Round-8 Scenario-2 Bug 2 (deal `8c024006`)
+**Severity:** resolved (commit `d52df3c`)
+
+`cleanupSweepArtifacts` was gated on `sweptAny` (a routing-leak sweep having fired), on the
+assumption that orphan shards only arise FROM sweeps. Empirically the LLM emits bare orphan
+fragments on its own ("Once I receive these..") with NO co-firing routing-leak phrase →
+`sweptAny=false` → cleanup skipped → orphan survived. Fixed by running the orphan matchers
+unconditionally (FP-safe by construction) while keeping the punctuation/whitespace tidy-up gated
+on orphan-removed-or-sweep-fired (and the period-collapse made ellipsis-safe) so leak-free bodies
+stay byte-identical.
+
+**Pattern:** when a cleanup pass is gated on co-occurring activity, verify the failure mode
+actually co-occurs with the gate condition. Here the orphan (failure) did NOT require a sweep
+(gate), so the gate created a coverage gap. The Grantham fix (ec505f2) closed the
+sweep-co-occurring case; this closes the standalone case.
+
+**Disposition:** resolved (fixed).
+
+## OBS-20 — LLM masking canonical extraction failures (architectural debt)
+**Surfaced by:** Michael Thornton Round-8 Scenario-2 Bug 1 investigation (deal `8c024006`)
+**Severity:** NOT fixed this round — methodology debt, broad audit candidate
+
+Thornton's appraised value displayed correctly ($380,000) but the investigation found the
+deterministic appraisal path contributed nothing on the stored deal (the appraisal doc's
+`extracted_data` was NULL; the property_tax fallback captured the prior-year $355,000). The
+$380,000 came from the LLM narrative — i.e. the LLM silently filled in where canonical extraction
+failed. Innovation IV(a) (canonical drives, AI supportive) degrades INVISIBLY when the LLM
+substitutes for a missing canonical value: a visible TBD would have surfaced the extraction gap;
+the LLM substitution hid it.
+
+**Pattern:** "LLM masking canonical misses." A field that LOOKS populated may be LLM-sourced over a
+silent canonical failure. Visible TBD can be architecturally healthier than silent LLM
+substitution for canonical-owned figures.
+
+**Methodology note (deferred):** audit broadly for fields where the LLM can substitute for a
+missing canonical value; consider an explicit canonical-vs-AI provenance indicator in the Snapshot
+so silent substitution is visible. NOT in scope this round (not Franco-flagged).
+
+**Disposition:** open — methodology debt.
+
+## OBS-21 — Conservatism documented in a comment but not code-enforced (fragile-by-omission)
+**Surfaced by:** Michael Thornton Round-8 Scenario-2 Bug 1 (existing-balance source correction)
+**Severity:** NOT fixed this round — maintenance pass candidate
+
+The OBS-14 existing-balance conservatism ("don't accept broker-stated values for this adverse
+figure") is documented only at the render-site comment (discrepancy-engine.js ~774-784) — NOT
+enforced by code-level source-classification filtering at the consumers. `computeCombinedLtv` reads
+`existing_first_mortgage_balance[0].value` with NO classification filter (line 341/346); the render
+also reads the raw array. The principle is preserved ONLY by what is NOT in the source list — which
+is why adding `loan_application` as a source (this round's original spec) would have SILENTLY
+violated it. Caught pre-implementation; the source addition was dropped (format-fixes-only).
+
+**Pattern:** an architectural principle preserved by OMISSION (a value simply isn't pushed) rather
+than by ACTIVE ENFORCEMENT (a consumer-side filter) is fragile — the next source addition silently
+breaks it with no failing test.
+
+**Methodology note (deferred):** add explicit source-classification filtering at
+`computeCombinedLtv` and other adverse-decision consumers so the conservatism is enforced, not
+implicit.
+
+**Disposition:** open — maintenance pass candidate.
+
+## OBS-22 — Feature-preservation enabling clean direction changes (Bug 4 case study)
+**Surfaced by:** Michael Thornton Round-8 Scenario-2 Bug 4 (deal `8c024006`)
+**Severity:** resolved (commit `d52df3c`)
+
+Franco wanted an admin-side submission-ready lender package. Rather than rebuild, Bug 4 reused
+`generateEscalationNotification` (which already produced a lender-forward-safe paragraph summary
+covering 6 of 8 required sections) via a new `mode` parameter. The R10-I
+`composeBrokerLenderPackageEmail` — repudiated for broker-side delivery two rounds ago but RETAINED
+in code per Porter's "don't aggressively delete" call — was also available; it informed the gap
+analysis even though the escalation function was the closer fit.
+
+**Pattern:** when a feature is repudiated for cause but the underlying capability is architecturally
+sound, retain the implementation rather than deleting. Future direction changes become wiring/param
+changes, not rebuilds. Second instance this engagement (first: existing-balance canonical
+conservatism enabling the Jennifer/Thornton render decisions).
+
+**Disposition:** resolved (fixed).
