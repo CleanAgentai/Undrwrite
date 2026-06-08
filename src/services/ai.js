@@ -1727,21 +1727,34 @@ const ROUTING_LEAK_PATTERNS = [
 //        conjunction. Normal prose capitalizes after a period, so a lowercase once/when/
 //        after here is unambiguously a clause the sweep severed (".once we've completed our
 //        review." / ".once we have everything together."). Object/verb-agnostic.
-// Both run ONLY when a sweep fired (caller gates on sweptAny), so leak-free outbounds stay
-// byte-identical. Neither modifies the sweep patterns themselves.
+// R11-B (Thornton 8c024006, 2026-06-08): the orphan matchers now run UNCONDITIONALLY
+// (the caller no longer gates them on sweptAny) — the LLM emits bare orphan fragments on
+// its own ("Once I receive these..") with no co-firing sweep, which the old gate skipped.
+// To keep leak-free, orphan-free bodies BYTE-IDENTICAL, the punctuation/whitespace tidy-up
+// runs ONLY when this pass actually removed an orphan OR a routing-leak sweep fired upstream
+// (sweepFired). That guard is what protects a legitimate ellipsis ("Let me check…") in an
+// otherwise-untouched outbound: with no orphan + no sweep, the tidy-up never runs. The
+// period-collapse is additionally ellipsis-safe (collapses one stray period, never "...").
 const ORPHAN_TEMPORAL_INITIAL = /\s*\b(?:once|when|after|as\s+soon\s+as)\s+(?:we|I)\s+(?:have|receive|get|had)\b(?![^.!?<]*\b(?:we|i|you)\b)[^.,!?<]*[.!]/gi;
 const ORPHAN_TEMPORAL_STRANDED = /\.\s*(?:once|when|after|as\s+soon\s+as)\b[^.!?<]*[.!]/g; // case-SENSITIVE: lowercase conjunction only
-const cleanupSweepArtifacts = (html) => {
+const cleanupSweepArtifacts = (html, sweepFired = false) => {
   if (!html || typeof html !== 'string') return html;
-  return html
+  const before = html;
+  let out = html
     .replace(ORPHAN_TEMPORAL_INITIAL, '')    // (1a) sentence-initial orphan, no main clause
-    .replace(ORPHAN_TEMPORAL_STRANDED, '')   // (1b) ".<lowercase-temporal> …." stranded orphan
-    .replace(/ +([.!?])/g, '$1')             // (2a) space(s) before a terminator
-    .replace(/([.!?])(?:\s*\.)+/g, '$1')     // (2b) terminator + stray period(s) → terminator (".." "!." "?." ". .")
-    .replace(/<p>\s*[.!?]?\s*<\/p>/gi, '')   // (3) empty / bare-terminator paragraph
-    .replace(/<p>[ \t]+/gi, '<p>')           // leading space a removal stranded in a <p>
-    .replace(/[ \t]+<\/p>/gi, '</p>')        // trailing space a removal stranded in a <p>
-    .replace(/\n{3,}/g, '\n\n');             // collapse the blank-line gap a removal leaves
+    .replace(ORPHAN_TEMPORAL_STRANDED, '');  // (1b) ".<lowercase-temporal> …." stranded orphan
+  // Tidy-up gate: only when an orphan was removed here OR a sweep fired upstream. Keeps a
+  // clean, untouched outbound byte-identical (legit ellipsis + spacing preserved).
+  if (out !== before || sweepFired) {
+    out = out
+      .replace(/<p>\s*[.!?]?\s*<\/p>/gi, '')          // (3) empty / bare-terminator paragraph
+      .replace(/ +([.!?])/g, '$1')                    // (2a) space(s) before a terminator
+      .replace(/(?<!\.)([.!?])\s*\.(?!\.)/g, '$1')    // (2b) terminator + ONE stray period (".." "!." "?." ". ."), ellipsis-safe
+      .replace(/<p>[ \t]+/gi, '<p>')                  // leading space a removal stranded in a <p>
+      .replace(/[ \t]+<\/p>/gi, '</p>')               // trailing space a removal stranded in a <p>
+      .replace(/\n{3,}/g, '\n\n');                    // collapse the blank-line gap a removal leaves
+  }
+  return out;
 };
 
 const enforceNoRoutingLeak = (html) => {
@@ -1754,13 +1767,19 @@ const enforceNoRoutingLeak = (html) => {
   // R11 (Grantham 55b3a48c, 2026-06-08) — retire the deferred "future cleanup pass"
   // (noted at the R10-H cascade comment ~L1639 and R10-H-d ~L1664). Routing-leak
   // patterns intentionally prioritize leak removal over grammatical cleanliness and
-  // leave artifact shards (bare-period paragraphs, stranded temporal fragments). Run
-  // a single conservative cleanup ONLY when a sweep actually fired, so untouched
-  // outbounds are byte-identical.
-  if (out !== before) {
-    out = cleanupSweepArtifacts(out);
-  }
-  return { swept: out, sweptAny: out !== before };
+  // leave artifact shards (bare-period paragraphs, stranded temporal fragments).
+  // R11-B (Thornton 8c024006, 2026-06-08) — run the cleanup UNCONDITIONALLY, not gated
+  // on a sweep having fired. The original sweptAny gate assumed orphan shards only arise
+  // FROM sweeps; empirically the LLM also emits bare orphan fragments on its own
+  // ("Once I receive these..") with no co-firing routing-leak phrase → sweptAny=false →
+  // the gate skipped cleanup and the orphan survived. The matchers are FP-safe by
+  // construction (comma/pronoun main-clause guard + lowercase-after-period signature),
+  // so running on every outbound is safe; leak-free, orphan-free bodies are unchanged
+  // (cleanupSweepArtifacts is a no-op when nothing matches). sweptAny still reflects
+  // ONLY routing-leak substitutions (computed before cleanup) for caller logging.
+  const sweptAny = out !== before;
+  out = cleanupSweepArtifacts(out, sweptAny);
+  return { swept: out, sweptAny };
 };
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2908,24 +2927,56 @@ Private Mortgage Link`,
     // his QA confirmed the expected canonical wording. Hardcoded per BBB Q5
     // precedent (consistent with Franco's name being hardcoded already).
     return `<p>${greeting}</p>
-<p>The file is now complete and submitted. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>
+<p>The file is now complete and ready for review. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>
 <p>Vienna<br>Private Mortgage Link</p>`;
   },
 
-  // Generate internal escalation notification to admin (LTV > 80%)
-  generateEscalationNotification: async (dealSummary, messages, documents) => {
+  // Generate internal escalation notification to admin (LTV > 80%).
+  // R11-B (Thornton 8c024006, 2026-06-08): mode-parameterized. mode='escalation' (default)
+  // preserves the existing prompt EXACTLY (byte-identical output for the LTV>80% path).
+  // mode='completion' produces a clean, submission-ready LENDER PACKAGE for the admin to
+  // forward to a lender on file completion — same shared sections, completion framing (no
+  // "Deal Review Required" heading, no LTV>80% reason, no APPROVED/DECLINE action block, no
+  // internal email-conversation block), plus Income/Credit/Document-checklist sections.
+  generateEscalationNotification: async (dealSummary, messages, documents, { mode = 'escalation' } = {}) => {
     try {
       // Group Q: parameterize message labels with broker name (Bug 9.6 fix). The
       // EMAIL CONVERSATION block goes to Franco; without explicit attribution, Claude
       // has rendered inbound bodies as if from Franco himself when broker emails open
       // with "Hi Franco". Belt-and-suspenders with the prompt rule below.
       const inboundSenderLabel = dealSummary?.broker_name || dealSummary?.sender_name || 'Broker';
-      const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
-        messages: [{
-          role: 'user',
-          content: `Generate an internal deal review notification email for a private mortgage deal that requires manual review due to LTV exceeding 80%.
+      const isCompletion = mode === 'completion';
+      // mode='completion' — clean lender-forwardable package (no internal/review/action content).
+      const completionContent = `Generate a clean, submission-ready LENDER PACKAGE for a COMPLETED private mortgage deal. The admin (Franco) will copy this and forward it to a lender, so it must be presentable and paste-clean. This is NOT a review request — the file is already complete and approved.
+
+IMPORTANT: Do NOT start with raw HTML tags. Start with a clean heading text. Format as clean HTML email.
+
+FORMAT: Use <h2>/<h3> for section headers, <p> for text and label/value rows (label in <strong>), <ul>/<li> for lists. DO NOT use <table> anywhere — tables don't survive copy-paste into outgoing lender emails (borders drop, columns misalign across clients).
+
+This is a LENDER-FACING package — every section is forwardable. Do NOT include any internal-only content, review/action items, APPROVE/DECLINE language, or email history.
+
+Sections to include:
+1. Heading: "Lender Submission Package — {borrower full name}"
+2. Borrower Profile: full name; marital status and dependents if known; employment (employer, occupation, years employed, income type); a one-line stability note.
+3. Property Details: property address, property type, appraised value.
+4. Loan Request: loan amount requested, mortgage position (1st / 2nd), purpose / use of funds.
+5. LTV: the LTV percentage; if a 2nd mortgage, also the combined LTV.
+6. Income Summary: income type, annual income figure, and the income documentation on file (e.g. T4 / Notice of Assessment), plus an employment-stability note.
+7. Credit Summary: credit scores if present in the summary; notable tradeline status and any derogatory items; a brief qualitative assessment. If specific scores are NOT in the data, state "Credit report on file" and summarize qualitatively — do NOT invent scores.
+8. Exit Strategy: the borrower's stated exit / repayment plan.
+9. Document Checklist: list the required documents with a received status. Required set: Loan Application, Credit Bureau, Income Proof (T4/NOA), Appraisal, PNW Statement, Mortgage Payout Statement, Property Tax Assessment, Government ID, AML Form, PEP Form. Mark each "✓ Received" if a matching document appears in DOCUMENTS ON FILE below, else "— not on file". Note that all documents are attached as a zip.
+
+Pull values ONLY from the deal summary and documents below. Do NOT invent figures — if a value isn't present, omit the row or note "not provided".
+
+DEAL SUMMARY:
+${JSON.stringify(dealSummary, null, 2)}
+
+DOCUMENTS ON FILE:
+${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n') || 'None yet'}
+
+Return only the HTML email body.`;
+      // mode='escalation' (default) — existing prompt, byte-identical to pre-R11-B behavior.
+      const escalationContent = `Generate an internal deal review notification email for a private mortgage deal that requires manual review due to LTV exceeding 80%.
 
 This is an internal email — not written as Franco, just a clear summary for review.
 
@@ -2975,13 +3026,16 @@ ATTRIBUTION RULE (CRITICAL for the EMAIL CONVERSATION above):
 - OUTBOUND messages are FROM Vienna. Franco is the RECIPIENT of this notification email and also a sender when his admin-labeled messages appear.
 - CRITICAL — RENDER EVERY ENTRY (Group DDDD S6.3): the messages array above is authoritative; render every entry in the order given. Do NOT omit the latest message regardless of perceived redundancy.
 
-Return only the HTML email body.`,
-        }],
+Return only the HTML email body.`;
+      const response = await callClaude({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: isCompletion ? completionContent : escalationContent }],
       });
 
       return response.content[0].text.trim();
     } catch (error) {
-      console.error('Claude escalation notification error:', error);
+      console.error(`Claude ${mode} notification error:`, error);
       throw error;
     }
   },

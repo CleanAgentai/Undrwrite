@@ -837,7 +837,13 @@ const renderDealSnapshot = (canonicalMap, opts = {}) => {
       lines.push(`<p><strong>⚠ Additional entity — clarification needed:</strong> ${corporateEntities.clarificationMessage}</p>`);
     }
   }
-  lines.push(`<p><strong>Ownership Type:</strong> ${ownershipType || 'TBD'}</p>`);
+  // R11-B (Thornton 8c024006, 2026-06-08): the "Ownership Type" row now renders the
+  // deterministic OCCUPANCY canonical (Owner Occupied / Rental / Second Home), not the LLM
+  // entity ownership_type (personal/corporate). The entity value is already shown as "Borrower
+  // Type" above, so the prior wiring was redundant AND couldn't carry occupancy. opts.ownership-
+  // Type stays threaded for the entity field's other consumers (doc-request/lead-summary).
+  const _occupancyTuple = (canonicalMap.subject_property_occupancy || [])[0];
+  lines.push(`<p><strong>Ownership Type:</strong> ${(_occupancyTuple && _occupancyTuple.value) || 'TBD'}</p>`);
 
   return `<h2>Deal Snapshot</h2>\n` + lines.join('\n');
 };

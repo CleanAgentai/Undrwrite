@@ -606,7 +606,10 @@ const extractFromMortgageStatement = (doc) => {
   }
 
   // Outstanding Principal Balance (real anchor, Marcus verified)
-  const balM = text.match(/Outstanding\s+Principal\s+Balance\s*\$?\s*([\d,]+(?:\.\d{2})?)/i);
+  // R11-B (Thornton 8c024006, 2026-06-08): `:?` added so a label-colon-value form
+  // ("Outstanding Principal Balance:$147,000.00", no whitespace after the colon) matches.
+  // Pre-fix the colon sat between "Balance" and "$" and broke the `\$?\s*` adjacency.
+  const balM = text.match(/Outstanding\s+Principal\s+Balance\s*:?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i);
   if (balM) out.existing_first_mortgage_balance = normalizeMoney(balM[1]);
 
   // TOTAL PAYOUT AMOUNT (only on real payout statements — Grace's TD Balance Statement
@@ -718,7 +721,10 @@ const extractFromCreditBureau = (doc) => {
   // only and gate via the required `Mortgage` token immediately after.
   for (const syn of LENDER_SYNONYMS_BY_LENGTH) {
     const escaped = syn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const reA = new RegExp(`\\b${escaped}\\s*Mortgage\\s*(?:[A-Z][a-z]+\\s+\\d{4})?\\s*\\$([\\d,]+)\\s*\\$([\\d,]+)`, 'i');
+    // R11-B (Thornton 8c024006, 2026-06-08): accept an ISO date (2017-11) between
+    // "Mortgage" and the figures, in addition to the original "Mon YYYY" form — some
+    // bureaus render opened-date as ISO, which broke the "<date>\s*\$" adjacency.
+    const reA = new RegExp(`\\b${escaped}\\s*Mortgage\\s*(?:[A-Z][a-z]+\\s+\\d{4}|\\d{4}-\\d{2})?\\s*\\$([\\d,]+)\\s*\\$([\\d,]+)`, 'i');
     const mA = cleaned.match(reA);
     if (mA) {
       out.existing_first_mortgage_lender = LENDER_REVERSE_MAP[syn];
@@ -853,8 +859,19 @@ const extractFromLoanApplication = (doc) => {
   // on first match in the doc — Page-1 annotations come before Page-2+ in
   // PDF text-extraction order.
   const annM = text.match(/\[Page\s+1\s+annotation\]\s*\$?\s*([\d,]+(?:\.\d{2})?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s*$/m); // Bug 2: suffix-aware (broker-filled annotation)
-  if (annM) {
-    const amount = normalizeMoney(annM[1]);
+  let rawAmount = annM ? annM[1] : null;
+  // R11-B (Thornton 8c024006, 2026-06-08): plain-text fallback for the DIGITAL PML loan-app
+  // template, which has NO "[Page N annotation]" markers (those appear only on scanned/
+  // broker-filled forms). Matches a labeled "Loan Amount Requested:$88,600" field; REQUIRES
+  // the label + a $-amount so it stays conservative (won't fire on narrative prose like
+  // "...the loan amount of $X"). Third instance of the annotation-gating gap (Thomas/Jennifer
+  // loan_term, now Thornton loan_amount) — new extractors should support both formats up front.
+  if (rawAmount == null) {
+    const plainM = text.match(/\b(?:Loan\s+Amount\s+Requested|Requested\s+Loan\s+Amount|Loan\s+Amount|Amount\s+Requested)\s*:?\s*\$\s*([\d,]+(?:\.\d{2})?)/i);
+    if (plainM) rawAmount = plainM[1];
+  }
+  if (rawAmount != null) {
+    const amount = normalizeMoney(rawAmount);
     // Sanity bound per R6-β-A verdict: $5,000-$2,000,000. Catches obvious
     // wrong-field extractions (years, percentages, IDs); conservative
     // around observed corpus range ($68k-$415k).
@@ -865,6 +882,39 @@ const extractFromLoanApplication = (doc) => {
   // FRANCO Round-8 (2026-06-06): Loan Term extraction removed (see header note) — lenders
   // set the term post-approval, so it drives no underwriting decision.
   return out;
+};
+
+// R11-B (Thornton 8c024006, 2026-06-08): deterministic OCCUPANCY extractor (Owner Occupied /
+// Rental / Second Home) for the Snapshot "Ownership Type" row. DISTINCT from the LLM
+// analysis.ownership_type (personal|corporate ENTITY type, load-bearing for corporate-checklist
+// gating at ai.js:3133 — left untouched). Deterministic-over-LLM per innovation IV(a) / OBS-N+2
+// (don't let an LLM field silently mask a canonical miss). Tiered + conservative: explicit
+// label/phrase first; rental/investment/second-home BEFORE the owner-occupied derivation so a
+// rental subject (whose borrower also lists a principal-residence asset) isn't mislabeled.
+// Returns null when no confident signal (visible TBD > wrong value).
+const _normalizeOccupancy = (raw) => {
+  const v = String(raw || '').toLowerCase();
+  if (/owner|principal|primary/.test(v)) return 'Owner Occupied';
+  if (/rental|investment|tenant|non[\s-]?owner/.test(v)) return 'Rental';
+  if (/second|vacation/.test(v)) return 'Second Home';
+  return null;
+};
+const extractOccupancyFromLoanApplication = (doc) => {
+  const text = doc?.text || doc?.extracted_data?.text || '';
+  if (!text) return null;
+  // 1. Explicit occupancy / property-use LABEL with a value.
+  const labelM = text.match(/\b(?:Occupancy(?:\s+Type)?|Property\s+Use|Intended\s+Use|Owner\s+Occupancy)\s*:?\s*(Owner[\s-]?Occupied|Rental(?:\s+Property)?|Investment(?:\s+Property)?|Second\s+Home|Vacation(?:\s+Home)?|Principal\s+Residence|Primary\s+Residence)\b/i);
+  if (labelM) return _normalizeOccupancy(labelM[1]);
+  // 2. Standalone explicit phrases — rental/investment/second-home FIRST (a subject-use signal
+  //    outranks the owner-occupied derivation in tier 3).
+  if (/\b(?:Rental\s+Property|Investment\s+Property|tenant[\s-]?occupied|non[\s-]?owner[\s-]?occupied)\b/i.test(text)) return 'Rental';
+  if (/\b(?:Second\s+Home|Vacation\s+(?:Home|Property))\b/i.test(text)) return 'Second Home';
+  if (/\bOwner[\s-]?Occupied\b/i.test(text)) return 'Owner Occupied';
+  // 3. Derivation (Owner Occupied only): the subject property is listed as the borrower's
+  //    principal/primary residence (e.g. the ASSETS row "Principal Residence — <subject addr>").
+  //    Gated behind the absence of rental/investment/second-home signals above.
+  if (/\b(?:Principal|Primary)\s+Residence\b/i.test(text)) return 'Owner Occupied';
+  return null;
 };
 
 // ─── AML / PEP forms — Full Legal Name only (borrower address out of scope) ───
@@ -1618,6 +1668,10 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
     // lineage empirically (sibling future candidates: property_use_type,
     // collateral_type, loan_program).
     transaction_type: [],
+    // R11-B (Thornton 8c024006, 2026-06-08): property OCCUPANCY (Owner Occupied / Rental /
+    // Second Home) — deterministic, loan_application-sourced. Display-only (Snapshot "Ownership
+    // Type" row); NOT in the discrepancy-compute list. Distinct from the LLM entity ownership_type.
+    subject_property_occupancy: [],
   };
 
   const push = (field, value, source, extra = {}) => {
@@ -1724,6 +1778,10 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       // annotation contains "Second Mortgage" standalone-line.
       const loanAppMortgagePos = extractMortgagePositionFromLoanApplication(doc);
       push('mortgage_position', loanAppMortgagePos, doc.file_name, { classification: cls });
+      // R11-B (Thornton 8c024006, 2026-06-08): deterministic occupancy (Owner Occupied / Rental
+      // / Second Home) from the loan app → Snapshot "Ownership Type" row.
+      const loanAppOccupancy = extractOccupancyFromLoanApplication(doc);
+      push('subject_property_occupancy', loanAppOccupancy, doc.file_name, { classification: cls });
     } else if (cls === 'pnw_statement') {
       // R4-RESIDUAL-2: PNW-only existing-first-mortgage fallback. Page-2
       // annotation anchor `<Lender> — First Mortgage` + immediately-following
@@ -2144,6 +2202,7 @@ module.exports = {
   extractMortgagePositionFromLoanApplication,
   inferMortgagePositionFromExistingBalance,
   extractFromLoanApplication,
+  extractOccupancyFromLoanApplication,
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,
   tokenizeNameForCompare,

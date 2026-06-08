@@ -1807,7 +1807,21 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   const _r9gPackageLine = _r9gPackageAttachments.length > 0
     ? `<p>The broker has been notified the file is complete and directed to you for further questions. The complete document package is attached for lender submission.</p>`
     : `<p>The broker has been notified the file is complete and directed to you for further questions.</p>`;
-  const infoBody = `<p>${infoBodyLead}</p>${_r9gPackageLine}`;
+  // R11-B (Thornton 8c024006, 2026-06-08): admin-side submission-ready LENDER PACKAGE. Franco
+  // wants a formatted deal package (not just the raw zip) to copy when submitting to a lender.
+  // Reuses generateEscalationNotification in 'completion' mode (shared sections, completion
+  // framing — no LTV>80%/APPROVE-DECLINE). Admin-only (appended HERE; the broker never receives
+  // it). NON-BLOCKING: a generation failure must NOT block the completion handoff (R9-A discipline).
+  let _r11LenderPackage = '';
+  try {
+    const _pkg = await aiService.generateEscalationNotification(dealSummary, dealMessages || [], dealDocs || [], { mode: 'completion' });
+    if (_pkg && typeof _pkg === 'string' && _pkg.trim()) {
+      _r11LenderPackage = `\n<hr>\n<p><strong>Lender Submission Package</strong> — copy and paste below for forwarding:</p>\n${_pkg}`;
+    }
+  } catch (err) {
+    console.error(`R11-B: lender package generation failed for deal ${deal.id}, sending info notice without it:`, err.message);
+  }
+  const infoBody = `<p>${infoBodyLead}</p>${_r9gPackageLine}${_r11LenderPackage}`;
   const infoResult = await emailService.sendEmail(
     config.adminEmail,
     infoSubject,
