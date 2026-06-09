@@ -492,7 +492,12 @@ field), check whether the prior fix was applied at the consumer or the source. A
 canonical fields (borrower_name, property_address, lender) for at-source vs at-consumer patch
 patterns where a deterministic extractor feeds only some consumers.
 
-**Disposition:** resolved (fixed).
+**Disposition:** resolved (fixed). **Known consequence (Patricia Simmons, 2026-06-09):** widening
+`broker_name` to the full firm identity activated a latent wrong-argument bug in a consumer
+(`isCommercialSubmission` via `runDiscrepancyDetectionAggregated`) — see OBS-31. The cascade does
+NOT mean OBS-23 was wrong; OBS-23 (canonical-at-source) was the correct architecture. The cascade
+was a pre-existing latent consumer bug that the content-widening surfaced, and it was fixed at the
+consumer (`2f25730`), not by reverting OBS-23.
 
 ## OBS-24 — Internal routing identifiers in user-facing narratives (hardcoded variant)
 **Surfaced by:** Ryan Callahan Round-8 Scenario-4 Bug 2 (deal `1011e4e4`)
@@ -640,5 +645,75 @@ exercise the FULL consumer chain offline. For the changed field, ask:
 When offline reasoning is exhausted and deployed behavior still diverges, deployed runtime
 instrumentation (a temporary trace log) is the correct next step — not more speculation.
 
-**Disposition:** banked methodology. Bug 1 corrective landed (`796d233`); Bug 3 under deployed
-instrumentation (`17690a1`) pending root cause.
+**Disposition:** banked methodology. Bug 1 corrective landed (`796d233`) + deterministic backstop
+(`7938bf9`); Bug 3 root cause FOUND via the deployed instrumentation and fixed (`2f25730`) — see
+OBS-31 for the cascade root cause the instrumentation uncovered.
+
+## OBS-31 — Canonical-field semantic change cascade regression
+**Surfaced by:** Patricia Simmons round Bug 3 — unexplained deployed-vs-offline divergence (deal `2ccbb9d9`)
+**Severity:** resolved (commit `2f25730`) — was a LIVE production regression
+
+Bug 3's deployed prelim rendered City/Province TBD while EVERY offline replication of the extractor,
+the aggregation path, and the filter chain produced the correct city. Deployed runtime
+instrumentation (5 iterations) traced the divergence to an OBS-23 CASCADE: the OBS-23 fix made
+`broker_name` carry the full firm identity (`"Olivia Hartmann, Ridgeview Mortgage Corp, Lic. #MB445789"`).
+`runDiscrepancyDetectionAggregated` (webhook.js ~1320) was called with `leadSummaryBrokerName` as its
+`borrowerName` argument — a pre-existing MIS-NAMED ARGUMENT that lay latent because `broker_name` used
+to be a bare personal name. When `broker_name`'s content WIDENED to include firm names containing
+Corp/Inc/Ltd/LLC suffixes, `isCommercialSubmission`'s corp-suffix check (canonical-fields.js:251)
+activated → `commercial=true` → the function short-circuited returning `canonical_map: {}` → the Deal
+Snapshot's canonical rows (City/Province and others) rendered TBD.
+
+**Blast radius:** every deal since the OBS-23 deploy whose broker firm contained a corp suffix
+(Corp/Corporation/Inc/Incorporated/Ltd/Limited/LLC/LLP/LP/GP) false-flagged as commercial → empty
+canonical_map → degraded Snapshot. Pre-OBS-23 the path "worked" only because `broker_name` was a bare
+personal name. The fix passes the actual borrower name (`dealSummary.borrower_name || deal.borrower_name`)
+to the `borrowerName` argument; the corp-suffix check itself was NOT weakened (corporate BORROWERS still
+flag commercial — verified).
+
+**Pattern:** widening a canonical field's content SEMANTIC can activate latent wrong-argument bugs in
+consumers. The original mis-naming was harmless while the content was narrow (a bare name); widening the
+content (personal name → full firm identity) surfaced the latent bug. This is the inverse-direction
+companion to OBS-23: OBS-23 fixed the at-source population correctly; this is the downstream consumer
+that the correct fix's wider content tripped.
+
+**Methodology:** when changing a canonical field's content semantic, audit ALL consumers of that field
+for content-sensitive logic — not only consumers that explicitly reference the field, but also consumers
+that receive it via MIS-NAMED arguments, type-coerced parameters, or implicit passing. Procedure:
+(1) grep the field name and inspect every reference; (2) grep consumer functions that take similar-named
+arguments (e.g. a `borrowerName` parameter) and verify each call site passes the CORRECT field, not a
+different party's value. Mis-named arguments are a class of latent bugs that activate when content
+semantics shift. Specifically: a function taking a `borrowerName` argument should receive an actual
+borrower name at every call site — never a broker name or other party.
+
+**Methodology (verification):** this is also the concrete payoff of OBS-30 — offline extractor
+correctness was necessary but not sufficient; only deployed runtime instrumentation revealed the
+consumer-chain divergence. When offline reasoning is exhausted and deployed behavior still diverges,
+instrument the deployed path.
+
+**Disposition:** resolved (fixed `2f25730`, diagnostics removed in same commit; deploy-verified —
+Corp-firm broker shape now renders City Calgary / AB).
+
+## OBS-32 — Deterministic outbound guard for canonical-known fields (canonical-vs-AI at dispatch)
+**Surfaced by:** Patricia Simmons Bug 1 — residual LLM variance after the prompt override (deal `2ccbb9d9`)
+**Severity:** resolved (commit `7938bf9`)
+
+The Bug 1 prompt-level OVERRIDE (`canonicalExitStrategyContext`, `796d233`) told the LLM not to ask for
+the exit strategy when canonical already had it — but prompt instructions are LLM-PROBABILISTIC (~1/4
+deployed runs still asked, despite 3/3 offline). The fix adds a DETERMINISTIC post-generation strip
+(`stripCanonicalKnownAsk_ExitStrategy`) that runs every generation regardless of LLM output: when JS
+canonical authority knows the field, any residual ask for it is removed from the outbound before dispatch.
+
+**Pattern:** "canonical knows X → no AI-generated outbound should ask for X" is an outbound-layer
+instance of the canonical-vs-AI discipline (innovation IV(a)). A prompt instruction is the first line
+(suppresses most variance); a deterministic post-gen strip is the backstop (closes the residual). This
+mirrors the established strip-and-inject idiom (discrepancy section, Deal Snapshot) where JS owns the
+authoritative content and the LLM's variant output is normalized at the boundary.
+
+**Methodology note (deferred generalization):** the strip is scoped to `exit_strategy` (the one reported
+field). The same shape applies to any canonical-known field the LLM might still request (loan amount,
+property value, lender, occupancy). To extend, parameterize the noun phrase; keep the conservative
+"noun-phrase + request-cue" gate so declarative mentions are never stripped. Deferred until a second
+field actually exhibits the variance (avoid speculative breadth).
+
+**Disposition:** resolved (fixed). Verified 9/9 unit cases + 10/10 real-LLM Patricia generations (post-strip ask=0).
