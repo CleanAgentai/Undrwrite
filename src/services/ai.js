@@ -2070,7 +2070,7 @@ module.exports = {
     // null (e.g., fresh deal with no prior broker_name extraction at this
     // entry point), parsedBrokerFirstName takes over — preserves R4-Bucket-C.7
     // / R5-E behavior for the Eric Johansson Round-4 fixture.
-    const { discrepancyDetected = false, canonicalFieldsPrompt = '', parsedBrokerFirstName = null, greetingFirstName = null } = opts;
+    const { discrepancyDetected = false, canonicalFieldsPrompt = '', parsedBrokerFirstName = null, greetingFirstName = null, canonicalExitStrategy = null } = opts;
     // R8-A effective greeting: helper-first per Q2-(b), parser-fallback when
     // helper returns null. For Nadia Petrov S15 (after R8-A parser hardening
     // closes parsedBrokerFirstName=null gap), parser now returns "Nadia" →
@@ -2310,12 +2310,22 @@ module.exports = {
       const canonicalFieldsContext = canonicalFieldsPrompt
         ? `\n\nCANONICAL FIELD VALUES (JS-extracted authority — use ONLY these for any field-level claim; do not infer from raw extracted_data):\n${canonicalFieldsPrompt}`
         : '';
+      // R11-D (Patricia Simmons, 2026-06-09): canonical exit-strategy override. The static "EXIT
+      // STRATEGY RULE" above tells Claude to set exit_strategy ONLY from the EMAIL body, never from
+      // a document — so a Section-5 exit strategy in the loan APPLICATION is left null and Claude
+      // (correctly per that rule) asks the broker for it in this welcome email. When JS has
+      // deterministically extracted the exit strategy from the loan app, inject it here as an
+      // explicit OVERRIDE so Claude treats it as received and does NOT ask. This must run
+      // before generation (a post-hoc backfill can't un-ask an already-generated welcome email).
+      const canonicalExitStrategyContext = canonicalExitStrategy
+        ? `\n\nEXIT STRATEGY ON FILE — OVERRIDE (deterministically extracted from the loan application's Exit Strategy section): "${canonicalExitStrategy}". This OVERRIDES the email-only EXIT STRATEGY RULE above: set the analysis JSON exit_strategy to this value, treat the exit strategy as RECEIVED, and do NOT ask the broker for it or list it among missing/needed items.`
+        : '';
 
       content.push({
         type: 'text',
         text: `${prompt}
 
-The sender's name is: ${senderName || 'Unknown'}${nameCollisionInstructions}${noGenerateDiscrepancyBlock}${canonicalFieldsContext}
+The sender's name is: ${senderName || 'Unknown'}${nameCollisionInstructions}${noGenerateDiscrepancyBlock}${canonicalFieldsContext}${canonicalExitStrategyContext}
 
 Their initial email says:
 ---

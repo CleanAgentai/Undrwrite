@@ -3172,6 +3172,15 @@ No deal record was created. If this was a legitimate broker submission, please r
         if (_c7ParsedBrokerName) {
           console.log(`C.7: signature parser extracted broker first name "${_c7ParsedBrokerName}" — passing to processInitialEmail for deterministic greeting`);
         }
+        // R11-D corrective (Patricia Simmons, 2026-06-09): extract the canonical exit strategy from
+        // the loan application BEFORE processInitialEmail, so the welcome-email prompt can treat it
+        // as on-file and NOT ask the broker for it. The post-hoc backfill below (after the call)
+        // can't un-ask an already-generated welcome email — the override must reach the prompt.
+        const _r11dCanonExit = (() => {
+          const la = (savedDocs || []).find(d => d.classification === 'loan_application');
+          return la ? cFields.extractExitStrategyFromLoanApplication(la) : null;
+        })();
+        if (_r11dCanonExit) console.log('R11-D: canonical exit strategy extracted from loan application — passing to processInitialEmail (override)');
         // eslint-disable-next-line prefer-const
         let { welcomeEmail, dealSummary } = await aiService.processInitialEmail(
           email.fromName,
@@ -3182,7 +3191,7 @@ No deal record was created. If this was a legitimate broker submission, please r
           hasOwnPnw,
           initialFromCollision,
           email.subject,  // S15-E-followup: subject used by JS-side absence-based clash detection
-          { discrepancyDetected: _bDiscrepancyDetected, canonicalFieldsPrompt: _bCanonicalPromptCtx, parsedBrokerFirstName: _c7ParsedBrokerName }
+          { discrepancyDetected: _bDiscrepancyDetected, canonicalFieldsPrompt: _bCanonicalPromptCtx, parsedBrokerFirstName: _c7ParsedBrokerName, canonicalExitStrategy: _r11dCanonExit }
         );
         // Cluster B Commit 2b — post-Claude strip + inject (pure JS injection completes).
         // strip is defense-in-depth backstop (Cluster E lesson — prompt enforcement is
