@@ -1352,9 +1352,10 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   try {
     console.log('R11-D-DIAG city/province trace: ' + JSON.stringify({
       inboundCount: _bInboundMessages.length,
-      inboundBodyHeads: _bInboundMessages.map(m => (m.body || '').slice(0, 200)),
+      bodyLens: _bInboundMessages.map(m => (m.body || '').length),
+      hasPropertyLabel: _bInboundMessages.map(m => /Property\s*:/i.test(m.body || '')),
+      propertyRegions: _bInboundMessages.map(m => ((m.body || '').match(/Property[\s\S]{0,55}/i) || [''])[0]),
       unfilteredCity: (_bDetectAdmin.canonical_map.subject_property_city || []).map(t => t.value),
-      unfilteredProvince: (_bDetectAdmin.canonical_map.subject_property_province || []).map(t => t.value),
       unfilteredAddress: (_bDetectAdmin.canonical_map.subject_property_address || []).map(t => t.value),
       filteredCity: (_bFilteredCanonicalMap.subject_property_city || []).map(t => t.value),
       derivedCityProvince: dEngine.deriveCityProvince(_bFilteredCanonicalMap),
