@@ -537,3 +537,78 @@ scoped to the two reported bugs.
 
 **Disposition:** open — future maintenance. Real signed broker emails parse correctly, so this
 only manifests on a fully-unsigned submission.
+
+## OBS-26 — Embedded-content extraction pattern (third instance)
+**Surfaced by:** Patricia Simmons Bugs 1+2 (deal `2ccbb9d9`)
+**Severity:** resolved (commit `a37baef`)
+
+Information embedded in a larger document (the loan application) doesn't flow into a structured
+determination because the canonical extractors were designed around document-PRESENCE, not
+content-WITHIN-document. Patricia's exit strategy was in loan-app "SECTION 5 — EXIT STRATEGY", the
+prelim narrative quoted it, yet the completeness gate (which checks the structured
+`dealSummary.exit_strategy`) asked for it and marked it [MISSING]. Third instance: Thornton
+occupancy_type (loan-app embedded), Patricia exit_strategy (loan-app Section 5), and the earlier
+loan_term issue (resolved by removal). Fixed with `extractExitStrategyFromLoanApplication` +
+a webhook backfill of the structured field.
+
+**Pattern:** when a required structured field's content typically lives EMBEDDED in a larger
+document, it needs both a content extractor AND wiring into the determination that consumes it —
+not just a document-presence check.
+
+**Methodology note (deferred):** scan loan applications systematically for other embedded-content
+fields (income narrative, exit strategy, ownership/occupancy, declarations) that feed structured
+determinations, and ensure each has an extractor + backfill.
+
+**Disposition:** resolved (fixed).
+
+## OBS-27 — extractPropertyRegion / address-block format coverage
+**Surfaced by:** Patricia Simmons Bug 3 (deal `2ccbb9d9`)
+**Severity:** resolved (commit `a37baef`)
+
+`extractFromEmailBody`'s property-block match required markdown-bold `*Property:*`; Patricia's
+PLAIN `"- Property: 48 Woodpark Circle SW, Calgary, AB …\n   - Loan Requested:"` (no asterisks,
+indented-bullet continuation) yielded no block → city/province TBD. `deriveCityProvince` itself
+was fine. Fixed by routing the block through `extractPropertyRegion`, whose line-pattern now also
+terminates on an indented bullet / labeled field.
+
+**Pattern:** a regex built against ONE broker-prose format (bold `*Property:*`) silently fails on
+an adjacent format (plain `Property:` + bullets). When extracting from broker prose, anticipate
+format variance: bold vs plain, bulleted vs unbulleted, line-wrapped vs single-line. NOT a
+long-standing gap — 4/5 corpus deals (bold) always worked; Patricia is the plain-format outlier
+(Franco's "persistent" framing was a misdiagnosis).
+
+**Disposition:** resolved (fixed).
+
+## OBS-28 — Fallback purpose capture: line-wrapping in prose fields
+**Surfaced by:** Patricia Simmons Bug 4 (deal `2ccbb9d9`)
+**Severity:** resolved (commit `a37baef`)
+
+The fallback purpose capture `/[^.\n]{3,80}/` excluded newlines, so it truncated at the wrap when
+the broker's "Purpose:" value line-WRAPPED (`"…maturing September\n   2026; also …"`). The R10-G
+override then pinned the truncated canonical value into the prelim Loan Purpose. Fixed by
+capturing the first line plus soft-wrapped continuation lines (excluding the next bullet/labeled
+field) and collapsing the wrap; cap raised 100→250.
+
+**Pattern:** newline-excluding captures (`[^.\n]`) are appropriate for label/value fields but
+INAPPROPRIATE for prose content that can span wrapped lines. Prose-content captures should
+anticipate line-wrapping (continuation-aware multi-line capture), while still stopping at the next
+labeled field / bullet / sentence break.
+
+**Disposition:** resolved (fixed).
+
+## OBS-29 — Empirical regression-hypothesis refutation discipline
+**Surfaced by:** Patricia Simmons Bug 4 (deal `2ccbb9d9`)
+**Severity:** methodology (no code artifact)
+
+Bug 4 was framed as a probable regression from commit `67ae33a` (the Thomas maturity-trim). An
+empirical trace REFUTED it: Patricia's purpose went through the fallback path, not the
+Loan-Request-line path where the trim lives; the truncation was a pre-existing newline limitation.
+Had the hypothesis been accepted on its face, the trim might have been weakened or reverted —
+breaking Thomas's case — to "fix" an unrelated bug.
+
+**Pattern:** when a recent commit is SUSPECTED of regression, trace the actual failing code path
+before scoping. A hypothesis-only response risks unnecessary changes or false reverts. Surface-and-
+verify discipline applies to regression hypotheses as much as to bug reports. (Counterpart: when a
+trace CONFIRMS a recent commit caused a regression — e.g. the sweptAny coverage gap — fix it.)
+
+**Disposition:** banked methodology.
