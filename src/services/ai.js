@@ -598,6 +598,103 @@ const welcomeEmailIsAskingClarification = (welcomeEmailHtml) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────────
+// R11-D backstop (Patricia Simmons, 2026-06-09) — canonical-known-field ask strip
+// ──────────────────────────────────────────────────────────────────────────
+// Deterministic OUTBOUND guard for the canonical-vs-AI discipline (innovation
+// IV(a)): when JS canonical authority KNOWS a field's value, no AI-generated
+// outbound should still ask the broker for it. The prompt-level OVERRIDE
+// (canonicalExitStrategyContext, ai.js ~2318) suppresses the exit-strategy ask
+// MOST of the time, but it is LLM-PROBABILISTIC — ~1/4 deployed Patricia runs
+// still asked. This is the deterministic backstop for that residual variance:
+// it runs every generation regardless of what the LLM produced.
+//
+// Scoped to EXIT STRATEGY (the reported Patricia variance). The shape generalizes
+// to ANY canonical-known field ("canonical knows X → outbound must not ask for
+// X"); only exit_strategy is wired today (one reported field — conservative
+// rollout). To extend: parameterize _EXIT_NP with the new field's noun phrase.
+//
+// Borrower welcome emails are conversational <p> prose with NO bullets (prompt
+// lines 65 / 197-199), so the ask is normally an inline SENTENCE inside a <p>,
+// frequently ALONGSIDE other legitimate asks (payout statement, NOA, …) — e.g.
+// the prompt's own Example 1: "…could you let us know the exit strategy on this?
+// We would also need the current mortgage payout statement, appraisal, …". The
+// strip is therefore SENTENCE-granular: it removes only the exit-strategy request
+// sentence and preserves sibling asks in the same paragraph. Broker emails may use
+// <li> bullets, so a bullet-granular pass runs too.
+//
+// CONSERVATIVE (false-positive-averse per spec): a fragment is removed ONLY when
+// it pairs an exit-strategy NOUN PHRASE with a REQUEST CUE (interrogative, or
+// need/share/provide/send/let-us-know/could-you/still-missing). Declarative
+// mentions are LEFT INTACT:
+//   "the exit strategy looks reasonable"          → kept (no request cue)
+//   "Exit strategy: borrower will sell at term"   → kept (no request cue)
+//   "…could you let us know the exit strategy?"   → removed (interrogative cue)
+//   "<li>Exit strategy — how they plan to repay</li>" in a needs list → removed
+const _EXIT_NP = String.raw`(?:exit\s+strateg(?:y|ies)|exit\s+plan|repayment\s+(?:plan|strategy)|how\s+[\w .'-]{0,40}?(?:plans?|intends?)\s+to\s+(?:repay|refinanc\w*|exit|pay\s+off|sell))`;
+const _REQUEST_CUE = String.raw`(?:could|can|would)\s+you|please\s+(?:provide|share|send|confirm|let\s+us\s+know|clarify|advise)|let\s+us\s+know|we(?:'?ll|\s+will|'?d|\s+would)?\s+(?:also\s+)?(?:need|require)|i(?:'?ll|\s+will)?\s+(?:also\s+)?need|to\s+(?:proceed|move\s+(?:this\s+)?(?:along|forward)|complete\s+the\s+file)|(?:still\s+)?(?:need|require|missing|outstanding)|provide|share|send\s+(?:over|us|me|through)|what(?:'?s|\s+is)\s+the|do\s+you\s+(?:have|know)|kindly`;
+// An exit-strategy NOUN PHRASE within ~80 chars of a REQUEST CUE (either order) = a request.
+const _EXIT_REQUEST_RE = new RegExp(`(?:${_REQUEST_CUE})[\\s\\S]{0,80}?${_EXIT_NP}|${_EXIT_NP}[\\s\\S]{0,80}?(?:${_REQUEST_CUE})`, 'i');
+const _EXIT_NP_RE = new RegExp(_EXIT_NP, 'i');
+
+// Split a <p>'s inner HTML into sentence-ish segments, preserving <br> as boundary
+// markers (so we can prune <br>s orphaned by a removed sentence).
+const _splitSentencesPreservingBr = (inner) => {
+  const parts = [];
+  inner.split(/(<br\s*\/?>)/i).forEach((chunk) => {
+    if (/^<br\s*\/?>$/i.test(chunk)) { parts.push(chunk); return; }
+    const sents = chunk.match(/[^.?!]+[.?!]+\s*|[^.?!]+$/g) || (chunk ? [chunk] : []);
+    sents.forEach((s) => parts.push(s));
+  });
+  return parts;
+};
+
+const stripCanonicalKnownAsk_ExitStrategy = (html) => {
+  if (!html || typeof html !== 'string') return { stripped: html, strippedAny: false };
+  const before = html;
+  let out = html;
+
+  // (1) Bullet-granular — remove <li> exit-strategy requests (broker doc lists).
+  //     An <li> is removed when its text contains the exit NP AND either a request
+  //     cue or is a short bare bullet (≤64 chars — a needs-list item whose request
+  //     framing lives in the list intro). A long declarative <li> is kept.
+  out = out.replace(/<li>([\s\S]*?)<\/li>/gi, (m, inner) => {
+    const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!_EXIT_NP_RE.test(text)) return m;
+    if (_EXIT_REQUEST_RE.test(text) || text.length <= 64) return '';
+    return m;
+  });
+
+  // (2) Sentence-granular within <p> — remove only the exit-strategy request
+  //     sentence(s); preserve sibling asks in the same paragraph.
+  out = out.replace(/<p>([\s\S]*?)<\/p>/gi, (m, inner) => {
+    if (!_EXIT_REQUEST_RE.test(inner)) return m;
+    const kept = _splitSentencesPreservingBr(inner).filter((seg) => {
+      if (/^<br\s*\/?>$/i.test(seg)) return true; // structural; pruned next
+      return !_EXIT_REQUEST_RE.test(seg);
+    });
+    let rebuilt = kept.join('')
+      .replace(/^(?:\s*<br\s*\/?>\s*)+/i, '')
+      .replace(/(?:\s*<br\s*\/?>\s*)+$/i, '')
+      .replace(/(?:\s*<br\s*\/?>\s*){2,}/gi, '<br>')
+      .trim();
+    // Drop an orphaned leading connector left by a removed preceding sentence
+    // ("…the exit strategy? And the NOA." → strip sentence 1 → "And the NOA.").
+    rebuilt = rebuilt.replace(/^(?:and|also|additionally|as well as|plus)\b[,\s]*/i, '');
+    // If nothing meaningful remains, the whole <p> was the ask — drop it.
+    if (!rebuilt || /^[\s.?!,;:–—-]*$/.test(rebuilt.replace(/<[^>]+>/g, ''))) return '';
+    // Recapitalize a now-leading lowercase word left by sentence removal.
+    rebuilt = rebuilt.replace(/^(\s*)([a-z])/, (mm, sp, ch) => sp + ch.toUpperCase());
+    return `<p>${rebuilt}</p>`;
+  });
+
+  // (3) Cleanup — empty <ul> left after removing its only bullet(s); collapse runs.
+  out = out.replace(/<ul>\s*<\/ul>\s*/gi, '');
+  out = out.replace(/\n{3,}/g, '\n\n');
+
+  return { stripped: out, strippedAny: out !== before };
+};
+
+// ──────────────────────────────────────────────────────────────────────────
 // Cluster B Commit 2 — broker-side discrepancy strip (defense-in-depth)
 // ──────────────────────────────────────────────────────────────────────────
 // Removes any Vienna-generated discrepancy bullets / clarification language
@@ -2368,7 +2465,21 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
         dealSummary.broker_name = resolveCanonicalBrokerName(emailBody, dealSummary.broker_name);
       }
 
-      return { welcomeEmail, dealSummary };
+      // R11-D backstop (Patricia Simmons, 2026-06-09): deterministic post-gen guard.
+      // The canonicalExitStrategyContext OVERRIDE above suppresses the exit-strategy
+      // ask probabilistically; this strips any RESIDUAL ask the LLM still emitted
+      // when JS canonical authority already knows the exit strategy. Runs every
+      // generation (no LLM dependency) → closes the ~1/4 deployed variance.
+      let finalWelcomeEmail = welcomeEmail;
+      if (canonicalExitStrategy && welcomeEmail) {
+        const { stripped, strippedAny } = stripCanonicalKnownAsk_ExitStrategy(welcomeEmail);
+        if (strippedAny) {
+          finalWelcomeEmail = stripped;
+          console.log('[R11-D backstop] stripped residual exit-strategy ask from welcome email (canonical exit_strategy on file)');
+        }
+      }
+
+      return { welcomeEmail: finalWelcomeEmail, dealSummary };
     } catch (error) {
       console.error('Claude API error:', error);
       throw error;
@@ -4813,6 +4924,8 @@ ${JSON.stringify(summaryData, null, 2)}`,
   isIdentityClashByAbsence,
   // Cluster D (Marcus 1f1e7ac4 + Ethan 830f9ad5 2026-05-18 real-Postmark): false-COMPLETE gate.
   welcomeEmailIsAskingClarification,
+  // R11-D backstop (Patricia Simmons): deterministic canonical-known-field ask strip.
+  stripCanonicalKnownAsk_ExitStrategy,
   enforceReviewBanner,
   // Cluster B Commit 2 — symmetric pure-injection strip + inject helpers.
   stripVienna_DiscrepancyContent,
