@@ -1344,6 +1344,22 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       )
     )
   );
+  // R11-D-DIAG (Patricia Simmons, 2026-06-09): TEMPORARY diagnostic for the City/Province "TBD"
+  // discrepancy — every OFFLINE path on the deployed binary (extractFromEmailBody → aggregation →
+  // filter chain → deriveCityProvince) computes the city, yet the LIVE prelim renders TBD. Capture
+  // the runtime inputs + canonical city at the render-feeding map to locate the divergence.
+  // REMOVE once root-caused (no fix here — diagnostic only).
+  try {
+    console.log('R11-D-DIAG city/province trace: ' + JSON.stringify({
+      inboundCount: _bInboundMessages.length,
+      inboundBodyHeads: _bInboundMessages.map(m => (m.body || '').slice(0, 200)),
+      unfilteredCity: (_bDetectAdmin.canonical_map.subject_property_city || []).map(t => t.value),
+      unfilteredProvince: (_bDetectAdmin.canonical_map.subject_property_province || []).map(t => t.value),
+      unfilteredAddress: (_bDetectAdmin.canonical_map.subject_property_address || []).map(t => t.value),
+      filteredCity: (_bFilteredCanonicalMap.subject_property_city || []).map(t => t.value),
+      derivedCityProvince: dEngine.deriveCityProvince(_bFilteredCanonicalMap),
+    }));
+  } catch (_diagErr) { console.error('R11-D-DIAG failed: ' + _diagErr.message); }
   // FRANCO-Q3/Q4 (2026-05-28): multi-party qualification roster — deterministic
   // who-counts determination feeding the Snapshot disposition rows + the
   // generateLeadSummary aggregation directive below.
