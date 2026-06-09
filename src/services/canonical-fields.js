@@ -327,7 +327,13 @@ const extractPropertyRegion = (emailBody) => {
   if (!emailBody) return '';
   const boldM = emailBody.match(/\*\s*Property\s*:\s*\*\s*([\s\S]+?)\*/i);
   if (boldM) return boldM[1];
-  const lineM = emailBody.match(/Property\s*:\s*([\s\S]{0,200}?)(?:\n\n|\nLTV|\nAppraised|\nMortgage|$)/i);
+  // R11-D (Patricia Simmons, 2026-06-09): plain (non-markdown-bold) "Property:" label with a
+  // BULLETED continuation. Patricia's email is "- Property: 48 Woodpark Circle SW, Calgary, AB
+  // T2W 2X4\n   - Loan Requested: ..." — the prior terminator set (\n\n | \nLTV | \nAppraised |
+  // \nMortgage | $) didn't include the next indented bullet, so the lazy capture never closed
+  // → no region → city/province TBD. Added terminators: an indented bullet start (\n\s*[-•*]\s)
+  // and a new labeled field line (\n\s*[A-Z][\w /]*:). Bold inputs still hit boldM above first.
+  const lineM = emailBody.match(/Property\s*:\s*([\s\S]{0,200}?)(?:\n\s*[-•*]\s|\n\s*[A-Z][\w .\/]*:|\n\n|\nLTV|\nAppraised|\nMortgage|$)/i);
   if (lineM) return lineM[1];
   return '';
 };
@@ -397,10 +403,13 @@ const extractFromEmailBody = (emailBody, emailSubject = '') => {
   // term post-approval, so the broker-stated term drives no underwriting decision. The
   // email-body and loan-application term extractors + the Snapshot row are all removed.
   if (!emailBody) return out;
-  // Property block: between `*Property:*` and next `*`
-  const propM = emailBody.match(/\*\s*Property\s*:\s*\*\s*([\s\S]+?)\*/i);
-  if (propM) {
-    const block = propM[1];
+  // Property block. R11-D (Patricia Simmons, 2026-06-09): use extractPropertyRegion so a PLAIN
+  // "Property:" label (no markdown bold) + bulleted continuation is handled too. Pre-fix this
+  // inline regex required `*Property:*` bold, so Patricia's "- Property: 48 Woodpark Circle SW,
+  // Calgary, AB T2W 2X4\n   - Loan Requested:" yielded NO block → city/province TBD. Bold inputs
+  // resolve identically via extractPropertyRegion's boldM (same capture as the old inline regex).
+  const block = extractPropertyRegion(emailBody);
+  if (block) {
     const addr = extractAddressLine(block);
     if (addr) out.subject_property_address = normalizeAddress(addr);
     const postalM = block.match(POSTAL_RE_SINGLE);
@@ -917,6 +926,33 @@ const extractOccupancyFromLoanApplication = (doc) => {
   return null;
 };
 
+// R11-D (Patricia Simmons 2ccbb9d9, 2026-06-09): deterministic EXIT STRATEGY extractor from
+// the loan application. The exit strategy is CONTENT embedded in the loan app (e.g. "SECTION 5
+// — EXIT STRATEGY"), NOT a separate document — but the completeness gate (webhook computeIntake-
+// AskedItems / computeMissing) checks the structured dealSummary.exit_strategy field, which the
+// LLM can leave null even when the section is present (it surfaces the content in the prelim
+// NARRATIVE instead). Deterministic-over-LLM per OBS-20 (don't let the LLM mask a canonical
+// miss). Third instance of the embedded-content class (Thornton occupancy, now exit strategy).
+// Captures the section content until the next section boundary; conservative ≥50-char threshold
+// so an empty "Exit Strategy" header doesn't false-populate. Returns null when no real content.
+const extractExitStrategyFromLoanApplication = (doc) => {
+  const text = doc?.text || doc?.extracted_data?.text || '';
+  if (!text) return null;
+  // Anchor on an exit-strategy / repayment header (optionally prefixed "SECTION N —"); capture
+  // the following content up to the next section header / known label / end of document.
+  const m = text.match(/(?:SECTION\s*\d+\s*[—\-:]\s*)?(?:EXIT\s+STRATEGY|EXIT\s+PLAN|REPAYMENT\s+(?:PLAN|STRATEGY))\b[ \t]*\n+([\s\S]*?)(?=\n\s*(?:SECTION\s*\d+\b|Additional\s+Notes\b|Declaration\b|Signature\b|Acknowledgement\b|[A-Z][A-Z][A-Z ]{4,}\n)|$)/i);
+  if (!m) return null;
+  // Drop a redundant "Exit Strategy" sub-label line the form often repeats under the header,
+  // then collapse internal line-wraps to single spaces for a clean single-field value.
+  let content = m[1]
+    .replace(/^\s*(?:Exit\s+Strategy|Repayment\s+(?:Plan|Strategy)|Exit\s+Plan)\s*\n/i, '')
+    .replace(/\s*\n\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (content.length < 50) return null;                       // conservative: ignore empty/stub sections
+  return content.length > 600 ? content.slice(0, 600).trim() : content;
+};
+
 // ─── AML / PEP forms — Full Legal Name only (borrower address out of scope) ───
 
 const extractFromAmlPep = (doc) => {
@@ -1213,13 +1249,24 @@ const parseBrokerInitialIntent = (messageBody) => {
     }
   }
 
-  // Fallback: "for $X" purpose-only or amount-only patterns
+  // Fallback: "Purpose: <...>" / "Use of funds: <...>" patterns.
   if (!intents.find(i => i.field === 'purpose')) {
-    // "for [purpose]" patterns common in broker initial statements
-    const purposeM = messageBody.match(/\b(?:purpose|use\s+of\s+funds)\s*:?\s+([^.\n]{3,80})/i);
+    // R11-D (Patricia Simmons, 2026-06-09): MULTI-LINE-aware capture. The broker's "Purpose:"
+    // value can LINE-WRAP in the email body (e.g. "...maturing September\n   2026; also
+    // consolidating $5,500..."). The prior /[^.\n]{3,80}/ excluded newlines, so it truncated
+    // at the wrap ("...maturing September") and the R10-G override pinned the truncated value
+    // into the prelim Loan Purpose. Capture across wrapped lines, stopping at the next labeled
+    // field / bullet / paragraph break / email signoff; collapse the wrap to a single space.
+    // Cap raised 100→250 so a legitimate 2-3 line purpose isn't rejected. NOTE: independent of
+    // the Loan-Request-line path above (+ its 67ae33a maturity trim) — that path is untouched.
+    // Capture the first line (period-stopping, as before) PLUS any soft-wrapped continuation
+    // lines — a continuation is a newline + indentation + content that is NOT a new bullet or a
+    // labeled field (those mark the next item). Preserves prior single-line behavior (stops at a
+    // sentence period / margin newline) while joining "maturing September\n   2026; also …".
+    const purposeM = messageBody.match(/\b(?:purpose|use\s+of\s+funds)\s*:?\s+([^.\n]{3,250}(?:\n[ \t]+(?![ \t]*(?:[-•*]|[A-Z][\w /]{1,24}:))[^.\n]{1,250})*)/i);
     if (purposeM) {
-      const purpose = purposeM[1].trim().replace(/[,.]+$/, '');
-      if (purpose.length >= 3 && purpose.length <= 100) {
+      const purpose = purposeM[1].replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim().replace(/[,.;:]+$/, '');
+      if (purpose.length >= 3 && purpose.length <= 250) {
         intents.push({ field: 'purpose', value: purpose, source: 'broker_initial_intent', rawPhrase: purposeM[0] });
       }
     }
@@ -2203,6 +2250,7 @@ module.exports = {
   inferMortgagePositionFromExistingBalance,
   extractFromLoanApplication,
   extractOccupancyFromLoanApplication,
+  extractExitStrategyFromLoanApplication,
   extractBorrowerFromPropertyTax,
   extractCanonicalFields,
   tokenizeNameForCompare,

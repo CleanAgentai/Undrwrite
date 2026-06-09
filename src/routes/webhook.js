@@ -3220,6 +3220,23 @@ No deal record was created. If this was a legitimate broker submission, please r
         // both-Franco branch — sets name_collides_with_admin: true on the summary
         // for downstream prompts (generateBrokerResponse) to read.
         dealSummary = normalizeSenderName(dealSummary, email.fromName);
+        // R11-D (Patricia Simmons, 2026-06-09): backfill exit_strategy from the loan application
+        // when the LLM left the structured field null. The exit strategy is CONTENT embedded in
+        // the loan app (Section 5 / "Exit Strategy" / "Repayment Plan"), not a separate document —
+        // the completeness gate (computeIntakeAskedItems L143, missing-docs L1292, willReview gates)
+        // checks dealSummary.exit_strategy, so without this Vienna asks the broker for an exit
+        // strategy already on file AND the prelim marks it [MISSING] while its narrative quotes it.
+        // Runs BEFORE the extracted_data persist + the gates below; deterministic (OBS-20).
+        if (!dealSummary?.exit_strategy) {
+          const _r11dLoanApp = (savedDocs || []).find(d => d.classification === 'loan_application');
+          if (_r11dLoanApp) {
+            const _r11dExit = cFields.extractExitStrategyFromLoanApplication(_r11dLoanApp);
+            if (_r11dExit) {
+              dealSummary.exit_strategy = _r11dExit;
+              console.log('R11-D: backfilled exit_strategy from loan application section');
+            }
+          }
+        }
         console.log('Welcome email + deal summary generated');
 
         // Get form attachments.
