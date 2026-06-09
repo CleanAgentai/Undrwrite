@@ -612,3 +612,33 @@ verify discipline applies to regression hypotheses as much as to bug reports. (C
 trace CONFIRMS a recent commit caused a regression — e.g. the sweptAny coverage gap — fix it.)
 
 **Disposition:** banked methodology.
+
+## OBS-30 — Offline extractor verification doesn't validate the full consumer chain
+**Surfaced by:** Patricia Simmons round — Bugs 1 & 3 deployed-staging failures (deal `2ccbb9d9`)
+**Severity:** methodology (recurrence of OBS-10 at a different layer)
+
+Bugs 1 and 3 were verified offline at the EXTRACTOR level (correct canonical values) but failed
+END-TO-END on deployed code. Bug 1: the post-hoc backfill couldn't un-ask the LLM's welcome email,
+which was generated BEFORE the backfill and under a prompt rule (EXIT STRATEGY RULE) that forbade
+reading exit strategy from documents. Bug 3: the extractor produced the correct canonical city
+offline, yet the live prelim rendered TBD via a consumer path whose runtime behavior diverged from
+every offline replication (still under investigation via deployed instrumentation).
+
+**Pattern:** extracting correctly is NECESSARY but NOT SUFFICIENT. The consumer chain — LLM prompts
+that read the structured field, and render paths that consume the canonical value through
+aggregation/filtering — must be verified end-to-end before declaring an extractor/canonical-
+population fix complete. This is OBS-10 (offline tests bypassing pipeline stages) recurring at the
+consumer-chain layer.
+
+**Methodology principle:** before declaring an extractor or canonical-population fix complete,
+exercise the FULL consumer chain offline. For the changed field, ask:
+- Does any LLM prompt consume it? WHEN is the prompt constructed relative to when the extraction
+  runs? (A post-hoc population can't repair an already-generated LLM output.)
+- Does any render path consume it through aggregation/filtering that might lose or never receive
+  the value?
+- Is there a timing/sequence dependency between extraction and consumption?
+When offline reasoning is exhausted and deployed behavior still diverges, deployed runtime
+instrumentation (a temporary trace log) is the correct next step — not more speculation.
+
+**Disposition:** banked methodology. Bug 1 corrective landed (`796d233`); Bug 3 under deployed
+instrumentation (`17690a1`) pending root cause.
