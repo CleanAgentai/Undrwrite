@@ -1326,10 +1326,6 @@ const extractCanonicalFieldsAggregated = (inboundMessages, savedDocs, opts = {})
   for (const msg of inbounds) {
     const strippedBody = stripQuotedReplyChain(msg.body || '');
     const extracted = cf.extractFromEmailBody(strippedBody, msg.subject || emailSubject);
-    // R11-D-DIAG v4 (Patricia Simmons, 2026-06-09): surgical trace INSIDE the aggregation —
-    // pinpoint whether stripQuotedReplyChain destroys the Property section on deployed (offline
-    // it is a no-op). REMOVE once root-caused.
-    try { console.log('R11-D-DIAG-AGG: ' + JSON.stringify({ rawLen: (msg.body || '').length, strippedLen: strippedBody.length, strippedHasProperty: /Property\s*:/i.test(strippedBody), strippedPropRegion: (strippedBody.match(/Property[\s\S]{0,50}/i) || [''])[0], extractedCity: extracted.subject_property_city, extractedAddr: extracted.subject_property_address })); } catch (_e) {}
     for (const field of Object.keys(resolved)) {
       const v = extracted[field];
       if (v != null && v !== '') resolved[field] = v;

@@ -1314,10 +1314,20 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // would have produced. See discrepancy-engine.js header for F3's known
   // limitation (substantive admin-typed inline content not currently filtered).
   const _bInboundMessages = dealMessages.filter(m => m.direction === 'inbound');
+  // R11-D (Patricia Simmons, 2026-06-09): pass the BORROWER name (NOT leadSummaryBrokerName) as
+  // runDiscrepancyDetectionAggregated's `borrowerName` arg. That arg feeds isCommercialSubmission
+  // (corporate-BORROWER corp-suffix check) + joint-borrower detection — both want the borrower.
+  // CASCADE REGRESSION from OBS-23 (Ryan Callahan): broker_name became the full firm identity
+  // ("…Ridgeview Mortgage Corp, Lic. #…"), so passing it here tripped the corp-suffix check →
+  // isCommercialSubmission=true → runDiscrepancyDetectionAggregated returned canonical_map {} →
+  // the Deal Snapshot's City/Province (and other canonical rows) went TBD. Affected every deal
+  // whose broker firm contains Corp/Inc/Ltd/etc. since the OBS-23 deploy. Pre-OBS-23 it "worked"
+  // only because broker_name was a bare personal name with no corp suffix.
+  const _bAggBorrowerName = dealSummary?.borrower_name || deal.borrower_name || null;
   const _bDetectAdmin = dEngine.runDiscrepancyDetectionAggregated(
     _bInboundMessages,
     dealDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
-    leadSummaryBrokerName,
+    _bAggBorrowerName,
     { emailSubject: _bInboundMessages[0]?.subject || '' }
   );
   // R6-γ (2026-05-21): strip lender attribution from non-payout-statement
@@ -1344,30 +1354,6 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       )
     )
   );
-  // R11-D-DIAG (Patricia Simmons, 2026-06-09): TEMPORARY diagnostic for the City/Province "TBD"
-  // discrepancy — every OFFLINE path on the deployed binary (extractFromEmailBody → aggregation →
-  // filter chain → deriveCityProvince) computes the city, yet the LIVE prelim renders TBD. Capture
-  // the runtime inputs + canonical city at the render-feeding map to locate the divergence.
-  // REMOVE once root-caused (no fix here — diagnostic only).
-  try {
-    console.log('R11-D-DIAG city/province trace: ' + JSON.stringify({
-      inboundCount: _bInboundMessages.length,
-      aggCommercial: _bDetectAdmin.commercial,
-      aggCommercialSignal: _bDetectAdmin.commercial_signal,
-      aggClash: _bDetectAdmin.identity_clash_yielded,
-      aggClashInfo: _bDetectAdmin.identity_clash_info,
-      docNames: dealDocs.map(d => d.file_name),
-      bodyLens: _bInboundMessages.map(m => (m.body || '').length),
-      hasPropertyLabel: _bInboundMessages.map(m => /Property\s*:/i.test(m.body || '')),
-      propertyRegions: _bInboundMessages.map(m => ((m.body || '').match(/Property[\s\S]{0,55}/i) || [''])[0]),
-      unfilteredCity: (_bDetectAdmin.canonical_map.subject_property_city || []).map(t => t.value),
-      unfilteredAddress: (_bDetectAdmin.canonical_map.subject_property_address || []).map(t => t.value),
-      filteredCity: (_bFilteredCanonicalMap.subject_property_city || []).map(t => t.value),
-      derivedCityProvince: dEngine.deriveCityProvince(_bFilteredCanonicalMap),
-      directCity: _bInboundMessages.map(m => { try { return cFields.extractFromEmailBody(m.body || '', '').subject_property_city; } catch (e) { return 'ERR:' + e.message; } }),
-      directAddress: _bInboundMessages.map(m => { try { return cFields.extractFromEmailBody(m.body || '', '').subject_property_address; } catch (e) { return 'ERR'; } }),
-    }));
-  } catch (_diagErr) { console.error('R11-D-DIAG failed: ' + _diagErr.message); }
   // FRANCO-Q3/Q4 (2026-05-28): multi-party qualification roster — deterministic
   // who-counts determination feeding the Snapshot disposition rows + the
   // generateLeadSummary aggregation directive below.
