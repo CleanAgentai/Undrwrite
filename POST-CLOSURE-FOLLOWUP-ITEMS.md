@@ -717,3 +717,47 @@ property value, lender, occupancy). To extend, parameterize the noun phrase; kee
 field actually exhibits the variance (avoid speculative breadth).
 
 **Disposition:** resolved (fixed). Verified 9/9 unit cases + 10/10 real-LLM Patricia generations (post-strip ask=0).
+
+## OBS-33 — Audience-appropriate communication in prompts (the second axis after accuracy)
+**Surfaced by:** Kevin Tran AML/PEP request — Franco flagged condescension (deal `2e31da9d`)
+**Severity:** resolved (held commit, not pushed)
+
+The post-approval AML/PEP request read: "AML form (Anti-Money Laundering) / PEP form (Politically
+Exposed Person) … These are FINTRAC compliance forms that you can collect on Kevin's behalf." The
+acronym expansions were LITERAL in the prompt (Group KKKK ai.js ~2511-2512 + complianceDocs ~3323);
+the FINTRAC explanation sentence was the LLM paraphrasing that same framing. Brokers are licensed
+mortgage professionals who handle AML/PEP routinely — defining the acronyms and explaining FINTRAC
+reads as condescending. Fixed: both sites now emit BARE LABELS ("AML Form", "PEP Form"); the
+ec505f2/OBS-16 accuracy framing (FINTRAC, NOT "broker compliance") is preserved INTERNAL-ONLY with
+an explicit do-not-explain directive (option b — keep the accuracy guard, suppress the output).
+
+**Pattern:** prompts should encode the AUDIENCE's expertise level. Professional audiences don't need
+basic domain terminology explained. Default to bare labels/references for professional readers;
+expand only when reader expertise is unclear or the term is genuinely unusual. This is the SECOND
+AXIS of prompt-encoded product-knowledge quality, distinct from OBS-16's first axis: OBS-16 fixed
+whether the content was factually CORRECT (FINTRAC vs "broker compliance"); OBS-33 fixes whether the
+content's level of detail MATCHES READER EXPECTATIONS. Both are prompt-quality categories — accuracy
+and audience-fit — worth checking together when reviewing broker/admin-facing prompt output.
+
+**Methodology — negative constraints alone are probabilistic; pair with a positive exemplar.**
+First pass used only prohibitions ("do NOT expand acronyms / mention FINTRAC / say compliance
+forms"). Acronym + FINTRAC leaks dropped to zero, but a soft category descriptor ("the final
+compliance forms") still surfaced ~25% (2/8) in the conversational path. Adding a POSITIVE template
+("Phrase it plainly, e.g. 'The last two items I need are the AML Form and PEP Form.'") drove it to
+0/20. When a prompt instruction must suppress a natural-language tendency, a concrete positive
+exemplar is higher-leverage than stacking negative constraints.
+
+**Audience-scan findings:**
+- `generateInfoRequestEmail` (ai.js ~3450) listed `PNW Statement Form (Personal Net Worth)` to the
+  broker — same expand-acronym-for-a-pro pattern. FIXED in the same commit (Porter-approved): now
+  bare `PNW Statement Form`. (The PNW prompt-instruction sites ai.js ~2345-2346 keep "(Personal Net
+  Worth)" as INTERNAL context only — their output example is already bare, so no change needed.)
+- `DOC_DISPLAY_NAMES` uses `AML Report` / `PEP Report` (already bare, no expansion) — but "Report"
+  vs the "Form" wording is a minor cross-surface consistency nit. DELIBERATELY LEFT ALONE
+  (Porter call): not user-impacting, and changing it would require a broader audit of all
+  DOC_DISPLAY_NAMES consumers (admin [MISSING] lists, prelim, lead summary, LLL broker fallback)
+  before touching shared labels. Banked here for visibility only.
+
+**Disposition:** resolved — both AML/PEP producing sites + the PNW expansion. Verified: 0/20
+over-explanation across both AML/PEP generators; KKKK forced-ask 10/10; non-AML/PEP paths 0/6 leak
+(audience rule scoped). Deploy-verification on push.

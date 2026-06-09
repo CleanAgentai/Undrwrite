@@ -2507,11 +2507,11 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
       const postApprovalAmlPepBlock = postApprovalAmlPepAsk
         ? `
 
-POST-APPROVAL AML/PEP ASK (Group KKKK — load-bearing for the conversational follow-up flow): the deal has passed prelim approval, all intake documents are on file, and the only remaining items before funding are the FINTRAC compliance forms (AML and PEP), which we collect through the broker on the borrower's behalf. Your reply MUST explicitly request:
-- AML form (Anti-Money Laundering — FINTRAC compliance, collected via broker on the borrower's behalf)
-- PEP form (Politically Exposed Person — FINTRAC compliance, collected via broker on the borrower's behalf)
+POST-APPROVAL AML/PEP ASK (Group KKKK — load-bearing for the conversational follow-up flow): the deal has passed prelim approval, all intake documents are on file, and the only remaining items before funding are the AML and PEP forms. Your reply MUST explicitly request, as BARE LABELS:
+- AML Form
+- PEP Form
 
-Acknowledge what's already received (intake is complete) and request AML + PEP as the final items needed. Do NOT skip this — the pre-KKKK conversational flow omitted AML/PEP because the STANDARD DOCUMENT CHECKLIST below doesn't include them. This block is the explicit instruction for the post-approval-intake-complete state and OVERRIDES any prior rule about "AML/PEP not asked at intake" (this is not intake — this is the post-approval compliance ask).`
+Acknowledge what's already received (intake is complete) and request AML + PEP as the final items needed. AUDIENCE RULE: list them as bare labels exactly — "AML Form", "PEP Form". Do NOT expand the acronyms (no "(Anti-Money Laundering)", no "(Politically Exposed Person)"), do NOT explain what the forms are, do NOT mention FINTRAC, and do NOT describe them with any category label such as "compliance forms", "compliance items", "compliance documents", or "the final compliance forms" — name them ONLY as "AML Form" and "PEP Form". The broker is a licensed mortgage professional who handles these routinely — explaining or categorizing them reads as condescending. Phrase the ask plainly, e.g. "The last two items I need are the AML Form and PEP Form." — do NOT put any descriptor (no "compliance", no "final compliance forms") before the labels. Internal context FOR YOUR ACCURACY ONLY (never state it in the reply): these are FINTRAC compliance forms collected via the broker on the borrower's behalf, NOT "broker compliance" forms. Do NOT skip this — the pre-KKKK conversational flow omitted AML/PEP because the STANDARD DOCUMENT CHECKLIST below doesn't include them. This block is the explicit instruction for the post-approval-intake-complete state and OVERRIDES any prior rule about "AML/PEP not asked at intake" (this is not intake — this is the post-approval compliance ask).`
         : '';
 
       // Group OOOO (S6.1): pre-approval gate/conversation mismatch fix. When
@@ -3319,8 +3319,14 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
       // consumer site; default false preserves pre-approval JJJ semantic
       // for legacy callers (initial-submission path, strict-superset widening).
       const intakeComplete = allIntakeReceived(receivedClassifications, reqIsPurchase);
+      // BARE LABELS (Kevin Tran, 2026-06-09): brokers are licensed mortgage
+      // professionals who handle AML/PEP routinely — the parenthetical acronym
+      // expansions + FINTRAC framing here read as condescending. List the forms
+      // as bare labels; the accuracy framing (the ec505f2 OBS-16 correction —
+      // FINTRAC compliance, NOT "broker compliance") is preserved INTERNAL-ONLY
+      // via the AML/PEP AUDIENCE RULE block below, which forbids stating it.
       const complianceDocs = (reqSenderIsBroker && (intakeComplete || isPostApproval))
-        ? `\n- AML form (Anti-Money Laundering — FINTRAC compliance, collected via broker on the borrower's behalf)\n- PEP form (Politically Exposed Person — FINTRAC compliance, collected via broker on the borrower's behalf)`
+        ? `\n- AML Form\n- PEP Form`
         : '';
 
       const response = await callClaude({
@@ -3358,6 +3364,8 @@ UNIFICATION RULES — Same doc, different names. Pick ONE phrasing per item and 
 - PNW STATEMENT vs PERSONAL NET WORTH: "Personal Net Worth Statement" = "PNW Statement" = "PNW Statement Form" = "PNW" = "net worth statement". Same single document.
 
 CRITICAL — DO NOT NAME UNSTATED LENDERS: never reference a specific bank, credit union, or lender by name (e.g. "TD Bank", "RBC", "Royal Bank", "Scotiabank", "BMO", "Bank of Montreal", "CIBC", "National Bank", "Tangerine", "Manulife", "Equitable", "Haventree", "MCAP", "ATB") unless the broker EXPLICITLY stated that institution in their correspondence (the conversation history or deal summary). If you don't know who holds the existing mortgage, do NOT fill in a guess — ask the broker to confirm. Pattern: "Could you send the current mortgage payout statement, and let us know which lender it's with?" — NOT "could you send the TD Bank payout statement?". Same rule for exit lenders.
+
+AML/PEP AUDIENCE RULE (Kevin Tran, 2026-06-09): if the checklist includes "AML Form" and/or "PEP Form", list them as BARE LABELS exactly — "AML Form", "PEP Form". Do NOT expand the acronyms (no "(Anti-Money Laundering)", no "(Politically Exposed Person)"), do NOT explain what the forms are, do NOT mention FINTRAC, and do NOT describe them with any category label such as "compliance forms", "compliance items", "compliance documents", or "the final compliance forms" — name them ONLY as "AML Form" and "PEP Form". The broker is a licensed mortgage professional who handles these forms routinely — explaining or categorizing them reads as condescending. Phrase the ask plainly, e.g. "The last two items I need are the AML Form and PEP Form." — do NOT put any descriptor (no "compliance", no "final compliance forms") before the labels. Internal context FOR YOUR ACCURACY ONLY (never state any of this in the email): these are FINTRAC compliance forms collected via the broker on the borrower's behalf — they are NOT "broker compliance" forms. Simply request "AML Form" and "PEP Form" as items, nothing more.
 
 DEAL TYPE: ${reqIsPurchase ? 'PURCHASE — borrower does not yet own the subject property' : 'REFINANCE / EXISTING MORTGAGE'}
 
@@ -3439,7 +3447,10 @@ Return only the HTML email body. Do not include a subject line.`,
 
       const missingForms = [];
       if (!hasApp) missingForms.push('Loan Application Form');
-      if (!hasPnw) missingForms.push('PNW Statement Form (Personal Net Worth)');
+      // BARE LABEL (Kevin Tran audience-fit, 2026-06-09): brokers know what a PNW
+      // Statement Form is — drop the "(Personal Net Worth)" expansion (same
+      // audience-appropriateness principle as the AML/PEP bare-label fix, OBS-33).
+      if (!hasPnw) missingForms.push('PNW Statement Form');
 
       const formsNote = missingForms.length > 0
         ? `\n\nAlso, the following forms have not been received yet:\n${missingForms.map(f => `- ${f}`).join('\n')}\nMention that they can use their own forms if they already have them filled out — our templates were provided as an alternative.`
