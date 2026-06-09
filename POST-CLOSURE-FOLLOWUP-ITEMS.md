@@ -468,3 +468,72 @@ changes, not rebuilds. Second instance this engagement (first: existing-balance 
 conservatism enabling the Jennifer/Thornton render decisions).
 
 **Disposition:** resolved (fixed).
+
+## OBS-23 — Canonical-at-source for cross-surface fields (broker_name)
+**Surfaced by:** Ryan Callahan Round-8 Scenario-4 Bug 1 (deal `1011e4e4`)
+**Severity:** resolved (commit `d6c5dbf`)
+
+`broker_name` drives multiple consumer surfaces (greetings, prelim/escalation "Broker:" field,
+`[INBOUND from …]` labels, completion greeting). The prior R8-A fix correctly identified the
+principle — signature parse beats email metadata — but applied it at the GREETING consumers
+(`effectiveGreetingFirstName`) rather than at the canonical field. The field itself stayed
+populated from `senderName` in the bypass paths (and from the LLM on the normal path), so
+admin-facing consumers that read `broker_name` inherited the wrong value. Fixed by populating the
+canonical `broker_name` from a deterministic signature parse (`resolveCanonicalBrokerName` =
+`parseBrokerFullIdentity || fallback`) at the SOURCE — both bypass dealSummaries + a post-LLM
+guard — so every consumer is correct without per-site wiring.
+
+**Pattern:** when a canonical value drives multiple surfaces, fix at the SOURCE (canonical
+population), not at each consumer. Per-consumer patching creates patch-recurrence risk as new
+consumers are added (exactly how the escalation surface escaped the greeting-only R8-A fix).
+
+**Methodology note:** when a recurring pattern surfaces ("Hi Franco!" → now the escalation Broker
+field), check whether the prior fix was applied at the consumer or the source. Audit other
+canonical fields (borrower_name, property_address, lender) for at-source vs at-consumer patch
+patterns where a deterministic extractor feeds only some consumers.
+
+**Disposition:** resolved (fixed).
+
+## OBS-24 — Internal routing identifiers in user-facing narratives (hardcoded variant)
+**Surfaced by:** Ryan Callahan Round-8 Scenario-4 Bug 2 (deal `1011e4e4`)
+**Severity:** resolved (commit `d6c5dbf`)
+
+`key_risks_or_notes` (admin-facing escalation narrative) was hardcoded with the internal routing
+identifier "via R10-C-1 dedicated-generator bypass" (ai.js). It surfaced verbatim in the
+escalation's Key Risks section. Rewritten to plain language modeled on the clean S15 sibling.
+
+**Pattern:** engineer-facing identifiers (routing codes, function names, design-rationale refs)
+belong in code comments / logs, NEVER in fields that surface to users. This is the HARDCODED
+variant of the same class as Grantham's FINTRAC framing (which was an LLM paraphrase of
+prompt-encoded language) — both are internal language reaching user surfaces, via different
+mechanisms (direct string vs prompt-then-paraphrase).
+
+**Methodology note:** audit hardcoded narrative/summary string assignments (`key_risks_or_notes`,
+`summary`, any admin/broker-facing field literal) for engineer-facing language. A grep for
+`R[0-9]+-[A-Z]` inside string assignments is a cheap detector.
+
+**Disposition:** resolved (fixed). The R10-C-1 string was the only such leak (grep-confirmed).
+
+## OBS-25 — Completion-email greeting uses raw split() instead of selectGreetingFirstName
+**Surfaced by:** Ryan Callahan Round-8 Scenario-4 broker-name consumer audit (deal `1011e4e4`)
+**Severity:** NOT fixed this round — common case resolved; residual edge banked
+
+`generateCompletionEmail` derives its greeting first name via `broker_name.split(/\s+/)[0]`
+(ai.js ~2924) rather than the `selectGreetingFirstName` helper every other broker-facing email
+uses. With the OBS-23 canonical fix, `broker_name` is now correct, so the common case greets
+correctly ("Hi Brandon,"). BUT the raw `split()` lacks `selectGreetingFirstName`'s anti-Franco
+collision guard: in the rare case where signature parsing fails entirely and `broker_name` falls
+back to `senderName` (the proxy "Franco Maione"), the completion greeting would read "Hi Franco,"
+— the exact recurring bug class — whereas `selectGreetingFirstName` would fall back to generic
+"Hi there,".
+
+**Pattern:** a single consumer using a bespoke extraction (`split()`) instead of the shared,
+guard-equipped helper is a latent recurrence of an already-fixed bug class.
+
+**Methodology note (deferred):** route the completion-email greeting through
+`selectGreetingFirstName` (pass `greetingFirstName` from the completion-handoff caller, mirroring
+the doc-request/rejection/broker-response paths). Small change; deferred to keep the Ryan commit
+scoped to the two reported bugs.
+
+**Disposition:** open — future maintenance. Real signed broker emails parse correctly, so this
+only manifests on a fully-unsigned submission.
