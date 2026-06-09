@@ -752,6 +752,10 @@ exemplar is higher-leverage than stacking negative constraints.
   broker — same expand-acronym-for-a-pro pattern. FIXED in the same commit (Porter-approved): now
   bare `PNW Statement Form`. (The PNW prompt-instruction sites ai.js ~2345-2346 keep "(Personal Net
   Worth)" as INTERNAL context only — their output example is already bare, so no change needed.)
+  IMPORTANT: `generateInfoRequestEmail` is marked UNUSED (ai.js:3438 — "No webhook or cron consumer
+  as of 2026-05-05"), so this expansion never reached a live broker and the path is NOT
+  staging-replayable. The fix is code-hygiene / correctness-when-wired, verified offline only (5/5
+  bare). The live broker-facing over-explanation was AML/PEP only.
 - `DOC_DISPLAY_NAMES` uses `AML Report` / `PEP Report` (already bare, no expansion) — but "Report"
   vs the "Form" wording is a minor cross-surface consistency nit. DELIBERATELY LEFT ALONE
   (Porter call): not user-impacting, and changing it would require a broader audit of all
