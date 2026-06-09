@@ -1359,6 +1359,8 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
       unfilteredAddress: (_bDetectAdmin.canonical_map.subject_property_address || []).map(t => t.value),
       filteredCity: (_bFilteredCanonicalMap.subject_property_city || []).map(t => t.value),
       derivedCityProvince: dEngine.deriveCityProvince(_bFilteredCanonicalMap),
+      directCity: _bInboundMessages.map(m => { try { return cFields.extractFromEmailBody(m.body || '', '').subject_property_city; } catch (e) { return 'ERR:' + e.message; } }),
+      directAddress: _bInboundMessages.map(m => { try { return cFields.extractFromEmailBody(m.body || '', '').subject_property_address; } catch (e) { return 'ERR'; } }),
     }));
   } catch (_diagErr) { console.error('R11-D-DIAG failed: ' + _diagErr.message); }
   // FRANCO-Q3/Q4 (2026-05-28): multi-party qualification roster — deterministic
