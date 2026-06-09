@@ -1352,6 +1352,11 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   try {
     console.log('R11-D-DIAG city/province trace: ' + JSON.stringify({
       inboundCount: _bInboundMessages.length,
+      aggCommercial: _bDetectAdmin.commercial,
+      aggCommercialSignal: _bDetectAdmin.commercial_signal,
+      aggClash: _bDetectAdmin.identity_clash_yielded,
+      aggClashInfo: _bDetectAdmin.identity_clash_info,
+      docNames: dealDocs.map(d => d.file_name),
       bodyLens: _bInboundMessages.map(m => (m.body || '').length),
       hasPropertyLabel: _bInboundMessages.map(m => /Property\s*:/i.test(m.body || '')),
       propertyRegions: _bInboundMessages.map(m => ((m.body || '').match(/Property[\s\S]{0,55}/i) || [''])[0]),
