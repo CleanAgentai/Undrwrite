@@ -1165,7 +1165,11 @@ const stripAndInjectDocumentsIncluded = (html, documents, missingDocs) => {
 //     signature was "Please advise on next steps." Tight empirically-observed
 //     list per Q3 verdict; expand only if Stage 2 surfaces additional cases
 //     (same R8-B empirical-evidence-required discipline).
-const _validateBrokerFirstNameCapture = (rawCapture) => {
+// R11-C (Ryan Callahan 1011e4e4, 2026-06-09): backward-compatible `returnFull` param.
+// Default (false) returns the first token EXACTLY as before (all greeting callers unchanged).
+// returnFull=true returns the validated full nameLine ("Brandon Mitchell") the validator
+// already computes internally — consumed by parseBrokerFullIdentity for admin-facing surfaces.
+const _validateBrokerFirstNameCapture = (rawCapture, returnFull = false) => {
   if (!rawCapture) return null;
   let nameLine = rawCapture.replace(/^\s*\*+/, '').replace(/\*+\s*$/, '').trim();
   // R8-A: strip pipe-delimited firm/license portions. Nadia shape gives
@@ -1198,7 +1202,7 @@ const _validateBrokerFirstNameCapture = (rawCapture) => {
   // Never extract admin's own first name (defense-in-depth — collision
   // cases should fall back to generic rather than echo admin name).
   if (firstToken.toLowerCase() === 'franco') return null;
-  return firstToken;
+  return returnFull ? nameLine : firstToken;
 };
 
 // R10-B (2026-05-27): body-prose self-identification extractor. Canonical
@@ -1226,7 +1230,7 @@ const _validateBrokerFirstNameCapture = (rawCapture) => {
 // subsystem (Q7 verdict). NOT a new template family designation yet — wait
 // for pattern recurrence across multiple distinct surfaces before promoting
 // "JS-side pre-AI signal extraction" to 4th family.
-const parseBrokerFirstNameFromBodyProse = (emailBody) => {
+const parseBrokerFirstNameFromBodyProse = (emailBody, returnFull = false) => {
   if (!emailBody || typeof emailBody !== 'string') return null;
   const intros = [
     /\bMy name is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:from|with|at)\b/,
@@ -1238,7 +1242,7 @@ const parseBrokerFirstNameFromBodyProse = (emailBody) => {
   for (const re of intros) {
     const m = emailBody.match(re);
     if (m && m[1]) {
-      const result = _validateBrokerFirstNameCapture(m[1]);
+      const result = _validateBrokerFirstNameCapture(m[1], returnFull);
       if (result) return result;
     }
   }
@@ -1256,12 +1260,50 @@ const parseBrokerFirstNameFromBodyProse = (emailBody) => {
 // _c7ParsedBrokerName computation feeding processInitialEmail). When future
 // extraction sources emerge (e.g., subject line, In-Reply-To header), they
 // plug into this wrapper without modifying existing extractors.
-const parseBrokerFirstName = (emailBody) => {
-  return parseBrokerFirstNameFromBodyProse(emailBody)
-      || parseBrokerFirstNameFromSignature(emailBody);
+const parseBrokerFirstName = (emailBody, returnFull = false) => {
+  return parseBrokerFirstNameFromBodyProse(emailBody, returnFull)
+      || parseBrokerFirstNameFromSignature(emailBody, returnFull);
 };
 
-const parseBrokerFirstNameFromSignature = (emailBody) => {
+// R11-C (Ryan Callahan 1011e4e4, 2026-06-09): canonical broker IDENTITY for admin-facing
+// surfaces (escalation/prelim "Broker:" field + [INBOUND from …] labels). Three granularity
+// levels with GRACEFUL DEGRADATION:
+//   L2 nameLine    → "Brandon Mitchell"            (parseBrokerFirstName(body, true))
+//   + firm         → "Brandon Mitchell, Clearview Mortgage Corp"
+//   + license      → "Brandon Mitchell, Clearview Mortgage Corp, Lic. #MB667823"
+// Firm comes from the body self-ID ("…with <Firm>") — R8-A's documented AUTHORITATIVE source —
+// else a standalone signature line ending in a company suffix. License from a "Lic./License #"
+// anchor. If only the name parses → name; if name fails → null (caller falls back to senderName).
+// Conservative firm/license patterns (structural, not arbitrary near-signature text).
+const _BROKER_FIRM_SUFFIX = '(?:Mortgage|Mortgages|Corp|Corporation|Group|Inc|Financial|Partners|Capital|Lending|Brokers?|Realty|Holdings|Solutions|Services|Co)\\.?';
+// A firm = Title-case word(s) ending in ONE OR MORE consecutive company-suffix words, so
+// "Clearview Mortgage Corp" captures all three (not just "Clearview Mortgage").
+const _BROKER_FIRM_CORE = `[A-Z][A-Za-z0-9&'’\\-]+(?:\\s+[A-Z][A-Za-z0-9&'’\\-]+)*?(?:\\s+${_BROKER_FIRM_SUFFIX})+`;
+const parseBrokerFullIdentity = (emailBody) => {
+  if (!emailBody || typeof emailBody !== 'string') return null;
+  const nameLine = parseBrokerFirstName(emailBody, true); // L2 full name (or null)
+  if (!nameLine) return null;
+  const parts = [nameLine];
+  // Firm — prefer body self-ID "with/from/at <Firm>", else a standalone signature firm line.
+  let firm = (emailBody.match(new RegExp(`\\b(?:with|from|at|of)\\s+(${_BROKER_FIRM_CORE})`)) || [])[1];
+  if (!firm) firm = (emailBody.match(new RegExp(`(?:^|\\n)\\s*(${_BROKER_FIRM_CORE})\\s*(?:\\n|$)`)) || [])[1];
+  if (firm) {
+    firm = firm.trim().replace(/,+$/, '').trim();
+    // Strip a trailing sentence period ("…Mortgage Group.") but keep real abbreviations ("…Inc.").
+    if (/\.$/.test(firm) && !/\b(?:Inc|Corp|Corporation|Co|Ltd)\.$/i.test(firm)) firm = firm.slice(0, -1).trim();
+    parts.push(firm);
+  }
+  // License — "Lic. #MB667823" / "License #12345" (1-3 letter prefix or bare digits).
+  const lic = (emailBody.match(/\b(?:Lic\.?|License)\s*#?\s*([A-Z]{1,3}\d{4,}|\d{4,})/i) || [])[1];
+  if (lic) parts.push('Lic. #' + lic);
+  return parts.join(', ');
+};
+
+// Canonical broker NAME for a dealSummary/consumer: parsed signature identity wins; the supplied
+// fallback (LLM broker_name / senderName metadata) is used only when no signature name parses.
+const resolveCanonicalBrokerName = (emailBody, fallback) => parseBrokerFullIdentity(emailBody) || fallback || null;
+
+const parseBrokerFirstNameFromSignature = (emailBody, returnFull = false) => {
   if (!emailBody || typeof emailBody !== 'string') return null;
   // 1) Strip RFC sig delimiter footer ("\n-- \n" and everything after).
   //    Kills the proxy-shadow root cause: Franco's admin footer below the
@@ -1337,7 +1379,7 @@ const parseBrokerFirstNameFromSignature = (emailBody) => {
   // Last-match = first-match in those cases; truth table behavior unchanged.
   const precedingMatches = [...beforeFooter.matchAll(/([^\n]+)\n+[^\n]*Lic\.\s*#/gi)];
   for (let i = precedingMatches.length - 1; i >= 0; i--) {
-    const result = _validateBrokerFirstNameCapture(precedingMatches[i][1]);
+    const result = _validateBrokerFirstNameCapture(precedingMatches[i][1], returnFull);
     if (result) return result;
   }
 
@@ -1355,7 +1397,7 @@ const parseBrokerFirstNameFromSignature = (emailBody) => {
   // Iterate from last to first (canonical sig is at body end).
   for (let i = sameLineMatches.length - 1; i >= 0; i--) {
     if (!sameLineMatches[i][1].includes('|')) continue;
-    const result = _validateBrokerFirstNameCapture(sameLineMatches[i][1]);
+    const result = _validateBrokerFirstNameCapture(sameLineMatches[i][1], returnFull);
     if (result) return result;
   }
 
@@ -2092,7 +2134,7 @@ module.exports = {
         const dealSummary = {
           sender_type: 'broker',
           sender_name: senderName,
-          broker_name: senderName,
+          broker_name: resolveCanonicalBrokerName(emailBody, senderName), // R11-C: parsed signature identity wins over the account/proxy name
           borrower_name: _s15BodyName,
           identity_clash: true,
           misattached_documents: _s15Misattached,
@@ -2154,12 +2196,16 @@ module.exports = {
         const _r10cDealSummary = {
           sender_type: 'broker',
           sender_name: senderName,
-          broker_name: senderName,
+          broker_name: resolveCanonicalBrokerName(emailBody, senderName), // R11-C: parsed signature identity wins over the account/proxy name
           borrower_name: _r10cBorrowerName,
           ltv_percent: _r10cEffectiveLtv,
           ltv_band: 'over_80',
           collateral_offered: false,
-          key_risks_or_notes: `High LTV detected (${_r10cEffectiveLtv}%) — broker asked about additional collateral via R10-C-1 dedicated-generator bypass. Awaiting broker response on collateral.`,
+          // R11-C (Ryan Callahan 1011e4e4, 2026-06-09): plain-language narrative — no internal
+          // routing identifier. Pre-fix this read "...via R10-C-1 dedicated-generator bypass",
+          // which surfaced verbatim in the admin escalation's Key Risks section. Modeled after
+          // the clean S15 sibling (~L2099): describe what happened, no engineer-facing codes.
+          key_risks_or_notes: `High LTV of ${_r10cEffectiveLtv}% exceeds the 80% threshold. Vienna has asked the broker whether additional collateral is available before requesting other documents. Awaiting broker response.`,
           summary: `High-LTV deal (${_r10cEffectiveLtv}%) — collateral question sent to broker; awaiting response before doc-collection workflow proceeds.`,
         };
         const welcomeEmail = await module.exports.generateHighLtvCollateralAsk(_r10cDealSummary, effectiveGreetingFirstName);
@@ -2300,6 +2346,16 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
           jsonText = jsonText.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
         }
         dealSummary = JSON.parse(jsonText);
+      }
+
+      // R11-C (Ryan Callahan 1011e4e4, 2026-06-09): post-extraction canonical guard. The LLM
+      // can still read the From-header account name into broker_name despite the R8-A schema
+      // instruction (Ryan: signed "Brandon Mitchell" but broker_name came back "Franco Maione").
+      // When the deterministic signature parse yields a broker identity, it WINS — making the
+      // canonical broker_name correct regardless of LLM variance, so all admin-facing consumers
+      // (escalation/prelim "Broker:" + [INBOUND from …] labels) render the true broker.
+      if (dealSummary) {
+        dealSummary.broker_name = resolveCanonicalBrokerName(emailBody, dealSummary.broker_name);
       }
 
       return { welcomeEmail, dealSummary };
@@ -4785,6 +4841,8 @@ ${JSON.stringify(summaryData, null, 2)}`,
   DOCUMENTS_INCLUDED_BLOCK_PATTERN,
   // R4-Bucket-C.7 — broker-signature first-name parser (Marcus collision fix)
   parseBrokerFirstNameFromSignature,
+  parseBrokerFullIdentity,
+  resolveCanonicalBrokerName,
   // R10-B (2026-05-27): body-prose self-ID extractor + resolver-chain
   // wrapper. parseBrokerFirstName is the canonical entry point for callers;
   // FromSignature + FromBodyProse exported for direct testing + harness use.
