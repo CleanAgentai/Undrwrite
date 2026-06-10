@@ -897,6 +897,30 @@ const formatCanonicalFieldsForPrompt = (canonicalMap) => {
       `"${u.value}"${u.lender ? ` (lender: ${u.lender})` : ''} [sources: ${u.sources.join(', ')}]`
     ).join('; ')}`);
   }
+  // R11-D materiality reconciliation (Sandra Whitfield; Franco direction 2026-06-10).
+  // A mortgage PAYOUT statement's total payout structurally EXCEEDS the principal
+  // BALANCE by accrued interest + discharge fees — an EXPECTED, immaterial difference,
+  // NOT a discrepancy. The LLM, seeing existing_first_mortgage_balance and
+  // existing_first_mortgage_payout_total (and the email's round-number balance estimate),
+  // intermittently treated them as conflicting and asked the broker to reconcile —
+  // holding the prelim (R5-B-2). Per Franco: treat as immaterial, the document figures
+  // are authoritative, do NOT ask. The materiality DECISION here is deterministic
+  // (JS-computed); the note communicates it to the welcome/lead-summary generator (which
+  // does the LLM-driven narrative) so it does not flag a phantom discrepancy. Threshold:
+  // payout exceeds balance by <= max(2% of balance, $5,000) AND in the expected
+  // direction (payout >= balance). A payout BELOW the balance, or a difference ABOVE the
+  // threshold, is NOT expected accrued interest → no note → surfaces normally.
+  const _balVals = ((canonicalMap || {}).existing_first_mortgage_balance || []).map(t => t.value).filter(v => typeof v === 'number');
+  const _payVals = ((canonicalMap || {}).existing_first_mortgage_payout_total || []).map(t => t.value).filter(v => typeof v === 'number');
+  if (_balVals.length && _payVals.length) {
+    const _balance = Math.max(..._balVals);
+    const _payout = Math.max(..._payVals);
+    const _diff = _payout - _balance;
+    const _threshold = Math.max(0.02 * _balance, 5000);
+    if (_diff >= 0 && _diff <= _threshold) {
+      lines.push(`  NOTE (existing-mortgage payout reconciliation — DETERMINISTIC): the payout total ($${_payout}) exceeds the principal balance ($${_balance}) by $${_diff}. This is EXPECTED accrued interest + discharge fees, is document-confirmed, and is NOT a discrepancy. Treat these figures as authoritative; do NOT flag a balance/payout discrepancy and do NOT ask the broker to reconcile them.`);
+    }
+  }
   return lines.length === 0 ? '(no canonical fields extracted)' : lines.join('\n');
 };
 

@@ -992,3 +992,47 @@ faithful rate 0/10. So the balance-clarification may be an artifact of the same 
 deployed behavior; deployed multi-run will confirm before any Franco product question is raised.
 
 **Disposition:** banked methodology. Verification for this fix is pipeline-faithful + deployed-gated.
+
+## OBS-40 — Materiality-aware deterministic discrepancy logic (existing-balance vs payout)
+**Surfaced by:** Sandra Whitfield residual; resolved by Franco product direction (2026-06-10)
+**Severity:** resolved (this commit)
+
+After the Source-of-Funds canonical fix (0fb1bd0) eliminated the spurious purpose confabulation,
+Sandra still intermittently (deployed ~3/8) held the prelim on a GENUINE-but-immaterial difference:
+the broker email stated the existing balance as a round $278,500; the RBC payout statement gives
+principal $278,500 + accrued interest/fees = total payout $282,444. The LLM treated
+existing_first_mortgage_balance vs existing_first_mortgage_payout_total as conflicting and asked the
+broker to reconcile → R5-B-2 hold. There is NO structured discrepancy (the canonical balance MATCHES
+the email); the conflict was purely the LLM comparing the principal balance against the
+interest-inclusive payout total. Franco's product direction: treat the expected accrued-interest
+difference as immaterial, use the payout statement figures as authoritative, do NOT ask.
+
+**Fix:** a DETERMINISTIC materiality reconciliation in `formatCanonicalFieldsForPrompt` — when
+existing_first_mortgage_payout_total exceeds existing_first_mortgage_balance by <= max(2% of balance,
+$5,000) in the expected direction (payout >= balance), emit a deterministic NOTE stating the
+difference is expected accrued interest + discharge fees, document-confirmed, NOT a discrepancy, and
+the broker must not be asked to reconcile. A payout BELOW the balance, or a difference ABOVE the
+threshold, gets no note → surfaces normally. Single site (formatCanonicalFieldsForPrompt) covers all
+three canonicalFieldsPrompt consumers (initial / review / active).
+
+**Pattern:** discrepancy detection needs DOMAIN-AWARE MATERIALITY. Two sources differing is not
+automatically a discrepancy — magnitude, direction, and domain semantics matter (accrued interest is
+structurally expected; a round-number broker estimate vs a precise payout figure are not equivalent
+claims). When LLM-phrasing variance creates inconsistent GATE decisions, the architectural response
+is not "tune the LLM" but "encode the deterministic logic the LLM was approximating." The materiality
+DECISION is deterministic JS; the note is how that decision reaches the LLM-driven narrative
+generator (the welcome/lead-summary). Builds on OBS-14 (document-confirmed sources authoritative for
+adverse-decision inputs).
+
+**Recursive OBS-36 CLOSURE:** the four-layer Margaret Bug-1 cascade is now fully resolved at the root
+of each layer — pdf-parse reliability (Layer A) → name over-capture (Layer C) → AML "Source of Funds"
+canonical purpose contamination (0fb1bd0) → balance/payout materiality (this commit). Each layer
+surfaced only after the prior was fixed (reliability surfaces latent dependents). This is the
+architectural ENDPOINT: the final layer was a PRODUCT decision (Franco's materiality call), not a
+technical bug — the point where domain expertise replaces continued technical patching.
+
+**Disposition:** resolved (this commit). Verified: materiality note logic 5/5 unit cases (immaterial
+→ note; material / reverse-direction / no-payout → no note). NOTE: offline balance-clar was already
+0/10 BEFORE this note (unfaithful low sample per OBS-39) so offline cannot validate the note;
+DEPLOYED multi-run is the gate (Sandra balance-clar 3/8 → expect 0). Source-of-Funds remains 0;
+genuine material balance disagreements still surface; smoke intact.
