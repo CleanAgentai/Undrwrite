@@ -410,10 +410,30 @@ const buildBrokerThreadInputs = (allMessages = []) => {
 // gates are on disjoint code paths.
 // ──────────────────────────────────────────────────────────────────────────
 const shouldHoldPrelimForDiscrepancy = ({ brokerFacingDiscrepancyCount, brokerFacingReplyText, summary }) => {
+  // R11-D Option B (Sandra Whitfield, 2026-06-10): the prelim-hold is now driven by
+  // DETERMINISTIC structured discrepancies ONLY. It previously ALSO held on
+  // `clarificationPending` (an LLM-prose classifier over the welcome) and
+  // `viennaFlaggedDiscrepancy` (the LLM's summary.unresolved_discrepancy) — both
+  // LLM-PHRASING-DRIVEN. Sandra's rich, fully-extracted submission made the LLM
+  // intermittently phrase a clarification (mostly the EXPECTED balance-vs-payout
+  // accrued-interest difference, which is NOT a structured discrepancy), so the prelim
+  // was held ~60% of the time purely on LLM variance — and no amount of canonical-prompt
+  // guidance reliably stopped the LLM (it reads the payout statement document directly).
+  // Per the OBS-40 principle — "the LLM's role is supportive narrative, not gate
+  // evaluation" — the prelim-HOLD gate must be deterministic. When the LLM notices a
+  // genuine-but-unstructured concern it still ASKS the broker in the welcome email; we
+  // simply no longer HOLD the prelim for it (the prelim fires, the clarification reaches
+  // the broker in the same email, the next broker turn re-evaluates). Genuine STRUCTURED
+  // cross-source discrepancies (filterBrokerFacing) still hold the prelim, exactly as
+  // before. See OBS-41.
   const hasStructuredDiscrepancy = (brokerFacingDiscrepancyCount || 0) > 0;
-  const clarificationPending = aiService.welcomeEmailIsAskingClarification(brokerFacingReplyText || '');
-  const viennaFlaggedDiscrepancy = !!summary?.unresolved_discrepancy;
-  return hasStructuredDiscrepancy || clarificationPending || viennaFlaggedDiscrepancy;
+  // Computed for OBSERVABILITY only — these LLM signals no longer gate the prelim:
+  const _llmClarificationPending = aiService.welcomeEmailIsAskingClarification(brokerFacingReplyText || '');
+  const _llmFlaggedDiscrepancy = !!summary?.unresolved_discrepancy;
+  if (!hasStructuredDiscrepancy && (_llmClarificationPending || _llmFlaggedDiscrepancy)) {
+    console.log(`B-2 (Option B): prelim NOT held — LLM phrased a clarification/flag (clarif=${_llmClarificationPending}, llmFlag=${_llmFlaggedDiscrepancy}) but there is NO structured discrepancy. Deterministic gate: prelim fires; any clarification still reaches the broker via the welcome.`);
+  }
+  return hasStructuredDiscrepancy;
 };
 
 const computeWillReview = ({ deal, summary, classifications, identityClashUnresolved, standaloneLtv }) => {

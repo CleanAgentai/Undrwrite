@@ -1036,3 +1036,44 @@ technical bug — the point where domain expertise replaces continued technical 
 0/10 BEFORE this note (unfaithful low sample per OBS-39) so offline cannot validate the note;
 DEPLOYED multi-run is the gate (Sandra balance-clar 3/8 → expect 0). Source-of-Funds remains 0;
 genuine material balance disagreements still surface; smoke intact.
+
+## OBS-41 — Prelim-hold gate must be DETERMINISTIC, not LLM-phrasing-driven (Option B)
+**Surfaced by:** Sandra Whitfield — materiality note insufficient on deployed (Porter decision, 2026-06-10)
+**Severity:** resolved (this commit) — the systemic root of the Sandra residual
+
+`shouldHoldPrelimForDiscrepancy` (R5-B-2) held the prelim on an OR of three signals: a DETERMINISTIC
+structured discrepancy (filterBrokerFacing) PLUS two LLM-PHRASING-DRIVEN ones —
+`clarificationPending` (a prose classifier over the LLM's welcome) and `viennaFlaggedDiscrepancy`
+(the LLM's summary.unresolved_discrepancy). Sandra's rich, fully-extracted submission made the LLM
+intermittently phrase SOME clarification (mostly the expected balance-vs-payout accrued-interest
+difference), so the prelim was held ~60% of the time on pure LLM variance. Three successive
+context-layer fixes (cd98ef0 content exclusion, be3782a filename exclusion, f464741 materiality note)
+each reduced a SPECIFIC trigger but could not stop the LLM reliably — it reads the payout statement
+DOCUMENT directly and re-derives the difference regardless of canonical-prompt guidance.
+
+**Fix (Porter Option B):** the prelim-HOLD gate now fires on DETERMINISTIC structured discrepancies
+ONLY. The LLM signals are still computed (logged for observability) but no longer gate. When the LLM
+notices a genuine-but-unstructured concern it STILL asks the broker in the welcome email; we simply
+no longer HOLD the prelim for it — the prelim fires, the clarification reaches the broker in the same
+email, and the next broker turn re-evaluates. Genuine STRUCTURED cross-source discrepancies still
+hold, exactly as before.
+
+**Pattern (the engagement's deepest methodology lesson):** a RELEASE/PROGRESSION GATE must be driven
+by deterministic state, not by classifying LLM prose. LLM phrasing varies run-to-run; gating on it
+makes the gate non-deterministic and unfixable by context-tuning (the model can always re-derive a
+concern from the raw documents). When you find a gate evaluating an LLM signal, move the gate to
+deterministic state and demote the LLM to supportive narrative. This is the structural generalization
+of OBS-40 ("the LLM's role is supportive narrative, not gate evaluation") and the resolution of the
+recursive OBS-36 cascade: the cascade's final, irreducible layer was that the GATE ITSELF consulted
+the LLM. Context fixes (cd98ef0/be3782a/f464741) are retained as defense-in-depth (they reduce how
+OFTEN Vienna asks an immaterial clarification — a cosmetic improvement), but Option B is what makes
+the prelim fire CONSISTENTLY.
+
+**Trade-off (Porter-accepted):** a genuine concern the LLM notices but the structured detector does
+not will no longer hold the prelim — it fires, with the clarification still sent to the broker. The
+deterministic structured detector remains the authority for holds.
+
+**Disposition:** resolved (this commit). Verified: Sandra structured broker-facing discrepancies = 0
+→ no hold → prelim fires (deterministic premise confirmed offline); gate returns true iff
+structured count > 0 (genuine structured holds preserved). DEPLOYED gate: Sandra prelim consistency
+(target 8/8) — the OBS-39 deployed validation.
