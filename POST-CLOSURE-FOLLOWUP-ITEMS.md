@@ -937,3 +937,58 @@ classification-based documents-included section (admin-facing, not LLM-context).
 **Disposition:** resolved (this commit). Verified: 0/10 Source-of-Funds confabulation (was ~30-50%);
 genuine discrepancies still detected; Margaret/Patricia/Grantham smoke clean. The residual
 existing-balance clarification (~50%) is a SEPARATE genuine matter pending Franco's product call.
+
+## OBS-38 — Source classification belongs at the CANONICAL extraction layer (the root)
+**Surfaced by:** Sandra Whitfield — deployed-vs-offline divergence on the Source-of-Funds fix (2026-06-10)
+**Severity:** resolved (this commit) — the ROOT layer for OBS-37/37b
+
+cd98ef0 (content) and be3782a (filename) excluded compliance docs from the LLM CONTEXT, but Sandra
+still confabulated "Source of Funds" on deployed (5/6). Root cause was DEEPER: `extractFromAmlPep`
+(canonical-fields.js ~964) extracted the AML form's "Source of Funds" FIELD as a loan `purpose`, and
+the consumer (~1813) pushed it into `canonical_map.purpose`. That canonical purpose flowed into
+`canonicalFieldsPrompt` (webhook.js:3156) → the LLM read `purpose: "Source of Funds"` as authoritative
+and confabulated a discrepancy vs the email purpose → R5-B-2 prelim-hold. Fixed by REMOVING the AML/PEP
+purpose extraction + push: compliance docs source IDENTITY (Full Legal Name), NOT substantive
+deal-intent fields.
+
+**Pattern:** when applying source-classification discipline, fix at the DEEPEST layer where the source
+contributes data — the canonical extraction that POPULATES the map — not just downstream consumers
+(LLM context, prompt construction, discrepancy comparison). The canonical map propagates to EVERY
+consumer; fixing only some consumers (cd98ef0/be3782a closed buildContentBlocks + attachmentNote but
+NOT canonicalFieldsPrompt) leaves the bug live through the unfixed ones. Downstream exclusions are
+valid DEFENSE-IN-DEPTH but not primary resolution. Audit ALL layers: canonical extraction → prompt
+construction → LLM context → discrepancy comparison; fix at the deepest, keep the rest as backstops.
+
+**Disposition:** resolved (this commit; cd98ef0/be3782a retained as defense-in-depth). Faithful
+verify: canonicalFieldsPrompt clean; Sandra Source-of-Funds 0/10 (pipeline-faithful, see OBS-39);
+identity preserved; genuine conflicts still detected. Deployed confirmation on push.
+
+## OBS-39 — Offline-verification pipeline-faithfulness (second misfire this engagement)
+**Surfaced by:** Sandra Whitfield — be3782a "verified" offline but failed on deployed (2026-06-10)
+**Severity:** methodology (recurrence of OBS-10 / OBS-30 at the canonical-prompt layer)
+
+be3782a's offline test passed `opts={}`, OMITTING the `canonicalFieldsPrompt` the deployed webhook
+passes — so it bypassed the exact pipeline stage carrying the bug. Offline showed 0/10 (clean) while
+deployed showed 5/6 (broken). I pushed on that false signal. This is the SECOND instance of an
+unfaithful-offline-test misfire this engagement (first: Patricia Bug-3 — backfill couldn't un-ask an
+already-generated welcome; the offline extractor passed while deployed failed).
+
+**Methodology (elevated):** an offline test is only a valid verification surface if it exercises the
+SAME pipeline stages as the deployed code. Before trusting an offline test for a fix, enumerate the
+deployed pipeline stages the fix depends on and verify the test exercises EACH:
+- Which prompt fragments does the deployed code construct & pass? (canonicalFieldsPrompt,
+  discrepancyDetected, greetingFirstName, canonicalExitStrategy, …)
+- Which canonical state does it compute, and through which filter chain?
+- Which gate conditions does it evaluate?
+Specifically for CANONICAL-LAYER fixes: the offline test MUST compute `canonicalFieldsPrompt` via the
+same `runDiscrepancyDetection` → filter-chain → `formatCanonicalFieldsForPrompt` the webhook uses, and
+pass it to `processInitialEmail` — otherwise it cannot see canonical-map-propagated bugs. A
+deployed-binary multi-run remains the final gate.
+
+**Corollary discovery:** the "residual balance-clarification" (surfaced as a Franco product question)
+was ALSO measured by the unfaithful test (opts={}). With the faithful pipeline (canonicalFieldsPrompt
+carrying the authoritative existing-balance + payout_total), the LLM is grounded and does NOT ask —
+faithful rate 0/10. So the balance-clarification may be an artifact of the same flaw, not real
+deployed behavior; deployed multi-run will confirm before any Franco product question is raised.
+
+**Disposition:** banked methodology. Verification for this fix is pipeline-faithful + deployed-gated.

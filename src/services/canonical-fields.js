@@ -961,15 +961,16 @@ const extractFromAmlPep = (doc) => {
   if (!text) return out;
   const m = text.match(/Full\s+Legal\s+Name\s*\n\s*([A-Z][a-zA-Z'\-]+(?:[ \t]+[A-Z][a-zA-Z'\-]+){1,4})/);
   if (m) out.primary_borrower_full_name = m[1].trim();
-  // R10-G (2026-05-27): purpose extraction from AML "Purpose of Mortgage" /
-  // "Source of Funds" field. Empirically anchored against Ethan AML form
-  // (Round-6 Scenario 7) where "Debt consolidation and emergency home
-  // repairs" appears under the Purpose of Mortgage label.
-  const purposeM = text.match(/(?:Purpose\s+of\s+Mortgage|Source\s+of\s+Funds)\s*\n+\s*([^.\n]{3,100})/i);
-  if (purposeM && purposeM[1]) {
-    const p = purposeM[1].trim().replace(/[,.]+$/, '');
-    if (p.length >= 3 && p.length <= 100) out.purpose = p;
-  }
+  // R11-D (Sandra Whitfield, 2026-06-10): the R10-G AML purpose extraction is REMOVED.
+  // AML/PEP are FINTRAC COMPLIANCE documents — a source for IDENTITY (Full Legal Name),
+  // NOT for substantive deal-intent fields (purpose, loan_amount, …). The "Source of
+  // Funds" field on an AML form is a compliance attestation about where the borrower's
+  // funds originate (e.g. "Employment income"), NOT the loan purpose; extracting it as
+  // `purpose` was architecturally wrong. It populated canonical purpose = "Source of
+  // Funds", which fed canonicalFieldsPrompt → the LLM confabulated a purpose discrepancy
+  // ("email says debt consolidation but AML shows Source of Funds") → R5-B-2 prelim-hold.
+  // (Ethan R6-S7 "Purpose of Mortgage" came through this too, but the broker email /
+  // loan application is the authoritative purpose source; compliance docs are not.)
   return out;
 };
 
@@ -1808,9 +1809,10 @@ const extractCanonicalFields = (emailBody, savedDocs, opts = {}) => {
       push('primary_borrower_full_name', r.primary_borrower_full_name, doc.file_name);
     } else if (cls === 'aml' || cls === 'pep') {
       const r = extractFromAmlPep(doc);
+      // Compliance docs contribute IDENTITY only — NOT substantive deal-intent fields.
+      // The R10-G purpose push is removed (Sandra Whitfield): AML "Source of Funds" is a
+      // compliance attestation, not a loan purpose. Purpose comes from email/loan_app.
       push('primary_borrower_full_name', r.primary_borrower_full_name, doc.file_name);
-      // R10-G: purpose from AML form's Purpose-of-Mortgage field
-      push('purpose', r.purpose, doc.file_name, { classification: cls });
     } else if (cls === 'loan_application') {
       // R6-β-A (2026-05-21): Page-1 annotation extraction of requested_loan_amount.
       // R6-α (2026-05-21): thread classification:'loan_application' onto the
