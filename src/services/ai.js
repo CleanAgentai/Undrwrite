@@ -2351,9 +2351,15 @@ module.exports = {
       // (their field labels were mis-read as deal-intent values — Sandra Whitfield).
       const content = await buildContentBlocks(...excludeComplianceForSubstantive(attachments, savedDocs));
 
-      const attachmentNames = attachments.map(a => a.Name).join(', ');
-      const attachmentNote = attachments.length > 0
-        ? `\n\nThe sender attached ${attachments.length} file(s): ${attachmentNames}\nThe supported attachments have been provided above for you to review.`
+      // Compliance docs (AML/PEP) excluded from the LLM-exposed attachment list too —
+      // not just their CONTENT (cd98ef0). The filenames alone let the LLM confabulate a
+      // "Source of Funds" purpose discrepancy from training-data knowledge of AML forms,
+      // even with the content removed (Sandra Whitfield). Source classification applies
+      // to ALL representations the LLM sees: content AND filename metadata.
+      const [_subAttForNote] = excludeComplianceForSubstantive(attachments, savedDocs);
+      const attachmentNames = _subAttForNote.map(a => a.Name).join(', ');
+      const attachmentNote = _subAttForNote.length > 0
+        ? `\n\nThe sender attached ${_subAttForNote.length} file(s): ${attachmentNames}\nThe supported attachments have been provided above for you to review.`
         : '\n\nNo attachments were included with this email.';
 
       // R5-D Surface A (2026-05-21): structured-signal-authoritative.
@@ -4640,8 +4646,12 @@ Return only the HTML email body.`,
       // (their field labels were mis-read as deal-intent values — Sandra Whitfield).
       const content = await buildContentBlocks(...excludeComplianceForSubstantive(attachments, savedDocs));
 
-      const attachmentNames = attachments.map(a => a.Name).join(', ');
-      const attachmentNote = attachments.length > 0
+      // Compliance docs (AML/PEP) excluded from the filename list too (see the
+      // processInitialEmail attachmentNote — filename metadata triggers LLM
+      // confabulation even with content removed; Sandra Whitfield).
+      const [_subAttForNote] = excludeComplianceForSubstantive(attachments, savedDocs);
+      const attachmentNames = _subAttForNote.map(a => a.Name).join(', ');
+      const attachmentNote = _subAttForNote.length > 0
         ? `\nAttached files: ${attachmentNames}`
         : '';
 

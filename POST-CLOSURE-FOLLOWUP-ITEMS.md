@@ -901,6 +901,39 @@ suffices.
 (borrower name — handled JS-side), but NOT for substantive deal-intent fields. The exclusion is
 scoped to the substantive-analysis LLM context, not to identity verification.
 
-**Disposition:** resolved (held commit). Verified offline: 0/10 real-LLM Sandra runs flag the
-spurious purpose discrepancy (was ~30-40%); Margaret (no AML/PEP) unaffected (filter no-op). Deploy +
-multi-run Sandra consistent-prelim replay after Porter push approval.
+**Disposition:** content-exclusion landed (cd98ef0) but proved NECESSARY-BUT-INSUFFICIENT — deployed
+Sandra still confabulated the "Source of Funds" discrepancy (~17-80%) because the filename metadata
+(attachmentNote) still exposed the AML/PEP forms. Completed by the filename exclusion (see OBS-37b).
+NOTE: the offline "0/10" cd98ef0 figure was a lucky sample — the true offline rate was ~30-50%
+(the offline harness IS faithful to deployed). After OBS-37b, the Source-of-Funds confabulation is
+gone (0/10), but a SEPARATE genuine residual remains (existing-balance email-vs-payout difference,
+~50%) — that is a Franco product-direction question (materiality of expected accrued-interest
+differences), not a code bug; pending his call.
+
+## OBS-37b — Source classification applies to ALL representations the LLM sees (filename metadata)
+**Surfaced by:** Sandra Whitfield residual, test-phase (Margaret Chen round, 2026-06-10)
+**Severity:** resolved (this commit) — refinement of OBS-37
+
+Source classification discipline applies to ALL representations the LLM sees, NOT just content.
+Filename metadata is itself a context signal that triggers training-data recall — the LLM saw the
+AML/PEP filenames in `attachmentNote`, recalled domain knowledge ("AML forms have a Source-of-Funds
+field"), and CONFABULATED a discrepancy claim ungrounded in actual content (even mis-attributing
+"Source of Funds" to the loan application, which has no such field). OBS-37's content-only exclusion
+was insufficient; the fix excludes filenames alongside content. Empirically: content-only =
+~30-50% confabulation; content + filename = 0% Source-of-Funds.
+
+**Methodology principle:** when excluding a source category from LLM context, audit ALL
+representations of the source — content, filenames, lists, counts, references — and exclude
+consistently. Partial exclusion creates the CONFABULATION failure mode: the model knows the source
+exists (from any partial signal) and invents details about it (from training data) without grounding
+in actual content. This generalizes beyond compliance docs to ANY source-category exclusion: the
+exclusion must be comprehensive across signal surfaces. A refinement of the LLM-context-construction
+discipline, distinct from (but related to) OBS-37's source classification.
+
+**Acknowledged behavior change:** the broker welcome's file count/list now reflects substantive docs
+only (AML/PEP omitted). AML/PEP RECEIVED-status still surfaces in the admin prelim's
+classification-based documents-included section (admin-facing, not LLM-context).
+
+**Disposition:** resolved (this commit). Verified: 0/10 Source-of-Funds confabulation (was ~30-50%);
+genuine discrepancies still detected; Margaret/Patricia/Grantham smoke clean. The residual
+existing-balance clarification (~50%) is a SEPARATE genuine matter pending Franco's product call.
