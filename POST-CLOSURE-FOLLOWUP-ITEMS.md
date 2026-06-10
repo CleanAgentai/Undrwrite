@@ -765,3 +765,44 @@ exemplar is higher-leverage than stacking negative constraints.
 **Disposition:** resolved — both AML/PEP producing sites + the PNW expansion. Verified: 0/20
 over-explanation across both AML/PEP generators; KKKK forced-ask 10/10; non-AML/PEP paths 0/6 leak
 (audience rule scoped). Deploy-verification on push.
+
+## OBS-34 — Verification-surface integrity: bulletproof is a TRIAGE suite, not a release gate
+**Surfaced by:** Margaret Chen Layer B scoping (pdf-parse reliability investigation, 2026-06-10)
+**Severity:** methodology / engagement-context correction (resolved by reframe)
+
+**Discovery:** the bulletproof suite has NEVER passed clean. Committed historical full-matrix
+results show it failing 118 (05-28) → 114 (05-29) → 101 (05-31) → 67 → 65 (today, post-Layer-A) —
+i.e. 65-failing is the BEST it has ever been, trending down as Vienna improved. The committed
+`TRIAGE-REPORT-fullmatrix-1.md` + `BULLETPROOF-PROGRAM-CLOSEOUT` (commit b1027bc) explicitly frame it
+as a PER-ASSERTION TRIAGE suite: failures are dispositioned individually as Vienna-defect vs
+harness-artifact vs spec-question (e.g. "capture-ordering artifacts, not Vienna defects";
+CLUSTER-2+3 "NOT-A-BUG"). The high failure count is BY DESIGN — strict assertions surface
+divergences for human review, not a binary pass/fail gate.
+
+**Correction to prior framing:** earlier rounds' "verified clean on bulletproof" / "126 fixtures
+pass" claims could NOT have referred to a green suite (it was never green). They were either
+shorthand for "no NEW failures vs the prior known baseline" or a misunderstanding. We don't have
+access to what prior Claude Code sessions meant; we DO have the committed history showing it was
+never green. The validity of fixes verified by OTHER means (staging replay, direct empirical) is
+unaffected — only the rigor-CLAIM wording needs correcting.
+
+**Going-forward verification discipline:**
+- DIRECT EMPIRICAL verification is the reliable signal — staging replay against real-shape deals,
+  multi-run variance, regression sanity on the corpus. This is what actually confirmed Layer A
+  (Margaret keystone: prelim now sends), Kevin AML/PEP (4/4 bare labels), and prior staging-verified
+  rounds.
+- Bulletproof = a REFERENCE/triage surface: good for spotting spec-vs-runtime divergences and
+  NET-regressions (more pass→fail than the prior baseline), NOT a release gate.
+- Report wording: say "direct empirical verification confirmed [specific behavior] on deployed
+  code", NOT "bulletproof passed clean."
+
+**Pattern (methodology):** a verification surface has a DESIGNED PURPOSE that isn't always
+self-evident from running it. A failing suite is not always a regression signal — some suites
+surface divergences for human triage rather than gate releases. When a surface's behavior conflicts
+with expectations, AUDIT THE SURFACE'S DOCUMENTED PURPOSE before treating its output as a signal.
+Here the committed history (TRIAGE-REPORT, PROGRAM-CLOSEOUT) made the purpose explicit; the
+assumption that "all fixtures green" was the target was never grounded in the surface's design.
+
+**Disposition:** resolved by reframe (Porter decision: adopt triage-suite framing; do NOT reconcile
+the 65 to green). Layers C (BUG-4/Sandra-prelim) and D (Bug 2) proceed via direct empirical
+verification, no bulletproof dependency. Related: [[project_bulletproof_phase6_integration]].
