@@ -3,6 +3,21 @@ const pdfParse = require('pdf-parse');
 const archiver = require('archiver');
 const { extractFormValues } = require('../lib/pdfFormExtract');
 
+// Layer A (Margaret Chen, 2026-06-09): re-require a FRESH pdf-parse instance,
+// resetting the bundled pdf.js GLOBAL state. pdf-parse@1.1.1's old pdf.js (v1.x/
+// v2.0) holds module-level mutable state that corrupts across rapid sequential
+// parses, throwing "bad XRef entry" etc. on VALID PDFs. A same-module retry can
+// stay STUCK at the same corrupt state position (measured: a T4 that failed all
+// 3 in-place retries); re-requiring a fresh module clears the state so the retry
+// reliably recovers (measured 0 failures across 48 parses). deals.js is the only
+// pdf-parse consumer, so swapping the local instance has no other-consumer impact.
+const freshPdfParse = () => {
+  for (const k of Object.keys(require.cache)) {
+    if (k.includes('pdf-parse')) delete require.cache[k]; // covers the module + its bundled lib/pdf.js/* builds
+  }
+  return require('pdf-parse');
+};
+
 const IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
 
 // Classify a document based on filename and extracted text content
@@ -354,17 +369,41 @@ module.exports = {
     // values and annotation contents (which pdf-parse can't see). Combining both means a
     // filled fillable PDF or an annotation-marked PDF won't look "blank" to Claude.
     let extractedText = null;
+    let extractionFailed = false;   // Layer A: genuine parse failure (distinct from "parsed, no text")
+    let extractionError = null;
+    let extractionAttempts = 0;
     if (attachment.ContentType === 'application/pdf') {
       let baseText = '';
       let formText = '';
-      try {
-        const parsed = await pdfParse(buffer);
-        if (parsed.text && parsed.text.trim().length > 0) {
-          baseText = parsed.text.trim();
+      // ── Layer A (Margaret Chen, 2026-06-09): retry-on-failure ──────────────
+      // pdf-parse@1.1.1 bundles an old pdf.js (v1.x/v2.0) with GLOBAL mutable
+      // state that intermittently corrupts under rapid multi-document parsing,
+      // throwing "bad XRef entry" / "Illegal character" / "Command token too
+      // long" on VALID PDFs (measured ~37.5% per-doc). A re-parse lands at a
+      // different shared-state position and succeeds — measured 100% recovery in
+      // ≤3 attempts. Without this, the failure was swallowed and the doc stored
+      // with empty text → silent canonical degradation (e.g. an unparsed
+      // mortgage_statement → null existing balance → BUG-4 guard → no prelim).
+      const MAX_ATTEMPTS = 3;
+      let lastErr = null;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        extractionAttempts = attempt;
+        try {
+          // First attempt uses the cached module (fast path — ~62% succeed
+          // first try); on RETRY, re-require a fresh pdf-parse so the corrupted
+          // pdf.js global state is reset (a same-module retry can stay stuck).
+          const pp = attempt === 1 ? pdfParse : freshPdfParse();
+          const parsed = await pp(buffer);
+          if (parsed.text && parsed.text.trim().length > 0) baseText = parsed.text.trim();
+          lastErr = null;
+          break; // parsed OK (whether it yielded text or is genuinely text-less)
+        } catch (err) {
+          lastErr = err;
+          console.log(`  pdf-parse attempt ${attempt}/${MAX_ATTEMPTS} failed for ${attachment.Name}: ${err.message}`);
+          if (attempt < MAX_ATTEMPTS) await new Promise(r => setTimeout(r, 50)); // brief settle before fresh-module retry
         }
-      } catch (err) {
-        console.log(`  pdf-parse failed for ${attachment.Name}:`, err.message);
       }
+      // pdf-lib AcroForm/annotation extraction — independent of pdf-parse.
       try {
         formText = await extractFormValues(buffer);
       } catch (err) {
@@ -374,8 +413,21 @@ module.exports = {
       if (combined.length > 0) {
         extractedText = combined;
         const formNote = formText.length > 0 ? ` (incl. ${formText.length} chars of form fields/annotations)` : '';
-        console.log(`  Extracted ${extractedText.length} chars from ${attachment.Name}${formNote}`);
+        const recoveredNote = extractionAttempts > 1 && !lastErr ? ` [recovered on attempt ${extractionAttempts}]` : '';
+        console.log(`  Extracted ${extractedText.length} chars from ${attachment.Name}${formNote}${recoveredNote}`);
+      } else if (lastErr) {
+        // ── Layer A — surface the failure (Remediation B): "fail visibly" ────
+        // All retries exhausted AND pdf-parse still threw → a GENUINE parse
+        // failure, NOT an empty document. Flag it explicitly so downstream logic
+        // (canonical extractors, the BUG-4 incomplete-canonical guard) can tell
+        // "failed to parse" apart from "parsed, genuinely no text layer". The
+        // doc is still stored (storage upload + record) so it is visible and
+        // re-processable rather than silently dropped.
+        extractionFailed = true;
+        extractionError = lastErr.message;
+        console.error(`  ⚠️ pdf-parse FAILED after ${MAX_ATTEMPTS} attempts for ${attachment.Name}: ${lastErr.message} — flagging extraction_failed (not silent-empty)`);
       }
+      // else: parsed OK but no text layer (image-only PDF) → genuine empty; extractedText stays null, no failure flag.
     }
 
     // Upload to storage bucket
@@ -421,7 +473,15 @@ module.exports = {
         file_type: fileType,
         storage_path: storagePath,
         classification,
-        extracted_data: extractedText ? { text: extractedText } : null,
+        // Layer A: three distinct states (was an ambiguous text-or-null):
+        //   { text: "<chars>" }                         → parsed, has text
+        //   { text: null, extraction_failed: true, … }  → parse FAILED (visible flag)
+        //   null                                         → parsed OK, genuinely no text layer
+        extracted_data: extractedText
+          ? { text: extractedText }
+          : (extractionFailed
+            ? { text: null, extraction_failed: true, extraction_error: extractionError, extraction_attempts: extractionAttempts }
+            : null),
       })
       .select()
       .single();
