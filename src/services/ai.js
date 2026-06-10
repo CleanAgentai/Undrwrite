@@ -5,6 +5,35 @@ const { isPurchaseFromSummary, intakeRequiredFor, isDocRequirementSatisfied, all
 const { selectGreetingFirstName } = require('../lib/greeting');
 const { detectCorporateEntities } = require('./corporate-entities'); // FRANCO-Q5
 
+// ──────────────────────────────────────────────────────────────────────────
+// Document source classification — compliance vs substantive (Sandra Whitfield,
+// 2026-06-10). FINTRAC compliance forms (AML / PEP) attest to identity and
+// source-of-funds; they are NOT a source for SUBSTANTIVE deal-intent fields
+// (loan_purpose, loan_amount, property_value). Their field LABELS (e.g. the AML/PEP
+// "Source of Funds" heading) were being read by the substantive-analysis LLM as
+// competing field VALUES → a phantom purpose discrepancy ("email says debt
+// consolidation but AML/PEP show Source of Funds") → unresolved_discrepancy →
+// R5-B-2 prelim-hold. Surfaced once Layer A made these forms extract (they were
+// previously empty from silent pdf-parse failures → invisible to the LLM).
+// Exclude compliance-doc CONTENT from the substantive-analysis LLM context only.
+// Identity verification is UNAFFECTED — it reads savedDocs directly JS-side
+// (isIdentityClashByAbsence / extractBorrowerFromDocText / canonical extraction),
+// not through this LLM document context. Substantive deal-intent fields come from
+// the broker email body, loan application, mortgage statement, credit bureau,
+// appraisal, property tax assessment, and PNW statement — never compliance docs.
+const COMPLIANCE_DOC_CLASSIFICATIONS = new Set(['aml', 'pep']);
+const isComplianceDoc = (d) => !!(d && COMPLIANCE_DOC_CLASSIFICATIONS.has(d.classification));
+// Returns [attachments, savedDocs] with compliance docs removed — for the
+// SUBSTANTIVE-analysis LLM context only (callers keep the full savedDocs for
+// identity/canonical work).
+const excludeComplianceForSubstantive = (attachments = [], savedDocs = []) => {
+  const compNames = new Set((savedDocs || []).filter(isComplianceDoc).map(d => d.file_name));
+  return [
+    (attachments || []).filter(a => !compNames.has(a.Name)),
+    (savedDocs || []).filter(d => !isComplianceDoc(d)),
+  ];
+};
+
 // Retry wrapper for Claude API calls (handles rate limits)
 const callClaude = async (params, maxRetries = 3) => {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -2318,7 +2347,9 @@ module.exports = {
         return { welcomeEmail, dealSummary: _r10cDealSummary };
       }
 
-      const content = await buildContentBlocks(attachments, savedDocs);
+      // Compliance docs (AML/PEP) excluded from the substantive-analysis LLM context
+      // (their field labels were mis-read as deal-intent values — Sandra Whitfield).
+      const content = await buildContentBlocks(...excludeComplianceForSubstantive(attachments, savedDocs));
 
       const attachmentNames = attachments.map(a => a.Name).join(', ');
       const attachmentNote = attachments.length > 0
@@ -2498,7 +2529,9 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
   // Conversational broker response — reads full context and responds naturally
   generateBrokerResponse: async (emailBody, attachments = [], savedDocs = [], existingSummary, conversationHistory = [], documentsOnFile = [], dealStatus = 'active', { postApprovalAmlPepAsk = false, postApprovalAmlPepPending = false, stillMissingForReview = [], discrepancyDetected = false, canonicalFieldsPrompt = '', greetingFirstName = null, brokerRepliedSinceLastViennaOutbound = true } = {}) => {
     try {
-      const content = await buildContentBlocks(attachments, savedDocs);
+      // Compliance docs (AML/PEP) excluded from the substantive-analysis LLM context
+      // (their field labels were mis-read as deal-intent values — Sandra Whitfield).
+      const content = await buildContentBlocks(...excludeComplianceForSubstantive(attachments, savedDocs));
 
       // R6-ζ (2026-05-21): forbidden-non-sequitur-openers block — see
       // buildForbiddenOpenersBlock docblock at module scope.
@@ -3680,9 +3713,12 @@ Classification guidance:
     //   See computeCanonicalLenderForReview in webhook.js for resolver shape.
     const { noSnapshot = false, canonicalLtvOverride = null, canonicalLenderOverride = null, canonicalCorrectionsOverride = null, multiPartyQualificationOverride = null } = opts;
     try {
-      // Build document text sections from extracted data
+      // Build document text sections from extracted data. Compliance docs (AML/PEP)
+      // excluded from the substantive narrative context — same source-classification
+      // principle as the dealSummary producers (Sandra Whitfield). Their received
+      // STATUS still surfaces via the classification-based documents-included section.
       const docSections = documents
-        .filter(d => d.extracted_data?.text)
+        .filter(d => d.extracted_data?.text && !isComplianceDoc(d))
         .map(d => `--- ${d.classification || 'unclassified'}: ${d.file_name} ---\n${d.extracted_data.text}`)
         .join('\n\n');
 
@@ -4600,7 +4636,9 @@ Return only the HTML email body.`,
   // this back up, ensure it cannot drift from generateBrokerResponse's analysis schema.
   updateDealSummary: async (emailBody, attachments = [], existingSummary, savedDocs = []) => {
     try {
-      const content = await buildContentBlocks(attachments, savedDocs);
+      // Compliance docs (AML/PEP) excluded from the substantive-analysis LLM context
+      // (their field labels were mis-read as deal-intent values — Sandra Whitfield).
+      const content = await buildContentBlocks(...excludeComplianceForSubstantive(attachments, savedDocs));
 
       const attachmentNames = attachments.map(a => a.Name).join(', ');
       const attachmentNote = attachments.length > 0

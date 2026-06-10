@@ -856,3 +856,51 @@ storage unchanged) so future over-captures can't manufacture phantom name discre
 **Disposition:** resolved (held commit). Verified offline: Sandra 0 broker-facing discrepancies;
 genuine name conflicts still fire; property-tax names extract clean (Sandra/Patricia). Deploy +
 Sandra prelim-fires replay after Porter push approval.
+
+## OBS-37 — Document source classification: compliance vs substantive
+**Surfaced by:** Sandra Whitfield residual (Margaret Chen round, 2026-06-10)
+**Severity:** resolved (held commit)
+
+After the Layer C name-fix, Sandra STILL intermittently (~30-40%) failed to produce a prelim. Root
+cause: the substantive-analysis LLM (processInitialEmail → buildContentBlocks) was fed the AML/PEP
+form CONTENT, read the FINTRAC form's "Source of Funds" FIELD LABEL as a competing loan-PURPOSE
+value, and emitted a phantom discrepancy ("email says debt consolidation but AML/PEP show Source of
+Funds") → `unresolved_discrepancy=true` + a clarification ask → R5-B-2 `shouldHoldPrelimForDiscrepancy`
+held the prelim. Intermittent because the LLM only noticed the label ~1/3 of runs.
+
+**Pattern:** documents have CATEGORICAL purposes that should constrain which fields they source.
+Compliance documents (AML, PEP, FINTRAC forms, identity attestations) exist to satisfy regulatory
+requirements about identity and source-of-funds; they are NOT a source for SUBSTANTIVE deal-intent
+fields (loan_purpose, loan_amount, property_value). Substantive fields come from the broker email
+body, loan application, mortgage statement, credit bureau, appraisal, property tax assessment, and
+PNW statement. Source classification matters.
+
+**Fix (deterministic, not prompt-probabilistic):** `excludeComplianceForSubstantive` filters AML/PEP
+out of the buildContentBlocks document context at the three dealSummary producers (processInitialEmail,
+generateBrokerResponse, updateDealSummary) and out of generateLeadSummary's docSections. Identity
+verification is UNAFFECTED — it reads savedDocs directly JS-side (isIdentityClashByAbsence /
+extractBorrowerFromDocText / canonical extraction), not through the LLM document context; AML/PEP
+RECEIVED-status still surfaces via the classification-based documents-included section. So compliance
+docs remain in scope for compliance/identity flows and are removed ONLY from substantive-field
+analysis.
+
+**Connection to OBS-21 (fragile-by-omission):** the prior reliance was conservatism-by-omission —
+"compliance docs happen not to carry substantive fields, so the LLM won't mis-read them." That
+omission-based assumption broke the moment a compliance form's FIELD LABEL ("Source of Funds") looked
+like a substantive value. Like OBS-21, the fix replaces an omission-based assumption with ACTIVE
+source-list filtering. Conservatism must be code-enforced, not assumed.
+
+**Recursive OBS-36 instance (second in this round):** Layer A's extraction-reliability fix made the
+AML/PEP forms extract (previously empty → invisible), which surfaced this latent mis-read — the
+SECOND recursive "reliability surfaces latent dependent issues" instance in one round (the first was
+Sandra's name over-capture → Layer C). Lesson: each foundational reliability improvement can surface
+MULTIPLE layers of latent issues; budget verification iteratively rather than assuming one pass
+suffices.
+
+**Field-scope line (encoded):** compliance docs ARE legitimate sources for IDENTITY-related fields
+(borrower name — handled JS-side), but NOT for substantive deal-intent fields. The exclusion is
+scoped to the substantive-analysis LLM context, not to identity verification.
+
+**Disposition:** resolved (held commit). Verified offline: 0/10 real-LLM Sandra runs flag the
+spurious purpose discrepancy (was ~30-40%); Margaret (no AML/PEP) unaffected (filter no-op). Deploy +
+multi-run Sandra consistent-prelim replay after Porter push approval.
