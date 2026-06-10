@@ -1595,8 +1595,17 @@ const ROUTING_LEAK_PATTERNS = [
   { match: /,\s+[Pp]erfect\s*[!.]+/g, replace: '.' },
   // C3-b1 — "looks like a complete <file/package/application/submission>"
   // Broker-facing analog of the COMPLETE-overclaim Bucket B fixed admin-side.
-  { match: /\b(?:[Tt]his\s+)?looks\s+like\s+a\s+complete\s+(?:file|package|application|submission)\b/g,
-    replace: "I've received what you've sent" },
+  // R11-D Bug 2 (Margaret Chen, 2026-06-10): the prior fix REPLACED this overclaim
+  // with "I've received what you've sent" — but the ack typically already opens with
+  // "I've received <doc list>…", so the substitution DOUBLED the receipt
+  // acknowledgment ("…I've received the loan application…. I've received what you've
+  // sent! I'll get this into review.") — the redundant sentence Franco flagged.
+  // Now REMOVE the overclaim sentence entirely: the ack's own doc-receipt line + the
+  // forward-looking "I'll review" line already acknowledge; the overclaim is pure
+  // compliance-risk filler. Consume the phrase + leading space + trailing sentence
+  // punctuation; cleanupSweepArtifacts mops any residual shard.
+  { match: /\s*\b(?:[Tt]his\s+)?looks\s+like\s+a\s+complete\s+(?:file|package|application|submission)\b\s*[!.]*/g,
+    replace: '' },
   // C3-b2 — "we should be able to move forward with the review" (E-b-adjacent variant)
   { match: /\bwe\s+should\s+be\s+able\s+to\s+move\s+forward\s+with\s+(?:the|our)\s+review\b[.!?]?/gi,
     replace: "I'll review the file." },

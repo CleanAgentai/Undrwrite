@@ -1015,7 +1015,12 @@ const extractBorrowerFromPropertyTax = (doc) => {
   const block = findAnchorBlock(text, /Owner\s+Name(?:\s+Roll|\s*\n)/i, 200);
   if (!block) return null;
   // Block starts with name, then concatenated roll number. Take leading name tokens.
-  const m = block.match(/^\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})/);
+  // R11-D Layer C (Sandra Whitfield, 2026-06-10): use [ \t]+ (NOT \s+) between name
+  // tokens so the capture STOPS at the line boundary — otherwise the following line's
+  // label ("Mailing Address") bleeds into the name ("Sandra Mae Whitfield\nMailing
+  // Address"), creating a phantom borrower-name discrepancy that held the prelim. Same
+  // line-boundary convention already used by the "Full Name" extractor above (~L705).
+  const m = block.match(/^\s*([A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){1,4})/);
   return m ? m[1].trim() : null;
 };
 
@@ -2125,7 +2130,19 @@ const resolveCanonicalIntentValue = (canonicalMap, field) => {
 };
 
 // Convenience tokenizer used by discrepancy-engine for name comparison.
-const tokenizeNameForCompare = (name) => (name || '').trim().split(/\s+/)
+// R11-D Layer C (Sandra Whitfield, 2026-06-10): normalize a borrower name for
+// COMPARISON ONLY (canonical storage stays as-extracted) so an extractor
+// over-capture doesn't manufacture a phantom cross-source discrepancy. Defends
+// the comparison layer regardless of which extractor over-captures: (1) take the
+// first non-empty line (drops a "<name>\n<label>" bleed like "…\nMailing
+// Address"); (2) strip a trailing field-label phrase if it ran onto the same line
+// (requires preceding whitespace, so a name is never fully erased).
+const NAME_LABEL_TAIL_RE = /\s+(?:mailing\s+address|property\s+address|roll\s+number|assessment(?:\s+year)?|legal\s+description|owner\s+name|parcel(?:\s+number)?|account\s+number)\b[\s\S]*$/i;
+const normalizeNameForCompare = (name) => {
+  const firstLine = (name || '').split(/\r?\n/).map(x => x.trim()).find(x => x.length > 0) || '';
+  return firstLine.replace(NAME_LABEL_TAIL_RE, '').trim();
+};
+const tokenizeNameForCompare = (name) => normalizeNameForCompare(name).split(/\s+/)
   .map(t => t.toLowerCase().replace(/[.,]/g, ''))
   .filter(t => t.length > 0);
 

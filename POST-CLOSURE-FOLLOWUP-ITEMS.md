@@ -806,3 +806,53 @@ assumption that "all fixtures green" was the target was never grounded in the su
 **Disposition:** resolved by reframe (Porter decision: adopt triage-suite framing; do NOT reconcile
 the 65 to green). Layers C (BUG-4/Sandra-prelim) and D (Bug 2) proceed via direct empirical
 verification, no bulletproof dependency. Related: [[project_bulletproof_phase6_integration]].
+
+## OBS-35 — cleanupSweepArtifacts em-dash over-strip (pre-existing, banked)
+**Surfaced by:** Layer D Bug 2 unit testing (Margaret Chen round, 2026-06-10)
+**Severity:** pre-existing bug — BANKED for a future maintenance pass, NOT fixed (out of scope)
+
+`cleanupSweepArtifacts` (the unconditional post-sweep pass in `enforceNoRoutingLeak`) strips a
+legitimate em-dash CONTINUATION: "Thanks for sending these over — I'll be in touch shortly with an
+update." → "Thanks for sending these over —." It removes the trailing clause and leaves a stranded
+em-dash + period. Confirmed PRE-EXISTING (identical output with and without the Bug 2 / C3-b1
+change — diffed against baseline), so it is independent of the Layer D fix.
+
+**Likely cause:** the cleanup matches a routing-leak-shaped phrase after the em-dash and strips it,
+without recognizing the "<text> — <clause>" continuation structure, leaving the em-dash orphaned.
+
+**Methodology:** orphan-cleanup patterns should detect em-dash continuations and either preserve the
+em-dash structure or remove the dash cleanly when its trailing clause goes. Same class as the
+Grantham-round orphan-shard issue (Bug 3 — routing-leak sweep leaving artifact fragments); the
+cleanup-pass discipline needs continued refinement as new shapes surface.
+
+**Disposition:** banked for a future maintenance pass under stable verification conditions; not
+blocking. Do NOT fix opportunistically — it needs its own scoped FP-safety review.
+
+## OBS-36 — Reliable extraction surfaces latent false-positive discrepancies (Layer A consequence)
+**Surfaced by:** Sandra Whitfield Layer C (Margaret Chen round, 2026-06-10)
+**Severity:** resolved (held commit — Layer C fixes a+b)
+
+After Layer A made document text extraction reliable (pdf-parse retry), Sandra's property-tax doc —
+previously EMPTY (silent pdf-parse failure) — now extracts. Its owner-name extractor over-captured
+the next line's label ("Sandra Mae Whitfield\nMailing Address"); the borrower-name discrepancy
+comparison (first+last token) saw last token "address" ≠ "whitfield" → a PHANTOM cross-source
+discrepancy → R5-B-2 `shouldHoldPrelimForDiscrepancy` held the prelim → deal stuck `active`, no
+prelim. The original deal prelim'd ONLY because the property-tax doc was empty (no name → no
+conflict).
+
+**Pattern:** improving an upstream signal (extraction reliability) can SURFACE latent downstream
+bugs (over-capturing field extractors that previously never ran). The net effect of Layer A is
+strongly positive (Margaret fixed; 9/10 deals' silent degradation resolved), but it changes the
+input distribution to every downstream consumer — so a fix that increases coverage should be
+followed by a sweep for consumers that were previously shielded by the missing data. Mini-blast-
+radius: ANY doc with an over-capturing extractor can now manufacture false discrepancies.
+
+**Fix (Layer C, this round):** (a) property-tax owner-name extractor uses `[ \t]+` (not `\s+`) to
+stop the name at the line boundary (canonical-fields.js ~L1018 — matching the convention already on
+the "Full Name" extractor ~L705); (b) defense-in-depth name normalization at the COMPARISON layer
+(`tokenizeNameForCompare` → first non-empty line + trailing-label strip; comparison-only, canonical
+storage unchanged) so future over-captures can't manufacture phantom name discrepancies.
+
+**Disposition:** resolved (held commit). Verified offline: Sandra 0 broker-facing discrepancies;
+genuine name conflicts still fire; property-tax names extract clean (Sandra/Patricia). Deploy +
+Sandra prelim-fires replay after Porter push approval.
