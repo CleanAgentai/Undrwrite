@@ -14,6 +14,7 @@ const {
   intakeRequiredFor,
   allRequiredForCompletion,
   allIntakeReceived,
+  computeMissingIntakeItems,
 } = require('../lib/dealType');
 const config = require('../config');
 const emailService = require('../services/email');
@@ -503,28 +504,23 @@ const computeStillMissingForReview = ({ deal, summary, classifications, identity
     : !!(summary?.ltv_percent && summary.ltv_percent > 80);
   if (isHighLtv) return [];
 
-  const items = [];
-  const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
-  const hasExitStrategy = !!(summary?.exit_strategy && String(summary.exit_strategy).trim());
-
-  // (2026-06-02) Removed an orphaned `if (!ltv) items.push('a current property
-  // appraisal ...')` line: `ltv` was never a parameter of this function (the
-  // signature has always been { deal, summary, classifications,
-  // identityClashUnresolved, highLtv }), so the line threw ReferenceError when
-  // reached, crashing the active-deal continuation response generation (Franco
-  // 87a83f83 — silence after broker clarification). It was newly reachable
-  // because the Option-C refinance fix stopped this scenario from auto-declining
-  // at the initial gate. The line was incoherent either way: if `ltv` had merely
-  // existed-as-undefined, `!ltv` is always true → it would push "need appraisal"
-  // on EVERY active-continuation deal regardless of an appraisal being present.
-  // Appraisal presence is already covered by the hasReviewableDoc check below
-  // (which includes 'appraisal'); LTV-computability is gated separately at the
-  // prelim/escalation layer (canonical market_value + shouldEscalateOnIncomplete-
-  // Canonical). No working behavior is lost.
-  if (!hasReviewableDoc) items.push('a reviewable document (current appraisal, NOA, or proof of income)');
-  if (!hasExitStrategy) items.push('exit strategy (how the borrower plans to repay or refinance out at maturity)');
-
-  return items;
+  // Round-9 (Katherine Morrison, 2026-06-11): use the SAME authoritative missing-items
+  // set as the admin preliminary review (computeMissingIntakeItems — the single source
+  // of truth) instead of the prior narrow 2-item heuristic. Pre-this, the heuristic only
+  // flagged a missing "reviewable doc" (appraisal/NOA/income) + exit_strategy — so a deal
+  // with an appraisal + T4 satisfied it and returned [], OOOO never fired, and Vienna's
+  // broker reply was free to over-promise "everything looks complete" while gov ID /
+  // property tax / payout were outstanding (which the admin prelim correctly showed as
+  // [MISSING]). Returning the full intake-missing key set closes that divergence by
+  // construction. Returns classification KEYS; OOOO maps them to broker phrases via
+  // brokerPhraseForMissingItem, and the post-gen enforceMissingDocsHonesty guard consumes
+  // the same keys. The early-return branches above (status/prelim/identity/high-LTV) keep
+  // their original "this flow doesn't enumerate intake docs" semantics.
+  return computeMissingIntakeItems({
+    classifications,
+    isPurchase: isPurchaseFromSummary(summary),
+    exitStrategy: summary?.exit_strategy,
+  });
 };
 
 // R9-F (2026-05-26): pre-create intake classification + data-model gate —
@@ -1299,17 +1295,18 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // Group SSS: prelim uses intakeRequiredFor (Tier 1 only — JJJ preserved, AML/PEP
   // do NOT appear in the prelim [MISSING] list).
   // Fix 4: isDocRequirementSatisfied makes NOA satisfy income_proof per Bradley's intent.
+  // Round-9 (Katherine Morrison): admin prelim + broker reply now share ONE
+  // missing-items computation (computeMissingIntakeItems) so the two can never
+  // diverge — previously the broker reply used a narrow heuristic and could call a
+  // file "complete" while this admin list correctly showed items [MISSING]. The
+  // result is identical to the prior inline computation (intakeRequiredFor −
+  // satisfied, + exit_strategy when null) — semantics unchanged, source unified.
   const isPurchase = isPurchaseFromSummary(dealSummary);
-  const missingDocs = intakeRequiredFor(isPurchase)
-    .filter(req => !isDocRequirementSatisfied(req, classifications));
-
-  // Group C (S6.3/S7.3): exit_strategy is a deal-summary field, not a document
-  // classification. Surface it here when null/empty so it appears in the admin's
-  // preliminary review [MISSING] list and downstream draft preview. missingDocs
-  // semantically becomes "missing items" — the rendering loop downstream handles
-  // the non-doc key via DOC_DISPLAY_NAMES.exit_strategy. Variable name stays for
-  // diff-tightness; semantic widening is comment-only.
-  if (!dealSummary?.exit_strategy) missingDocs.push('exit_strategy');
+  const missingDocs = computeMissingIntakeItems({
+    classifications,
+    isPurchase,
+    exitStrategy: dealSummary?.exit_strategy,
+  });
 
   const dealMessages = await dealsService.getMessages(deal.id);
   // Group DDDD (S6.2): pre-label messages so admin "approved" / "send" replies
@@ -3311,6 +3308,30 @@ No deal record was created. If this was a legitimate broker submission, please r
             : [hasOwnApplication && 'skipping Application Form', hasOwnPnw && 'skipping PNW Form'].filter(Boolean).join(', ') || '');
         console.log('Attaching', formAttachments.length, 'forms', skipNote ? `(${skipNote})` : '');
 
+        // Round-9 (Katherine Morrison, 2026-06-11) — DETERMINISTIC MISSING-DOCS HONESTY
+        // GUARD on the broker welcome email. This is the guarantee that eliminates the
+        // "everything looks complete" class: JS owns the completeness verdict, not the LLM.
+        // Fires ONLY for broker intake in a NON-deferred state (high-LTV collateral-ask /
+        // identity-clash welcomes intentionally carry no doc list → skip). Strips any
+        // completeness overclaim and, if the reply doesn't already request a missing intake
+        // item, injects a deterministic "still need" ask — both keyed on the SAME
+        // authoritative missing set the admin prelim uses. Runs LAST, after the routing-leak
+        // + Perfect-opener sweeps, on the final pre-send content.
+        if (!deferredIntake && !isBorrower) {
+          const _r9WelcomeClassifications = (savedDocs || []).map(d => d.classification).filter(Boolean);
+          const _r9WelcomeMissingKeys = computeMissingIntakeItems({
+            classifications: _r9WelcomeClassifications,
+            isPurchase: isPurchaseFromSummary(dealSummary),
+            exitStrategy: dealSummary?.exit_strategy,
+          });
+          const _r9WelcomeFirst = (dealSummary?.borrower_name || '').trim().split(/\s+/)[0] || null;
+          const _r9Honesty = aiService.enforceMissingDocsHonesty(welcomeEmail, _r9WelcomeMissingKeys, { borrowerFirstName: _r9WelcomeFirst });
+          welcomeEmail = _r9Honesty.swept;
+          if (_r9Honesty.sweptAny || _r9Honesty.injectedAny) {
+            console.log(`Round-9: welcome honesty guard — sweptOverclaim=${_r9Honesty.sweptAny} injectedAsk=${_r9Honesty.injectedAny} (missing=[${_r9WelcomeMissingKeys.join(', ')}])`);
+          }
+        }
+
         // Send the AI-generated response with forms attached (HTML formatted)
         emailService.sendEmailDelayed(
           email.from,
@@ -3800,6 +3821,31 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           reviewResult.responseEmail = _r8bSweep.swept;
           if (_r8bSweep.sweptAny) console.log(`R8-B: "Perfect"-opener sweep neutralized opener in review-path responseEmail`);
         }
+        // Round-9 (Katherine Morrison, 2026-06-11) — deterministic missing-docs honesty
+        // guard on the under_review reply path. A deal in 'under_review' was sent to admin
+        // for preliminary review but may STILL have outstanding intake docs (Katherine:
+        // prelim fired with 3 docs missing) — a broker follow-up here must not over-promise
+        // completeness either. Excluded: 'ltv_escalated' (high-LTV collateral-ask, no doc
+        // list) and identity-clash. Computes the authoritative missing set directly (the
+        // status-gated computeStillMissingForReview returns [] outside 'active').
+        if (reviewResult.responseEmail
+            && existingDeal.status === 'under_review'
+            && !reviewSummaryIn?.identity_clash) {
+          const _r9ReviewClassifications = (reviewDocumentsOnFile || []).map(d => d.classification).filter(Boolean);
+          const _r9ReviewMissingKeys = computeMissingIntakeItems({
+            classifications: _r9ReviewClassifications,
+            isPurchase: isPurchaseFromSummary(reviewResult.updatedSummary || reviewSummaryIn),
+            exitStrategy: (reviewResult.updatedSummary || reviewSummaryIn)?.exit_strategy,
+          });
+          if (_r9ReviewMissingKeys.length > 0) {
+            const _r9First = (reviewResult.updatedSummary?.borrower_name || reviewSummaryIn?.borrower_name || '').trim().split(/\s+/)[0] || null;
+            const _r9Honesty = aiService.enforceMissingDocsHonesty(reviewResult.responseEmail, _r9ReviewMissingKeys, { borrowerFirstName: _r9First });
+            reviewResult.responseEmail = _r9Honesty.swept;
+            if (_r9Honesty.sweptAny || _r9Honesty.injectedAny) {
+              console.log(`Round-9: review-path honesty guard — sweptOverclaim=${_r9Honesty.sweptAny} injectedAsk=${_r9Honesty.injectedAny} (missing=[${_r9ReviewMissingKeys.join(', ')}])`);
+            }
+          }
+        }
         // Normalize the freshly-updated summary on the way back, before persisting.
         reviewResult.updatedSummary = normalizeSenderName(reviewResult.updatedSummary, email.fromName);
 
@@ -4258,6 +4304,20 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           const _r8bSweep = aiService.stripPerfectOpener(result.responseEmail);
           result.responseEmail = _r8bSweep.swept;
           if (_r8bSweep.sweptAny) console.log(`R8-B: "Perfect"-opener sweep neutralized opener in active-path responseEmail`);
+        }
+        // Round-9 (Katherine Morrison, 2026-06-11) — deterministic missing-docs honesty
+        // guard on the active-path reply. Reuses the SAME stillMissingForReview key set
+        // that fed OOOO (gated: status/prelim/identity/high-LTV already return [] there),
+        // so the guard is a strict no-op outside the intake-gathering state. Strips any
+        // completeness overclaim Claude produced despite OOOO + injects the outstanding
+        // items if not already asked. Cascade-composes AFTER the Perfect-opener sweep.
+        if (result.responseEmail && Array.isArray(stillMissingForReview) && stillMissingForReview.length > 0) {
+          const _r9First = (result.updatedSummary?.borrower_name || summaryIn?.borrower_name || '').trim().split(/\s+/)[0] || null;
+          const _r9Honesty = aiService.enforceMissingDocsHonesty(result.responseEmail, stillMissingForReview, { borrowerFirstName: _r9First });
+          result.responseEmail = _r9Honesty.swept;
+          if (_r9Honesty.sweptAny || _r9Honesty.injectedAny) {
+            console.log(`Round-9: active-path honesty guard — sweptOverclaim=${_r9Honesty.sweptAny} injectedAsk=${_r9Honesty.injectedAny} (missing=[${stillMissingForReview.join(', ')}])`);
+          }
         }
         // Normalize the freshly-updated summary on the way back, before persisting.
         result.updatedSummary = normalizeSenderName(result.updatedSummary, email.fromName);

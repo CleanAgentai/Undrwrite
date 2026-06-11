@@ -135,6 +135,25 @@ const allIntakeReceived = (classifications, isPurchase) =>
     isDocRequirementSatisfied(req, classifications || [])
   );
 
+// SINGLE SOURCE OF TRUTH for "what intake items are still outstanding?" (Franco
+// Round-9, Katherine Morrison). Pre-this, the admin preliminary review computed
+// the accurate missing-docs list inline (intakeRequiredFor − satisfied, + a null
+// exit_strategy) while the broker-facing reply used a SEPARATE narrow heuristic
+// (computeStillMissingForReview: only "a reviewable doc" + exit_strategy) — so the
+// broker reply didn't know what admin knew and could declare a file "complete"
+// while gov ID / property tax / payout were outstanding. This helper is now the
+// ONE computation both consumers call, by construction eliminating that divergence.
+// Returns classification KEYS (+ the non-document 'exit_strategy' sentinel) ordered
+// per the requirement list; callers map to display names via DOC_DISPLAY_NAMES /
+// the broker-facing phrase map. Synonym-aware (NOA satisfies income_proof) and
+// purchase/refinance-aware via the shared predicates above.
+const computeMissingIntakeItems = ({ classifications, isPurchase, exitStrategy }) => {
+  const missing = intakeRequiredFor(isPurchase)
+    .filter(req => !isDocRequirementSatisfied(req, classifications || []));
+  if (!exitStrategy || !String(exitStrategy).trim()) missing.push('exit_strategy');
+  return missing;
+};
+
 module.exports = {
   // MMMM
   isPurchaseFromSummary,
@@ -149,4 +168,6 @@ module.exports = {
   allRequiredForCompletion,
   // KKKK
   allIntakeReceived,
+  // Round-9 (Katherine Morrison): single source of truth for outstanding intake items
+  computeMissingIntakeItems,
 };

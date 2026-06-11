@@ -189,6 +189,12 @@ CRITICAL — DO NOT ASK FOR AML / PEP AT INTAKE (Group JJJ, S12.2):
 - These will be requested AFTER intake is complete and the file passes preliminary review — handled by a separate post-approval doc-request email, not this welcome.
 - JJJ-hardening (2026-05-18): pre-hardening this rule was IMPLICIT — the "WHAT TO ASK FOR" list above simply didn't include AML/PEP, and the prompt relied on Claude not adding them. That implicit protection had a ~20% baseline leak rate (Claude volunteering AML/PEP as a "you'll need this later" line) and amplified to ~70% when adjacent prompt content shifted. This explicit rule converts the implicit omission into explicit prohibition.
 
+CRITICAL — DOCUMENT-STATUS SELF-CONSISTENCY (Franco Round-9, Katherine Morrison 2026-06-11):
+- A refinance intake file is COMPLETE only when ALL of these are on file: Government-Issued ID, a current appraisal, Property Tax Assessment, current Mortgage Payout Statement, proof of income (NOA/T4/pay stubs/employment letter), and a credit bureau report. (Purchase files swap the payout statement for the Purchase Agreement.)
+- If ANY of those is NOT among the attachments, you are in "still gathering" mode. You MUST acknowledge what was received and then explicitly ask for the missing items. You MUST NOT state or imply the file is complete.
+- FORBIDDEN whenever ANY item is still outstanding: "everything looks complete", "everything's all set", "the file is complete", "we have everything we need", "ready for review", "good to go", "nothing further needed", or any variant claiming the file/package is complete or ready. Five documents attached does NOT mean the file is complete — count against the full list above, not against "the broker sent a lot."
+- Do NOT congratulate the broker on a "complete" submission when items remain. Acknowledge the specific docs received, then clearly list what's still needed.
+
 CRITICAL — MUST ASK FOR CREDIT BUREAU REPORT IF NOT ATTACHED (S15-followup, Anna Bergstrom 2026-05-18 verification surfaced):
 - If NO credit bureau (CB) document is attached to this submission, you MUST ask for credit either by including "Credit bureau report(s) for [borrower]" in your intake doc list OR by asking "Have you pulled credit for the borrower(s)?" — pick one phrasing, do not omit the ask entirely. Credit pull is a load-bearing intake item; lender preliminary review depends on it.
 - If a CB document IS attached, do NOT ask — Vienna already received it (the conditional negative half stays intact).
@@ -2061,6 +2067,139 @@ const stripPerfectOpener = (html) => {
   return { swept: html, sweptAny: false };
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// Round-9 (Katherine Morrison, 2026-06-11) — DETERMINISTIC MISSING-DOCS HONESTY
+// GUARD. The most effective elimination of the "everything looks complete" class
+// of bug: the LLM is removed from AUTHORING the completeness verdict. Vienna's
+// broker-facing welcome email declared "I received [5 docs] — everything looks
+// complete for Katherine's refinance" while Government ID, Property Tax Assessment
+// and the Mortgage Payout Statement were still outstanding (the admin prelim
+// correctly listed all three [MISSING]). Prompt forbidden-phrase lists + the
+// narrow C3-b1 regex ("looks like a complete file/package…") cannot enumerate
+// every phrasing Claude can invent — this is the OBS-40/41 lesson: a gate-like
+// verdict ("is this file complete?") must be driven by DETERMINISTIC STATE, never
+// by constraining or classifying LLM prose.
+//
+// This guard fires ONLY when JS knows intake items are outstanding
+// (missingKeys.length > 0 — the authoritative computeMissingIntakeItems set,
+// shared with the admin prelim). When it fires it guarantees TWO invariants:
+//   (1) NO completeness claim survives — any "everything looks complete /
+//       we have everything we need / you're all set / ready for review" assertion
+//       is stripped (these are all false-by-construction in this state).
+//   (2) The outstanding items ARE communicated — if the (stripped) reply doesn't
+//       already reference a given missing item, a deterministic, warm "still need"
+//       block is injected before the sign-off. Per-item de-dupe avoids double-
+//       asking items Claude already requested.
+// When missingKeys is empty the guard is a strict no-op, so the legitimate
+// all-received path ("I believe we have everything we need to send for review")
+// is untouched. Returns {swept, sweptAny, injectedAny} like the sibling sweeps.
+
+// Broker-facing phrasing for outstanding intake items (warmer / more specific than
+// the admin DOC_DISPLAY_NAMES; income_proof spells out the interchangeable forms,
+// exit_strategy explains itself). Falls back to DOC_DISPLAY_NAMES for any key not
+// listed here.
+const MISSING_ITEM_BROKER_PHRASES = {
+  government_id: 'a Government-Issued ID',
+  appraisal: 'a current property appraisal',
+  property_tax: 'a Property Tax Assessment',
+  mortgage_statement: 'a current Mortgage Payout Statement',
+  income_proof: 'proof of income (an NOA, T4, pay stubs, or employment letter)',
+  credit_report: 'a credit bureau report',
+  purchase_contract: 'the Purchase Agreement (Agreement of Purchase and Sale)',
+  exit_strategy: 'the exit strategy (how the borrower plans to repay or refinance out at maturity)',
+};
+
+// Per-item "is this already referenced in the reply?" detectors — used to avoid
+// double-asking for an item Claude already requested on its own.
+const MISSING_ITEM_PRESENCE_RE = {
+  government_id: /government[\s-]?issued\s*id|photo\s*id|driver'?s?\s*licen|passport|\bgov(?:ernment)?\s*id\b/i,
+  appraisal: /apprais/i,
+  property_tax: /property\s*tax/i,
+  mortgage_statement: /payout\s*statement|mortgage\s*payout|mortgage\s*statement|discharge\s*statement|payoff/i,
+  income_proof: /proof\s*of\s*income|\bnoa\b|notice\s*of\s*assessment|\bt4\b|pay[\s.-]?stub|employment\s*letter|income\s*(?:doc|verif)/i,
+  credit_report: /credit\s*(?:bureau|report|check|score)/i,
+  purchase_contract: /purchase\s*(?:agreement|contract)|agreement\s*of\s*purchase/i,
+  exit_strategy: /exit\s*strategy|plans?\s*to\s*repay|refinanc/i,
+};
+
+const brokerPhraseForMissingItem = (key) =>
+  MISSING_ITEM_BROKER_PHRASES[key] || (module.exports.DOC_DISPLAY_NAMES || {})[key] || key;
+
+const formatMissingItemsForBroker = (keys) =>
+  (keys || []).map(brokerPhraseForMissingItem);
+
+// Completeness-overclaim strip patterns. Each runs ONLY inside the guard (i.e.
+// only when items are genuinely outstanding), so aggressive removal of any
+// "complete / all set / ready for review / nothing further needed" assertion is
+// safe — every such claim is false in this state. Ordered: trailing em-dash/comma
+// clauses first (so "…credit bureau — everything looks complete for X." loses just
+// the clause, keeping the doc-receipt acknowledgment + terminator), then whole
+// standalone sentences.
+const COMPLETENESS_OVERCLAIM_PATTERNS = [
+  // Trailing "— and everything looks complete for X" / ", everything's all set" clause
+  // attached to a prior sentence (keep the prior clause + its terminator).
+  { match: /\s*[—–-]\s+(?:and\s+|so\s+)?(?:everything|the\s+file|the\s+package|this|your\s+file|we|you)\b[^.!?]*?\b(?:complete|completed|in\s+order|all\s+set|good\s+to\s+go|ready\s+(?:for|to)\b|have\s+everything\s+we\s+need)\b[^.!?]*(?=[.!?])/gi,
+    replace: '' },
+  { match: /,\s+(?:and\s+|so\s+)?(?:everything|the\s+file|the\s+package|your\s+file)\b[^.!?]*?\b(?:complete|completed|in\s+order|all\s+set|good\s+to\s+go|ready\s+(?:for|to)\b)\b[^.!?]*(?=[.!?])/gi,
+    replace: '' },
+  // Whole standalone completeness sentences.
+  { match: /(?:^|(?<=[.!?>]\s)|(?<=<p>\s*))[^.!?<>]*\b(?:everything(?:\s+else)?\s+(?:looks|seems|is|appears)\s+(?:complete|in\s+order|all\s+set|good)|we\s+(?:now\s+)?have\s+everything\s+we\s+need|(?:the|your)\s+(?:file|package|application|submission)\s+(?:is|looks|appears)\s+complete|(?:you'?re|we'?re)\s+(?:all\s+set|all\s+good|good\s+to\s+go)|everything'?s\s+(?:all\s+set|in\s+order|here|good)|good\s+to\s+go|ready\s+(?:for\s+review|to\s+(?:go\s+to\s+)?review)|nothing\s+(?:further|else)\s+(?:is\s+)?needed)\b[^.!?<>]*[.!?]\s*/gi,
+    replace: '' },
+];
+
+const enforceMissingDocsHonesty = (html, missingKeys, opts = {}) => {
+  if (!html || typeof html !== 'string' || !Array.isArray(missingKeys) || missingKeys.length === 0) {
+    return { swept: html, sweptAny: false, injectedAny: false };
+  }
+  const before = html;
+  let out = html;
+
+  // INVARIANT 1 — strip every completeness overclaim (all false in this state).
+  for (const { match, replace } of COMPLETENESS_OVERCLAIM_PATTERNS) {
+    out = out.replace(match, replace);
+  }
+  // Tidy artifacts a strip can leave: doubled spaces, space-before-punct, an
+  // emptied <p></p>, stranded leading/trailing whitespace inside a <p>.
+  out = out
+    .replace(/<p>\s*<\/p>/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+([.!?,])/g, '$1')
+    .replace(/<p>[ \t]+/gi, '<p>')
+    .replace(/[ \t]+<\/p>/gi, '</p>')
+    .replace(/\n{3,}/g, '\n\n');
+  const sweptAny = out !== before;
+
+  // INVARIANT 2 — ensure the outstanding items are communicated. De-dupe against
+  // items the reply already references (Claude may have asked for some on its own).
+  const unreferenced = missingKeys.filter(k => {
+    const re = MISSING_ITEM_PRESENCE_RE[k];
+    return re ? !re.test(out) : true;
+  });
+  let injectedAny = false;
+  if (unreferenced.length > 0) {
+    const phrases = formatMissingItemsForBroker(unreferenced);
+    const list = phrases.length === 1
+      ? phrases[0]
+      : phrases.length === 2
+        ? `${phrases[0]} and ${phrases[1]}`
+        : `${phrases.slice(0, -1).join(', ')}, and ${phrases[phrases.length - 1]}`;
+    const whose = opts.borrowerFirstName ? `${opts.borrowerFirstName}'s` : 'the';
+    const block = `<p>To complete ${whose} file, I'll still need ${list}. Send those along whenever you have a chance and we'll keep things moving!</p>`;
+    // Insert before the sign-off paragraph if we can find one, else append.
+    const signoffRe = /(<p>\s*Vienna\b[\s\S]*?<\/p>\s*)$/i;
+    if (signoffRe.test(out)) {
+      out = out.replace(signoffRe, `${block}\n$1`);
+    } else if (/<p>\s*Vienna\b/i.test(out)) {
+      out = out.replace(/(<p>\s*Vienna\b)/i, `${block}\n$1`);
+    } else {
+      out = `${out}\n${block}`;
+    }
+    injectedAny = true;
+  }
+
+  return { swept: out, sweptAny, injectedAny };
+};
+
 // THOMAS-BERGQVIST Bug 3 (Layer 2 post-sweep) — strip broker-style closings from the
 // ADMIN-INTERNAL preliminary review. generateLeadSummary's prompt generalizes a friendly
 // sign-off from the broker-facing prompt corpus and appends "Looking forward to hearing
@@ -2585,12 +2724,12 @@ Acknowledge what's already received (intake is complete) and request AML + PEP a
       const stillMissingBlock = (Array.isArray(stillMissingForReview) && stillMissingForReview.length > 0)
         ? `
 
-STILL-MISSING-FOR-REVIEW (Group OOOO — load-bearing for the gate/conversation match): the JS-side review gate has computed that the file is NOT yet ready to send for review. The following items are still outstanding:
-${stillMissingForReview.map(item => `- ${item}`).join('\n')}
+STILL-MISSING-FOR-REVIEW (Group OOOO — load-bearing for the gate/conversation match): JS has computed (from the authoritative intake checklist — the SAME list the internal preliminary review uses) that the following required intake items are NOT yet on file:
+${stillMissingForReview.map(item => `- ${module.exports.brokerPhraseForMissingItem(item)}`).join('\n')}
 
-Your reply MUST acknowledge what was received (if any new docs/info came in this turn) and then explicitly list these outstanding items so the broker can provide them. The file cannot move forward until these are in.
+Your reply MUST acknowledge what was received (if any new docs/info came in this turn) and then explicitly request these outstanding items so the broker can provide them. Do NOT state or imply the file is complete — items remain outstanding. (Note: the file may ALREADY be in preliminary review even while these are outstanding — do NOT tell the broker the file is "stalled" or "cannot move forward"; simply request the items so we can complete it.)
 
-FORBIDDEN PHRASES while this block is active (do NOT use any of these — they over-promise relative to the JS gate state and stall the file when the gate holds):
+FORBIDDEN PHRASES while this block is active (do NOT use any of these — they falsely claim completeness while intake items remain outstanding):
 - "I believe we have everything we need to send the file for review"
 - "we have everything we need"
 - "I'll get this over for review"
@@ -5024,6 +5163,10 @@ ${JSON.stringify(summaryData, null, 2)}`,
   ROUTING_LEAK_PATTERNS,
   // R8-B (2026-05-22) — JS-side "Perfect"-opener post-gen sweep.
   stripPerfectOpener,
+  // Round-9 (Katherine Morrison, 2026-06-11) — deterministic missing-docs honesty guard.
+  enforceMissingDocsHonesty,
+  formatMissingItemsForBroker,
+  brokerPhraseForMissingItem,
   // THOMAS-BERGQVIST Bug 3 (2026-06-05) — JS-side broker-closing sweep for the admin prelim.
   stripAdminClosing,
   // R4-Bucket-C.6 — Documents Included JS render + strip+inject (Grace T4 fix)

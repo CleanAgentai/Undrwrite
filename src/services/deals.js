@@ -43,7 +43,20 @@ const classifyByContent = (extractedText) => {
   // and produced a false filename-vs-content mismatch callout on the Grantham loan app.
   if (/apprais(?:al\s+report|er|al\s+certification)|comparable\s+sales?\b|uspap|(?:sales|direct)\s+comparison\s+approach|opinion\s+of\s+(?:market\s+)?value/i.test(text)) return 'appraisal';
   if (/credit score|credit bureau|equifax|transunion|experian|beacon score/i.test(text)) return 'credit_report';
-  if (/notice of assessment|canada revenue|income tax.*return/i.test(text)) return 'noa';
+  // T4 — Statement of Remuneration Paid (employer-issued employment-income slip).
+  // MUST be tested BEFORE the NOA rule below. Franco Round-9 (Katherine Morrison,
+  // recurring from Daniel Hartley): every genuine T4 carries the CRA header
+  // "Canada Revenue Agency / Agence du revenu du Canada" — which the old NOA rule's
+  // bare `canada revenue` alternative matched, classifying T4 content as 'noa'. The
+  // filename ("T4_*.pdf") classifies as income_proof, so detectClassificationMismatch
+  // fired a false "reads as a Notice of Assessment" admin callout on every T4. A T4
+  // and an NOA (CRA's post-filing assessment of a T1 return) are entirely different
+  // documents. Positive T4 detection here routes T4 content to income_proof (matching
+  // its filename → no mismatch); the NOA rule below is also tightened to drop the
+  // over-broad `canada revenue` token (genuine NOAs always carry the literal
+  // "Notice of Assessment" title — synthNOA + real CRA NOAs — so nothing is lost).
+  if (/statement of remuneration paid|t4\s*(?:slip|statement)|employment income\b[\s\S]{0,80}\bbox\s*14|\bbox\s*14\b[\s\S]{0,80}employment income/i.test(text)) return 'income_proof';
+  if (/notice of assessment|income tax.*return/i.test(text)) return 'noa';
   if (/anti-money laundering|proceeds of crime|fintrac/i.test(text)) return 'aml';
   if (/politically exposed person/i.test(text)) return 'pep';
   if (/payoff amount|payout amount|prepayment penalty|interest to.*date|validity (period|date|window)|payout statement|payout letter|mortgage payout|discharge statement|mortgage discharge/i.test(text)) return 'mortgage_statement';
