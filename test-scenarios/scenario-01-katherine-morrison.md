@@ -3,8 +3,9 @@
 **Tests:** Vienna's introduction behaviour when a brand-new broker submits for the first time
 with a partial document package (5 of 8), LTV ≤ 80%.
 
-**Status:** 🟡 3 bugs fixed + verified offline on the real documents · deployed replay pending
-**Commit:** `625d3fb` (held) + Gov-ID follow-up fix (uncommitted at time of writing)
+**Status:** 🟢 3 bugs fixed and **verified on the deployed staging service** (real PDFs, both batches)
+**Commits:** `625d3fb` (Bug 1+2) · `d65be32` (Bug 3 + scenario log) — both live on staging
+**Replay:** `node scripts/replay-scenario1-katherine.js` — **19/19 assertions pass** on `undrwrite.onrender.com`
 
 ---
 
@@ -155,10 +156,20 @@ All 8 real PDFs classify correctly; initial 5-of-8 → missing set is exactly th
 ### Harness ✅
 `node scripts/round9-missing-docs-honesty-harness.js` — **14/14 invariants hold.**
 
-### Deployed staging replay ⏳ pending push approval
-- [ ] Send the real Loretta→Katherine inbound (5 docs) to staging.
-- [ ] Welcome email: acknowledges 5 received, **no completeness claim**, requests Gov ID + Property Tax + Payout.
-- [ ] Admin preliminary review fires (LTV 61%); lists received + `[MISSING]` Gov ID / Property Tax / Payout.
-- [ ] Prelim has **no** "T4 reads as NOA" callout.
-- [ ] Send batch 2 (Gov ID, Property Tax, Payout); prelim updates with **no** "Gov ID reads as AML" callout.
-- [ ] File reads as complete only once all 8 are in.
+### Deployed staging replay ✅ (commit `d65be32` live; `scripts/replay-scenario1-katherine.js` — 19/19)
+Turn 0 (5 docs):
+- [x] Welcome acknowledges 5 received, **no completeness claim**, requests Gov ID + Scotiabank payout + Property Tax.
+- [x] Admin preliminary review fires (LTV 61%, `under_review`); lists `[RECEIVED]` ×5 + `[MISSING]` Gov ID / Property Tax / Payout; rates GREAT.
+- [x] Prelim has **no** "T4 reads as NOA" callout (T4 → `[RECEIVED] income_proof`).
+
+Turn 1 (remaining 3 docs, threaded reply):
+- [x] Batch 2 attaches to the **same** deal (no duplicate) and reaches **8/8 docs**.
+- [x] Gov ID → `government_id` (**not** `aml`) — Bug 3 confirmed end-to-end on staging.
+- [x] Property Tax → `property_tax`; Scotiabank Payout → `mortgage_statement`.
+- [x] Full 8-doc set → `computeMissingIntakeItems` empty.
+- [x] `[UPDATED]` prelim **suppressed** on this doc-only completion — **expected** (Path B double-prelim fix, Franco 2026-06-03).
+
+### Notes surfaced during verification
+- **First deployed run had no prelim** → intermittent **pdf-parse flakiness** (known issue; Layer A retry); re-ran clean. Not a code defect.
+- **Duplicate-deal on un-threaded batch 2** was a **test-harness artifact** — deal matching is thread-only (In-Reply-To/References); a real broker reply carries those headers. Harness now threads to Vienna's welcome MessageID.
+- **No broker acknowledgment on the doc-completion turn** is the existing **NNN suppression** design (Vienna goes silent on `under_review`; admin's next action is the broker-facing message). Not a regression. *Open product question for Franco if he wants the broker acked when they complete the package while awaiting his decision.*

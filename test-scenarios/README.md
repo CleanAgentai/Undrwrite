@@ -29,4 +29,4 @@ One markdown file per scenario. Real test documents live on the Desktop under
 
 | # | Name | Tests | Status |
 |---|------|-------|--------|
-| 1 | [Katherine Morrison](scenario-01-katherine-morrison.md) | New broker email — intro behaviour, 5-of-8 docs | 🟡 3 bugs fixed offline; deployed replay pending |
+| 1 | [Katherine Morrison](scenario-01-katherine-morrison.md) | New broker email — intro behaviour, 5-of-8 docs | 🟢 3 bugs fixed + deployed-verified (19/19) |
