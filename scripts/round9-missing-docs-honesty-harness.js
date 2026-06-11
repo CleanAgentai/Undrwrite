@@ -62,6 +62,26 @@ check('NOA file (named NOA, NOA content) produces NO mismatch', () => {
   assert.strictEqual(m, null, `got mismatch ${JSON.stringify(m)}`);
 });
 
+// Gov ID copies are collected FOR FINTRAC/AML identity verification, so their cover text
+// cites AML/FINTRAC — must NOT classify as 'aml' or throw a false mismatch callout
+// (surfaced on Franco's real Scenario-1 GovernmentID_Katherine_Morrison.pdf).
+const GOV_ID_TEXT = [
+  "GOVERNMENT-ISSUED IDENTIFICATION — COPY ON FILE",
+  "Collected by broker for AML identification purposes — Private Mortgage Link",
+  "PROVINCE OF ALBERTA  DRIVER'S LICENCE",
+  "KATHERINE ANNE MORRISON",
+  "LICENCE NO: AB-4418-76931   EXP: 2029-03-18",
+  "collected from the borrower for the purpose of identity verification pursuant to FINTRAC Anti-Money Laundering regulations.",
+].join('\n');
+check('Gov ID with FINTRAC/AML cover text classifies as government_id (not aml)', () => {
+  const c = deals.__test__.classifyByContent(GOV_ID_TEXT);
+  assert.strictEqual(c, 'government_id', `got '${c}'`);
+});
+check('Gov ID file produces NO classification mismatch', () => {
+  const m = deals.detectClassificationMismatch('GovernmentID_Katherine_Morrison.pdf', GOV_ID_TEXT);
+  assert.strictEqual(m, null, `got mismatch ${JSON.stringify(m)}`);
+});
+
 console.log('\n=== I2 — Bug 1: single source of truth (computeMissingIntakeItems) ===');
 check("Katherine's 5-of-8 refinance → gov ID + property tax + payout missing", () => {
   // received: loan_application(form, not intake-required), pnw(form), income_proof(T4),

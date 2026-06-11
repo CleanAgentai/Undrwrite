@@ -57,6 +57,15 @@ const classifyByContent = (extractedText) => {
   // "Notice of Assessment" title — synthNOA + real CRA NOAs — so nothing is lost).
   if (/statement of remuneration paid|t4\s*(?:slip|statement)|employment income\b[\s\S]{0,80}\bbox\s*14|\bbox\s*14\b[\s\S]{0,80}employment income/i.test(text)) return 'income_proof';
   if (/notice of assessment|income tax.*return/i.test(text)) return 'noa';
+  // Government-issued ID — MUST precede the AML rule below. IDs are routinely collected
+  // FOR FINTRAC/AML identity verification, so an ID copy's cover text references "AML" /
+  // "FINTRAC" (Franco Round-9 / Katherine Morrison Scenario-1 ID copy: "collected for AML
+  // identification purposes pursuant to FINTRAC Anti-Money Laundering regulations"). Without
+  // this, the AML rule matched that reference → content classified 'aml' while the
+  // "GovernmentID_*.pdf" filename classified 'government_id' → false "reads as an AML Report"
+  // mismatch callout on the admin prelim when the broker sends the ID. Keyed on explicit
+  // identity-document markers an AML compliance form does not carry as its primary content.
+  if (/government[- ]issued identification|driver'?s licen[cs]e\b|\blicen[cs]e\s*(?:no|number)\b|\bpassport\s*(?:no|number)\b|provincial\s+identification/i.test(text)) return 'government_id';
   if (/anti-money laundering|proceeds of crime|fintrac/i.test(text)) return 'aml';
   if (/politically exposed person/i.test(text)) return 'pep';
   if (/payoff amount|payout amount|prepayment penalty|interest to.*date|validity (period|date|window)|payout statement|payout letter|mortgage payout|discharge statement|mortgage discharge/i.test(text)) return 'mortgage_statement';
@@ -133,9 +142,22 @@ const classifyDocument = (fileName, extractedText) => {
 // matched nothing the file class IS the content class → no false positive. The
 // filename-based classification is KEPT for downstream code (no behaviour change);
 // this only adds a flag.
+// Compliance classifications (AML/PEP) are reference-prone in BOTH directions: a
+// government ID, loan application, or cover letter routinely cites "FINTRAC" / "AML"
+// (it was collected for AML identity verification), and an AML/PEP form cites the ID
+// type it verified. The mismatch callout exists to catch a mislabeled SUBSTANTIVE doc
+// (a "Credit_Bureau_*.pdf" that is actually a PNW — Daniel Kim), NOT to police
+// compliance references. So a compliance content/file class never drives a callout.
+const COMPLIANCE_CLASSIFICATIONS = new Set(['aml', 'pep']);
+
 const detectClassificationMismatch = (fileName, extractedText) => {
   const fileClass = classifyDocument(fileName, extractedText);
   const contentClass = classifyByContent(extractedText);
+  // Round-9 (Katherine Morrison): suppress callouts driven by incidental compliance
+  // references (gov ID "...pursuant to FINTRAC AML regulations" → contentClass 'aml').
+  if (COMPLIANCE_CLASSIFICATIONS.has(contentClass) || COMPLIANCE_CLASSIFICATIONS.has(fileClass)) {
+    return null;
+  }
   if (contentClass !== 'other' && contentClass !== fileClass) {
     return { fileName, fileClass, contentClass };
   }
