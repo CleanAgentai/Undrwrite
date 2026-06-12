@@ -2432,13 +2432,26 @@ ${draftEmail}
             // instead of re-firing the [UPDATED] PRELIMINARY Review with redundant
             // APPROVED/DECLINE prompt. Preserve original timestamp if conditions
             // are sent multiple times — first-stamp wins.
+            //
+            // Round-9 (James Okafor S9, 2026-06-12): ALSO stamp prelim_approved_at here.
+            // Sending admin-specified conditions to the broker IS an approval-with-conditions
+            // — the file now proceeds to condition-fulfilment → completion. decideReviewDispatch
+            // (L2041) and computeCompletionDispatch (L963) both gate completion-handoff on
+            // prelim_approved_at, so without this stamp the broker's condition docs (AML/PEP)
+            // route to preliminary-update → Path B doc-only suppression → the auto-handoff never
+            // fires and the broker is left with no close-out. (parseAdminReply classifies
+            // "Approved with the following conditions: …" as neither approved nor rejected, so it
+            // lands in this conditions branch rather than the approval branch that stamps it.)
+            // allDocsIn is false at conditions-send time (conditions are sent BECAUSE AML/PEP are
+            // missing), so this cannot trigger a premature completion. First-stamp-wins.
             await dealsService.update(existingDeal.id, {
               draft_email: null,
               draft_subject: null,
               draft_action: null,
               conditions_sent_at: existingDeal.conditions_sent_at || new Date().toISOString(),
+              prelim_approved_at: existingDeal.prelim_approved_at || new Date().toISOString(),
             });
-            console.log('Conditions sent to broker, status unchanged, conditions_sent_at stamped');
+            console.log('Conditions sent to broker, status unchanged, conditions_sent_at + prelim_approved_at stamped');
           }
         };
 
