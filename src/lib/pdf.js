@@ -91,4 +91,4 @@ const buildContentBlocks = async (attachments, savedDocs = []) => {
   return blocks;
 };
 
-module.exports = { buildContentBlocks };
+module.exports = { buildContentBlocks, isFormLikeText };

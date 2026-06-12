@@ -82,6 +82,34 @@ check('Gov ID file produces NO classification mismatch', () => {
   assert.strictEqual(m, null, `got mismatch ${JSON.stringify(m)}`);
 });
 
+// Form-template docs (PML blank Loan Application / PNW AcroForms) extract only field
+// labels ("Mortgage Type", "Balance Owing") — must NOT drive a mismatch callout
+// (Scenarios 8/9/12/14 false "PNW reads as Mortgage Balance Statement").
+const PNW_FORM_TEXT = [
+  'Personal Statement of Affairs', 'DOB: Gender:', 'SIN: Marital Status:',
+  'Mortgage Type: First  Second', 'Asset Value', 'Balance Owing', 'Mortgage Balance',
+  'Assets', 'Liabilities', 'Chequing Account', 'RRSP', 'TFSA', 'Name:', 'Email:',
+].join('\n');
+check('PNW form template produces NO mismatch (form-like, not content-classified)', () => {
+  const m = deals.detectClassificationMismatch('PNW_Statement_Sandra_Fletcher.pdf', PNW_FORM_TEXT);
+  assert.strictEqual(m, null, `got mismatch ${JSON.stringify(m)}`);
+});
+// Borrower name "Noah" must not trigger the NOA filename rule (Scenario 12).
+check('T4 file for borrower "Noah" classifies income_proof, not noa (filename)', () => {
+  const c = deals.__test__.classifyDocument('T4_Noah_MacKenzie_2025.pdf', T4_TEXT);
+  assert.strictEqual(c, 'income_proof', `got '${c}'`);
+});
+check('genuine NOA-named file still classifies noa (filename)', () => {
+  const c = deals.__test__.classifyDocument('NOA_Mateen_2025.pdf', NOA_TEXT);
+  assert.strictEqual(c, 'noa', `got '${c}'`);
+});
+check('AML/PEP forms never drive a mismatch callout (compliance suppression)', () => {
+  // AML form whose body cites the verified ID type ("Driver's Licence") → content may read
+  // government_id; compliance-class on either side suppresses the callout.
+  const amlText = 'FINTRAC Client Identification and Verification — Anti-Money Laundering\nID Type verified: Driver\'s Licence  Licence No: AB-123\nProceeds of Crime (Money Laundering) Act compliance.';
+  assert.strictEqual(deals.detectClassificationMismatch('AML_Form_Sandra_Whitfield.pdf', amlText), null);
+});
+
 console.log('\n=== I2 — Bug 1: single source of truth (computeMissingIntakeItems) ===');
 check("Katherine's 5-of-8 refinance → gov ID + property tax + payout missing", () => {
   // received: loan_application(form, not intake-required), pnw(form), income_proof(T4),

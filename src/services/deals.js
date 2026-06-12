@@ -2,6 +2,7 @@ const supabase = require('../lib/supabase');
 const pdfParse = require('pdf-parse');
 const archiver = require('archiver');
 const { extractFormValues } = require('../lib/pdfFormExtract');
+const { isFormLikeText } = require('../lib/pdf');
 
 // Layer A (Margaret Chen, 2026-06-09): re-require a FRESH pdf-parse instance,
 // resetting the bundled pdf.js GLOBAL state. pdf-parse@1.1.1's old pdf.js (v1.x/
@@ -86,7 +87,11 @@ const classifyDocument = (fileName, extractedText) => {
   if (/pnw|personal.?net.?worth|net.?worth/i.test(name)) return 'pnw_statement';
   if (/appraisal/i.test(name)) return 'appraisal';
   if (/credit.?bureau|credit.?report|credit.?check|credit.?score|\bcb\b|beacon|fico/i.test(name)) return 'credit_report';
-  if (/noa|notice.?of.?assessment/i.test(name)) return 'noa';
+  // Round-9 (Noah MacKenzie Scenario-12): the bare `noa` token matched the borrower
+  // NAME "Noah" → a T4 for Noah classified by FILENAME as 'noa' → false "reads as NOA"
+  // mismatch. Guard the token: 'noa' only when it's NOT part of a longer word (e.g. NOA_,
+  // _NOA, NOA2025 — but not "Noah"). Underscore is a \w char so \b can't be used.
+  if (/(?:^|[^a-z])noa(?![a-z])|notice.?of.?assessment/i.test(name)) return 'noa';
   if (/aml|anti.?money/i.test(name)) return 'aml';
   if (/pep|politically.?exposed/i.test(name)) return 'pep';
   if (/intake|checklist|borrower.?intake/i.test(name)) return 'intake_form';
@@ -151,6 +156,15 @@ const classifyDocument = (fileName, extractedText) => {
 const COMPLIANCE_CLASSIFICATIONS = new Set(['aml', 'pep']);
 
 const detectClassificationMismatch = (fileName, extractedText) => {
+  // Round-9 (Sandra Fletcher / Lena Park / James Okafor / Noah MacKenzie Scenarios 8/14/9/12):
+  // PML's blank Loan Application + PNW templates are AcroForms — pdf-parse extracts only the
+  // field LABELS ("Mortgage Type", "Balance Owing"), which match the mortgage_balance content
+  // rule → false "PNW reads as Mortgage Balance Statement" / "Loan App reads as ..." callouts.
+  // Content-classification of a form template is meaningless (the borrower data is read from the
+  // AcroForm / base64 by the LLM, not this text), so don't run the cross-check on form-like text.
+  // Genuine wrong-doc mismatches (a credit-named file that is really a filled PNW — Daniel Kim)
+  // carry real readable content and are NOT form-like, so they still fire.
+  if (isFormLikeText(extractedText || '')) return null;
   const fileClass = classifyDocument(fileName, extractedText);
   const contentClass = classifyByContent(extractedText);
   // Round-9 (Katherine Morrison): suppress callouts driven by incidental compliance
