@@ -44,6 +44,15 @@ const classifyByContent = (extractedText) => {
   // and produced a false filename-vs-content mismatch callout on the Grantham loan app.
   if (/apprais(?:al\s+report|er|al\s+certification)|comparable\s+sales?\b|uspap|(?:sales|direct)\s+comparison\s+approach|opinion\s+of\s+(?:market\s+)?value/i.test(text)) return 'appraisal';
   if (/credit score|credit bureau|equifax|transunion|experian|beacon score/i.test(text)) return 'credit_report';
+  // PNW / Personal Net Worth — MUST precede the mortgage-balance rule below. A net-worth
+  // statement lists the borrower's mortgage among liabilities ("Mortgage Balance: $X"), which
+  // the mortgage_balance_statement rule matches → false "PNW reads as Mortgage Balance Statement"
+  // admin callout (Franco Round-9, S8/S9/S12/S14). The isFormLikeText guard in
+  // detectClassificationMismatch catches the BLANK template offline, but the DEPLOYED text
+  // appends AcroForm annotations with filled $ amounts → not form-like → guard misses (OBS-39
+  // offline-vs-deployed gap). Positive detection on the PML form title ("Personal Statement of
+  // Affairs") + net-worth phrasing classifies it correctly regardless of annotations.
+  if (/personal statement of affairs|personal net worth|net worth statement|statement of net worth|total net worth/i.test(text)) return 'pnw_statement';
   // T4 — Statement of Remuneration Paid (employer-issued employment-income slip).
   // MUST be tested BEFORE the NOA rule below. Franco Round-9 (Katherine Morrison,
   // recurring from Daniel Hartley): every genuine T4 carries the CRA header
