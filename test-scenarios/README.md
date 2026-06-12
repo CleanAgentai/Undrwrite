@@ -47,14 +47,14 @@ Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
 | 3 | Michael Thornton | Conversational opener → docs (2-turn) | 🟢 deployed |
 | 4 | Ryan Callahan | LTV >80% escalation / collateral ask | 🟢 deployed |
 | 5 | Margaret Chen | Prelim ≤80% (appraisal absent from folder) | 🟢 deployed |
-| 6 | Kevin Tran | Draft review: Franco approves → send | ⬜ pending (admin-reply flow) |
-| 7 | Daniel Hartley | Draft review: Franco edits | ⬜ pending (admin-reply flow) |
-| 8 | Sandra Fletcher | Franco rejects → polite rejection | ⬜ pending (admin-reply flow) |
-| 9 | James Okafor | Franco conditions → fulfil → handoff | ⬜ pending (admin-reply flow) |
+| 6 | Kevin Tran | Draft review: Franco approves → send | 🟢 deployed (full approve→draft→send→broker) |
+| 7 | Daniel Hartley | Draft review: Franco edits | 🟢 deployed (edits incorporated into draft) |
+| 8 | Sandra Fletcher | Franco rejects → polite rejection | 🟦 blocked by test data (loan app = 2nd mortgage → discrepancy hold; no prelim to decline) |
+| 9 | James Okafor | Franco conditions → fulfil → handoff | 🟦 blocked by test data (loan app = 2nd mortgage) |
 | 10 | Helen MacGregor | Referral broker, CC admin | 🟢 deployed (body) · CC/attach not body-checkable |
 | 11 | Sophie Larsson | Referral borrower, plain language + forms | 🟢 deployed |
-| 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | ⬜ pending (cron) · classifier Bug 4 fixed |
-| 13 | Daily Summary | Automated nightly summary (cron) | ⬜ pending (cron) |
+| 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | 🟦 blocked by test data (loan app = 2nd mortgage) + needs cron |
+| 13 | Daily Summary | Automated nightly summary (cron) | ⬜ pending (cron invocation) |
 | 14 | Lena Park | Data discrepancy (credit-score mismatch) | 🟦 Vienna correct — **test-data mismatch** (see below) |
 | 15 | Anna Bergstrom | Broker own app + identity clash | 🟦 Vienna correct — **test-data mismatch** (see below) |
 
@@ -71,6 +71,21 @@ Verified against the **real** AcroForm annotations of the Desktop PDFs:
   proceeds with Anna (also catching the same real 1st-vs-2nd position discrepancy). Franco's own
   `vimarealty` run showed borrower "Grace Marie Paulson", so his copy of the S15 docs differs
   from the Desktop copy.
+
+### Test-data issue blocking S8 / S9 / S12 / S14 / S15 — loan apps generated as "2nd Mortgage"
+`scripts/scan-positions.js` (reads the AcroForm annotations of every loan app) shows **5 of 12**
+loan apps annotate as a **Second Mortgage** while their scenario/email says "1st":
+
+```
+   1st/none  S1 S2 S3 S4 S5 S6 S7   (clean — these scenarios run end-to-end)
+   ⚠️ 2nd     S8 S9 S12 S14 S15      (email says 1st → Vienna correctly holds for clarification)
+```
+
+Because Vienna (correctly) flags the email-vs-loanapp 1st/2nd conflict and holds the deal for
+clarification, the prelim never fires — so the **reject (S8) / conditions (S9) / reminders (S12)**
+flows can't be reached with this data. **Fix: regenerate those 5 loan apps as "First Mortgage"**
+(or set the broker emails to "2nd") and the flows will proceed. No Vienna change needed — verified
+by S6/S7 (clean loan apps) running the full admin pipeline successfully.
 
 **Action for Franco/Porter:** regenerate the S14 loan app with the 631/619 credit scores in a
 readable field (and as a 1st mortgage), and the S15 loan app with Grace Paulson's identity, to

@@ -106,6 +106,30 @@ const SCENARIOS = {
     docs: [],
     expect: 'referral-broker',
   },
+  8: {
+    dir: 'Scenario 8', fromName: 'Anita Kowalski', email: 'a.kowalski+s8@clearwaterlending.ca',
+    subject: 'New Mortgage Submission — Sandra Fletcher — 412 Windermere Close SW, Edmonton',
+    body: `Hi,\nMy name is Anita Kowalski, mortgage broker with Clearwater Lending Inc., Lic. #MB101783. I'd like to submit a new application for your review.\n\nBorrower: Sandra Fletcher\nProperty: 412 Windermere Close SW, Edmonton, AB\nMortgage Position: 1st\n\nPlease find the document package attached.${sig('Anita Kowalski', 'Clearwater Lending Inc.', 'MB101783', '(403) 785-2244')}`,
+    docs: ['LoanApplication_Sandra_Fletcher.pdf', 'PNW_Statement_Sandra_Fletcher.pdf', 'T4_Sandra_Fletcher_2025.pdf', 'Appraisal_412_Windermere_Close_SW_Edmonton.pdf', 'Credit_Bureau_Sandra_Fletcher.pdf', 'RBC_Payout_Statement_Sandra_Fletcher.pdf'],
+    expect: 'admin-reject',
+    adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower\'s debt servicing is too tight for this file. Please send a polite decline.' }],
+  },
+  6: {
+    dir: 'Scenario 6', fromName: 'Sarah Chen', email: 's.chen+s6@northbrookmortgage.ca',
+    subject: 'New Mortgage Submission — Kevin Tran — 3312 Brentwood Road NW, Calgary',
+    body: `Hi,\nMy name is Sarah Chen, mortgage broker with Northbrook Mortgage Group, Lic. #MB889561. I'd like to submit a new application for your review.\n\nBorrower: Kevin Minh Tran\nProperty: 3312 Brentwood Road NW, Calgary, AB\nMortgage Position: 1st\n\nPlease find the complete document package attached.${sig('Sarah Chen', 'Northbrook Mortgage Group', 'MB889561', '(403) 963-4412')}`,
+    docs: ['LoanApplication_Kevin_Tran.pdf', 'PNW_Statement_Kevin_Tran.pdf', 'T4_Kevin_Tran_2025.pdf', 'Appraisal_3312_Brentwood_Road_NW_Calgary.pdf', 'Credit_Bureau_Kevin_Tran.pdf', 'GovernmentID_Kevin_Tran.pdf', 'PropertyTaxAssessment_Kevin_Tran.pdf', 'ATB_Payout_Statement_Kevin_Tran.pdf'],
+    expect: 'admin-approve-send',
+    adminFlow: [{ replyTo: 'prelim', body: 'APPROVED — looks good, proceed.' }, { replyTo: 'last', body: 'SEND — the draft looks great, send it to the broker as-is.' }],
+  },
+  7: {
+    dir: 'Scenario 7', fromName: 'Paul Drummond', email: 'p.drummond+s7@sherwoodmortgage.ca',
+    subject: 'New Mortgage Submission — Daniel Hartley — 2847 Palliser Drive SW, Calgary',
+    body: `Hi,\nMy name is Paul Drummond, mortgage broker with Sherwood Mortgage Partners, Lic. #MB990672. I'd like to submit a new application for your review.\n\nBorrower: Daniel James Hartley\nProperty: 2847 Palliser Drive SW, Calgary, AB T2V 4A8\nLoan Request: $298,000 (1st mortgage, refinance)\nProperty Value: $498,000\nLTV: Approximately 59.8%\n\nPlease find the documents attached.${sig('Paul Drummond', 'Sherwood Mortgage Partners', 'MB990672', '(403) 874-3315')}`,
+    docs: ['LoanApplication_Daniel_Hartley.pdf', 'PNW_Statement_Daniel_Hartley.pdf', 'T4_Daniel_Hartley_2025.pdf', 'Credit_Bureau_Daniel_Hartley.pdf', 'GovernmentID_Daniel_Hartley.pdf', 'PropertyTaxAssessment_Daniel_Hartley.pdf', 'CIBC_Payout_Statement_Daniel_Hartley.pdf'],
+    expect: 'admin-approve-send',
+    adminFlow: [{ replyTo: 'prelim', body: 'APPROVED — proceed to draft.' }, { replyTo: 'last', body: 'Send this to the broker, but please add a note that we will need 30 days for funding and that the rate is 9.99%. Otherwise looks good.' }],
+  },
   11: {
     dir: 'Scenario 1 docs', fromName: 'Sophie Larsson', email: 'sophie.larsson+s11@gmail.com',
     subject: 'Mortgage inquiry — referred by Franco Maione',
@@ -208,6 +232,40 @@ const SCENARIOS = {
       } else if (cfg.expect === 'identity-clash') {
         check('after confirmation: deal proceeds (status active/under_review)', ['active', 'under_review'].includes(st2.status), st2.status);
         check('borrower name corrected to Anna (not Grace)', /anna/i.test(JSON.stringify(st2.extracted_data?.borrower_name || '')) && !/grace/i.test(JSON.stringify(st2.extracted_data?.borrower_name || '')), st2.extracted_data?.borrower_name);
+      }
+    }
+
+    if (cfg.adminFlow) check('prelim fired so admin can act (else deal held — check loan-app position)', !!admin, `status=${st.status} (no prelim — likely 1st-vs-2nd discrepancy hold)`);
+    // ── admin-reply flow (Franco APPROVED / SEND / DECLINE, threaded to the prelim) ──
+    if (cfg.adminFlow && admin) {
+      let prevOut = out;
+      for (let i = 0; i < cfg.adminFlow.length; i++) {
+        const step = cfg.adminFlow[i];
+        const target = step.replyTo === 'prelim' ? lastMidOf(prevOut, isPrelim) : lastMidOf(prevOut);
+        console.log(`\n--- ADMIN REPLY ${i + 1}: "${step.body.slice(0, 40)}..." (thread <${String(target).slice(0, 18)}>) ---`);
+        await postToWebhook({ From: ADMIN, FromName: 'Franco Maione', FromFull: { Email: ADMIN, Name: 'Franco Maione' }, To: TO, Subject: `Re: ${admin.Subject}`, TextBody: step.body, HtmlBody: null, MessageID: `s${id}-${ts}-admin${i}@test`, Date: new Date().toISOString(), Headers: target ? [{ Name: 'In-Reply-To', Value: `<${target}>` }, { Name: 'References', Value: `<${target}>` }] : [], Attachments: [] });
+        prevOut = await waitStable(deal.id, `admin${i + 1}`, prevOut.length + 1);
+      }
+      const st3 = await dealState(deal.id);
+      const finalOut = await fetchOutboundFromSupabase(s, deal.id);
+      const newMsgs = finalOut.slice(out.length);
+      const brokerFacing = newMsgs.filter(m => !isPrelim(m) && !/ACTION REQUIRED|DRAFT|for (your )?review/i.test(m.Subject || ''));
+      console.log(`  after admin flow: status=${st3.status} | new outbound subjects: ${newMsgs.map(m => (m.Subject || '').slice(0, 40)).join(' | ')}`);
+      if (cfg.expect === 'admin-reject') {
+        const rej = newMsgs.map(m => strip(m.TextBody)).join(' ');
+        console.log('\n----- REJECTION TO BROKER -----\n' + (newMsgs.length ? strip(newMsgs[newMsgs.length - 1].TextBody).slice(0, 700) : '<<none>>'));
+        check('status rejected', st3.status === 'rejected', st3.status);
+        check('a broker-facing decline was sent', newMsgs.length >= 1);
+        check('decline is polite + not a generic "does not meet criteria"', /unfortunate|unable to|not (a fit|able to proceed)|won.?t be able|after (careful )?review/i.test(rej) && !/does not meet (our )?criteria\.?\s*$/i.test(rej), rej.slice(0, 200));
+        check('decline does NOT leak internal routing (Franco/underwriters)', !/franco|underwrit|lender rep|internal/i.test(rej), rej.slice(0, 200));
+      } else if (cfg.expect === 'admin-approve-send') {
+        const draftToAdmin = newMsgs.find(m => /DRAFT|review|ACTION/i.test(m.Subject || '')) || (newMsgs.length >= 1 ? newMsgs[0] : null);
+        const brokerFinal = newMsgs[newMsgs.length - 1];
+        console.log('\n----- FINAL TO BROKER -----\n' + (brokerFinal ? strip(brokerFinal.TextBody).slice(0, 700) : '<<none>>'));
+        check('a draft was produced for admin after APPROVED', !!draftToAdmin);
+        check('a broker-facing email was sent after SEND', !!brokerFinal && newMsgs.length >= 2);
+        check('broker-facing final does NOT leak internal routing', brokerFinal && !/franco|underwrit|internal review|lender rep/i.test(strip(brokerFinal.TextBody)), brokerFinal && strip(brokerFinal.TextBody).slice(0, 150));
+        check('no duplicate deal', (await dealsForEmail(from)) === 1);
       }
     }
 
