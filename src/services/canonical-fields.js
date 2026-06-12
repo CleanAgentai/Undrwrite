@@ -677,10 +677,21 @@ const extractFromAppraisal = (doc) => {
     const postalM = block.match(POSTAL_RE_SINGLE);
     if (postalM) out.subject_property_postal_code = normalizePostal(postalM[1] + postalM[2]);
   }
-  // Market value
+  // Market value. The figure commonly sits on the LINE AFTER the label, so allow
+  // intervening whitespace/newlines (\s*) before the $ amount.
+  // Round-9 (Sandra Whitfield S2 / Katherine S1 corpus): the prior three labels
+  // missed the most common test-appraisal formats — "APPRAISED MARKET VALUE\n$475,000"
+  // (Chinook) and "FINAL ESTIMATED MARKET VALUE\n$484,000" (Saddleback). Without the
+  // appraised value, canonical LTV is null → for a refinance WITH a payout statement the
+  // BUG-4 incomplete-canonical guard escalates a clean sub-80 deal to awaiting_collateral
+  // instead of firing the preliminary review. A REQUIRED qualifier (APPRAISED/FINAL/
+  // ESTIMATED/RECONCILED) before "MARKET VALUE" keeps this from matching the
+  // "MARKET VALUE ESTIMATE" comparable-sales header (whose next line is a comp price).
   const valM = text.match(/OPINION\s+OF\s+VALUE\s*\n?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i)
             || text.match(/Reconciled\s+Market\s+Value\s*[:\n]?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i)
-            || text.match(/Final\s+Value\s+Opinion\s*[:\n]?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i);
+            || text.match(/Final\s+Value\s+Opinion\s*[:\n]?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i)
+            || text.match(/(?:APPRAISED|FINAL(?:\s+ESTIMATED)?|ESTIMATED|RECONCILED)\s+MARKET\s+VALUE\b(?:\s+(?:ESTIMATE|OPINION))?\s*[:\s]*\$\s*([\d,]+(?:\.\d{2})?)/i)
+            || text.match(/MARKET\s+VALUE\s+(?:OPINION|CONCLUSION)\b\s*[:\s]*\$\s*([\d,]+(?:\.\d{2})?)/i);
   if (valM) out.subject_property_market_value = normalizeMoney(valM[1]);
   return out;
 };
