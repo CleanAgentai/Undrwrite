@@ -49,14 +49,14 @@ Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
 | 5 | Margaret Chen | Prelim ≤80% (appraisal absent from folder) | 🟢 deployed |
 | 6 | Kevin Tran | Draft review: Franco approves → send | 🟢 deployed (full approve→draft→send→broker) |
 | 7 | Daniel Hartley | Draft review: Franco edits | 🟢 deployed (edits incorporated into draft) |
-| 8 | Sandra Fletcher | Franco rejects → polite rejection | 🟢 reject pipeline verified (clean-data run); S8 docs blocked by 2nd-mortgage data |
-| 9 | James Okafor | Franco conditions → fulfil → handoff | 🟢 conditions-request + doc-receipt verified (clean data); S9 docs blocked by 2nd-mortgage data |
+| 8 | Sandra Fletcher | Franco rejects → polite rejection | 🟢 deployed (regen docs): prelim → DECLINE → SEND → broker rejection + status rejected |
+| 9 | James Okafor | Franco conditions → fulfil → handoff | 🟡 conditions request → broker dispatches + names AML/PEP; **auto-handoff after fulfilment does not fire** (open) |
 | 10 | Helen MacGregor | Referral broker, CC admin | 🟢 deployed (body) · CC/attach not body-checkable |
 | 11 | Sophie Larsson | Referral borrower, plain language + forms | 🟢 deployed |
-| 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | 🟢 reminder enumerates exact items; atomic anti-multi-send (verify-cron-output.js) |
+| 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | 🟢 deployed (regen): partial submission → requests missing items, no false position/PNW mismatch; reminder cron verified offline |
 | 13 | Daily Summary | Automated nightly summary (cron) | 🟢 all 5 sections incl. Automated Reminders; idempotent send, non-deal filter |
-| 14 | Lena Park | Data discrepancy (credit-score mismatch) | 🟦 Vienna correct — **test-data mismatch** (see below) |
-| 15 | Anna Bergstrom | Broker own app + identity clash | 🟦 Vienna correct — **test-data mismatch** (see below) |
+| 14 | Lena Park | Data discrepancy (credit-score mismatch) | 🟢 deployed (regen): catches 631/619 vs 748/752, holds, resolves to ONE prelim |
+| 15 | Anna Bergstrom | Broker own app + identity clash | 🟢 deployed (regen Grace docs): catches Anna/Grace clash, holds for identity, resolves |
 
 ### Scenarios 14 & 15 — Vienna is correct; the Desktop test data doesn't match the scenario intent
 Verified against the **real** AcroForm annotations of the Desktop PDFs:

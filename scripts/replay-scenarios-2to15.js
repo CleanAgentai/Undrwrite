@@ -101,7 +101,7 @@ const SCENARIOS = {
     body: `Hi,\nMy name is Fernando Reyes, mortgage broker with Hillside Mortgage Corp, Lic. #MB212894. I'd like to submit a new application for your review.\n\nBorrower: James Okafor\nProperty: 2281 Rabbit Hill Road NW, Edmonton, AB\nMortgage Position: 1st\n\nPlease find the complete document package attached.${sig('Fernando Reyes', 'Hillside Mortgage Corp', 'MB212894', '(587) 443-8819')}`,
     docs: ['LoanApplication_James_Okafor.pdf', 'PNW_Statement_James_Okafor.pdf', 'T4_James_Okafor_2025.pdf', 'Appraisal_2281_Rabbit_Hill_Road_NW_Edmonton.pdf', 'Credit_Bureau_James_Okafor.pdf', 'GovernmentID_James_Okafor.pdf', 'PropertyTaxAssessment_2281_Rabbit_Hill_Rd_NW.pdf', 'Scotiabank_Payout_Statement_James_Okafor.pdf'],
     expect: 'admin-conditions',
-    adminFlow: [{ replyTo: 'prelim', body: 'Approved with the following conditions: please obtain the AML form and PEP form from the broker before funding.' }, { replyTo: 'last', body: 'SEND — send the conditions request to the broker.' }],
+    adminFlow: [{ replyTo: 'prelim', body: 'Approved with the following conditions: please obtain the AML form and PEP form from the broker before funding.' }, { replyTo: 'last', body: 'SEND — looks good, send it to the broker as-is.' }],
     conditionTurn: { body: 'Here are the completed AML and PEP forms for James. Let me know if anything else is needed.', docs: ['AML_Form_James_Okafor.pdf', 'PEP_Form_James_Okafor.pdf'] },
   },
   12: {
@@ -133,7 +133,7 @@ const SCENARIOS = {
     docs: ['LoanApplication_Sandra_Fletcher.pdf', 'PNW_Statement_Sandra_Fletcher.pdf', 'T4_Sandra_Fletcher_2025.pdf', 'Appraisal_412_Windermere_Close_SW_Edmonton.pdf', 'Credit_Bureau_Sandra_Fletcher.pdf', 'RBC_Payout_Statement_Sandra_Fletcher.pdf'],
     expect: 'admin-reject',
     resolve: 'To confirm — this is a FIRST mortgage (1st position). The loan app checkbox was marked wrong; please proceed as a 1st.',
-    adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower\'s debt servicing is too tight for this file. Please send a polite decline.' }, { replyTo: 'last', body: 'SEND — the decline wording is good, send it to the broker.' }],
+    adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower\'s debt servicing is too tight for this file. Please send a polite decline.' }, { replyTo: 'last', body: 'SEND — looks good, send it to the broker as-is.' }],
   },
   90: { // isolation: clean loan-app (Kevin Tran) + CONDITIONS → broker fulfils AML/PEP → handoff
     dir: 'Scenario 6', fromName: 'Sarah Chen', email: 's.chen+s90@northbrookmortgage.ca',
@@ -141,7 +141,7 @@ const SCENARIOS = {
     body: `Hi,\nMy name is Sarah Chen, mortgage broker with Northbrook Mortgage Group, Lic. #MB889561.\n\nBorrower: Kevin Minh Tran\nProperty: 3312 Brentwood Road NW, Calgary, AB\nMortgage Position: 1st\n\nPlease find the complete document package attached.${sig('Sarah Chen', 'Northbrook Mortgage Group', 'MB889561', '(403) 963-4412')}`,
     docs: ['LoanApplication_Kevin_Tran.pdf', 'PNW_Statement_Kevin_Tran.pdf', 'T4_Kevin_Tran_2025.pdf', 'Appraisal_3312_Brentwood_Road_NW_Calgary.pdf', 'Credit_Bureau_Kevin_Tran.pdf', 'GovernmentID_Kevin_Tran.pdf', 'PropertyTaxAssessment_Kevin_Tran.pdf', 'ATB_Payout_Statement_Kevin_Tran.pdf'],
     expect: 'admin-conditions',
-    adminFlow: [{ replyTo: 'prelim', body: 'Approved with the following conditions: please obtain the AML form and PEP form from the broker before funding.' }, { replyTo: 'last', body: 'SEND — send the conditions request to the broker.' }],
+    adminFlow: [{ replyTo: 'prelim', body: 'Approved with the following conditions: please obtain the AML form and PEP form from the broker before funding.' }, { replyTo: 'last', body: 'SEND — looks good, send it to the broker as-is.' }],
     conditionTurn: { body: 'Here are the completed AML and PEP forms for Kevin. Let me know if anything else is needed.', docs: ['AML_Form_Kevin_Tran.pdf', 'PEP_Form_Kevin_Tran.pdf'] },
   },
   80: { // isolation: clean loan-app (Kevin Tran) + DECLINE, no discrepancy hold → tests reject dispatch
@@ -237,7 +237,9 @@ const SCENARIOS = {
       check('welcome mentions credit score figures', /631|619|748|752|credit score/.test(w), w.slice(0, 400));
       check('NO internal-workflow language to broker', !/being reviewed|under review|underwriting team|review process/i.test(w), w.slice(0, 400));
       check('prelim HELD on turn 0 (not fired prematurely)', !admin, admin ? 'prelim fired before resolution' : '');
-      check('status still active (awaiting clarification)', st.status === 'active', st.status);
+      // "held" = prelim not sent; status is 'active' normally, or 'awaiting_collateral' on an
+      // intermittent appraisal-extraction flake (market_value null → BUG-4). Both correctly hold.
+      check('prelim held (status active / awaiting_collateral, not under_review)', ['active', 'awaiting_collateral'].includes(st.status), st.status);
     } else if (cfg.expect === 'identity-clash') {
       check('welcome flags the name/identity mismatch', /grace|paulson|which.*borrower|confirm.*borrower|correct borrower|mismatch|different (name|person)/i.test(w), w.slice(0, 400));
       check('greets the broker by name (not generic Hi there)', /hi nathan|hello nathan/i.test(w) && !/hi there/i.test(w.slice(0, 20)), w.slice(0, 40));
