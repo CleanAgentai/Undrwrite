@@ -1519,7 +1519,13 @@ const extractMortgagePositionFromLoanApplication = (doc) => {
   let m;
   while ((m = annPattern.exec(text)) !== null) {
     const val = m[1].trim();
-    const posM = val.match(/^(1st|2nd|3rd|First|Second|Third)\s+Mortgage$/i);
+    // Round-9 (Noah MacKenzie S12, 2026-06-12): Franco's regenerated loan apps annotate the
+    // position as "First Mortgage (Refinance)" — the prior `$`-anchored match rejected the
+    // "(Refinance)" suffix, so no loan_application position tuple was produced; the derived
+    // "2nd-from-existing-balance" signal then outranked the email's explicit "1st" → a false
+    // 1st-vs-2nd discrepancy on a clean refinance. Match the position prefix and ignore a
+    // trailing qualifier ((Refinance)/- Refinance/etc.); \b (not $) keeps "Mortgagee" etc. out.
+    const posM = val.match(/^(1st|2nd|3rd|First|Second|Third)\s+Mortgage\b/i);
     if (posM) {
       const v = posM[1].toLowerCase();
       return (v === 'first' || v === '1st') ? '1st'
@@ -1587,6 +1593,15 @@ const extractMortgagePositionFromLoanApplication = (doc) => {
 // suppression at extractCanonicalFields strips derived anyway.
 const inferMortgagePositionFromExistingBalance = (canonicalMap) => {
   if (!canonicalMap) return null;
+  // Round-9 (Noah MacKenzie S12, 2026-06-12): if the loan application EXPLICITLY states a
+  // position, defer to it — loan_application is doc-authoritative and outranks this derived
+  // signal in the precedence filter anyway. A refinance loan app that says "First Mortgage
+  // (Refinance)" pays out the existing 1st (the new loan IS the 1st), so inferring a
+  // contradicting "2nd" from the existing balance only manufactures a false 1st-vs-2nd
+  // discrepancy. A loan app that genuinely says "2nd" already drives the real discrepancy on
+  // its own, so suppressing the redundant derived signal loses nothing.
+  const explicitLoanAppPos = (canonicalMap.mortgage_position || []).some(t => t?.classification === 'loan_application');
+  if (explicitLoanAppPos) return null;
   const balances = canonicalMap.existing_first_mortgage_balance || [];
   const hasNonZero = balances.some(t => t && Number.isFinite(t.value) && t.value > 0);
   if (!hasNonZero) return null;

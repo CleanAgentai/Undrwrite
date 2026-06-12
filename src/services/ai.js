@@ -477,6 +477,28 @@ const extractBorrowerFromDocText = (docText) => {
   return null;
 };
 
+// Round-9 (S15 Grace Paulson, 2026-06-12): Franco's regenerated loan apps store the
+// borrower name as split AcroForm annotations ("Grace" / "Marie Paulson") with no
+// "Full Name:" label, so extractBorrowerFromDocText misses it and the identity-clash
+// detector goes blind. Fall back to the borrower's personal email — forms reliably
+// include "grace.paulson@outlook.com", whose local part encodes the name. Only
+// "first.last@" shapes yield a usable 2-token name; initials / role addresses
+// (n.blackwood@, info@, noreply@) collapse to a single >1-char token and are dropped by
+// the caller's tokens.length<2 guard, so a broker/lender address can't manufacture a clash.
+const extractBorrowerNameFromPersonalEmail = (docText) => {
+  if (!docText || typeof docText !== 'string') return null;
+  const re = /\b([A-Za-z][A-Za-z'-]+)[._]([A-Za-z][A-Za-z'-]+)@/g;
+  let m;
+  while ((m = re.exec(docText)) !== null) {
+    const first = m[1], last = m[2];
+    if (first.length > 1 && last.length > 1) {
+      const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+      return `${cap(first)} ${cap(last)}`;
+    }
+  }
+  return null;
+};
+
 // Tokenize a name for comparison — lowercase, drop initials/periods, drop
 // single-letter tokens. "Anna M. Bergstrom" → ["anna", "bergstrom"].
 const tokenizeNameForCompare = (name) => (name || '').trim().split(/\s+/)
@@ -579,7 +601,8 @@ const isIdentityClashByAbsence = (emailSubject, emailBody, savedDocs) => {
     // Shape resilience (Cluster B Commit 2 wiring): accept either
     // `{ extracted_data: { text } }` (webhook savedDocs shape — original S15-E
     // contract) OR `{ text }` (corpus pilot + canonical-fields adapter shape).
-    const docName = extractBorrowerFromDocText(sd?.extracted_data?.text || sd?.text || '');
+    const _docText = sd?.extracted_data?.text || sd?.text || '';
+    const docName = extractBorrowerFromDocText(_docText) || extractBorrowerNameFromPersonalEmail(_docText);
     if (!docName) continue;
     const tokens = tokenizeNameForCompare(docName);
     if (tokens.length < 2) continue; // single-token doc names too ambiguous

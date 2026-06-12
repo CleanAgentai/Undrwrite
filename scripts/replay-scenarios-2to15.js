@@ -14,7 +14,11 @@ const TO = 'info@privatemortgagelink.com';
 const ROOT = '/Users/porterstanley/Desktop/UndrWrite Testing';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const strip = (h) => (h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-const att = (dir, name) => ({ Name: name, ContentType: 'application/pdf', Content: fs.readFileSync(path.join(ROOT, dir, name)).toString('base64') });
+// Franco regenerated 5 loan apps (2026-06-12) into "remaining docs/" — read those overrides
+// from there, everything else from the scenario folder.
+const REGEN_DIR = 'remaining docs';
+const REGEN_FILES = new Set(['LoanApplication_Sandra_Fletcher.pdf', 'LoanApplication_James_Okafor.pdf', 'LoanApplication_Noah_MacKenzie.pdf', 'LoanApplication_Lena_Park.pdf', 'LoanApplication_Grace_Paulson.pdf']);
+const att = (dir, name) => ({ Name: name, ContentType: 'application/pdf', Content: fs.readFileSync(path.join(ROOT, REGEN_FILES.has(name) ? REGEN_DIR : dir, name)).toString('base64') });
 const isPrelim = (m) => /PRELIMINARY|ACTION REQUIRED/i.test(m.Subject || '');
 const isEscalation = (m) => /ESCALAT|LTV|>80|COLLATERAL|HIGH.?LTV/i.test(m.Subject || '');
 
@@ -87,9 +91,25 @@ const SCENARIOS = {
     dir: 'Scenario 15', fromName: 'Nathan Blackwood', email: 'n.blackwood+s15@kestrelmortgage.ca',
     subject: 'New Mortgage Submission — Anna Bergstrom — 1801 Varsity Estates Dr NW, Calgary',
     body: `Hi,\nMy name is Nathan Blackwood, mortgage broker with Kestrel Mortgage Corp, Lic. #MB545107. I'm submitting a new application using our firm's own loan application form.\n\nBorrower: Anna Bergstrom\nProperty: 1801 Varsity Estates Dr NW, Calgary, AB\nMortgage Position: 1st\n\nPlease find the documents attached.${sig('Nathan Blackwood', 'Kestrel Mortgage Corp', 'MB545107', '(403) 774-8823')}`,
-    docs: ['LoanApplication_Anna_Bergstrom.pdf', 'T4_Anna_Bergstrom_2025.pdf', 'Credit_Bureau_Anna_Bergstrom.pdf', 'Appraisal_1801_Varsity_Estates_Dr_NW_Calgary.pdf', 'BMO_Payout_Statement_Anna_Bergstrom.pdf'],
+    docs: ['LoanApplication_Grace_Paulson.pdf', 'T4_Anna_Bergstrom_2025.pdf', 'Credit_Bureau_Anna_Bergstrom.pdf', 'Appraisal_1801_Varsity_Estates_Dr_NW_Calgary.pdf', 'BMO_Payout_Statement_Anna_Bergstrom.pdf'],
     expect: 'identity-clash',
-    turn2: { body: 'Yes, Anna Bergstrom is the correct borrower — apologies, the documents were mislabeled. Confirming the deal is for Anna Bergstrom at 1801 Varsity Estates Dr NW.', docs: [] },
+    turn2: { body: 'Apologies — the loan application was mislabeled. Anna Bergstrom is the correct borrower at 1801 Varsity Estates Dr NW. I will resend the correct application.', docs: [] },
+  },
+  9: {
+    dir: 'Scenario 9', fromName: 'Fernando Reyes', email: 'f.reyes+s9@hillsidemortgage.ca',
+    subject: 'New Mortgage Submission — James Okafor — 2281 Rabbit Hill Road NW, Edmonton',
+    body: `Hi,\nMy name is Fernando Reyes, mortgage broker with Hillside Mortgage Corp, Lic. #MB212894. I'd like to submit a new application for your review.\n\nBorrower: James Okafor\nProperty: 2281 Rabbit Hill Road NW, Edmonton, AB\nMortgage Position: 1st\n\nPlease find the complete document package attached.${sig('Fernando Reyes', 'Hillside Mortgage Corp', 'MB212894', '(587) 443-8819')}`,
+    docs: ['LoanApplication_James_Okafor.pdf', 'PNW_Statement_James_Okafor.pdf', 'T4_James_Okafor_2025.pdf', 'Appraisal_2281_Rabbit_Hill_Road_NW_Edmonton.pdf', 'Credit_Bureau_James_Okafor.pdf', 'GovernmentID_James_Okafor.pdf', 'PropertyTaxAssessment_2281_Rabbit_Hill_Rd_NW.pdf', 'Scotiabank_Payout_Statement_James_Okafor.pdf'],
+    expect: 'admin-conditions',
+    adminFlow: [{ replyTo: 'prelim', body: 'Approved with the following conditions: please obtain the AML form and PEP form from the broker before funding.' }, { replyTo: 'last', body: 'SEND — send the conditions request to the broker.' }],
+    conditionTurn: { body: 'Here are the completed AML and PEP forms for James. Let me know if anything else is needed.', docs: ['AML_Form_James_Okafor.pdf', 'PEP_Form_James_Okafor.pdf'] },
+  },
+  12: {
+    dir: 'Scenario 12', fromName: 'Piotr Nowak', email: 'p.nowak+s12@westwoodmortgage.ca',
+    subject: 'New Mortgage Submission — Noah MacKenzie — 5831 Riverbend Road NW, Edmonton',
+    body: `Hi,\nMy name is Piotr Nowak, mortgage broker with Westwood Mortgage Solutions, Lic. #MB323905. I'd like to submit a new application for your review.\n\nBorrower: Noah MacKenzie\nProperty: 5831 Riverbend Road NW, Edmonton, AB\nMortgage Position: 1st\n\nPlease find the initial documents attached. I'll send the remaining items shortly.${sig('Piotr Nowak', 'Westwood Mortgage Solutions', 'MB323905', '(780) 614-3327')}`,
+    docs: ['LoanApplication_Noah_MacKenzie.pdf', 'PNW_Statement_Noah_MacKenzie.pdf', 'T4_Noah_MacKenzie_2025.pdf', 'Appraisal_5831_Riverbend_Road_NW_Edmonton.pdf', 'Credit_Bureau_Noah_MacKenzie.pdf'],
+    expect: 'prelim-partial-missing',
   },
   3: {
     dir: 'Scenario 3', fromName: 'James Whitfield', email: 'j.whitfield+s3@stonewoodlending.ca',
@@ -205,6 +225,11 @@ const SCENARIOS = {
       check('no completeness overclaim in welcome', noOverclaim, w.slice(0, 300));
       check('welcome OR prelim flags appraisal missing', /appraisal/.test(w) || /\[missing\][^\n]*appraisal|appraisal[^\n]*\[missing\]/i.test(a), 'appraisal not flagged');
       check('no false mismatch callout in prelim', !/reads as|provided as a/i.test(a), (a.match(/.{0,60}reads as.{0,60}/i) || [])[0]);
+    } else if (cfg.expect === 'prelim-partial-missing') {
+      check('welcome requests the missing items (Gov ID / Property Tax / Payout)', /government[\s-]?issued id|government id|property tax|payout|mortgage (payout|statement)/.test(w), w.slice(0, 300));
+      check('no completeness overclaim', noOverclaim, w.slice(0, 300));
+      check('no false mismatch callout in prelim', !/reads as|provided as a/i.test(a), (a.match(/.{0,60}reads as.{0,60}/i) || [])[0]);
+      check('no false 1st-vs-2nd position discrepancy', !/mortgage[_ ]?position|1st.{0,20}2nd|first.{0,20}second mortgage/i.test(w), w.slice(0, 300));
     } else if (cfg.expect === 'discrepancy-hold') {
       // Turn 0: Vienna flags the 631/619 vs 748/752 credit-score mismatch to the broker,
       // cites the loan application (not the broker's email), and HOLDS the prelim.
