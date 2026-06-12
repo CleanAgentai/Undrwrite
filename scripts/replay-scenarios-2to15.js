@@ -91,6 +91,28 @@ const SCENARIOS = {
     expect: 'identity-clash',
     turn2: { body: 'Yes, Anna Bergstrom is the correct borrower — apologies, the documents were mislabeled. Confirming the deal is for Anna Bergstrom at 1801 Varsity Estates Dr NW.', docs: [] },
   },
+  3: {
+    dir: 'Scenario 3', fromName: 'James Whitfield', email: 'j.whitfield+s3@stonewoodlending.ca',
+    subject: 'Quick question about a deal — Michael Thornton',
+    body: `Hi there,\nMy name is James Whitfield from Stonewood Lending Group. I have a client, Michael Thornton, looking for a short-term private mortgage on his property in Lethbridge. LTV is around 62%, clean credit, solid employment. Is this something you'd be able to help with? Happy to send the full package if so.\n\nThanks,\nJames Whitfield\nStonewood Lending Group | Lic. #MB556238\n(403) 629-5514`,
+    docs: [],
+    expect: 'conversational',
+    turn2: { body: "Great, here's the full package for Michael.\n\nJames", docs: ['LoanApplication_Michael_Thornton.pdf', 'PNW_Statement_Michael_Thornton.pdf', 'T4_Michael_Thornton_2025.pdf', 'Appraisal_614_University_Drive_W_Lethbridge.pdf', 'Credit_Bureau_Michael_Thornton.pdf', 'GovernmentID_Michael_Thornton.pdf', 'PropertyTaxAssessment_Michael_Thornton.pdf', 'TD_Payout_Statement_Michael_Thornton.pdf'] },
+  },
+  10: {
+    dir: 'Scenario 1 docs', fromName: 'Helen MacGregor', email: 'h.macgregor+s10@sunridgelending.ca',
+    subject: 'Referral from Franco — New Broker Introduction',
+    body: `Hi,\nMy name is Helen MacGregor from Sunridge Lending Group. Franco Maione referred me to you. I have a client I'd like to discuss — can you let me know how you work with referred brokers and what I need to send over?\n\nThanks,\nHelen MacGregor\nSunridge Lending Group`,
+    docs: [],
+    expect: 'referral-broker',
+  },
+  11: {
+    dir: 'Scenario 1 docs', fromName: 'Sophie Larsson', email: 'sophie.larsson+s11@gmail.com',
+    subject: 'Mortgage inquiry — referred by Franco Maione',
+    body: `Hi,\nMy name is Sophie Larsson. Franco Maione suggested I reach out to you about getting a short-term mortgage. I own a home in Calgary and I'm looking to refinance. Franco said you might be able to help. Can you let me know what the next steps are?\n\nThanks,\nSophie Larsson\n(403) 555-0192`,
+    docs: [],
+    expect: 'referral-borrower',
+  },
 };
 
 (async () => {
@@ -155,6 +177,17 @@ const SCENARIOS = {
       check('does NOT request the full doc list yet', !/property tax|payout statement|proof of income/.test(w), w.slice(0, 300));
       check('status awaiting_identity_confirmation', st.status === 'awaiting_identity_confirmation', st.status);
       check('prelim NOT fired (identity gate first)', !admin);
+    } else if (cfg.expect === 'conversational') {
+      check('Vienna engages / offers to help (no premature prelim)', /happy to|send (over|the)|full package|glad to help|love to help|tell me more|how can|absolutely/.test(w), w.slice(0, 300));
+      check('no admin prelim on a no-doc conversational opener', !admin);
+    } else if (cfg.expect === 'referral-broker') {
+      check('introduces Vienna / explains process', /vienna|lead underwriter|how we work|process|here.?s how/.test(w), w.slice(0, 300));
+      check('asks the broker for the deal write-up/details', /write-?up|deal (details|summary)|tell me (more|about)|send (over|me) the|details (on|about)|what.*looking/.test(w), w.slice(0, 400));
+      check('mentions the referral / Franco context appropriately', !/hi there!?\s*$/i.test(w.slice(0, 12)));
+    } else if (cfg.expect === 'referral-borrower') {
+      check('plain language — NO industry jargon to borrower', !/\bLTV\b|\bNOA\b|\bAML\b|\bPEP\b|loan-to-value|payout statement|mortgage position/i.test(w), w.slice(0, 400));
+      check('includes a calendar / call booking link', /calendar\.app|book.*call|schedule.*call|calendly|15-minute|booking link/i.test(w), w.slice(0, 400));
+      check('mentions the intake forms (application / net worth)', /application|net worth|forms? (attached|to (fill|complete))|two forms/i.test(w), w.slice(0, 400));
     }
 
     // ── optional turn 2 (broker reply, threaded to Vienna's welcome) ──

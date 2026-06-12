@@ -44,27 +44,35 @@ Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
 |---|------|-------|--------|
 | 1 | [Katherine Morrison](scenario-01-katherine-morrison.md) | New broker email — intro, 5-of-8 docs | 🟢 deployed-verified (19/19) |
 | 2 | Sandra Whitfield | New broker, complete file → prelim | 🟢 deployed (Bug 5 fix) |
-| 3 | Michael Thornton | Conversational opener → docs (2-turn) | ⬜ pending |
+| 3 | Michael Thornton | Conversational opener → docs (2-turn) | 🟢 deployed |
 | 4 | Ryan Callahan | LTV >80% escalation / collateral ask | 🟢 deployed |
 | 5 | Margaret Chen | Prelim ≤80% (appraisal absent from folder) | 🟢 deployed |
 | 6 | Kevin Tran | Draft review: Franco approves → send | ⬜ pending (admin-reply flow) |
 | 7 | Daniel Hartley | Draft review: Franco edits | ⬜ pending (admin-reply flow) |
 | 8 | Sandra Fletcher | Franco rejects → polite rejection | ⬜ pending (admin-reply flow) |
 | 9 | James Okafor | Franco conditions → fulfil → handoff | ⬜ pending (admin-reply flow) |
-| 10 | Helen MacGregor | Referral broker, CC admin | ⬜ pending |
-| 11 | Sophie Larsson | Referral borrower, plain language + forms | ⬜ pending |
+| 10 | Helen MacGregor | Referral broker, CC admin | 🟢 deployed (body) · CC/attach not body-checkable |
+| 11 | Sophie Larsson | Referral borrower, plain language + forms | 🟢 deployed |
 | 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | ⬜ pending (cron) · classifier Bug 4 fixed |
 | 13 | Daily Summary | Automated nightly summary (cron) | ⬜ pending (cron) |
-| 14 | Lena Park | Data discrepancy (credit-score mismatch) | 🟠 form-extraction gap found (see below) |
-| 15 | Anna Bergstrom | Broker own app + identity clash | ⬜ pending (classifier clean) |
+| 14 | Lena Park | Data discrepancy (credit-score mismatch) | 🟦 Vienna correct — **test-data mismatch** (see below) |
+| 15 | Anna Bergstrom | Broker own app + identity clash | 🟦 Vienna correct — **test-data mismatch** (see below) |
 
-### Open finding — Scenario 14 (and form-template extraction generally)
-Lena's loan application is a **flattened PDF**: neither pdf-parse (labels only) nor AcroForm
-extraction recovers the filled values — only the LLM (base64) can read them. Consequences:
-1. The deterministic discrepancy engine misreads the "Mortgage Type: First Second" label as
-   position **2nd** → a **false** mortgage-position discrepancy vs the email's "1st".
-2. The **intended** credit-score discrepancy (loan app 631/619 vs bureau 748/752) **cannot be
-   caught deterministically** — the loan-app figures aren't in the extractable text.
-This is the next fix to scope (suppress canonical field extraction from form-template text, or
-route form-value discrepancies through the LLM). Affects any scenario relying on filled loan-app
-values for a deterministic cross-check.
+### Scenarios 14 & 15 — Vienna is correct; the Desktop test data doesn't match the scenario intent
+Verified against the **real** AcroForm annotations of the Desktop PDFs:
+- **S14 (Lena):** the loan app annotates as a **2nd mortgage** (`Second Mortgage`, `$78,000`,
+  `10.75%`, `12 months`, "Kitchen and bathroom renovation") while the broker email says "1st".
+  Vienna **correctly catches that real 1st-vs-2nd discrepancy** and holds the prelim. The
+  *intended* credit-score discrepancy (631/619 vs 748/752) is **not present in the extractable
+  content** — those figures are in neither the pdf-parse text nor the AcroForm annotations — so
+  it can't be exercised with this file.
+- **S15 (Anna):** the loan app annotates as **Anna Bergstrom** (`anna.bergstrom@ucalgary.ca`),
+  NOT Grace Paulson — so there is **no identity clash** in this data, and Vienna correctly
+  proceeds with Anna (also catching the same real 1st-vs-2nd position discrepancy). Franco's own
+  `vimarealty` run showed borrower "Grace Marie Paulson", so his copy of the S15 docs differs
+  from the Desktop copy.
+
+**Action for Franco/Porter:** regenerate the S14 loan app with the 631/619 credit scores in a
+readable field (and as a 1st mortgage), and the S15 loan app with Grace Paulson's identity, to
+exercise the intended tests. The discrepancy + identity engines themselves are working
+(demonstrated by the correct 1st-vs-2nd catch). No Vienna code change warranted here.
