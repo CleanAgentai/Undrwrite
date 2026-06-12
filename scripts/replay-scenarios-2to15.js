@@ -115,6 +115,15 @@ const SCENARIOS = {
     resolve: 'To confirm — this is a FIRST mortgage (1st position). The loan app checkbox was marked wrong; please proceed as a 1st.',
     adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower\'s debt servicing is too tight for this file. Please send a polite decline.' }, { replyTo: 'last', body: 'SEND — the decline wording is good, send it to the broker.' }],
   },
+  90: { // isolation: clean loan-app (Kevin Tran) + CONDITIONS → broker fulfils AML/PEP → handoff
+    dir: 'Scenario 6', fromName: 'Sarah Chen', email: 's.chen+s90@northbrookmortgage.ca',
+    subject: 'New Mortgage Submission — Kevin Tran — 3312 Brentwood Road NW, Calgary',
+    body: `Hi,\nMy name is Sarah Chen, mortgage broker with Northbrook Mortgage Group, Lic. #MB889561.\n\nBorrower: Kevin Minh Tran\nProperty: 3312 Brentwood Road NW, Calgary, AB\nMortgage Position: 1st\n\nPlease find the complete document package attached.${sig('Sarah Chen', 'Northbrook Mortgage Group', 'MB889561', '(403) 963-4412')}`,
+    docs: ['LoanApplication_Kevin_Tran.pdf', 'PNW_Statement_Kevin_Tran.pdf', 'T4_Kevin_Tran_2025.pdf', 'Appraisal_3312_Brentwood_Road_NW_Calgary.pdf', 'Credit_Bureau_Kevin_Tran.pdf', 'GovernmentID_Kevin_Tran.pdf', 'PropertyTaxAssessment_Kevin_Tran.pdf', 'ATB_Payout_Statement_Kevin_Tran.pdf'],
+    expect: 'admin-conditions',
+    adminFlow: [{ replyTo: 'prelim', body: 'Approved with the following conditions: please obtain the AML form and PEP form from the broker before funding.' }, { replyTo: 'last', body: 'SEND — send the conditions request to the broker.' }],
+    conditionTurn: { body: 'Here are the completed AML and PEP forms for Kevin. Let me know if anything else is needed.', docs: ['AML_Form_Kevin_Tran.pdf', 'PEP_Form_Kevin_Tran.pdf'] },
+  },
   80: { // isolation: clean loan-app (Kevin Tran) + DECLINE, no discrepancy hold → tests reject dispatch
     dir: 'Scenario 6', fromName: 'Sarah Chen', email: 's.chen+s80@northbrookmortgage.ca',
     subject: 'New Mortgage Submission — Kevin Tran — 3312 Brentwood Road NW, Calgary',
@@ -277,6 +286,27 @@ const SCENARIOS = {
         check('a broker-facing decline was sent', newMsgs.length >= 1);
         check('decline is polite + not a generic "does not meet criteria"', /unfortunate|unable to|not (a fit|able to proceed)|won.?t be able|after (careful )?review/i.test(rej) && !/does not meet (our )?criteria\.?\s*$/i.test(rej), rej.slice(0, 200));
         check('decline does NOT leak internal routing (Franco/underwriters)', !/franco|underwrit|lender rep|internal/i.test(rej), rej.slice(0, 200));
+      } else if (cfg.expect === 'admin-conditions') {
+        const condReq = newMsgs[newMsgs.length - 1];
+        console.log('\n----- CONDITIONS REQUEST TO BROKER -----\n' + (condReq ? strip(condReq.TextBody).slice(0, 600) : '<<none>>'));
+        check('conditions request sent to broker', !!condReq && newMsgs.length >= 2);
+        check('conditions request names AML + PEP', condReq && /aml/i.test(strip(condReq.TextBody)) && /pep/i.test(strip(condReq.TextBody)), condReq && strip(condReq.TextBody).slice(0, 150));
+        // broker fulfils the conditions
+        if (cfg.conditionTurn) {
+          console.log('\n--- BROKER FULFILS CONDITIONS (AML + PEP) ---');
+          const cmid = lastMidOf(finalOut, m => !isPrelim(m) && !/ACTION REQUIRED|DRAFT|for review/i.test(m.Subject || '')) || lastMidOf(finalOut);
+          await postToWebhook({ From: from, FromName: cfg.fromName, FromFull: { Email: from, Name: cfg.fromName }, To: TO, Subject: `Re: ${cfg.subject}`, TextBody: cfg.conditionTurn.body, HtmlBody: null, MessageID: `s${id}-${ts}-cond@test`, Date: new Date().toISOString(), Headers: cmid ? [{ Name: 'In-Reply-To', Value: `<${cmid}>` }, { Name: 'References', Value: `<${cmid}>` }] : [], Attachments: (cfg.conditionTurn.docs || []).map(d => att(cfg.dir, d)) });
+          const out4 = await waitStable(deal.id, 'handoff', finalOut.length + 1);
+          const stH = await dealState(deal.id);
+          const handoffMsgs = out4.slice(finalOut.length);
+          const handoff = handoffMsgs.map(m => strip(m.TextBody)).join(' ');
+          console.log(`  after fulfilment: status=${stH.status} | new: ${handoffMsgs.map(m => (m.Subject || '').slice(0, 36)).join(' | ')}`);
+          console.log('\n----- HANDOFF -----\n' + handoff.slice(0, 600));
+          const allDocs = await docClasses(deal.id);
+          check('AML + PEP now on file', allDocs.includes('aml') && allDocs.includes('pep'), allDocs.join(','));
+          check('Vienna sent a handoff / completion message', /complete|submitted|funding|further questions|franco@privatemortgagelink/i.test(handoff), handoff.slice(0, 200));
+          check('no duplicate deal', (await dealsForEmail(from)) === 1);
+        }
       } else if (cfg.expect === 'admin-approve-send') {
         const draftToAdmin = newMsgs.find(m => /DRAFT|review|ACTION/i.test(m.Subject || '')) || (newMsgs.length >= 1 ? newMsgs[0] : null);
         const brokerFinal = newMsgs[newMsgs.length - 1];

@@ -50,11 +50,11 @@ Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
 | 6 | Kevin Tran | Draft review: Franco approves → send | 🟢 deployed (full approve→draft→send→broker) |
 | 7 | Daniel Hartley | Draft review: Franco edits | 🟢 deployed (edits incorporated into draft) |
 | 8 | Sandra Fletcher | Franco rejects → polite rejection | 🟢 reject pipeline verified (clean-data run); S8 docs blocked by 2nd-mortgage data |
-| 9 | James Okafor | Franco conditions → fulfil → handoff | 🟦 blocked by test data (loan app = 2nd mortgage) |
+| 9 | James Okafor | Franco conditions → fulfil → handoff | 🟢 conditions-request + doc-receipt verified (clean data); S9 docs blocked by 2nd-mortgage data |
 | 10 | Helen MacGregor | Referral broker, CC admin | 🟢 deployed (body) · CC/attach not body-checkable |
 | 11 | Sophie Larsson | Referral borrower, plain language + forms | 🟢 deployed |
-| 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | 🟦 blocked by test data (loan app = 2nd mortgage) + needs cron |
-| 13 | Daily Summary | Automated nightly summary (cron) | ⬜ pending (cron invocation) |
+| 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | 🟢 reminder enumerates exact items; atomic anti-multi-send (verify-cron-output.js) |
+| 13 | Daily Summary | Automated nightly summary (cron) | 🟢 all 5 sections incl. Automated Reminders; idempotent send, non-deal filter |
 | 14 | Lena Park | Data discrepancy (credit-score mismatch) | 🟦 Vienna correct — **test-data mismatch** (see below) |
 | 15 | Anna Bergstrom | Broker own app + identity clash | 🟦 Vienna correct — **test-data mismatch** (see below) |
 
