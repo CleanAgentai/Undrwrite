@@ -49,7 +49,7 @@ Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
 | 5 | Margaret Chen | Prelim ≤80% (appraisal absent from folder) | 🟢 deployed |
 | 6 | Kevin Tran | Draft review: Franco approves → send | 🟢 deployed (full approve→draft→send→broker) |
 | 7 | Daniel Hartley | Draft review: Franco edits | 🟢 deployed (edits incorporated into draft) |
-| 8 | Sandra Fletcher | Franco rejects → polite rejection | 🟦 blocked by test data (loan app = 2nd mortgage → discrepancy hold; no prelim to decline) |
+| 8 | Sandra Fletcher | Franco rejects → polite rejection | 🟢 reject pipeline verified (clean-data run); S8 docs blocked by 2nd-mortgage data |
 | 9 | James Okafor | Franco conditions → fulfil → handoff | 🟦 blocked by test data (loan app = 2nd mortgage) |
 | 10 | Helen MacGregor | Referral broker, CC admin | 🟢 deployed (body) · CC/attach not body-checkable |
 | 11 | Sophie Larsson | Referral borrower, plain language + forms | 🟢 deployed |

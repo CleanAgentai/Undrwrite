@@ -115,6 +115,14 @@ const SCENARIOS = {
     resolve: 'To confirm — this is a FIRST mortgage (1st position). The loan app checkbox was marked wrong; please proceed as a 1st.',
     adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower\'s debt servicing is too tight for this file. Please send a polite decline.' }, { replyTo: 'last', body: 'SEND — the decline wording is good, send it to the broker.' }],
   },
+  80: { // isolation: clean loan-app (Kevin Tran) + DECLINE, no discrepancy hold → tests reject dispatch
+    dir: 'Scenario 6', fromName: 'Sarah Chen', email: 's.chen+s80@northbrookmortgage.ca',
+    subject: 'New Mortgage Submission — Kevin Tran — 3312 Brentwood Road NW, Calgary',
+    body: `Hi,\nMy name is Sarah Chen, mortgage broker with Northbrook Mortgage Group, Lic. #MB889561.\n\nBorrower: Kevin Minh Tran\nProperty: 3312 Brentwood Road NW, Calgary, AB\nMortgage Position: 1st\n\nPlease find the complete document package attached.${sig('Sarah Chen', 'Northbrook Mortgage Group', 'MB889561', '(403) 963-4412')}`,
+    docs: ['LoanApplication_Kevin_Tran.pdf', 'PNW_Statement_Kevin_Tran.pdf', 'T4_Kevin_Tran_2025.pdf', 'Appraisal_3312_Brentwood_Road_NW_Calgary.pdf', 'Credit_Bureau_Kevin_Tran.pdf', 'GovernmentID_Kevin_Tran.pdf', 'PropertyTaxAssessment_Kevin_Tran.pdf', 'ATB_Payout_Statement_Kevin_Tran.pdf'],
+    expect: 'admin-reject',
+    adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower does not meet our lending criteria for this property type. Please send a polite decline.' }, { replyTo: 'last', body: 'SEND — the draft looks great, send it to the broker as-is.' }],
+  },
   6: {
     dir: 'Scenario 6', fromName: 'Sarah Chen', email: 's.chen+s6@northbrookmortgage.ca',
     subject: 'New Mortgage Submission — Kevin Tran — 3312 Brentwood Road NW, Calgary',
