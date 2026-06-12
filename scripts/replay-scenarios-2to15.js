@@ -112,7 +112,8 @@ const SCENARIOS = {
     body: `Hi,\nMy name is Anita Kowalski, mortgage broker with Clearwater Lending Inc., Lic. #MB101783. I'd like to submit a new application for your review.\n\nBorrower: Sandra Fletcher\nProperty: 412 Windermere Close SW, Edmonton, AB\nMortgage Position: 1st\n\nPlease find the document package attached.${sig('Anita Kowalski', 'Clearwater Lending Inc.', 'MB101783', '(403) 785-2244')}`,
     docs: ['LoanApplication_Sandra_Fletcher.pdf', 'PNW_Statement_Sandra_Fletcher.pdf', 'T4_Sandra_Fletcher_2025.pdf', 'Appraisal_412_Windermere_Close_SW_Edmonton.pdf', 'Credit_Bureau_Sandra_Fletcher.pdf', 'RBC_Payout_Statement_Sandra_Fletcher.pdf'],
     expect: 'admin-reject',
-    adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower\'s debt servicing is too tight for this file. Please send a polite decline.' }],
+    resolve: 'To confirm — this is a FIRST mortgage (1st position). The loan app checkbox was marked wrong; please proceed as a 1st.',
+    adminFlow: [{ replyTo: 'prelim', body: 'DECLINE — the borrower\'s debt servicing is too tight for this file. Please send a polite decline.' }, { replyTo: 'last', body: 'SEND — the decline wording is good, send it to the broker.' }],
   },
   6: {
     dir: 'Scenario 6', fromName: 'Sarah Chen', email: 's.chen+s6@northbrookmortgage.ca',
@@ -150,11 +151,11 @@ const SCENARIOS = {
     await postToWebhook({ From: from, FromName: cfg.fromName, FromFull: { Email: from, Name: cfg.fromName }, To: TO, Subject: cfg.subject, TextBody: cfg.body, HtmlBody: null, MessageID: `s${id}-${ts}-t0@test`, Date: new Date().toISOString(), Headers: [], Attachments: cfg.docs.map(d => att(cfg.dir, d)) });
     const deal = await pollForDeal(s, from, { timeoutMs: 120000 });
     console.log(`  dealId=${deal.id} ltv=${deal.ltv} status=${deal.status}`);
-    const out = await waitStable(deal.id, 't0', 2);
+    let out = await waitStable(deal.id, 't0', 2);
     const st = await dealState(deal.id);
     const classes = await docClasses(deal.id);
     const welcome = out.find(m => !isPrelim(m) && !isEscalation(m)) || out[0];
-    const admin = out.find(isPrelim) || out.find(isEscalation);
+    let admin = out.find(isPrelim) || out.find(isEscalation);
     console.log(`\n  final status=${st.status} ltv=${st.ltv} | docs(${classes.length}): ${classes.join(', ')}`);
     console.log('\n----- WELCOME -----\n' + (welcome ? strip(welcome.TextBody) : '<<none>>'));
     console.log('\n----- ADMIN -----\n' + (admin ? strip(admin.TextBody).slice(0, 1200) : '<<none>>') + '\n');
@@ -235,7 +236,17 @@ const SCENARIOS = {
       }
     }
 
-    if (cfg.adminFlow) check('prelim fired so admin can act (else deal held — check loan-app position)', !!admin, `status=${st.status} (no prelim — likely 1st-vs-2nd discrepancy hold)`);
+    // If a discrepancy hold prevented the prelim, let the broker resolve it, then re-capture.
+    if (cfg.adminFlow && !admin && cfg.resolve) {
+      console.log(`\n--- RESOLVE TURN (broker clarifies the held discrepancy) ---`);
+      const mid = lastMidOf(out, m => !isPrelim(m) && !isEscalation(m)) || lastMidOf(out);
+      await postToWebhook({ From: from, FromName: cfg.fromName, FromFull: { Email: from, Name: cfg.fromName }, To: TO, Subject: `Re: ${cfg.subject}`, TextBody: cfg.resolve, HtmlBody: null, MessageID: `s${id}-${ts}-resolve@test`, Date: new Date().toISOString(), Headers: mid ? [{ Name: 'In-Reply-To', Value: `<${mid}>` }, { Name: 'References', Value: `<${mid}>` }] : [], Attachments: [] });
+      out = await waitStable(deal.id, 'resolve', out.length + 1);
+      admin = out.find(isPrelim) || out.find(isEscalation);
+      const stR = await dealState(deal.id);
+      check('broker can RESOLVE the position discrepancy → prelim fires (no stuck deal)', !!admin, `status=${stR.status}, still no prelim after broker clarified`);
+    }
+    if (cfg.adminFlow) check('prelim fired so admin can act', !!admin, `status=${st.status} (no prelim — discrepancy hold)`);
     // ── admin-reply flow (Franco APPROVED / SEND / DECLINE, threaded to the prelim) ──
     if (cfg.adminFlow && admin) {
       let prevOut = out;
