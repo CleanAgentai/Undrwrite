@@ -1,5 +1,8 @@
 # Vienna — Scenario Test & Verification Log
 
+> **STATUS: 15 / 15 scenarios deployed-green 🟢 — bulletproofing complete (2026-06-12).**
+> 9 deterministic bugs fixed + deployed. See the Round-9 bug table below.
+
 Living record of Franco's end-to-end test scenarios. We go through each one, reproduce
 the reported behaviour, fix every bug deterministically, and verify — offline on the real
 documents first, then on the deployed staging service — until **every single bug is squashed**.
@@ -34,6 +37,10 @@ One markdown file per scenario. Real test documents live on the Desktop under
 | 3 | Gov ID misclassified as AML form | positive `government_id` rule + compliance-mismatch suppression | `d65be32` |
 | 4 | PNW/LoanApp form templates → false "reads as Mortgage Balance" + T4 for "Noah" → NOA | skip mismatch on form-like text; guard `noa` filename token | `ba5684a` |
 | 5 | Appraisal market_value not extracted → clean sub-80 refi escalates to awaiting_collateral | add `APPRAISED/FINAL/ESTIMATED MARKET VALUE` patterns (value-on-next-line) | `e519684` |
+| 6 | False 1st-vs-2nd refi discrepancy | match "First Mortgage (Refinance)"; balance-inference defers to explicit loan-app position | `6fe17e0` |
+| 7 | Identity clash missed when borrower name is split AcroForm annotations | derive name from the borrower's personal email in the doc | `6fe17e0` |
+| 8 | PNW → Mortgage-Balance false mismatch on **deployed** (annotations defeat the form-like guard) | positive `pnw_statement` content rule | `fe1d778` |
+| 9 | Conditions flow never stamped `prelim_approved_at` → auto-handoff never fires | stamp `prelim_approved_at` on conditions-send | `55e2aa5` |
 
 Corpus sweep: `scripts/scenario-corpus-classify.js` (all 14 folders, 0 real mismatches).
 Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
@@ -50,7 +57,7 @@ Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
 | 6 | Kevin Tran | Draft review: Franco approves → send | 🟢 deployed (full approve→draft→send→broker) |
 | 7 | Daniel Hartley | Draft review: Franco edits | 🟢 deployed (edits incorporated into draft) |
 | 8 | Sandra Fletcher | Franco rejects → polite rejection | 🟢 deployed (regen docs): prelim → DECLINE → SEND → broker rejection + status rejected |
-| 9 | James Okafor | Franco conditions → fulfil → handoff | 🟡 conditions request → broker dispatches + names AML/PEP; **auto-handoff after fulfilment does not fire** (open) |
+| 9 | James Okafor | Franco conditions → fulfil → handoff | 🟢 deployed: conditions → broker fulfils AML/PEP → status completed + handoff + Lender Package (Bug 9) |
 | 10 | Helen MacGregor | Referral broker, CC admin | 🟢 deployed (body) · CC/attach not body-checkable |
 | 11 | Sophie Larsson | Referral borrower, plain language + forms | 🟢 deployed |
 | 12 | Noah MacKenzie | Follow-up reminders (cron day 2/3) | 🟢 deployed (regen): partial submission → requests missing items, no false position/PNW mismatch; reminder cron verified offline |
