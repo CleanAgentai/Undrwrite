@@ -75,6 +75,22 @@ const SCENARIOS = {
     docs: ['LoanApplication_Margaret_Chen.pdf', 'PNW_Statement_Margaret_Chen.pdf', 'T4_Margaret_Chen_2025.pdf', 'Credit_Bureau_Margaret_Chen.pdf', 'GovernmentID_Margaret_Chen.pdf', 'PropertyTaxAssessment_Margaret_Chen.pdf', 'TD_Payout_Statement_Margaret_Chen.pdf'],
     expect: 'prelim-missing-appraisal',
   },
+  14: {
+    dir: 'Scenario 14', fromName: 'Elena Vasquez', email: 'e.vasquez+s14@suncrestmortgage.ca',
+    subject: 'New Mortgage Submission — Lena Park — 3704 Parkhill Street SW, Calgary',
+    body: `Hi,\nMy name is Elena Vasquez, mortgage broker with Suncrest Mortgage Group, Lic. #MB434996. I'd like to submit a new application for your review.\n\nBorrower: Lena Park\nProperty: 3704 Parkhill Street SW, Calgary, AB\nMortgage Position: 1st\n\nPlease find the documents attached.${sig('Elena Vasquez', 'Suncrest Mortgage Group', 'MB434996', '(403) 881-5529')}`,
+    docs: ['LoanApplication_Lena_Park.pdf', 'PNW_Statement_Lena_Park.pdf', 'T4_Lena_Park_2025.pdf', 'Appraisal_3704_Parkhill_Street_SW_Calgary.pdf', 'Credit_Bureau_Lena_Park.pdf', 'Scotiabank_Payout_Statement_Lena_Park.pdf', 'GovernmentID_Lena_Park.pdf', 'PropertyTaxAssessment_3704_Parkhill_Street_SW_Calgary.pdf'],
+    expect: 'discrepancy-hold',
+    turn2: { body: 'The correct scores are 748 and 752 as shown on the credit bureau. The loan application had an old figure — please use the bureau scores.', docs: [] },
+  },
+  15: {
+    dir: 'Scenario 15', fromName: 'Nathan Blackwood', email: 'n.blackwood+s15@kestrelmortgage.ca',
+    subject: 'New Mortgage Submission — Anna Bergstrom — 1801 Varsity Estates Dr NW, Calgary',
+    body: `Hi,\nMy name is Nathan Blackwood, mortgage broker with Kestrel Mortgage Corp, Lic. #MB545107. I'm submitting a new application using our firm's own loan application form.\n\nBorrower: Anna Bergstrom\nProperty: 1801 Varsity Estates Dr NW, Calgary, AB\nMortgage Position: 1st\n\nPlease find the documents attached.${sig('Nathan Blackwood', 'Kestrel Mortgage Corp', 'MB545107', '(403) 774-8823')}`,
+    docs: ['LoanApplication_Anna_Bergstrom.pdf', 'T4_Anna_Bergstrom_2025.pdf', 'Credit_Bureau_Anna_Bergstrom.pdf', 'Appraisal_1801_Varsity_Estates_Dr_NW_Calgary.pdf', 'BMO_Payout_Statement_Anna_Bergstrom.pdf'],
+    expect: 'identity-clash',
+    turn2: { body: 'Yes, Anna Bergstrom is the correct borrower — apologies, the documents were mislabeled. Confirming the deal is for Anna Bergstrom at 1801 Varsity Estates Dr NW.', docs: [] },
+  },
 };
 
 (async () => {
@@ -125,6 +141,41 @@ const SCENARIOS = {
       check('no completeness overclaim in welcome', noOverclaim, w.slice(0, 300));
       check('welcome OR prelim flags appraisal missing', /appraisal/.test(w) || /\[missing\][^\n]*appraisal|appraisal[^\n]*\[missing\]/i.test(a), 'appraisal not flagged');
       check('no false mismatch callout in prelim', !/reads as|provided as a/i.test(a), (a.match(/.{0,60}reads as.{0,60}/i) || [])[0]);
+    } else if (cfg.expect === 'discrepancy-hold') {
+      // Turn 0: Vienna flags the 631/619 vs 748/752 credit-score mismatch to the broker,
+      // cites the loan application (not the broker's email), and HOLDS the prelim.
+      check('welcome flags a discrepancy / asks to confirm', /confirm|clarif|discrepan|which (is|are) correct|noticed/.test(w), w.slice(0, 400));
+      check('welcome mentions credit score figures', /631|619|748|752|credit score/.test(w), w.slice(0, 400));
+      check('NO internal-workflow language to broker', !/being reviewed|under review|underwriting team|review process/i.test(w), w.slice(0, 400));
+      check('prelim HELD on turn 0 (not fired prematurely)', !admin, admin ? 'prelim fired before resolution' : '');
+      check('status still active (awaiting clarification)', st.status === 'active', st.status);
+    } else if (cfg.expect === 'identity-clash') {
+      check('welcome flags the name/identity mismatch', /grace|paulson|which.*borrower|confirm.*borrower|correct borrower|mismatch|different (name|person)/i.test(w), w.slice(0, 400));
+      check('greets the broker by name (not generic Hi there)', /hi nathan|hello nathan/i.test(w) && !/hi there/i.test(w.slice(0, 20)), w.slice(0, 40));
+      check('does NOT request the full doc list yet', !/property tax|payout statement|proof of income/.test(w), w.slice(0, 300));
+      check('status awaiting_identity_confirmation', st.status === 'awaiting_identity_confirmation', st.status);
+      check('prelim NOT fired (identity gate first)', !admin);
+    }
+
+    // ── optional turn 2 (broker reply, threaded to Vienna's welcome) ──
+    if (cfg.turn2 && welcome) {
+      console.log(`\n--- TURN 2 (broker reply) ---`);
+      const mid = lastMidOf(out, m => !isPrelim(m) && !isEscalation(m)) || lastMidOf(out);
+      await postToWebhook({ From: from, FromName: cfg.fromName, FromFull: { Email: from, Name: cfg.fromName }, To: TO, Subject: `Re: ${cfg.subject}`, TextBody: cfg.turn2.body, HtmlBody: null, MessageID: `s${id}-${ts}-t1@test`, Date: new Date().toISOString(), Headers: mid ? [{ Name: 'In-Reply-To', Value: `<${mid}>` }, { Name: 'References', Value: `<${mid}>` }] : [], Attachments: (cfg.turn2.docs || []).map(d => att(cfg.dir, d)) });
+      const out2 = await waitStable(deal.id, 't2', out.length + 1);
+      const st2 = await dealState(deal.id);
+      const dealCount = await dealsForEmail(from);
+      const prelims = out2.filter(isPrelim);
+      console.log(`  after t2: status=${st2.status} outbound=${out2.length} prelims=${prelims.length} deals=${dealCount}`);
+      check('turn-2 reply threaded to SAME deal (no duplicate)', dealCount === 1, `${dealCount} deals`);
+      if (cfg.expect === 'discrepancy-hold') {
+        check('after resolution: exactly ONE prelim (no double)', prelims.length === 1, `${prelims.length} prelims`);
+        check('after resolution: prelim is PRELIMINARY not COMPLETE', prelims.length === 1 && /PRELIMINARY/i.test(prelims[0].Subject), prelims[0] && prelims[0].Subject);
+        check('status under_review after resolution', st2.status === 'under_review', st2.status);
+      } else if (cfg.expect === 'identity-clash') {
+        check('after confirmation: deal proceeds (status active/under_review)', ['active', 'under_review'].includes(st2.status), st2.status);
+        check('borrower name corrected to Anna (not Grace)', /anna/i.test(JSON.stringify(st2.extracted_data?.borrower_name || '')) && !/grace/i.test(JSON.stringify(st2.extracted_data?.borrower_name || '')), st2.extracted_data?.borrower_name);
+      }
     }
 
     console.log('\n' + (failures === 0 ? `✅ SCENARIO ${id} — ALL ASSERTIONS PASS` : `❌ SCENARIO ${id} — ${failures} FAILED`));
