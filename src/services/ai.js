@@ -2641,7 +2641,7 @@ Remember: return BOTH the welcome email AND the deal summary using the exact del
       });
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 3072,
         messages: [{ role: 'user', content }],
       });
@@ -3166,7 +3166,7 @@ ${canonicalFieldsPrompt}` : ''}
       });
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 3072,
         messages: [{ role: 'user', content }],
       });
@@ -3238,7 +3238,7 @@ This block is the EXPLICIT EXCEPTION to the general rule below ("do NOT explain 
         : '';
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 512,
         messages: [{
           role: 'user',
@@ -3415,7 +3415,7 @@ ATTRIBUTION RULE (CRITICAL for the EMAIL CONVERSATION above):
 
 Return only the HTML email body.`;
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 2048,
         messages: [{ role: 'user', content: isCompletion ? completionContent : escalationContent }],
       });
@@ -3540,7 +3540,7 @@ ADDITIONAL ITEMS — items to ask for at the end of the doc list:
         : '';
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         messages: [{
           role: 'user',
@@ -3667,7 +3667,7 @@ Return only the HTML email body. Do not include a subject line.`,
         : '';
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 512,
         messages: [{
           role: 'user',
@@ -3717,7 +3717,7 @@ Return only the HTML email body. Do not include a subject line.`,
         : '(no specific items tracked — use a generic "the items we previously requested" reference)';
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 512,
         messages: [{
           role: 'user',
@@ -3780,7 +3780,7 @@ Return only the HTML email body.`,
   classifyImage: async (base64Content, contentType, fileName) => {
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 50,
         messages: [{
           role: 'user',
@@ -4025,7 +4025,7 @@ OVERALL: For both loan amount and loan purpose, the broker's stated/corrected va
       }
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 4096,
         messages: [{
           role: 'user',
@@ -4248,7 +4248,7 @@ Return only the HTML. Do not include a subject line.`,
     // Use Claude for anything ambiguous
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 20,
         messages: [{
           role: 'user',
@@ -4334,7 +4334,7 @@ ADMIN'S REPLY:
     // approval of a draft he wanted changed.
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 20,
         messages: [{
           role: 'user',
@@ -4401,7 +4401,7 @@ ADMIN'S REPLY:
     // when in doubt — better to ask broker for clarification than mis-escalate.
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 20,
         messages: [{
           role: 'user',
@@ -4467,7 +4467,7 @@ BROKER'S REPLY:
         || (brokerSenderName || '').split(/\s+/)[0]
         || brokerSenderName;
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 256,
         messages: [{
           role: 'user',
@@ -4559,7 +4559,7 @@ ${emailBody}`,
         ? `at approximately ${ltvPercent}%`
         : 'above our usual 80% threshold';
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 320,
         messages: [{
           role: 'user',
@@ -4615,7 +4615,7 @@ Return only the HTML email body. Use <p> tags around each paragraph. No subject 
     // Use Claude for substantive replies. Conservative default = unresolved when in doubt.
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 80,
         messages: [{
           role: 'user',
@@ -4669,7 +4669,7 @@ BROKER'S REPLY:
   reviseEmailWithEdits: async (originalDraft, editInstructions, dealSummary) => {
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         messages: [{
           role: 'user',
@@ -4726,7 +4726,7 @@ Return only the revised HTML email body.`,
   generateAdminResponseEmail: async (dealSummary, adminNotes, conversationHistory = []) => {
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 512,
         messages: [{
           role: 'user',
@@ -4861,7 +4861,7 @@ IMPORTANT:
       });
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 2048,
         messages: [{ role: 'user', content }],
       });
@@ -4888,7 +4888,7 @@ IMPORTANT:
       // conversation log must attribute INBOUND to the broker, never to Franco.
       const inboundSenderLabel = dealSummary?.broker_name || dealSummary?.sender_name || 'Broker';
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 2048,
         messages: [{
           role: 'user',
@@ -4948,7 +4948,7 @@ Return only the inner HTML content.`,
   parseReferralEmail: async (emailBody) => {
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 512,
         messages: [{
           role: 'user',
@@ -5030,7 +5030,7 @@ If you cannot find a name, set referred_name to null.`,
       const isBorrower = referralData.sender_type === 'borrower';
 
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 512,
         messages: [{
           role: 'user',
@@ -5082,7 +5082,7 @@ Return only the HTML email body.`,
   generateDailySummary: async (summaryData) => {
     try {
       const response = await callClaude({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         // Bug 13.2 fix: 2048 tokens was truncating the All Current Deals table to
         // ~1 row when the active-deals count grew to 49. ~50 rows × ~100 tokens
         // per HTML row + the other 5 sections needs ~6-8K tokens of headroom.
