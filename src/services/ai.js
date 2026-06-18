@@ -51,6 +51,23 @@ const callClaude = async (params, maxRetries = 3) => {
   }
 };
 
+// Strip a leaked markdown code fence from an LLM-authored HTML email body.
+// The model sometimes wraps its output in ```html ... ``` despite "Return only
+// the HTML email body" — that fence then renders as literal text in the sent
+// email (Franco 2026-06-18: reminder emails opened with a visible "```html").
+// Deterministic guard applied at every HTML-email return site. Mirrors the
+// proven inline strip used by generateDocReviewNotification / generateDailySummary.
+const stripHtmlFence = (text) => {
+  if (typeof text !== 'string') return text;
+  // A leading markdown fence — ```html, ```HTML, a bare ```, or any ```lang — is
+  // never valid content in an HTML email body, so strip whatever fence form leaked.
+  return text
+    .trim()
+    .replace(/^```[a-z]*\n?/i, '')
+    .replace(/\n?```$/i, '')
+    .trim();
+};
+
 const INITIAL_EMAIL_PROMPT = `You are Vienna, the lead underwriter at Private Mortgage Link. You write emails on Franco's behalf. You must write as Vienna — first person, concise, professional, and friendly. In your first email, briefly introduce yourself as the lead underwriter.
 
 You have TWO tasks. You must return BOTH in a single response using the exact format specified at the bottom.
@@ -3292,7 +3309,7 @@ Private Mortgage Link`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude rejection email error:', error);
       throw error;
@@ -3420,7 +3437,7 @@ Return only the HTML email body.`;
         messages: [{ role: 'user', content: isCompletion ? completionContent : escalationContent }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error(`Claude ${mode} notification error:`, error);
       throw error;
@@ -3638,7 +3655,7 @@ Return only the HTML email body. Do not include a subject line.`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude document request email error:', error);
       throw error;
@@ -3696,7 +3713,7 @@ Return only the HTML email body. Do not include a subject line.`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude info request email error:', error);
       throw error;
@@ -3769,7 +3786,7 @@ Return only the HTML email body.`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude follow-up reminder error:', error);
       throw error;
@@ -4183,7 +4200,7 @@ Return only the HTML. Do not include a subject line.`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude lead summary error:', error);
       throw error;
@@ -4499,7 +4516,7 @@ BROKER'S ORIGINAL EMAIL BODY (context only — do not reference its contents bey
 ${emailBody}`,
         }],
       });
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude identity clash minimal-ask error:', error.message);
       throw error;
@@ -4590,7 +4607,7 @@ DO NOT include any of the following (negative list — these are the empirically
 Return only the HTML email body. Use <p> tags around each paragraph. No subject line, no <html>/<body> wrappers.`,
         }],
       });
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude high-LTV collateral ask error:', error.message);
       throw error;
@@ -4715,7 +4732,7 @@ Return only the revised HTML email body.`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude email revision error:', error);
       throw error;
@@ -4791,7 +4808,7 @@ Return only the HTML email body.`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude admin response email error:', error);
       throw error;
@@ -5071,7 +5088,7 @@ Return only the HTML email body.`,
         }],
       });
 
-      return response.content[0].text.trim();
+      return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude referral welcome email error:', error);
       throw error;
