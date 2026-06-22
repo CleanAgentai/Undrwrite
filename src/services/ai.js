@@ -68,6 +68,55 @@ const stripHtmlFence = (text) => {
     .trim();
 };
 
+// Label the income row of the lender-package checklist by the ACTUAL income
+// document on file, not a generic "T4 / NOA" (FRANCO Scenario-2 Round-9 Bug 2:
+// the file was a T4 — "T4_Sandra_Whitfield_2025.pdf" — but the checklist read
+// "Income Proof (T4 / NOA)", which reads as if Vienna wasn't sure which it was).
+const labelIncomeDocument = (doc) => {
+  if (!doc) return 'Income Proof (T4 / NOA)'; // generic — paired with "not on file"
+  const name = doc.file_name || '';
+  const yearMatch = name.match(/(?:19|20)\d{2}/);
+  const year = yearMatch ? ` (${yearMatch[0]})` : '';
+  if (/t4/i.test(name)) return `T4${year}`;
+  if (doc.classification === 'noa' || /noa|notice.?of.?assessment/i.test(name)) return `Notice of Assessment${year}`;
+  if (/t1|tax.?return/i.test(name)) return `Tax Return${year}`;
+  if (/pay.?stub|paystub/i.test(name)) return 'Pay Stub';
+  if (/employment.?letter/i.test(name)) return 'Employment Letter';
+  return 'Proof of Income';
+};
+
+// Deterministic lender-package document checklist (FRANCO Scenario-2 Round-9).
+// The checklist is structured data, not prose — building it in JS removes LLM
+// discretion that (a) dropped the PEP row entirely though the PEP form was on
+// file (Bug 3) and (b) used a generic income label (Bug 2). Every required row
+// is ALWAYS rendered with an accurate received/not-on-file status derived from
+// document classifications. Mirrors the prior section-9 required set so the
+// package is unchanged except for these two correctness fixes.
+const buildLenderPackageChecklist = (documents = []) => {
+  const docs = Array.isArray(documents) ? documents : [];
+  const find = (classes) => docs.find((d) => classes.includes(d && d.classification));
+  // Income row: prefer a T4 when one is on file, else any income proof, else NOA.
+  const incomeDoc =
+    docs.find((d) => d && d.classification === 'income_proof' && /t4/i.test(d.file_name || '')) ||
+    find(['income_proof', 'noa']);
+  const rows = [
+    ['Loan Application', find(['loan_application'])],
+    ['Credit Bureau', find(['credit_report'])],
+    [labelIncomeDocument(incomeDoc), incomeDoc],
+    ['Appraisal', find(['appraisal'])],
+    ['PNW Statement', find(['pnw_statement'])],
+    ['Mortgage Payout Statement', find(['mortgage_statement', 'mortgage_balance_statement'])],
+    ['Property Tax Assessment', find(['property_tax'])],
+    ['Government ID', find(['government_id'])],
+    ['AML Form', find(['aml'])],
+    ['PEP Form', find(['pep'])],
+  ];
+  const items = rows
+    .map(([label, doc]) => `  <li>${label} — ${doc ? `✓ Received (${doc.file_name})` : '✗ Not on file'}</li>`)
+    .join('\n');
+  return `<h3>Document Checklist</h3>\n<ul>\n${items}\n</ul>\n<p>All documents are attached to this email as a zip file.</p>`;
+};
+
 const INITIAL_EMAIL_PROMPT = `You are Vienna, the lead underwriter at Private Mortgage Link. You write emails on Franco's behalf. You must write as Vienna — first person, concise, professional, and friendly. In your first email, briefly introduce yourself as the lead underwriter.
 
 You have TWO tasks. You must return BOTH in a single response using the exact format specified at the bottom.
@@ -3331,7 +3380,7 @@ Private Mortgage Link`,
     // his QA confirmed the expected canonical wording. Hardcoded per BBB Q5
     // precedent (consistent with Franco's name being hardcoded already).
     return `<p>${greeting}</p>
-<p>The file is now complete and ready for review. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>
+<p>The file is now complete and submitted. Please direct any further questions to Franco at franco@privatemortgagelink.com.</p>
 <p>Vienna<br>Private Mortgage Link</p>`;
   },
 
@@ -3368,7 +3417,9 @@ Sections to include:
 6. Income Summary: income type, annual income figure, and the income documentation on file (e.g. T4 / Notice of Assessment), plus an employment-stability note.
 7. Credit Summary: credit scores if present in the summary; notable tradeline status and any derogatory items; a brief qualitative assessment. If specific scores are NOT in the data, state "Credit report on file" and summarize qualitatively — do NOT invent scores.
 8. Exit Strategy: the borrower's stated exit / repayment plan.
-9. Document Checklist: list the required documents with a received status. Required set: Loan Application, Credit Bureau, Income Proof (T4/NOA), Appraisal, PNW Statement, Mortgage Payout Statement, Property Tax Assessment, Government ID, AML Form, PEP Form. Mark each "✓ Received" if a matching document appears in DOCUMENTS ON FILE below, else "— not on file". Note that all documents are attached as a zip.
+
+Do NOT generate a Document Checklist section — the document checklist is appended
+deterministically after your output. End your response after the Exit Strategy section.
 
 Pull values ONLY from the deal summary and documents below. Do NOT invent figures — if a value isn't present, omit the row or note "not provided".
 
@@ -3437,7 +3488,10 @@ Return only the HTML email body.`;
         messages: [{ role: 'user', content: isCompletion ? completionContent : escalationContent }],
       });
 
-      return stripHtmlFence(response.content[0].text);
+      const body = stripHtmlFence(response.content[0].text);
+      // Completion mode: append the deterministic document checklist (Bug 2/3) so
+      // every required row is present and the income row reflects the actual doc.
+      return isCompletion ? `${body}\n${buildLenderPackageChecklist(documents)}` : body;
     } catch (error) {
       console.error(`Claude ${mode} notification error:`, error);
       throw error;
@@ -3864,6 +3918,9 @@ Classification guidance:
     exit_strategy: 'Exit Strategy',
     other: 'Other',
   },
+
+  // Exposed for deterministic-checklist verification (FRANCO Scenario-2 Round-9 Bug 2/3).
+  buildLenderPackageChecklist,
 
   // Generate comprehensive lead summary for Franco — reads all documents + deal data
   generateLeadSummary: async (dealSummary, ownershipType, documents, missingDocs, messages = [], opts = {}) => {
