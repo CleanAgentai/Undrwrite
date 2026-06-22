@@ -41,6 +41,10 @@ One markdown file per scenario. Real test documents live on the Desktop under
 | 7 | Identity clash missed when borrower name is split AcroForm annotations | derive name from the borrower's personal email in the doc | `6fe17e0` |
 | 8 | PNW → Mortgage-Balance false mismatch on **deployed** (annotations defeat the form-like guard) | positive `pnw_statement` content rule | `fe1d778` |
 | 9 | Conditions flow never stamped `prelim_approved_at` → auto-handoff never fires | stamp `prelim_approved_at` on conditions-send | `55e2aa5` |
+| 10 | Reminder/handoff emails leaked a literal ` ```html ` markdown fence into the sent body | shared `stripHtmlFence()` at all 11 HTML-email return sites | `73f395d` |
+| 11 | S2 broker handoff said "complete and **ready for review**" (implies still-pending) | deterministic template → "complete and **submitted**" | `85ea4cc` |
+| 12 | S2 lender-package checklist labeled income generically "T4 / NOA" + **dropped the PEP row** though on file | document checklist now **JS-deterministic** (`buildLenderPackageChecklist`) — all rows always present, income labeled by actual doc ("T4 (2025)") | `85ea4cc` |
+| 13 | S2 **feature** — "ready to close" lender package was a thin fact-sheet vs the rich prelim review | completion now sends the rich prelim format (`generateLeadSummary` `lenderPackage` mode: Sections 1-8 + Collateral/Risk/Rating, internal Section 10 omitted, deterministic checklist appended) via `buildCompletionLenderPackage` | `b32774d` |
 
 Corpus sweep: `scripts/scenario-corpus-classify.js` (all 14 folders, 0 real mismatches).
 Multi-scenario deployed harness: `scripts/replay-scenarios-2to15.js <id>`.
