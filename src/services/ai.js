@@ -3953,7 +3953,15 @@ Classification guidance:
     //   (loan_application + PNW + credit_bureau cite Scotiabank historically;
     //   RBC_Payout_Statement is authoritative for current lender = RBC).
     //   See computeCanonicalLenderForReview in webhook.js for resolver shape.
-    const { noSnapshot = false, canonicalLtvOverride = null, canonicalLenderOverride = null, canonicalCorrectionsOverride = null, multiPartyQualificationOverride = null } = opts;
+    // FRANCO Scenario-2 (2026-06-22): lenderPackage mode reuses this rich generator
+    // for the file-completion "ready to close" lender submission package — same
+    // detailed Sections 1-8 (Snapshot, Borrower, Purpose, Exit, Collateral &
+    // Valuation, Financial Snapshot, Risk Factors & Mitigants, Deal Rating) Franco
+    // forwards to lenders at prelim, but OMITS the internal Section 10 (Email
+    // Conversation + Action Required) and appends the deterministic Document
+    // Checklist (buildLenderPackageChecklist). Franco asked for the prelim's depth
+    // to be what's sent at close instead of the thinner fact-sheet.
+    const { noSnapshot = false, lenderPackage = false, canonicalLtvOverride = null, canonicalLenderOverride = null, canonicalCorrectionsOverride = null, multiPartyQualificationOverride = null } = opts;
     try {
       // Build document text sections from extracted data. Compliance docs (AML/PEP)
       // excluded from the substantive narrative context — same source-classification
@@ -4193,7 +4201,7 @@ WEAK BUT WORKABLE: Multiple risk factors (high LTV 80%+, poor credit, little inc
 
 Explain your rating in 2-3 sentences.
 
-=== SECTION 9: DOCUMENTS INCLUDED ===
+${lenderPackage ? '' : `=== SECTION 9: DOCUMENTS INCLUDED ===
 A checklist showing what has been received and what is missing:
 ${receivedFiles.map(f => `- [RECEIVED] ${f}`).join('\n')}
 ${missingDocs.map(d => `- [MISSING] ${module.exports.DOC_DISPLAY_NAMES[d] || d}`).join('\n')}
@@ -4229,7 +4237,7 @@ At the bottom, include this action section (the heading must carry the internal 
 <ul>
 <li><strong>APPROVED</strong> — preliminary approval granted, Vienna will request remaining documents from the broker</li>
 <li><strong>DECLINE</strong> — file rejected, Vienna will send a polite rejection to the broker</li>
-</ul>
+</ul>`}
 
 === INPUT DATA ===
 
@@ -4251,13 +4259,17 @@ ${messages.length > 0 ? messages.map(m => `[${m.senderLabel || (m.direction === 
 - Use underwriting language, not marketing language
 - Be thorough but scannable — a lender should understand the deal from this summary alone
 - This is an ADMIN-INTERNAL underwriting document for Franco, NOT a broker-facing email. Do NOT include any closing sign-off, "Looking forward to hearing from you" (or similar) language, or a "Vienna / Private Mortgage Link" signature. The document ends after the Email Conversation / Action Required sections — there is NO sign-off.
-- ${!isComplete ? 'Start the summary with a clear banner: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"' : 'Start the summary with: "FILE STATUS: COMPLETE — Ready for Review"'}
+- ${lenderPackage ? 'Start the summary with: "FILE STATUS: COMPLETE — Ready to Close". This is a lender-forwardable submission package — produce Sections 1 through 8 (Deal Snapshot through Deal Rating) only. Do NOT write a "Documents Included" / document checklist section, any "internal — do not forward" separator, an Email Conversation section, or an Action Required / APPROVED / DECLINE block — those are appended or omitted automatically. End your output after the Deal Rating section.' : (!isComplete ? 'Start the summary with a clear banner: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"' : 'Start the summary with: "FILE STATUS: COMPLETE — Ready for Review"')}
 
 Return only the HTML. Do not include a subject line.`,
         }],
       });
 
-      return stripHtmlFence(response.content[0].text);
+      const summary = stripHtmlFence(response.content[0].text);
+      // lenderPackage: append the deterministic Document Checklist (Bug 2/3) so the
+      // ready-to-close package lists every required doc with its true status and the
+      // income row labeled by the actual doc — same guarantee as the prior package.
+      return lenderPackage ? `${summary}\n${buildLenderPackageChecklist(documents)}` : summary;
     } catch (error) {
       console.error('Claude lead summary error:', error);
       throw error;

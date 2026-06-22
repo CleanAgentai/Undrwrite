@@ -1755,6 +1755,75 @@ const sendAdminMaterialCorrectionNotice = async (deal, changes, summary) => {
 //     observes 2-message admin handshake + auto-sent closing with canonical
 //     fixed-template language; NO Closing Draft Preview, NO SEND gate,
 //     status='completed' atomic.
+// FRANCO Scenario-2 (2026-06-22): at file completion, send Franco the SAME rich,
+// lender-forwardable underwriting summary he gets at preliminary review — the
+// detailed Sections 1-8 (Deal Snapshot, Borrower Overview, Loan Purpose, Exit
+// Strategy, Collateral & Valuation, Financial Snapshot, Risk Factors & Mitigants,
+// Deal Rating) plus the deterministic Document Checklist — instead of the thinner
+// fact-sheet generateEscalationNotification('completion') produced. Franco's ask:
+// "switch the two so the detailed prelim version is what's sent as the ready-to-
+// close lender submission package." generateLeadSummary in lenderPackage mode
+// omits the internal Section 10 (Email Conversation + Action Required).
+//
+// Accuracy: mirrors the prelim's canonical LTV / lender / corrections overrides
+// (computed from the same filtered canonical_map) so the load-bearing lender-
+// facing figures stay JS-authoritative — never an LLM-drifted LTV in a doc that
+// goes to a lender. The heavier Snapshot-injection + qualification-roster
+// machinery (FRANCO-Q3/Q4/Q5/Q11) from sendPreliminaryReviewToAdmin is NOT
+// replicated: the file is already approved, and the LLM renders Section 1 from the
+// complete canonical dealSummary with the LTV/lender override blocks constraining
+// the figures. If a multi-party/corporate completion package later needs the full
+// Snapshot roster, lift this to a shared helper with the prelim.
+const buildCompletionLenderPackage = async (deal, dealSummary, dealDocs, dealMessages) => {
+  const brokerName = dealSummary?.broker_name || dealSummary?.sender_name || deal.borrower_name;
+  const labeledMessages = labelMessagesForLeadSummary(dealMessages || [], brokerName);
+  const ownershipType = deal.ownership_type || dealSummary?.ownership_type || null;
+
+  const _inbound = (dealMessages || []).filter(m => m.direction === 'inbound');
+  const _aggBorrowerName = dealSummary?.borrower_name || deal.borrower_name || null;
+  const _detect = dEngine.runDiscrepancyDetectionAggregated(
+    _inbound,
+    (dealDocs || []).map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
+    _aggBorrowerName,
+    { emailSubject: _inbound[0]?.subject || '' }
+  );
+  const _filteredMap = dEngine.filterCanonicalMortgagePositionForObjectiveAuthoritative(
+    dEngine.filterCanonicalPurposeForBrokerAuthoritative(
+      dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+        dEngine.filterCanonicalLenderForPayoutOnly(_detect.canonical_map)
+      )
+    )
+  );
+  const _ltvOverride = computeCanonicalLtvForReview(_filteredMap);
+  const _lenderOverride = computeCanonicalLenderForReview(_filteredMap);
+  const _loanAmount = cFields.resolveCanonicalIntentValue(_filteredMap, 'requested_loan_amount');
+  const _purpose = cFields.resolveCanonicalIntentValue(_filteredMap, 'purpose');
+  const _isBrokerAmount = _loanAmount && (_loanAmount.source === 'broker_correction' || _loanAmount.source === 'broker_initial_intent');
+  const _isBrokerPurpose = _purpose && (_purpose.source === 'broker_correction' || _purpose.source === 'broker_initial_intent');
+  const _corrections = (_isBrokerAmount || _isBrokerPurpose)
+    ? { loanAmount: _isBrokerAmount ? _loanAmount : null, purpose: _isBrokerPurpose ? _purpose : null }
+    : null;
+  const _sanitizedDocs = cFields.sanitizeLoanAppDocTextForLLM(dealDocs || [], _detect.canonical_map);
+
+  let pkg = await aiService.generateLeadSummary(
+    dealSummary,
+    ownershipType,
+    _sanitizedDocs,
+    [], // complete file — no missing intake docs
+    labeledMessages,
+    {
+      lenderPackage: true,
+      canonicalLtvOverride: _ltvOverride,
+      canonicalLenderOverride: _lenderOverride,
+      canonicalCorrectionsOverride: _corrections,
+    }
+  );
+  // Strip any broker-style closing the LLM may append (mirrors the prelim's
+  // THOMAS-BERGQVIST Bug 3 sweep) — this package is forwardable, not a broker email.
+  const _sweep = aiService.stripAdminClosing(pkg);
+  return _sweep.swept;
+};
+
 const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, brokerInboundEmail, { conditionsFulfilled = false } = {}) => {
   const borrowerName = dealSummary?.borrower_name || deal.borrower_name;
 
@@ -1841,7 +1910,7 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   // it). NON-BLOCKING: a generation failure must NOT block the completion handoff (R9-A discipline).
   let _r11LenderPackage = '';
   try {
-    const _pkg = await aiService.generateEscalationNotification(dealSummary, dealMessages || [], dealDocs || [], { mode: 'completion' });
+    const _pkg = await buildCompletionLenderPackage(deal, dealSummary, dealDocs, dealMessages);
     if (_pkg && typeof _pkg === 'string' && _pkg.trim()) {
       _r11LenderPackage = `\n<hr>\n<p><strong>Lender Submission Package</strong> — copy and paste below for forwarding:</p>\n${_pkg}`;
     }
