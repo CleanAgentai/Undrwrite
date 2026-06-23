@@ -25,7 +25,15 @@ const isEscalation = (m) => /ESCALAT|LTV|>80|COLLATERAL|HIGH.?LTV/i.test(m.Subje
 let failures = 0;
 const check = (name, cond, detail) => { if (cond) console.log(`  ✓ ${name}`); else { failures++; console.log(`  ✗ ${name}${detail ? '\n      ' + String(detail).slice(0, 300) : ''}`); } };
 
-const waitStable = async (dealId, label, expect, maxMs = 200000) => {
+// stableMs = how long to wait with NO new outbound before giving up (the "nothing
+// more is coming" fallback). Default 90s. The completion handoff needs a larger
+// value: at file completion Vienna now generates the RICH lender submission package
+// (generateLeadSummary lenderPackage mode — full underwriting write-up, ~45s) on the
+// same async webhook turn before the [File Complete] admin notice + broker closing,
+// so the completion outbounds land ~120-130s after the broker's AML/PEP fulfilment
+// (vs ~65s with the prior thin fact-sheet). The webhook acks Postmark immediately
+// (process-after-ack) so this is latency, not a timeout/duplicate risk.
+const waitStable = async (dealId, label, expect, maxMs = 240000, stableMs = 90000) => {
   const start = Date.now(); let last = -1, lastChange = Date.now(), out = [];
   while (Date.now() - start < maxMs) {
     await sleep(5000);
@@ -33,7 +41,7 @@ const waitStable = async (dealId, label, expect, maxMs = 200000) => {
     if (out.length !== last) { last = out.length; lastChange = Date.now(); console.log(`    [${label}] outbound → ${last} @ ${((Date.now() - start) / 1000).toFixed(0)}s : [${out.map(m => (m.Subject || '').slice(0, 38)).join(' | ')}]`); }
     const stableFor = Date.now() - lastChange;
     if (last >= (expect || 1) && stableFor >= 30000) break;
-    if (last >= 1 && stableFor >= 90000) break;
+    if (last >= 1 && stableFor >= stableMs) break;
   }
   return out;
 };
@@ -323,7 +331,9 @@ const SCENARIOS = {
           console.log('\n--- BROKER FULFILS CONDITIONS (AML + PEP) ---');
           const cmid = lastMidOf(finalOut, m => !isPrelim(m) && !/ACTION REQUIRED|DRAFT|for review/i.test(m.Subject || '')) || lastMidOf(finalOut);
           await postToWebhook({ From: from, FromName: cfg.fromName, FromFull: { Email: from, Name: cfg.fromName }, To: TO, Subject: `Re: ${cfg.subject}`, TextBody: cfg.conditionTurn.body, HtmlBody: null, MessageID: `s${id}-${ts}-cond@test`, Date: new Date().toISOString(), Headers: cmid ? [{ Name: 'In-Reply-To', Value: `<${cmid}>` }, { Name: 'References', Value: `<${cmid}>` }] : [], Attachments: (cfg.conditionTurn.docs || []).map(d => att(cfg.dir, d)) });
-          const out4 = await waitStable(deal.id, 'handoff', finalOut.length + 1);
+          // 160s settle: completion now generates the rich lender package (~45s) before
+          // the [File Complete] notice + broker closing land (~120-130s post-fulfilment).
+          const out4 = await waitStable(deal.id, 'handoff', finalOut.length + 1, 240000, 160000);
           const stH = await dealState(deal.id);
           const handoffMsgs = out4.slice(finalOut.length);
           const handoff = handoffMsgs.map(m => strip(m.TextBody)).join(' ');
