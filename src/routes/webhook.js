@@ -18,6 +18,7 @@ const {
 } = require('../lib/dealType');
 const config = require('../config');
 const mailer = require('../lib/mailer');
+const TH = require('../config/thresholds');
 const resendInbound = require('../lib/resendInbound');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
@@ -108,7 +109,7 @@ const shouldSkipIntakeFormsForDeferredState = (dealSummary, canonicalHighLtv) =>
   // to the LLM value only when the caller hasn't threaded the canonical signal.
   if (canonicalHighLtv !== undefined) return !!canonicalHighLtv;
   const ltv = dealSummary.ltv_percent;
-  return !!(ltv && ltv > 80);
+  return !!(ltv && ltv > TH.LTV_ESCALATION_PCT);
 };
 
 // Group EEEE (S12.2): compute the intake_asked_items snapshot at intake time.
@@ -138,7 +139,7 @@ const computeIntakeAskedItems = (dealSummary, classificationsOnFile = [], canoni
   // (caller-computed), not dealSummary.ltv_percent (LLM additive-for-refi).
   const isHighLtv = (canonicalHighLtv !== undefined)
     ? !!canonicalHighLtv
-    : !!(dealSummary?.ltv_percent && dealSummary.ltv_percent > 80);
+    : !!(dealSummary?.ltv_percent && dealSummary.ltv_percent > TH.LTV_ESCALATION_PCT);
   if (isHighLtv) return null;
   // Broker-path, non-deferred-intake: compute the snapshot.
   const intakeBase = intakeRequiredFor(isPurchaseFromSummary(dealSummary));
@@ -447,7 +448,7 @@ const computeWillReview = ({ deal, summary, classifications, identityClashUnreso
   const hasReviewableDoc = ['income_proof', 'noa', 'appraisal'].some(c => (classifications || []).includes(c));
   const hasExitStrategy = !!(summary?.exit_strategy && String(summary.exit_strategy).trim());
   return !!(
-    ltv && ltv <= 80
+    ltv && ltv <= TH.LTV_ESCALATION_PCT
     && deal?.status === 'active'
     && hasReviewableDoc
     && hasExitStrategy
@@ -503,7 +504,7 @@ const computeStillMissingForReview = ({ deal, summary, classifications, identity
   // refi). Fallback to LLM only when canonical signal not threaded.
   const isHighLtv = (highLtv !== undefined)
     ? !!highLtv
-    : !!(summary?.ltv_percent && summary.ltv_percent > 80);
+    : !!(summary?.ltv_percent && summary.ltv_percent > TH.LTV_ESCALATION_PCT);
   if (isHighLtv) return [];
 
   // Round-9 (Katherine Morrison, 2026-06-11): use the SAME authoritative missing-items
@@ -1037,7 +1038,7 @@ const textToHtml = (text) => {
 // an already-escalated deal.
 const sendEscalationToAdmin = async (deal, dealSummary, ltv, options = {}) => {
   // LTV > 80% — escalate to Franco for approval
-  console.log(`LTV ${ltv}% > 80 — escalating to admin for approval${options.isUpdate ? ' (updated)' : ''}`);
+  console.log(`LTV ${ltv}% > ${TH.LTV_ESCALATION_PCT} — escalating to admin for approval${options.isUpdate ? ' (updated)' : ''}`);
   const dealMessages = await dealsService.getMessages(deal.id);
   const dealDocs = await dealsService.getDocumentsWithText(deal.id);
   // Group DDDD (S6.2): pre-label admin replies so the escalation log doesn't
@@ -1286,7 +1287,7 @@ const computeCanonicalLenderForReview = (canonicalMap) => {
 
 const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, ltv, options = {}) => {
   // LTV ≤ 80% confirmed — send Franco preliminary review with docs
-  console.log(`LTV ${ltv}% <= 80 — sending preliminary review to Franco${options.isUpdate ? ' (updated)' : ''}`);
+  console.log(`LTV ${ltv}% <= ${TH.LTV_ESCALATION_PCT} — sending preliminary review to Franco${options.isUpdate ? ' (updated)' : ''}`);
   const dealDocs = await dealsService.getDocumentsWithText(deal.id);
   const allDocsList = await dealsService.getDocumentsByDeal(deal.id);
   const classifications = allDocsList.map(d => d.classification).filter(Boolean);
@@ -3568,7 +3569,7 @@ No deal record was created. If this was a legitimate broker submission, please r
             });
           const _q2DeclineEmail = await aiService.generateRejectionEmail(
             dealSummary,
-            'the loan-to-value ratio exceeds our maximum threshold of 90%',
+            `the loan-to-value ratio exceeds our maximum threshold of ${TH.LTV_AUTO_DECLINE_PCT}%`,
             { greetingFirstName: _q2Greeting }
           );
           const _q2Subject = `Re: ${dealSummary?.borrower_name || 'Your mortgage inquiry'}`;
@@ -3578,7 +3579,7 @@ No deal record was created. If this was a legitimate broker submission, please r
           await emailService.sendEmail(
             config.adminEmail,
             `[Auto-Decline] LTV over 90% — ${dealSummary?.borrower_name || 'unnamed'}`,
-            `Vienna auto-declined a submission: ${_q2AutoDecline.basis} (canonical LTV; >90% threshold per Franco Q2).\n\nBorrower: ${dealSummary?.borrower_name || '(unknown)'}\nFrom: ${deal.email}\n\nStandalone LTV: ${_r1InitialStandaloneLtv ?? 'n/a'}%\nCombined LTV: ${_r1InitialCombinedLtv ?? 'n/a'}% (resolved=${dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap)})\n\nDeal ${deal.id} status set to rejected. If this LTV is incorrect, reply to the broker directly.\n\n(Automatic — FRANCO-Q2 >90% auto-decline gate.)`,
+            `Vienna auto-declined a submission: ${_q2AutoDecline.basis} (canonical LTV; >${TH.LTV_AUTO_DECLINE_PCT}% threshold per Franco Q2).\n\nBorrower: ${dealSummary?.borrower_name || '(unknown)'}\nFrom: ${deal.email}\n\nStandalone LTV: ${_r1InitialStandaloneLtv ?? 'n/a'}%\nCombined LTV: ${_r1InitialCombinedLtv ?? 'n/a'}% (resolved=${dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap)})\n\nDeal ${deal.id} status set to rejected. If this LTV is incorrect, reply to the broker directly.\n\n(Automatic — FRANCO-Q2 >90% auto-decline gate.)`,
             null, [], []
           );
         } else if (_r1InitialShouldEscalate || _bug4IncompleteCanonical) {
@@ -3588,14 +3589,14 @@ No deal record was created. If this was a legitimate broker submission, please r
           // combined > COMBINED_LTV_ESCALATION_THRESHOLD_PCT (NEW — captures
           // the dangerous-leverage case a 2nd mortgage with standalone ≤80 but
           // combined >80 was previously not flagging) OR BUG-4 canonical-incompleteness.
-          const _r1Reason = (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv > 80)
-            ? `standalone LTV ${_r1InitialStandaloneLtv}% > 80`
+          const _r1Reason = (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv > TH.LTV_ESCALATION_PCT)
+            ? `standalone LTV ${_r1InitialStandaloneLtv}% > ${TH.LTV_ESCALATION_PCT}`
             : _r1InitialShouldEscalate
               ? `combined LTV ${_r1InitialCombinedLtv}% > ${dEngine.COMBINED_LTV_ESCALATION_THRESHOLD_PCT} (standalone ${_r1InitialStandaloneLtv ?? 'null'}% under threshold)`
               : `BUG-4 canonical-incompleteness guard (mortgage_statement on file + loan present + combined-LTV null + payout unconfirmed → suspect-incomplete state, escalating for clarification rather than silent active)`;
           console.log(`Initial submission escalation gate triggered (Fix 7 + R4-RESIDUAL-1${_bug4IncompleteCanonical && !_r1InitialShouldEscalate ? ' + BUG-4' : ''}): ${_r1Reason} — entering awaiting_collateral state`);
           await dealsService.update(deal.id, { status: 'awaiting_collateral' });
-        } else if (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv <= 80 && initialHasReviewableDoc) {
+        } else if (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv <= TH.LTV_ESCALATION_PCT && initialHasReviewableDoc) {
           // R5-B-2 (2026-05-21): discrepancy-resolution gate at the initial-
           // submission trigger. Pre-B-2, Sandra Nathan (ffb4fa0c) + Sandra
           // Jennifer (112b619a) + Lena (8486bf8a) all fired premature
@@ -3613,7 +3614,7 @@ No deal record was created. If this was a legitimate broker submission, please r
             const _b2Clar = aiService.welcomeEmailIsAskingClarification(welcomeEmail || '');
             console.log(`B-2 (initial-submission): prelim held — discrepancy/clarification pending broker confirmation. structuredDiscrepancyCount=${_bBrokerFacing.length}, clarificationPending=${_b2Clar}, qqqq=${!!dealSummary?.unresolved_discrepancy}. Deal stays 'active'; broker reply still sent.`);
           } else {
-            console.log(`Initial submission canonical standalone LTV ${_r1InitialStandaloneLtv}% <= 80 with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
+            console.log(`Initial submission canonical standalone LTV ${_r1InitialStandaloneLtv}% <= ${TH.LTV_ESCALATION_PCT} with reviewable doc — sending preliminary review immediately (BBBB-relaxed: exit_strategy gap surfaces as [MISSING] in admin prelim, not a hold-gate; initialHasExitStrategy=${initialHasExitStrategy})`);
             // ownership_type is null on initial submission (only set later by generateBrokerResponse).
             // Fix 6 closed the display side: generateLeadSummary now renders "Ownership Type: TBD"
             // when null. The remaining (deferred) enhancement is to extract ownership_type directly
@@ -4552,7 +4553,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         const willFireCompletionHandoff = completionDispatch === 'completion-handoff';
         const willFirePreliminaryAllDocsIn = completionDispatch === 'preliminary-all-docs-in';
 
-        if (ltv && ltv <= 80 && !hasReviewableDoc) {
+        if (ltv && ltv <= TH.LTV_ESCALATION_PCT && !hasReviewableDoc) {
           console.log('LTV ≤ 80% but no reviewable docs yet (no income_proof/NOA/appraisal) — keeping Vienna conversational');
         }
 

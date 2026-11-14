@@ -23,6 +23,7 @@
 // the artifact-verified clean corpus.
 
 const cf = require('./canonical-fields');
+const TH = require('../config/thresholds');
 // S15-E lives in ai.js. Late-require to avoid circular import (ai.js doesn't yet
 // require discrepancy-engine in Commit 1; will in Commit 2 wiring).
 let _aiServiceForS15;
@@ -561,10 +562,10 @@ const computeStandaloneLtv = (canonicalMap) => {
 // shipped at conservative default (80%, matches standalone threshold).
 // Lender's call on the actual threshold — adjust after Franco's first
 // batch of combined-LTV-triggered escalations confirms or recalibrates.
-const COMBINED_LTV_ESCALATION_THRESHOLD_PCT = 80;
+const COMBINED_LTV_ESCALATION_THRESHOLD_PCT = TH.LTV_ESCALATION_PCT;
 
 const shouldEscalateOnAnyLtv = ({ standaloneLtv, combinedLtv, standaloneThreshold, combinedThreshold } = {}) => {
-  const stdT = (standaloneThreshold !== undefined && standaloneThreshold !== null) ? standaloneThreshold : 80;
+  const stdT = (standaloneThreshold !== undefined && standaloneThreshold !== null) ? standaloneThreshold : TH.LTV_ESCALATION_PCT;
   const cmbT = (combinedThreshold !== undefined && combinedThreshold !== null) ? combinedThreshold : COMBINED_LTV_ESCALATION_THRESHOLD_PCT;
   const stdHit = Number.isFinite(standaloneLtv) && standaloneLtv > stdT;
   // Null combined → fall back to standalone-only (no over-fire on clean
@@ -603,7 +604,7 @@ const shouldEscalateOnIncompleteCanonical = ({ hasMortgageStatement = false, com
 // RESOLVED — otherwise the provisional additive combined of an UNCONFIRMED
 // refinance (e.g. A14's 103%) would wrongly auto-decline a deal that should first
 // escalate for payout clarification (Q1). isCombinedLtvResolved gates that.
-const AUTO_DECLINE_LTV_THRESHOLD_PCT = 90;
+const AUTO_DECLINE_LTV_THRESHOLD_PCT = TH.LTV_AUTO_DECLINE_PCT;
 
 // Combined LTV is "resolved" (trustworthy as true leverage) when payout status is
 // settled: carve-out fired (payoutConfirmed refinance → combined==standalone), OR
@@ -667,8 +668,8 @@ const computeLtvBand = ({ standaloneLtv, combinedLtv } = {}) => {
     stdFinite ? standaloneLtv : -Infinity,
     cmbFinite ? combinedLtv : -Infinity,
   );
-  if (effective > 80) return 'over_80';
-  if (effective >= 75) return 'elevated_75_80';
+  if (effective > TH.LTV_ESCALATION_PCT) return 'over_80';
+  if (effective >= TH.LTV_ELEVATED_BAND_PCT) return 'elevated_75_80';
   return 'standard';
 };
 
