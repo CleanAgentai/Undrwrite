@@ -15,7 +15,7 @@ const { computeMissingIntakeItems } = require('../src/lib/dealType');
 const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const strip = (h) => (h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-const DIR = '/Users/porterstanley/Desktop/UndrWrite Testing/Scenario 1 docs';
+const DIR = (process.env.SCENARIO_DOCS_ROOT || '/Users/porterstanley/Desktop/ServiceAgent/UndrWrite Testing') + '/Scenario 1 docs';
 const att = (name) => ({ Name: name, ContentType: 'application/pdf', Content: fs.readFileSync(`${DIR}/${name}`).toString('base64') });
 
 const INITIAL = ['LoanApplication_Katherine_Morrison.pdf','PNW_Statement_Katherine_Morrison.pdf','T4_Katherine_Morrison_2025.pdf','Appraisal_142_Sage_Meadows_Circle_NW_Calgary.pdf','Credit_Bureau_Katherine_Morrison.pdf'];

@@ -12,7 +12,7 @@ const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KE
 // Admin as deployed (testing: the Resend test sink). LIVE_ADMIN_EMAIL overrides.
 const ADMIN = process.env.LIVE_ADMIN_EMAIL || 'delivered+admin@resend.dev';
 const TO = 'info@privatemortgagelink.com';
-const ROOT = '/Users/porterstanley/Desktop/UndrWrite Testing';
+const ROOT = process.env.SCENARIO_DOCS_ROOT || '/Users/porterstanley/Desktop/ServiceAgent/UndrWrite Testing';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const strip = (h) => (h || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 // Franco regenerated 5 loan apps (2026-06-12) into "remaining docs/" — read those overrides
