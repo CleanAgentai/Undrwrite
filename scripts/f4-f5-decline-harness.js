@@ -12,7 +12,7 @@ const ok = (l, c) => { c ? pass++ : fail++; console.log(`  ${c ? 'PASS' : 'FAIL'
 const welcomeIdx = wh.indexOf("// Send the AI-generated response with forms attached");
 const f4Idx = wh.indexOf('const _f4WillAutoDecline');
 ok('F4: auto-decline decision computed before the welcome send', f4Idx > 0 && f4Idx < welcomeIdx);
-ok('F4: welcome send is skipped when the deal will auto-decline', /if \(_f4WillAutoDecline\) \{[\s\S]{0,200}\} else emailService\.sendEmailDelayed\(/.test(wh));
+ok('F4: welcome send is skipped when the deal will auto-decline', /if \(_f4WillAutoDecline\) \{[\s\S]{0,200}\} else \{\s*welcomeQueued = true;\s*emailService\.sendEmailDelayed\(/.test(wh));
 ok('F4: identity clash still takes precedence over Q2', /_f4WillAutoDecline = !dealSummary\?\.identity_clash && dEngine\.shouldAutoDeclineOver90/.test(wh));
 ok('F5: Q2 decline (sendAutoDecline) is swept', /const declineHtml = sweepBrokerFacing\(await aiService\.generateRejectionEmail/.test(wh));
 ok('F5: Q7 decline is swept', /_q7DeclineEmail = sweepBrokerFacing\(await aiService\.generateRejectionEmail/.test(wh));
