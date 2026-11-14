@@ -691,12 +691,23 @@ const isIdentityClashByAbsence = (emailSubject, emailBody, savedDocs) => {
     // `{ extracted_data: { text } }` (webhook savedDocs shape — original S15-E
     // contract) OR `{ text }` (corpus pilot + canonical-fields adapter shape).
     const _docText = sd?.extracted_data?.text || sd?.text || '';
-    const docName = extractBorrowerFromDocText(_docText) || extractBorrowerNameFromPersonalEmail(_docText);
+    const labelledName = extractBorrowerFromDocText(_docText);
+    const docName = labelledName || extractBorrowerNameFromPersonalEmail(_docText);
     if (!docName) continue;
     const tokens = tokenizeNameForCompare(docName);
     if (tokens.length < 2) continue; // single-token doc names too ambiguous
     const firstPresent = brokerContent.includes(tokens[0]);
     const lastPresent = brokerContent.includes(tokens[tokens.length - 1]);
+    if (!labelledName) {
+      // Name read from an email address (Round-9 Bug 7) is weak evidence: local parts
+      // are often initial+surname or carry tags ("mchen.yyc@" → "Mchen Yyc"). Only a clash
+      // when NO part relates to a name the broker wrote — a token present, or a token that
+      // contains / is contained in a broker word of 3+ letters ("mchen" ⊃ "chen").
+      const brokerWords = brokerContent.split(/[^a-z'-]+/).filter(w => w.length >= 3);
+      const related = (t) => brokerContent.includes(t) || brokerWords.some(w => t.includes(w) || (t.length >= 3 && w.includes(t)));
+      if (tokens.some(related)) continue;
+      return { docName, docFile: sd.file_name, missingTokens: { firstPresent, lastPresent }, source: 'personal_email' };
+    }
     if (!firstPresent || !lastPresent) {
       return { docName, docFile: sd.file_name, missingTokens: { firstPresent, lastPresent } };
     }
