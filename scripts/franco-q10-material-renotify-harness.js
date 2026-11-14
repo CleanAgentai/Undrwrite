@@ -46,8 +46,10 @@ ok('v2 flow: prelim-parsed prior 260k vs current 295k → change', q10DetectMate
 
 console.log('\n[4] source invariants (v2)');
 const wh = fs.readFileSync(fs.existsSync('src/routes/webhook.js') ? 'src/routes/webhook.js' : '../src/routes/webhook.js', 'utf8');
-ok('prior derived from prelim outbound (q10ParsePriorFromPrelim)', /_q10LastPrelim\s*\?\s*q10ParsePriorFromPrelim\(_q10LastPrelim\.body\)/.test(wh));
-ok('re-notify hooked in text-only-noop branch', /text-only-noop[\s\S]{0,2600}q10DetectMaterialChanges\(_q10Prior, reviewResult\.updatedSummary\)/.test(wh));
+// F9 (2026-11-14): prior = prelim fact snapshot, with q10ParsePriorFromPrelim as the fallback
+// for prelims sent before snapshots existed; current = code-built thread facts.
+ok('prior = prelim snapshot, prelim-HTML parse as fallback (F9)', /const q10PriorFacts = async[\s\S]{0,400}trigger === 'prelim'[\s\S]{0,300}q10ParsePriorFromPrelim\(lastPrelim\.body\)/.test(wh));
+ok('re-notify hooked in text-only-noop branch (F9: thread facts)', /text-only-noop[\s\S]{0,3200}q10DetectMaterialChanges\(_q10Prior, _q10Now\?\.facts\)/.test(wh));
 ok('audit trail (_q10_admin_renotified_at + fields)', /_q10_admin_renotified_at/.test(wh) && /_q10_renotified_fields/.test(wh));
 ok('sendAdminMaterialCorrectionNotice helper exists', /const sendAdminMaterialCorrectionNotice = async/.test(wh));
 ok('delta-only notice (not full Snapshot re-render)', /Delta only; the full prelim Snapshot is not re-sent/.test(wh));

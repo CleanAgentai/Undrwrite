@@ -1642,6 +1642,7 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     reviewAttachments
   );
   await dealsService.saveMessage(deal.id, 'outbound', subject, enforcedLeadSummary, reviewResult.MessageID);
+  await recordFactSnapshot(deal, 'prelim'); // P1/F9: the facts the admin reviewed
   await dealsService.update(deal.id, { status: 'under_review' });
   // FRANCO-Q10 v2: prior material figures are derived from THIS prelim's persisted
   // outbound at correction time (q10ParsePriorFromPrelim) — no clobber-prone snapshot.
@@ -2195,6 +2196,63 @@ const isIgnoredSender = (from, entries) => {
 // F6: subjects of Vienna's own admin alerts (any number of Re:/Fwd: prefixes).
 const SYSTEM_ALERT_SUBJECT_RE = /^\s*((re|fwd?)\s*:\s*)*\[(Intake Filter|Out of Scope|Potential Duplicate|Auto-Decline|Admin-controlled deal|On hold — awaiting collateral|Stalled|LTV over \d+% after approval)\]/i;
 const isReplyToSystemAlert = (subject) => SYSTEM_ALERT_SUBJECT_RE.test(subject || '') || /^\s*((re|fwd?)\s*:\s*)*(New-client dispatch failed|Referral dispatch failed)\b/i.test(subject || '');
+
+// P1: the deal's structured facts, rebuilt from the whole thread (every inbound email,
+// newest wins, plus all documents) with the same source filters the prelim uses.
+// `facts` is the compact form keyed like Q10_MATERIAL_FIELDS, so it can be diffed.
+const buildThreadFacts = async (deal) => {
+  const inbound = (await dealsService.getMessages(deal.id)).filter(m => m.direction === 'inbound');
+  const docs = await dealsService.getDocumentsWithText(deal.id);
+  const raw = dEngine.extractCanonicalFieldsAggregated(
+    inbound,
+    docs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
+    { emailSubject: inbound[0]?.subject || '' }
+  );
+  const map = dEngine.filterCanonicalMortgagePositionForObjectiveAuthoritative(
+    dEngine.filterCanonicalPurposeForBrokerAuthoritative(
+      dEngine.filterCanonicalLoanAmountForDocAuthoritative(
+        dEngine.filterCanonicalLenderForPayoutOnly(raw)
+      )
+    )
+  );
+  const first = (f) => (map[f] || [])[0]?.value ?? null;
+  const postal = first('subject_property_postal_code');
+  const addr = first('subject_property_address');
+  const facts = {
+    loan_amount_requested: cFields.resolveCanonicalIntentValue(map, 'requested_loan_amount')?.value ?? first('requested_loan_amount'),
+    property_value: first('subject_property_market_value'),
+    existing_mortgage_balance: first('existing_first_mortgage_balance'),
+    // Property identity: normalized postal code when known (formatting-proof), else address.
+    property_address: postal ? String(postal).replace(/\s+/g, '').toUpperCase() : (addr ? String(typeof addr === 'object' ? (addr.street || JSON.stringify(addr)) : addr).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim() : null),
+    loan_type: [first('transaction_type'), first('mortgage_position')].filter(Boolean).join(' / ') || null,
+  };
+  return { map, facts };
+};
+
+// P1: record a snapshot; with onlyIfChanged, skip when the facts equal the latest one.
+const recordFactSnapshot = async (deal, trigger, { onlyIfChanged = false, threadFacts = null } = {}) => {
+  try {
+    const tf = threadFacts || await buildThreadFacts(deal);
+    if (onlyIfChanged) {
+      const last = (await dealsService.getFactSnapshots(deal.id)).pop();
+      if (last && JSON.stringify(last.facts) === JSON.stringify(tf.facts)) return tf;
+    }
+    await dealsService.saveFactSnapshot(deal.id, trigger, tf.facts, tf.map);
+    return tf;
+  } catch (err) {
+    console.error(`recordFactSnapshot(${trigger}) failed (continuing):`, err.message);
+    return null;
+  }
+};
+
+// F9: Q10 prior = the facts as of the last prelim (P1 snapshot). Deals whose prelim
+// predates snapshots fall back to parsing the prelim email (the old 3-field path).
+const q10PriorFacts = async (deal, messages) => {
+  const snap = (await dealsService.getFactSnapshots(deal.id)).filter(x => x.trigger === 'prelim').pop();
+  if (snap) return snap.facts;
+  const lastPrelim = [...(messages || [])].reverse().find(m => m.direction === 'outbound' && /PRELIMINARY Review/i.test(m.subject || ''));
+  return lastPrelim ? q10ParsePriorFromPrelim(lastPrelim.body) : null;
+};
 
 // Broker-facing cleanup applied to every model-written email before it goes out:
 // internal-routing phrasing and "Perfect"-style openers (Cluster E / R8-B).
@@ -3593,6 +3651,7 @@ No deal record was created. If this was a legitimate broker submission, please r
         });
 
         console.log('Welcome email sent, deal status: active');
+        await recordFactSnapshot(deal, 'intake'); // P1: facts as first received
 
         // Same HITL gate as the existing-deal `active` branch: if the broker submitted
         // an explicit LTV in the very first email, route Franco's escalation (>80%) or
@@ -4167,10 +4226,13 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // intentional exception to the C.1 zero-admin-emission invariant — scoped to
           // material underwriting changes per Franco's Q10 answer.
           // Prior material figures from the most-recent admin PRELIM outbound (immutable).
+          // F9: compare the code-built thread facts against the facts snapshotted when the
+          // prelim went out — all five material fields, no longer the model's summary vs
+          // three figures scraped from the prelim HTML.
           const _q10Msgs = await dealsService.getMessages(existingDeal.id);
-          const _q10LastPrelim = [..._q10Msgs].reverse().find(m => m.direction === 'outbound' && /PRELIMINARY Review/i.test(m.subject || ''));
-          const _q10Prior = _q10LastPrelim ? q10ParsePriorFromPrelim(_q10LastPrelim.body) : null;
-          const _q10Changes = q10DetectMaterialChanges(_q10Prior, reviewResult.updatedSummary);
+          const _q10Prior = await q10PriorFacts(existingDeal, _q10Msgs);
+          const _q10Now = await recordFactSnapshot(existingDeal, 'inbound', { onlyIfChanged: true });
+          const _q10Changes = q10DetectMaterialChanges(_q10Prior, _q10Now?.facts);
           if (_q10Changes.length > 0) {
             await sendAdminMaterialCorrectionNotice(existingDeal, _q10Changes, reviewResult.updatedSummary);
             const _q10At = new Date().toISOString();
@@ -4200,8 +4262,8 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // (material change + new docs) fire ONE [UPDATED] prelim reflecting both. The
           // Q10 delta-notice path (text-only-noop branch) is unaffected.
           const _pbMsgs = await dealsService.getMessages(existingDeal.id);
-          const _pbLastPrelim = [..._pbMsgs].reverse().find(m => m.direction === 'outbound' && /PRELIMINARY Review/i.test(m.subject || ''));
-          const _pbChanges = q10DetectMaterialChanges(_pbLastPrelim ? q10ParsePriorFromPrelim(_pbLastPrelim.body) : null, reviewResult.updatedSummary);
+          const _pbNow = await recordFactSnapshot(existingDeal, 'inbound', { onlyIfChanged: true });
+          const _pbChanges = q10DetectMaterialChanges(await q10PriorFacts(existingDeal, _pbMsgs), _pbNow?.facts); // F9
           if (_pbChanges.length > 0) {
             // Cluster D: pass the generated-but-NNN-suppressed reviewResult.responseEmail
             // so the gate can still detect a pending clarification ask even though the
@@ -4632,6 +4694,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           { emailSubject: _f3Inbound[0]?.subject || email.subject || '' }
         );
         const _f3Gates = evaluateFollowUpLtvGates({ deal: existingDeal, canonicalMap: _f3Map, fallbackStandaloneLtv: ltv, classifications: classificationsForGate });
+        await recordFactSnapshot(existingDeal, 'inbound', { onlyIfChanged: true }); // P1
         const willGoToCollateralCheck = shouldHoldForCollateral({
           ltvShouldEscalate: _r1ActiveLtvShouldEscalate || _f3Gates.incompleteEscalate, deal: existingDeal,
           collateralOffered: collateralAlreadyOffered, identityClashUnresolved,
@@ -4983,4 +5046,7 @@ module.exports.__test__ = {
   isIgnoredSender,
   // F7 (2026-11-14)
   requireInboundAuth,
+  // P1/F9 (2026-11-14)
+  buildThreadFacts,
+  q10DetectMaterialChanges,
 };

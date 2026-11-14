@@ -332,6 +332,24 @@ module.exports = {
   },
 
   // Find deal by outbound message ID (for thread matching via In-Reply-To)
+  // P1: append-only history of the deal's structured facts (the canonical map), stored as
+  // messages rows with direction 'system' (no schema change; every conversation query
+  // filters them out). body = JSON { trigger, facts, map }.
+  saveFactSnapshot: async (dealId, trigger, facts, map) => {
+    const { error } = await supabase.from('messages').insert({
+      deal_id: dealId, direction: 'system', subject: `[fact-snapshot] ${trigger}`,
+      body: JSON.stringify({ trigger, facts, map }),
+    });
+    if (error) console.error('saveFactSnapshot failed (continuing):', error.message);
+  },
+  getFactSnapshots: async (dealId) => {
+    const { data, error } = await supabase.from('messages').select('subject, body, created_at')
+      .eq('deal_id', dealId).eq('direction', 'system').like('subject', '[fact-snapshot]%')
+      .order('created_at', { ascending: true });
+    if (error) { console.error('getFactSnapshots failed:', error.message); return []; }
+    return (data || []).map(r => { try { return { ...JSON.parse(r.body), created_at: r.created_at }; } catch { return null; } }).filter(Boolean);
+  },
+
   // F7: has this inbound email (provider Message-ID / Resend email id) already been stored?
   inboundAlreadyProcessed: async (messageId) => {
     if (!messageId) return false;
@@ -375,6 +393,7 @@ module.exports = {
       .from('messages')
       .select('*')
       .eq('deal_id', dealId)
+      .neq('direction', 'system') // P1: fact snapshots are not conversation
       .order('created_at', { ascending: true });
 
     if (error) throw error;
@@ -697,6 +716,7 @@ module.exports = {
       .from('messages')
       .select('*, deals(borrower_name, email, status)')
       .gte('created_at', since)
+      .neq('direction', 'system')
       .order('created_at', { ascending: true });
 
     if (error) throw error;
