@@ -17,6 +17,8 @@ const {
   computeMissingIntakeItems,
 } = require('../lib/dealType');
 const config = require('../config');
+const mailer = require('../lib/mailer');
+const resendInbound = require('../lib/resendInbound');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
 const dealsService = require('../services/deals');
@@ -2000,7 +2002,7 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
   const allMessages = await dealsService.getMessages(deal.id);
   const brokerInputs = buildBrokerThreadInputs(allMessages);
   const chain = buildPreviewThreadChain(brokerInputs);
-  const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+  const formatThreadId = mailer.messageIdHeader;
   const brokerHeaders = [];
   if (brokerInputs.latestMessageId) {
     brokerHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(brokerInputs.latestMessageId) });
@@ -2130,7 +2132,7 @@ const decideReviewDispatch = (deal, reviewSummary, reviewClassifications, hasNew
 };
 
 // POST /webhook/inbound - receives incoming emails from Postmark
-router.post('/inbound', async (req, res) => {
+const handleInbound = async (req, res) => {
   // Respond immediately so Postmark doesn't retry
   res.status(200).json({ received: true });
 
@@ -2350,7 +2352,7 @@ ${draftEmail}
         // Group YYY (S5.3): anchor the References chain on Vienna's outbound IDs from
         // the DB. Pre-YYY only echoed admin's References, which fragmented when admin's
         // email client truncated/dropped the chain.
-        const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+        const formatThreadId = mailer.messageIdHeader;
         const threadHeaders = [];
         if (email.messageId) {
           const dealMessagesForThread = await dealsService.getMessages(existingDeal.id);
@@ -2429,7 +2431,7 @@ ${draftEmail}
           const brokerInputs = buildBrokerThreadInputs(allMessages);
           const chain = buildPreviewThreadChain(brokerInputs);
 
-          const formatThreadId = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+          const formatThreadId = mailer.messageIdHeader;
           const brokerHeaders = [];
           if (brokerInputs.latestMessageId) {
             brokerHeaders.push({ Name: 'In-Reply-To', Value: formatThreadId(brokerInputs.latestMessageId) });
@@ -4713,6 +4715,25 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
 
   } catch (error) {
     console.error('Webhook error:', error);
+  }
+};
+router.post('/inbound', handleInbound);
+
+// Resend inbound (EMAIL_PROVIDER=resend). Resend posts an `email.received` event;
+// resendInbound fetches body, attachments and threading headers and rebuilds the
+// Postmark-shaped payload, then the same handleInbound runs.
+router.post('/resend', async (req, res) => {
+  if (!resendInbound.verifySignature(req.rawBody || '', req.headers)) {
+    console.warn('Resend webhook: signature verification failed');
+    return res.status(401).json({ error: 'invalid signature' });
+  }
+  res.status(200).json({ received: true });
+  if (req.body?.type !== 'email.received') return;
+  try {
+    const payload = await resendInbound.toPostmarkPayload(req.body);
+    await handleInbound({ body: payload }, { status: () => ({ json: () => {} }) });
+  } catch (err) {
+    console.error('Resend inbound failed:', err);
   }
 });
 

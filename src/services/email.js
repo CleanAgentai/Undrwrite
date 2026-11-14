@@ -1,4 +1,4 @@
-const postmarkClient = require('../lib/postmark');
+const mailer = require('../lib/mailer');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
@@ -81,7 +81,7 @@ module.exports = {
       const scrubbedHtml = isAdmin ? htmlBody : stripAdminSignature(stripAdminGreeting(htmlBody));
       const scrubbedText = isAdmin ? textBody : stripAdminSignature(stripAdminGreeting(textBody));
       const emailData = {
-        From: config.postmark.senderEmail,
+        From: config.email.from,
         To: to,
         Subject: subject,
         TextBody: scrubbedText,
@@ -90,7 +90,7 @@ module.exports = {
       };
       if (headers.length > 0) emailData.Headers = headers;
       if (cc) emailData.Cc = cc;
-      const result = await postmarkClient.sendEmail(emailData);
+      const result = await mailer.send(emailData);
       console.log('Email sent:', result.MessageID);
       return result;
     } catch (error) {
@@ -110,7 +110,7 @@ module.exports = {
         const scrubbedHtml = isAdmin ? htmlBody : stripAdminSignature(stripAdminGreeting(htmlBody));
         const scrubbedText = isAdmin ? textBody : stripAdminSignature(stripAdminGreeting(textBody));
         const emailData = {
-          From: config.postmark.senderEmail,
+          From: config.email.from,
           To: to,
           Subject: subject,
           TextBody: scrubbedText,
@@ -118,7 +118,7 @@ module.exports = {
           Attachments: attachments,
         };
         if (headers.length > 0) emailData.Headers = headers;
-        const result = await postmarkClient.sendEmail(emailData);
+        const result = await mailer.send(emailData);
         console.log('Delayed email sent:', result.MessageID);
         if (onSent) await onSent(result);
       } catch (error) {

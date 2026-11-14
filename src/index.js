@@ -6,7 +6,8 @@ const { startCron: startDailySummaryCron } = require('./cron/dailySummary');
 const app = express();
 
 // JSON body parser with 50mb limit for attachment handling
-app.use(express.json({ limit: '50mb' }));
+// rawBody kept for webhook signature verification (Resend/svix).
+app.use(express.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody = buf.toString('utf8'); } }));
 
 // Request logging middleware
 app.use((req, res, next) => {

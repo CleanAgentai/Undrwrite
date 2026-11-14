@@ -1,5 +1,6 @@
 const cron = require('node-cron');
 const config = require('../config');
+const mailer = require('../lib/mailer');
 const dealsService = require('../services/deals');
 const emailService = require('../services/email');
 const aiService = require('../services/ai');
@@ -253,7 +254,7 @@ const runFollowUpReminders = async () => {
       // FINAL REVIEW dispatches, draft previews) excluded — broker's email
       // client never cached those MessageIDs, so referencing them silently
       // breaks threading.
-      const formatMessageId = (id) => (id.includes('@') ? `<${id}>` : `<${id}@mtasv.net>`);
+      const formatMessageId = mailer.messageIdHeader;
       const brokerFacingOutbounds = brokerFacingMessages.filter(m => m.direction === 'outbound' && m.external_message_id);
       const reminderHeaders = [];
       if (brokerFacingOutbounds.length > 0) {

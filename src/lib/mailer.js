@@ -1,0 +1,50 @@
+// Outbound email transport. Postmark-shaped in, Postmark-shaped out, so every
+// caller (services/email.js) is provider-agnostic:
+//   send({ From, To, Cc, Subject, TextBody, HtmlBody, Attachments, Headers }) → { MessageID }
+//
+// EMAIL_PROVIDER=postmark (default) — Postmark ServerClient, Message-IDs are <uuid@mtasv.net>.
+// EMAIL_PROVIDER=resend            — Resend REST API. Vienna sets its own Message-ID
+//   <uuid@MESSAGE_ID_DOMAIN> so broker replies thread back exactly as they do on Postmark
+//   (messages.external_message_id stores the bare uuid in both cases).
+const crypto = require('crypto');
+const config = require('../config');
+
+const provider = config.email.provider;
+
+// Bare stored id → RFC 5322 Message-ID for In-Reply-To / References headers.
+// Ids that already carry a domain (inbound Gmail/Outlook ids) pass through.
+const messageIdHeader = (id) => (id && id.includes('@') ? `<${id}>` : `<${id}@${config.email.messageIdDomain}>`);
+
+const sendViaPostmark = async (emailData) => {
+  const client = require('./postmark');
+  return client.sendEmail(emailData);
+};
+
+const sendViaResend = async ({ From, To, Cc, Subject, TextBody, HtmlBody, Attachments = [], Headers = [] }) => {
+  const uuid = crypto.randomUUID();
+  const headers = { 'Message-ID': messageIdHeader(uuid) };
+  for (const h of Headers || []) headers[h.Name] = h.Value;
+  const split = (v) => String(v).split(',').map(s => s.trim()).filter(Boolean);
+  const body = {
+    from: From,
+    to: split(To),
+    subject: Subject,
+    text: TextBody || undefined,
+    html: HtmlBody || undefined,
+    headers,
+    attachments: (Attachments || []).map(a => ({ filename: a.Name, content: a.Content, content_type: a.ContentType })),
+  };
+  if (Cc) body.cc = split(Cc);
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${config.resend.apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Resend send failed (${res.status}): ${json.message || JSON.stringify(json)}`);
+  return { MessageID: uuid, ProviderMessageID: json.id, To, SubmittedAt: new Date().toISOString() };
+};
+
+const send = (emailData) => (provider === 'resend' ? sendViaResend(emailData) : sendViaPostmark(emailData));
+
+module.exports = { send, messageIdHeader, provider };
