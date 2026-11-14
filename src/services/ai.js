@@ -4,6 +4,7 @@ const config = require('../config');
 const { isPurchaseFromSummary, intakeRequiredFor, isDocRequirementSatisfied, allIntakeReceived } = require('../lib/dealType');
 const { selectGreetingFirstName } = require('../lib/greeting');
 const { detectCorporateEntities } = require('./corporate-entities'); // FRANCO-Q5
+const TH = require('../config/thresholds'); // underwriting thresholds, also quoted in prompts
 
 // ──────────────────────────────────────────────────────────────────────────
 // Document source classification — compliance vs substantive (Sandra Whitfield,
@@ -222,13 +223,13 @@ LTV:
 - Do NOT calculate or confirm LTV in the initial email — the accurate LTV will be confirmed once we review the appraisal.
 - If the broker mentions an LTV figure in their email, acknowledge it as preliminary: e.g., "You've noted approximately 50% LTV — we'll confirm the exact figure once we review the appraisal."
 - LTV is based on the APPRAISED VALUE of the property, NOT the application form. Never say "we'll confirm once we review the application."
-- Do NOT state our LTV limit (80%) unless the broker specifically asks about it OR the deal is over 80%.
+- Do NOT state our LTV limit (${TH.LTV_ESCALATION_PCT}%) unless the broker specifically asks about it OR the deal is over ${TH.LTV_ESCALATION_PCT}%.
 
-HIGH LTV (over 80%) — when the broker has stated an LTV above 80%, OR when our calculation shows above 80%:
-- Acknowledge directly that the LTV is outside our usual 80% threshold.
+HIGH LTV (over ${TH.LTV_ESCALATION_PCT}%) — when the broker has stated an LTV above ${TH.LTV_ESCALATION_PCT}%, OR when our calculation shows above ${TH.LTV_ESCALATION_PCT}%:
+- Acknowledge directly that the LTV is outside our usual ${TH.LTV_ESCALATION_PCT}% threshold.
 - Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
 - Do NOT reject the deal. Do NOT promise it will be approved either. Just flag the threshold and ask about collateral options. Our underwriting team will make the final call.
-- CRITICAL — DO NOT REQUEST DOCUMENTS IN A HIGH-LTV INITIAL EMAIL: when LTV > 80%, the ONLY ask in this email is the collateral question. Do NOT include a document request list in this email — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. The full doc package will be requested LATER, after the lender decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
+- CRITICAL — DO NOT REQUEST DOCUMENTS IN A HIGH-LTV INITIAL EMAIL: when LTV > ${TH.LTV_ESCALATION_PCT}%, the ONLY ask in this email is the collateral question. Do NOT include a document request list in this email — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. The full doc package will be requested LATER, after the lender decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 
 IDENTITY CLASH MINIMAL-ASK BLOCK (TASK-1 SELF-SUFFICIENT — S15 hardened, Anna Bergstrom 2026-05-18 production bug):
 - TRIGGER (self-sufficient — do NOT defer to TASK 2): IF, while writing this email, you detect that the email body's borrower name differs from the borrower name on ANY attached document (loan application, credit bureau, appraisal, or any other doc that names a borrower) — i.e., they refer to two different people (e.g. "Anna Bergstrom" in email body vs "Grace Paulson" in loan app). Compare full names, not just first names. Minor variants (typos, missing middle name, initial-vs-full-name) do NOT trigger; only a clear different-person clash. Pre-S15 this block was gated on "identity_clash=true per TASK 2's rule" — but TASK 1 (this email) generates BEFORE TASK 2 (the dealSummary JSON), so the gate referenced a value that didn't exist yet at render time, causing this block to silently no-op under prompt-salience pressure from competing instructions. The self-sufficient trigger replaces that gate.
@@ -237,7 +238,7 @@ IDENTITY CLASH MINIMAL-ASK BLOCK (TASK-1 SELF-SUFFICIENT — S15 hardened, Anna 
   • The "PNW STATEMENT FORM" instruction — do NOT mention or attach our PNW template; do NOT say "feel free to use your own".
   • The "WHAT TO ASK FOR" doc list — do NOT ask for exit strategy, payout statement, appraisal, proof of income, credit bureau, government-issued ID, property tax assessment, loan amount, LTV, write-up, or any other intake item.
   • The "CRITICAL — DATA DISCREPANCY DETECTION" rule's worked examples (figure-discrepancy attribution shapes) — the name clash is flagged via the clarification pattern below, NOT via the email-vs-doc figure-discrepancy template.
-  • The high-LTV collateral question — even if LTV > 80%, identity comes first; collateral waits until identity is confirmed.
+  • The high-LTV collateral question — even if LTV > ${TH.LTV_ESCALATION_PCT}%, identity comes first; collateral waits until identity is confirmed.
 - THE MINIMAL-ASK CONTENT (your ENTIRE email body, top-to-bottom): greeting → one clarification sentence citing BOTH names → signoff. Cite BOTH conflicting names explicitly. Pattern: "I noticed your email mentions [body name] with property at [body address] but the attached documents are for [doc name]. Could you confirm which is the correct borrower for this application?" Use the actual names you found, not placeholders. Sign off as Vienna / Private Mortgage Link. Nothing else.
 - NEGATIVE LIST (DO NOT INCLUDE — exhaustive enumeration of the S15 production-bug leak shapes): do NOT include a <ul> doc list of any kind; do NOT include the words "exit strategy", "payout statement", "appraisal", "proof of income", "credit bureau", "government-issued ID", "property tax assessment", "NOA", "T4", "pay stubs", "employer letter", "loan amount", "LTV", "AML", "PEP" as items being requested; do NOT say "I received the loan application", "I received the credit bureau", "I received the appraisal", "I've got the application", "I have your application", "thanks for sending those through", "thanks for sending these over", "appreciate you sending those", or any direct doc-receipt acknowledgment; do NOT mention or attach our Loan Application Form or PNW Statement Form templates; do NOT say "feel free to use your own"; do NOT use doc-request framing like "to move this along, we'll need" / "to get the file moving" / "I'll need" / "could you send over"; do NOT proceed as if the file is in normal intake — nothing else moves until identity is resolved.
 - BORROWER NAME DISPOSITION (TASK 2 alignment, S15 hardened): when generating TASK 2's dealSummary below, set the borrower_name field to the EMAIL body's stated borrower (the broker's intended client), NOT the doc name. The broker's email is the authoritative statement of who the deal is for; the docs naming a different person are the anomaly the identity_clash=true flag identifies, not a competing truth about whose deal this is. Pre-S15 this disposition was unspecified — Claude defaulted to the doc name when N≥2 docs aligned on a wrong name, causing downstream code (broker addressing, doc-request emails) to refer to the wrong person.
@@ -993,8 +994,8 @@ const injectElevatedLtvBandCallout = (html, ltvBand, ltvValue) => {
   let out = html.replace(ELEVATED_LTV_BAND_CALLOUT_PATTERN, '');
   const ltvLabel = (ltvValue != null && Number.isFinite(ltvValue))
     ? `${ltvValue}%`
-    : '75-80%';
-  const callout = `<p data-marker="${ELEVATED_LTV_BAND_CALLOUT_MARKER}"><strong>Elevated LTV Band (Manual Review):</strong> LTV ${ltvLabel} falls in the 75-80% elevated band per Schedule A Stage 1 spec — this prelim warrants a manual-review pass before proceeding.</p>`;
+    : `${TH.LTV_ELEVATED_BAND_PCT}-${TH.LTV_ESCALATION_PCT}%`;
+  const callout = `<p data-marker="${ELEVATED_LTV_BAND_CALLOUT_MARKER}"><strong>Elevated LTV Band (Manual Review):</strong> LTV ${ltvLabel} falls in the ${TH.LTV_ELEVATED_BAND_PCT}-${TH.LTV_ESCALATION_PCT}% elevated band per Schedule A Stage 1 spec — this prelim warrants a manual-review pass before proceeding.</p>`;
   // Inject AFTER the Deal Snapshot block when present; otherwise prepend to
   // the leadSummary body. Detection mirrors prependDealSnapshot's heuristic.
   const snapshotBlockMatch = out.match(/<h2[^>]*>\s*Deal Snapshot\s*<\/h2>[\s\S]*?(?=<h2|<hr|$)/i);
@@ -2622,7 +2623,7 @@ module.exports = {
           // routing identifier. Pre-fix this read "...via R10-C-1 dedicated-generator bypass",
           // which surfaced verbatim in the admin escalation's Key Risks section. Modeled after
           // the clean S15 sibling (~L2099): describe what happened, no engineer-facing codes.
-          key_risks_or_notes: `High LTV of ${_r10cEffectiveLtv}% exceeds the 80% threshold. Vienna has asked the broker whether additional collateral is available before requesting other documents. Awaiting broker response.`,
+          key_risks_or_notes: `High LTV of ${_r10cEffectiveLtv}% exceeds the ${TH.LTV_ESCALATION_PCT}% threshold. Vienna has asked the broker whether additional collateral is available before requesting other documents. Awaiting broker response.`,
           summary: `High-LTV deal (${_r10cEffectiveLtv}%) — collateral question sent to broker; awaiting response before doc-collection workflow proceeds.`,
         };
         const welcomeEmail = await module.exports.generateHighLtvCollateralAsk(_r10cDealSummary, effectiveGreetingFirstName);
@@ -3040,7 +3041,7 @@ SENDER INFO (from deal summary):
 FILE STATE (deal status: ${dealStatus}):
 - 'active' = the file is still being assembled; admin review has NOT started. Vienna may be requesting more docs, answering questions, or acknowledging materials as they arrive.
 - 'under_review' = the file has ALREADY been forwarded to admin for review. Vienna's prior Preliminary Review email to admin is in the conversation history above as an OUTBOUND message. The forwarding has already happened.
-- 'ltv_escalated' = the file has ALREADY been escalated to admin (LTV > 80%). Same — forwarding done; review in flight.
+- 'ltv_escalated' = the file has ALREADY been escalated to admin (LTV > ${TH.LTV_ESCALATION_PCT}%). Same — forwarding done; review in flight.
 ${dealStatus === 'under_review' || dealStatus === 'ltv_escalated' ? `
 CRITICAL — STATE-AWARE FORWARDING LANGUAGE (deal status is '${dealStatus}', file already sent to admin):
 - The forwarding has already happened. NEVER use future-tense forwarding language: no "I'll send this to Franco", no "I'll get this over for review", no "I'll forward this", no "I'll route this internally", no "I'll pass this along", no "I'll send it for review", no "I'll send this over". Saying you'll do something you've already done is misleading and creates false trust with the broker.
@@ -3087,12 +3088,12 @@ ${existingSummary?.identity_clash ? `IDENTITY CLASH PENDING (Group HHH) — the 
 
 ` : ''}${existingSummary?.ltv_admin_cleared ? `LTV ALREADY CLEARED BY UNDERWRITING — our underwriting team has already reviewed and accepted this deal's LTV (approval or collateral override). Do NOT mention the LTV threshold, do NOT ask about additional collateral, and do NOT hold back the document request on LTV grounds. Proceed with normal document collection.
 
-` : ''}HIGH LTV (over 80%) — ${existingSummary?.ltv_admin_cleared ? 'NOT APPLICABLE on this deal (see LTV ALREADY CLEARED above); ignore this block.' : "when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:"}
-- Acknowledge directly that the LTV is outside our usual 80% threshold. Be honest about it.
+` : ''}HIGH LTV (over ${TH.LTV_ESCALATION_PCT}%) — ${existingSummary?.ltv_admin_cleared ? 'NOT APPLICABLE on this deal (see LTV ALREADY CLEARED above); ignore this block.' : `when the deal summary's ltv_percent is above ${TH.LTV_ESCALATION_PCT}, OR the broker has stated an LTV above ${TH.LTV_ESCALATION_PCT}%:`}
+- Acknowledge directly that the LTV is outside our usual ${TH.LTV_ESCALATION_PCT}% threshold. Be honest about it.
 ${existingSummary?.collateral_offered
   ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, etc., per the STANDARD DOCUMENT CHECKLIST below). Note on AML/PEP: do NOT ask for AML/PEP at intake — JJJ moved them out of the initial-contact email. POST-APPROVAL, when intake docs are complete and AML/PEP are the only remaining items (per KKKK gating), ask for them in your normal conversational doc-list — they ARE legitimate broker compliance asks once intake is in. The full doc-request email also requests them once intake completes (KKKK).`
   : `- Ask if there is any additional collateral the borrower can include (other property, additional security, second piece of real estate, etc.) to bring the combined LTV down — that may give us room to work with the deal.
-- CRITICAL — DO NOT REQUEST DOCUMENTS IN THIS EMAIL: when LTV > 80% and additional collateral has NOT yet been confirmed by the broker, the ONLY ask in this email is the collateral question. Do NOT include a document request list — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. Document requests will follow LATER, after Franco decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
+- CRITICAL — DO NOT REQUEST DOCUMENTS IN THIS EMAIL: when LTV > ${TH.LTV_ESCALATION_PCT}% and additional collateral has NOT yet been confirmed by the broker, the ONLY ask in this email is the collateral question. Do NOT include a document request list — no payout statement, no appraisal, no exit strategy, no AML, no PEP, no PNW, no NOA, no proof of income. Document requests will follow LATER, after Franco decides whether the deal is workable. Asking for docs prematurely creates wasted broker effort if the deal is declined for high-LTV reasons.
 - If the broker's most recent reply was unclear about collateral (questions back, "let me check", off-topic), re-ask the collateral question in different words — give concrete examples of what would qualify (a second piece of real estate, an investment property, a vacation home with equity). Stay firm: the doc package is NOT requested until collateral is resolved.`}
 - Do NOT reject the deal, do NOT promise it will be approved. Just flag the threshold and ${existingSummary?.collateral_offered ? 'proceed with normal intake.' : 'ask about collateral options.'} Our underwriting team will make the final call.
 
@@ -3325,7 +3326,7 @@ ${canonicalFieldsPrompt}` : ''}
     }
   },
 
-  // Generate rejection email to broker (LTV > 95%)
+  // Generate rejection email to broker (auto-decline above TH.LTV_AUTO_DECLINE_PCT, admin-chosen declines)
   generateRejectionEmail: async (dealSummary, adminDeclineReason = null, { greetingFirstName = null } = {}) => {
     try {
       // R8-A (2026-05-22): R5-E greeting wiring extended to rejection emails.
@@ -3487,7 +3488,7 @@ ${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`)
 
 Return only the HTML email body.`;
       // mode='escalation' (default) — existing prompt, byte-identical to pre-R11-B behavior.
-      const escalationContent = `Generate an internal deal review notification email for a private mortgage deal that requires manual review due to LTV exceeding 80%.
+      const escalationContent = `Generate an internal deal review notification email for a private mortgage deal that requires manual review due to LTV exceeding ${TH.LTV_ESCALATION_PCT}%.
 
 This is an internal email — not written as Franco, just a clear summary for review.
 
@@ -4149,9 +4150,9 @@ Rate this deal as one of: GREAT, OKAY, or WEAK BUT WORKABLE.
 
 GREAT: Conservative LTV (60% or less), desirable/liquid property, clear exit, consistent file, responsive/transparent borrower. Multiple layers of protection. Moves quickly, prices well.
 
-OKAY: One or two elements are weak but not fatal. Higher LTV (up to 80%), limited debt serviceability, credit issues. Exit strategy still believable. Needs lender-specific structuring.
+OKAY: One or two elements are weak but not fatal. Higher LTV (up to ${TH.LTV_ESCALATION_PCT}%), limited debt serviceability, credit issues. Exit strategy still believable. Needs lender-specific structuring.
 
-WEAK BUT WORKABLE: Multiple risk factors (high LTV 80%+, poor credit, little income) BUT at least one strong compensating factor (exceptional property, additional collateral, forced-sale protection). Highly lender-specific, requires careful storytelling.
+WEAK BUT WORKABLE: Multiple risk factors (high LTV ${TH.LTV_ESCALATION_PCT}%+, poor credit, little income) BUT at least one strong compensating factor (exceptional property, additional collateral, forced-sale protection). Highly lender-specific, requires careful storytelling.
 
 Explain your rating in 2-3 sentences.
 
@@ -4597,7 +4598,7 @@ ${emailBody}`,
       const ltvPercent = dealSummary?.ltv_percent;
       const ltvDescriptor = (ltvPercent && Number.isFinite(ltvPercent))
         ? `at approximately ${ltvPercent}%`
-        : 'above our usual 80% threshold';
+        : `above our usual ${TH.LTV_ESCALATION_PCT}% threshold`;
       const response = await callClaude({
         model: 'claude-sonnet-4-6',
         max_tokens: 320,
@@ -4605,14 +4606,14 @@ ${emailBody}`,
           role: 'user',
           content: `You are Vienna, the lead underwriter at Private Mortgage Link. Write a single short collateral-question email to a mortgage broker.
 
-CONTEXT — a high-LTV (>80%) situation has been detected on this deal:
+CONTEXT — a high-LTV (>${TH.LTV_ESCALATION_PCT}%) situation has been detected on this deal:
 - Borrower: ${borrowerName}
 - LTV: ${ltvDescriptor}
-- This is outside our usual 80% LTV threshold and requires Franco's review before we can proceed with the standard intake document collection.
+- This is outside our usual ${TH.LTV_ESCALATION_PCT}% LTV threshold and requires Franco's review before we can proceed with the standard intake document collection.
 
 YOUR ENTIRE TASK — write ONLY the collateral-question email, nothing else:
 - Greet the broker with: "${greeting}"
-- Acknowledge directly that the LTV ${ltvDescriptor} is outside our usual 80% threshold. Be honest about it — no hedging, no "approximately" qualifiers if the LTV is given.
+- Acknowledge directly that the LTV ${ltvDescriptor} is outside our usual ${TH.LTV_ESCALATION_PCT}% threshold. Be honest about it — no hedging, no "approximately" qualifiers if the LTV is given.
 - Ask the SINGLE question: is there any additional collateral the borrower can include to bring the combined LTV down? Give concrete examples: "a second piece of real estate, an investment property, a vacation home with equity, or another asset that could be used as security." Mention that this may give us room to work with the deal.
 - Close with one sentence acknowledging that our underwriting team will make the final call on whether the deal is workable. Sign off as Vienna / Private Mortgage Link.
 

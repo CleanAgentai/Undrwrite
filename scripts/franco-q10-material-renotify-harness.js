@@ -12,15 +12,18 @@ catch (e) { console.error('require webhook __test__ failed:', e.message); proces
 let pass = 0, fail = 0;
 const ok = (label, cond) => { cond ? pass++ : fail++; console.log(`  ${cond ? 'PASS' : 'FAIL'} ${label}`); };
 
-const prior = { loan_amount_requested: 260000, property_value: 700000, existing_mortgage_balance: 380000, property_address: '1142 Tory Rd NW', loan_type: 'refinance' };
+const prior = { loan_amount_requested: 260000, property_value: 700000, existing_mortgage_balance: 380000, property_address: '1142 Tory Rd NW', transaction_type: 'refinance', mortgage_position: '1st' };
 
 console.log('\n[1] material change → detected');
 const c1 = q10DetectMaterialChanges(prior, { ...prior, loan_amount_requested: 295000 });
 ok('loan amount 260k→295k detected', c1.length === 1 && c1[0].key === 'loan_amount_requested' && c1[0].new === 295000 && c1[0].old === 260000);
 const c2 = q10DetectMaterialChanges(prior, { ...prior, property_value: 735000 });
 ok('property value change detected', c2.length === 1 && c2[0].key === 'property_value');
-const c3 = q10DetectMaterialChanges(prior, { ...prior, loan_type: 'purchase' });
-ok('loan_type (transaction/position) change detected', c3.length === 1 && c3[0].key === 'loan_type');
+// F15: transaction type and mortgage position are compared separately.
+const c3 = q10DetectMaterialChanges(prior, { ...prior, transaction_type: 'purchase' });
+ok('transaction type change detected', c3.length === 1 && c3[0].key === 'transaction_type');
+const c3b = q10DetectMaterialChanges({ ...prior, mortgage_position: null }, { ...prior, mortgage_position: '1st' });
+ok('a position first stated later is not a change', c3b.length === 0);
 const c4 = q10DetectMaterialChanges(prior, { ...prior, existing_mortgage_balance: 400000 });
 ok('existing balance change detected', c4.length === 1);
 
@@ -31,7 +34,7 @@ ok('before-prelim (no prior snapshot) → 0 (admin sees first prelim)', q10Detec
 ok('current field null/absent → not counted as change', q10DetectMaterialChanges(prior, { ...prior, loan_amount_requested: null }).length === 0);
 
 console.log('\n[3] multiple material changes → all detected');
-const cm = q10DetectMaterialChanges(prior, { ...prior, loan_amount_requested: 295000, property_value: 735000, loan_type: 'purchase' });
+const cm = q10DetectMaterialChanges(prior, { ...prior, loan_amount_requested: 295000, property_value: 735000, transaction_type: 'purchase' });
 ok('3 material changes detected', cm.length === 3);
 ok('each carries old→new + field label', cm.every(c => c.old != null && c.new != null && typeof c.field === 'string'));
 

@@ -1092,7 +1092,9 @@ const sendEscalationToAdmin = async (deal, dealSummary, ltv, options = {}) => {
     escalationAttachments
   );
   await dealsService.saveMessage(deal.id, 'outbound', subject, escalationEmail, escalateResult.MessageID);
-  await dealsService.update(deal.id, { status: 'ltv_escalated' });
+  // F15: a draft previewed while the deal was on collateral hold (Q9 reject/conditions) no
+  // longer applies once the deal escalates — clear it so the admin's next SEND can't ship it.
+  await dealsService.update(deal.id, { status: 'ltv_escalated', draft_email: null, draft_subject: null, draft_action: null });
   console.log('Escalation email sent to admin, deal status: ltv_escalated');
 };
 
@@ -1616,7 +1618,8 @@ const Q10_MATERIAL_FIELDS = [
   ['property_value', 'property value'],
   ['existing_mortgage_balance', 'existing first mortgage balance'],
   ['property_address', 'property address'],
-  ['loan_type', 'transaction type / mortgage position'],
+  ['transaction_type', 'transaction type'],
+  ['mortgage_position', 'mortgage position'],
 ];
 const q10DetectMaterialChanges = (priorSnapshot, currentSummary) => {
   if (!priorSnapshot || !currentSummary) return [];
@@ -1853,6 +1856,9 @@ const buildCompletionLenderPackage = async (deal, dealSummary, dealDocs, dealMes
     }
   );
   pkg = aiService.prependDealSnapshot(aiService.stripVienna_DealSnapshot(pkg).stripped, _f14.snapshotHtml);
+  // F15: same P2 rule as the prelim — a lender-facing LTV that code could not compute is
+  // labelled as the model's estimate.
+  if (!_ltvOverride && dealSummary?.ltv_percent != null) pkg = aiService.injectLtvEstimateCallout(pkg, dealSummary.ltv_percent);
   // Strip any broker-style closing the LLM may append (mirrors the prelim's
   // THOMAS-BERGQVIST Bug 3 sweep) — this package is forwardable, not a broker email.
   const _sweep = aiService.stripAdminClosing(pkg);
@@ -2193,7 +2199,10 @@ const evaluateFollowUpLtvGates = ({ deal, canonicalMap, fallbackStandaloneLtv = 
   const combinedLtv = combined ? combined.combined_ltv_percent : null;
   const standaloneLtv = dEngine.computeStandaloneLtv(canonicalMap) ?? fallbackStandaloneLtv;
   const combinedResolved = dEngine.isCombinedLtvResolved(canonicalMap);
-  const autoDecline = dEngine.shouldAutoDeclineOver90({ standaloneLtv, combinedLtv, combinedResolved });
+  // F15: an irreversible decline needs a code-computed LTV; a model estimate (fallback) can
+  // escalate to the underwriter but never decline on its own.
+  const canonicalStandalone = dEngine.computeStandaloneLtv(canonicalMap);
+  const autoDecline = dEngine.shouldAutoDeclineOver90({ standaloneLtv: canonicalStandalone, combinedLtv, combinedResolved });
   const incompleteEscalate = !adminCleared && dEngine.shouldEscalateOnIncompleteCanonical({
     hasMortgageStatement: (classifications || []).includes('mortgage_statement'),
     combinedLtv,
@@ -2234,11 +2243,15 @@ const isReplyToSystemAlert = (subject) => SYSTEM_ALERT_SUBJECT_RE.test(subject |
 const buildThreadFacts = async (deal) => {
   const inbound = (await dealsService.getMessages(deal.id)).filter(m => m.direction === 'inbound');
   const docs = await dealsService.getDocumentsWithText(deal.id);
-  const raw = dEngine.extractCanonicalFieldsAggregated(
+  // F15: same detection path as the prelim (runDiscrepancyDetectionAggregated), so the facts
+  // carry its commercial / identity-clash / joint-borrower guards and never disagree with
+  // what the underwriter's Snapshot showed.
+  const raw = dEngine.runDiscrepancyDetectionAggregated(
     inbound,
     docs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
+    deal.extracted_data?.borrower_name || deal.borrower_name || null,
     { emailSubject: inbound[0]?.subject || '' }
-  );
+  ).canonical_map;
   const map = dEngine.filterCanonicalMortgagePositionForObjectiveAuthoritative(
     dEngine.filterCanonicalPurposeForBrokerAuthoritative(
       dEngine.filterCanonicalLoanAmountForDocAuthoritative(
@@ -2255,7 +2268,10 @@ const buildThreadFacts = async (deal) => {
     existing_mortgage_balance: first('existing_first_mortgage_balance'),
     // Property identity: normalized postal code when known (formatting-proof), else address.
     property_address: postal ? String(postal).replace(/\s+/g, '').toUpperCase() : (addr ? String(typeof addr === 'object' ? (addr.street || JSON.stringify(addr)) : addr).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim() : null),
-    loan_type: [first('transaction_type'), first('mortgage_position')].filter(Boolean).join(' / ') || null,
+    // F15: compared separately, so a position first stated later ("refinance" → "refinance /
+    // 1st") is a newly known value (ignored), not a change.
+    transaction_type: first('transaction_type'),
+    mortgage_position: first('mortgage_position'),
   };
   return { map, facts };
 };
@@ -2279,7 +2295,9 @@ const recordFactSnapshot = async (deal, trigger, { onlyIfChanged = false, thread
 // F9: Q10 prior = the facts as of the last prelim (P1 snapshot). Deals whose prelim
 // predates snapshots fall back to parsing the prelim email (the old 3-field path).
 const q10PriorFacts = async (deal, messages) => {
-  const snap = (await dealsService.getFactSnapshots(deal.id)).filter(x => x.trigger === 'prelim').pop();
+  // F15: the last facts the underwriter was told about — the prelim, or a later Q10 notice —
+  // so the same correction is not re-announced on every following email.
+  const snap = (await dealsService.getFactSnapshots(deal.id)).filter(x => x.trigger === 'prelim' || x.trigger === 'notified').pop();
   if (snap) return snap.facts;
   const lastPrelim = [...(messages || [])].reverse().find(m => m.direction === 'outbound' && /PRELIMINARY Review/i.test(m.subject || ''));
   return lastPrelim ? q10ParsePriorFromPrelim(lastPrelim.body) : null;
@@ -2415,7 +2433,9 @@ const handleInbound = async (req, res) => {
       'brandon@vimarealty.com',
       'admin@vimarealty.com',
     ];
-    if (senderEmail) ignoredSenders.push(senderEmail.toLowerCase());
+    // F15: parsed address (EMAIL_FROM may be "Vienna <addr>"), plus the reply-to inbox.
+    if (senderEmail) ignoredSenders.push(senderEmail.toLowerCase().replace(/^.*<|>.*$/g, '').trim());
+    if (config.email.replyTo) ignoredSenders.push(String(config.email.replyTo).toLowerCase().replace(/^.*<|>.*$/g, '').trim());
 
     if (isIgnoredSender(email.from, ignoredSenders)) {
       console.log('Skipping ignored/system email from:', email.from);
@@ -2739,9 +2759,12 @@ ${draftEmail}
               draft_subject: null,
               draft_action: null,
               conditions_sent_at: existingDeal.conditions_sent_at || new Date().toISOString(),
-              prelim_approved_at: existingDeal.prelim_approved_at || new Date().toISOString(),
+              // F15: conditions sent while the deal is on collateral hold (Q9 conditions reply) are
+              // a message to the broker, not an approval — stamping approval there would switch off
+              // the collateral hold and the >90% decline for this deal.
+              ...(existingDeal.status === 'awaiting_collateral' ? {} : { prelim_approved_at: existingDeal.prelim_approved_at || new Date().toISOString() }),
             });
-            console.log('Conditions sent to broker, status unchanged, conditions_sent_at + prelim_approved_at stamped');
+            console.log(`Conditions sent to broker, status unchanged, conditions_sent_at stamped${existingDeal.status === 'awaiting_collateral' ? ' (on collateral hold: not an approval)' : ' + prelim_approved_at'}`);
           }
         };
 
@@ -3656,7 +3679,7 @@ No deal record was created. If this was a legitimate broker submission, please r
         const _f4Map = cFields.extractCanonicalFields(email.textBody, savedDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })), { emailSubject: email.subject || '' });
         const _f4Combined = dEngine.computeCombinedLtv(_f4Map);
         const _f4WillAutoDecline = !dealSummary?.identity_clash && dEngine.shouldAutoDeclineOver90({
-          standaloneLtv: dEngine.computeStandaloneLtv(_f4Map) ?? dealSummary?.ltv_percent,
+          standaloneLtv: dEngine.computeStandaloneLtv(_f4Map), // F15: code-computed only — an estimate never declines
           combinedLtv: _f4Combined ? _f4Combined.combined_ltv_percent : null,
           combinedResolved: dEngine.isCombinedLtvResolved(_f4Map),
         }).decline;
@@ -3772,7 +3795,9 @@ No deal record was created. If this was a legitimate broker submission, please r
         // unconfirmed-refinance additive combined would wrongly decline a deal that
         // should escalate for payout clarification per Q1).
         const _q2AutoDecline = dEngine.shouldAutoDeclineOver90({
-          standaloneLtv: _r1InitialStandaloneLtv,
+          // F15: code-computed standalone only; when only the model's estimate exists the deal
+          // is held for the underwriter (escalation below) instead of declined unseen.
+          standaloneLtv: dEngine.computeStandaloneLtv(_r1InitialCanonicalMap),
           combinedLtv: _r1InitialCombinedLtv,
           combinedResolved: dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap),
         });
@@ -4286,6 +4311,7 @@ ${welcomeQueued
           const _q10Changes = q10DetectMaterialChanges(_q10Prior, _q10Now?.facts);
           if (_q10Changes.length > 0) {
             await sendAdminMaterialCorrectionNotice(existingDeal, _q10Changes, reviewResult.updatedSummary);
+            await recordFactSnapshot(existingDeal, 'notified', { threadFacts: _q10Now }); // F15: new Q10 baseline
             const _q10At = new Date().toISOString();
             await dealsService.update(existingDeal.id, {
               extracted_data: {
@@ -4722,10 +4748,15 @@ ${welcomeQueued
         // && !identityClashUnresolved` unchanged — relaxing any of those
         // reopens the duplicate-prelim regression.
         const _r1ActiveDocsWithText = await dealsService.getDocumentsWithText(existingDeal.id);
-        const _r1ActiveCanonicalMap = cFields.extractCanonicalFields(
-          email.textBody,
+        // F15: the follow-up LTV gates read the thread-aggregated facts (every inbound email,
+        // newest wins, plus all documents), the same map the F3 decline gate reads — previously
+        // the 80% escalation read only this email, so a figure stated in an earlier email could
+        // count for one gate and not the other.
+        const _f3Inbound = (await dealsService.getMessages(existingDeal.id)).filter(m => m.direction === 'inbound');
+        const _r1ActiveCanonicalMap = dEngine.extractCanonicalFieldsAggregated(
+          _f3Inbound,
           _r1ActiveDocsWithText.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
-          { emailSubject: email.subject || '' }
+          { emailSubject: _f3Inbound[0]?.subject || email.subject || '' }
         );
         const _r1ActiveCombined = dEngine.computeCombinedLtv(_r1ActiveCanonicalMap);
         const _r1ActiveCombinedLtv = _r1ActiveCombined ? _r1ActiveCombined.combined_ltv_percent : null;
@@ -4741,12 +4772,7 @@ ${welcomeQueued
         // only on a deal's first email. Follow-ups now run them too, on the thread-aggregated
         // facts (every inbound email, newest wins, plus all documents) so a correction or a
         // late document is judged together with what came before.
-        const _f3Inbound = (await dealsService.getMessages(existingDeal.id)).filter(m => m.direction === 'inbound');
-        const _f3Map = dEngine.extractCanonicalFieldsAggregated(
-          _f3Inbound,
-          _r1ActiveDocsWithText.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
-          { emailSubject: _f3Inbound[0]?.subject || email.subject || '' }
-        );
+        const _f3Map = _r1ActiveCanonicalMap;
         const _f3Gates = evaluateFollowUpLtvGates({ deal: existingDeal, canonicalMap: _f3Map, fallbackStandaloneLtv: ltv, classifications: classificationsForGate });
         await recordFactSnapshot(existingDeal, 'inbound', { onlyIfChanged: true }); // P1
         const willGoToCollateralCheck = shouldHoldForCollateral({
@@ -4844,9 +4870,16 @@ ${welcomeQueued
           if (_f3Gates.adminCleared) {
             const _f3Subject = `[LTV over ${TH.LTV_AUTO_DECLINE_PCT}% after approval] ${result.updatedSummary?.borrower_name || existingDeal.borrower_name || 'deal'}`;
             const _f3Body = `A broker follow-up on a deal you already approved puts the canonical LTV over ${TH.LTV_AUTO_DECLINE_PCT}%: ${_f3Gates.autoDecline.basis}.\n\nStandalone LTV: ${_f3Gates.standaloneLtv ?? 'n/a'}%\nCombined LTV: ${_f3Gates.combinedLtv ?? 'n/a'}%\n\nVienna did NOT decline (the deal is approved) and kept the conversation going. Review the figures with the broker.\n\nDeal ${existingDeal.id}`;
-            const _f3Alert = await emailService.sendEmail(config.adminEmail, _f3Subject, _f3Body, null, [], []);
-            await dealsService.saveMessage(existingDeal.id, 'outbound', _f3Subject, _f3Body, _f3Alert?.MessageID);
-            console.log(`F3: post-approval follow-up over ${TH.LTV_AUTO_DECLINE_PCT}% — admin alerted, no auto-decline`);
+            // F15: once per figure — later emails that leave the same LTV in place don't re-alert.
+            const _f3Key = `Standalone LTV: ${_f3Gates.standaloneLtv ?? 'n/a'}%\nCombined LTV: ${_f3Gates.combinedLtv ?? 'n/a'}%`;
+            const _f3Prior = (await dealsService.getMessages(existingDeal.id)).some(m => m.direction === 'outbound' && /^\[LTV over \d+% after approval\]/.test(m.subject || '') && (m.body || '').includes(_f3Key));
+            if (_f3Prior) {
+              console.log('F3: post-approval >90% alert already sent for these figures — not repeated');
+            } else {
+              const _f3Alert = await emailService.sendEmail(config.adminEmail, _f3Subject, _f3Body, null, [], []);
+              await dealsService.saveMessage(existingDeal.id, 'outbound', _f3Subject, _f3Body, _f3Alert?.MessageID);
+              console.log(`F3: post-approval follow-up over ${TH.LTV_AUTO_DECLINE_PCT}% — admin alerted, no auto-decline`);
+            }
           } else {
             console.log(`F3: follow-up auto-decline (FRANCO-Q2): ${_f3Gates.autoDecline.basis}`);
             await sendAutoDecline({

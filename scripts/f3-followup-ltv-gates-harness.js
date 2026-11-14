@@ -31,7 +31,7 @@ ok('Bug-4 needs a mortgage statement on file', r.incompleteEscalate === false);
 
 // Fallback standalone (model LTV) only used when canonical can't compute.
 r = g({ deal: fresh, canonicalMap: m({}), fallbackStandaloneLtv: 95 });
-ok('canonical absent → fallback standalone used (existing behaviour)', r.standaloneLtv === 95 && r.autoDecline.decline === true);
+ok('canonical absent → estimate shown, but an estimate never auto-declines (F15)', r.standaloneLtv === 95 && r.autoDecline.decline === false);
 
 // Thread aggregation: correction in a later email wins over the first email's figure.
 const agg = de.extractCanonicalFieldsAggregated([

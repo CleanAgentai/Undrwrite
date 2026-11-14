@@ -63,7 +63,12 @@
 // HHH (awaiting_identity_confirmation): no admin-bound subject — silent gate.
 // VVV (awaiting_collateral): same. No regex update needed for these.
 
-const ADMIN_REPLY_SUBJECT_RE = /^(?:Re:\s+)+(?:\[UPDATED\]\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\[Conditions Fulfilled\]|\[File Complete\]|\[Broker Update\])/i;
+// Nov 2026: Vienna's admin alerts are saved with their Message-IDs (so the admin can reply
+// on the deal's thread), so they must be recognised as admin-facing too — otherwise a
+// broker-facing email could thread onto an admin alert and admin replies to them would be
+// counted as broker email.
+const ADMIN_ALERT_SUBJECTS = 'Prelim correction|\\[Auto-Decline\\]|\\[On hold — awaiting collateral\\]|\\[Stalled\\]|\\[LTV over \\d+% after approval\\]|\\[Admin-controlled deal\\]|\\[Potential Duplicate\\]|\\[Intake Filter\\]|\\[Out of Scope\\]|New-client dispatch failed|Referral dispatch failed';
+const ADMIN_REPLY_SUBJECT_RE = new RegExp(`^(?:(?:Re|Fwd?):\\s+)+(?:\\[UPDATED\\]\\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\\[Conditions Fulfilled\\]|\\[File Complete\\]|\\[Broker Update\\]|${ADMIN_ALERT_SUBJECTS})`, 'i');
 
 const isAdminReplySubject = (subject) => ADMIN_REPLY_SUBJECT_RE.test(subject || '');
 
@@ -79,7 +84,7 @@ const isAdminReplySubject = (subject) => ADMIN_REPLY_SUBJECT_RE.test(subject || 
 // "Emails Received" filter, DDDD admin-label heuristic in generateLeadSummary)
 // depend on the reply-only semantic — they specifically want admin REPLIES,
 // not Vienna's outbound-to-admin originals.
-const ADMIN_FACING_SUBJECT_RE = /^(?:Re:\s+)*(?:\[UPDATED\]\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\[Conditions Fulfilled\]|\[File Complete\]|\[Broker Update\]|Daily Summary)/i;
+const ADMIN_FACING_SUBJECT_RE = new RegExp(`^(?:(?:Re|Fwd?):\\s+)*(?:\\[UPDATED\\]\\s+)?(?:ACTION REQUIRED:|FINAL REVIEW:|\\[Conditions Fulfilled\\]|\\[File Complete\\]|\\[Broker Update\\]|Daily Summary|${ADMIN_ALERT_SUBJECTS})`, 'i');
 
 const isAdminFacingSubject = (subject) => ADMIN_FACING_SUBJECT_RE.test(subject || '');
 
