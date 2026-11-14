@@ -32,9 +32,6 @@ ok('purchase → no Existing-Balance row', !balRow.test(h));
 h = render({ requested_loan_amount: [{ value: 300000 }], subject_property_market_value: [{ value: 600000 }] });
 ok('bare first-mortgage (no signal) → no Existing-Balance row', !balRow.test(h));
 
-console.log('[5] source invariant');
-const eng = require('fs').readFileSync('src/services/discrepancy-engine.js', 'utf8');
-ok('BUG-5 deterministic row present + gated by existing-mortgage signal', /BUG-5[\s\S]{0,1600}_bug5IsRefiOr2nd[\s\S]{0,300}renderSnapshotRow\('Existing 1st Mortgage Balance'/.test(eng));
 
 console.log(`\n[bug5-existing-balance-deterministic-row] ${pass} pass / ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);

@@ -52,10 +52,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   console.log(`\nDEAL ${deal.id} status=${deal.status} ltv=${deal.ltv} borrower=${deal.borrower_name}`);
   for (const m of outbound) console.log(`  OUT ${m.created_at || ''} ${m.Subject || m.subject}`);
 
-  const pm = await fetch(`https://api.postmarkapp.com/messages/outbound?count=50&offset=0&recipient=${encodeURIComponent(broker)}`, {
-    headers: { Accept: 'application/json', 'X-Postmark-Server-Token': process.env.POSTMARK_API_TOKEN },
-  }).then(r => r.json());
-  console.log(`\nPostmark delivered to broker: ${(pm.Messages || []).map(m => `${m.Status}:${m.Subject}`).join(' | ') || 'none'}`);
+  // Delivery check at the provider: Resend (list recent sends) or Postmark (outbound search).
+  if ((process.env.EMAIL_PROVIDER_CHECK || 'resend') === 'resend' && process.env.RESEND_API_KEY) {
+    const list = await fetch('https://api.resend.com/emails?limit=100', { headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` } }).then(r => r.json());
+    const mine = (list.data || []).filter(e => [].concat(e.to || []).some(t => t.toLowerCase() === broker.toLowerCase() || /blackhole/.test(t)) && new Date(e.created_at) > new Date(Date.now() - 15 * 60000));
+    console.log(`\nResend sends (last 15 min, test addresses): ${mine.map(e => `${e.last_event}:${(e.subject || '').slice(0, 60)}`).join(' | ') || 'none'}`);
+  }
 
   if (!keep) {
     await s.from('messages').delete().eq('deal_id', dealId);

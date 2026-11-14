@@ -24,7 +24,8 @@ console.log('[3] source invariants — both webhook.js call sites key on borrowe
 const wh = fs.readFileSync('src/routes/webhook.js', 'utf8');
 ok('prelim site uses deal.borrower_name (not leadSummaryBrokerName)', /_q5Corporate = ce\.detectCorporateEntities\(\{\s*borrowerName: dealSummary\?\.borrower_name \|\| deal\.borrower_name/.test(wh));
 ok('prelim site no longer falls back to leadSummaryBrokerName for Q5', !/borrowerName: dealSummary\?\.borrower_name \|\| leadSummaryBrokerName/.test(wh));
-ok('R10-I site prefers deal.borrower_name', /borrowerName: dealSummary\?\.borrower_name \|\| deal\.borrower_name \|\| borrowerName/.test(wh));
+// R10-I (broker lender package) site removed in 3cbd82b; the completion lender package's
+// borrower-identity plumbing is covered by scripts/f14-lender-package-parity-harness.js.
 
 console.log('[4] negative — broker-name still must not trigger (regression guard)');
 ok('"Mercer Mortgage Group" (broker co.) not corporate via L1 borrower slot when borrower is personal', ce.detectCorporateEntities({ borrowerName: 'Marcus Webb', textSources: 'from Mercer Mortgage Group' }).isCorporate === false);

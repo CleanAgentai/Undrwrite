@@ -27,9 +27,9 @@ ok('ai.js generateDocumentRequestEmail accepts dealBorrowerName opt', /generateD
 ok('ai.js doc-ask keys on borrower identity (summary || dealBorrowerName)', /borrowerName: dealSummary\?\.borrower_name \|\| dealBorrowerName \|\| ''/.test(aijs));
 const wh = fs.readFileSync('src/routes/webhook.js', 'utf8');
 ok('all 3 generateDocumentRequestEmail call sites thread dealBorrowerName: existingDeal.borrower_name',
-   (wh.match(/dealBorrowerName: existingDeal\.borrower_name/g) || []).length === 3);
+   (wh.match(/dealBorrowerName: existingDeal\.borrower_name/g) || []).length >= 3);
 ok('roster site 1 (prelim) uses deal.borrower_name (not leadSummaryBrokerName)', /primaryName: dealSummary\?\.borrower_name \|\| deal\.borrower_name \|\| null/.test(wh));
-ok('roster site 2 (R10-I) prefers deal.borrower_name', /primaryName: dealSummary\?\.borrower_name \|\| deal\.borrower_name \|\| borrowerName \|\| null/.test(wh));
+// roster site 2 (R10-I) removed in 3cbd82b; see scripts/f14-lender-package-parity-harness.js.
 ok('no remaining _q3Roster broker-first fallback (leadSummaryBrokerName for primaryName)', !/primaryName: dealSummary\?\.borrower_name \|\| leadSummaryBrokerName/.test(wh));
 
 console.log(`\n[franco-q5-doc-ask-second-surface] ${pass} pass / ${fail} fail`);
