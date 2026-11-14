@@ -1940,8 +1940,8 @@ const sendCompletionHandoff = async (deal, dealSummary, dealDocs, dealMessages, 
     : `<p>The broker has been notified the file is complete and directed to you for further questions.</p>`;
   // R11-B (Thornton 8c024006, 2026-06-08): admin-side submission-ready LENDER PACKAGE. Franco
   // wants a formatted deal package (not just the raw zip) to copy when submitting to a lender.
-  // Reuses generateEscalationNotification in 'completion' mode (shared sections, completion
-  // framing — no LTV>80%/APPROVE-DECLINE). Admin-only (appended HERE; the broker never receives
+  // Built by buildCompletionLenderPackage: generateLeadSummary in lenderPackage mode with the
+  // prelim's code-built Snapshot / roster (F14) and the deterministic checklist (F10). Admin-only (appended HERE; the broker never receives
   // it). NON-BLOCKING: a generation failure must NOT block the completion handoff (R9-A discipline).
   let _r11LenderPackage = '';
   try {
@@ -2619,9 +2619,9 @@ ${draftEmail}
       // at dailySummary.js:51) kept firing follow-ups on completed files.
       // Both symptoms (Cluster A no-broker-delivery + Cluster G reminder-misfire)
       // share this single root via the transitivity:
-      //   executeDraft is the SOLE setter of status='completed' (verified by
-      //   grep — only L1144 in src/) AND the SOLE broker-facing send on
-      //   action='approval_completed'. So if executeDraft fires correctly,
+      //   executeDraft sets status='completed' for an admin-approved close-out draft
+      //   (sendCompletionHandoff is the other setter, on the autonomous all-docs-in path)
+      //   AND is the only broker-facing send on action='approval_completed'. So if executeDraft fires correctly,
       //   reminder cron's d.status==='active' filter naturally excludes the deal.
       //
       // Conservative guard scoping: 'active' enters ONLY when
@@ -2688,8 +2688,10 @@ ${draftEmail}
             await dealsService.update(existingDeal.id, { status: 'rejected', draft_email: null, draft_subject: null, draft_action: null });
             console.log('Deal status: rejected');
           } else if (draftAction === 'approval_completed') {
-            // R9-A AUTO-SEND DEAD-CODE (2026-05-26): post-R9-A this branch is
-            // structurally unreachable from the autonomous close-out path.
+            // Reached when the admin approves an under_review deal whose file is already
+            // complete (the approval_completed draft is written there and SENT here).
+            // (Corrected 2026-11-14 — this was annotated "unreachable"; it is not.)
+            // The autonomous all-docs-in path does not come through here:
             // sendCompletionHandoff (webhook.js:937+) now auto-sends the
             // deterministic closing email to the broker directly and sets
             // status='completed' inline, bypassing the draft cycle entirely.
@@ -4034,6 +4036,9 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
             // active-branch LTV gate WILL re-write status='awaiting_collateral' to the DB
             // (idempotent — already that value).
             existingDeal.status = 'active';
+            // F12: mark the case so the active branch's dedicated collateral re-ask
+            // (R10-C-1) fires — its old status check could never match after this flip.
+            existingDeal._ambiguousCollateralReply = true;
           }
         }
       }
@@ -4599,8 +4604,10 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // R5-C-CASCADE-COMPOSITION precedent.
         const _r10cActiveCollateralOffered = !!existingDeal.extracted_data?.collateral_offered
           || !!result.updatedSummary?.collateral_offered;
-        if (existingDeal.status === 'awaiting_collateral' && !_r10cActiveCollateralOffered && result.responseEmail) {
-          console.log(`R10-C-1 (active-branch): awaiting_collateral && !collateral_offered — replacing Claude responseEmail with generateHighLtvCollateralAsk output`);
+        // F12: keyed on the ambiguous-collateral marker; `status === 'awaiting_collateral'`
+        // was unreachable here (the collateral handler flips status to 'active' in memory).
+        if (existingDeal._ambiguousCollateralReply && !_r10cActiveCollateralOffered && result.responseEmail) {
+          console.log(`R10-C-1 (active-branch): ambiguous collateral reply && !collateral_offered — replacing Claude responseEmail with generateHighLtvCollateralAsk output`);
           const _r10cActiveCollateralAsk = await aiService.generateHighLtvCollateralAsk(
             result.updatedSummary || summaryIn,
             _eActiveGreeting,
@@ -4890,12 +4897,9 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // Bug 1 (2026-05-28): canonical standalone LTV display (see willReview branch).
           await sendPreliminaryReviewToAdmin(existingDeal, result.updatedSummary, ownershipType, _r1ActiveStandaloneLtv, { brokerFacingReplyText: result.responseEmail || '' });
         } else {
-          // Deal already under_review or no LTV yet — keep conversation going.
-          // (We do NOT auto-flip to 'active' here anymore — awaiting_collateral, completed,
-          // rejected, etc. should preserve their state.)
-          if (!['active', 'under_review', 'awaiting_collateral', 'ltv_escalated', 'completed', 'rejected'].includes(existingDeal.status)) {
-            await dealsService.update(existingDeal.id, { status: 'active' });
-          }
+          // No gate fired — keep the conversation going; status is left as it is.
+          // (F12: removed a status re-write guarded by a check that could never be true
+          // here — this branch only runs with existingDeal.status === 'active'.)
           console.log('Conversation continues — waiting for more docs/info');
         }
 

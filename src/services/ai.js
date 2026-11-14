@@ -3757,64 +3757,6 @@ Return only the HTML email body. Do not include a subject line.`,
     }
   },
 
-  // UNUSED — DO NOT CALL WITHOUT AUDITING AGAINST CURRENT RULE SET.
-  // No webhook or cron consumer as of 2026-05-05. Lacks Bug C / Group T / Group O / Group P
-  // hardening present in the active prompts. If you wire it up, mirror the FORBIDDEN
-  // APPROVAL/ROUTING + DO NOT NAME UNSTATED LENDERS + TONE & BREVITY blocks first.
-  generateInfoRequestEmail: async (dealSummary, missing, hasApp = false, hasPnw = false) => {
-    try {
-      const missingItems = [];
-      if (missing.ltv) missingItems.push('enough information to calculate the LTV (loan amount, property value, existing mortgage balance)');
-      if (missing.ownershipType) missingItems.push('whether the borrower is an individual or a corporation, and who owns the collateral property');
-
-      const missingForms = [];
-      if (!hasApp) missingForms.push('Loan Application Form');
-      // BARE LABEL (Kevin Tran audience-fit, 2026-06-09): brokers know what a PNW
-      // Statement Form is — drop the "(Personal Net Worth)" expansion (same
-      // audience-appropriateness principle as the AML/PEP bare-label fix, OBS-33).
-      if (!hasPnw) missingForms.push('PNW Statement Form');
-
-      const formsNote = missingForms.length > 0
-        ? `\n\nAlso, the following forms have not been received yet:\n${missingForms.map(f => `- ${f}`).join('\n')}\nMention that they can use their own forms if they already have them filled out — our templates were provided as an alternative.`
-        : '';
-
-      const response = await callClaude({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 512,
-        messages: [{
-          role: 'user',
-          content: `You are Vienna, the lead underwriter at Private Mortgage Link, a private mortgage lender. Write a short follow-up email to the broker.
-
-We need a bit more information before we can move forward. Specifically, we still need:
-${missingItems.map(i => `- ${i}`).join('\n')}${formsNote}
-
-DEAL SUMMARY:
-${JSON.stringify(dealSummary, null, 2)}
-
-EMAIL RULES:
-- Write as Vienna in first person
-- Warm and friendly — make it feel like a quick check-in, not a demand
-- Address the broker by their FIRST NAME (from broker_name or sender_name in the deal summary)
-- BANNED OPENERS — never start the email with any of these: "Perfect!", "Perfect.", "Perfect,", "Awesome!", "Amazing!", "Wonderful!", "Sounds good!", "Got it!", "Great news!", "Great news —", "Great news,". SELF-CHECK before returning: re-read the FIRST WORD of your email opening. If it begins with "Perfect", "Awesome", "Amazing", "Wonderful", "Sounds good", "Got it", or "Great news" in ANY punctuation form (!, ., comma, or alone), REWRITE that opening to start with a specific acknowledgement instead. Do not let these slip through under any acknowledgement context — even when the broker just provided positive news, the opener must NOT be one of these.Use a real specific acknowledgement instead.
-- Use proper HTML formatting with <p> tags
-- Sign off as: Vienna\\nPrivate Mortgage Link
-
-CRITICAL — RECIPIENT NAME RULE:
-- The recipient is the BROKER. Their first name comes from the deal summary's broker_name or sender_name field.
-- Franco is the LENDER you work for — Franco is NEVER the recipient. NEVER greet the recipient as "Franco", "Frank", or any variation.
-- If the broker's name in the deal summary is "Jason Mercer", greet them as "Hi Jason!".
-
-Return only the HTML email body. Do not include a subject line.`,
-        }],
-      });
-
-      return stripHtmlFence(response.content[0].text);
-    } catch (error) {
-      console.error('Claude info request email error:', error);
-      throw error;
-    }
-  },
-
   // Generate follow-up reminder email for stale deals (broker hasn't replied)
   // Group KKK + LLL (S12.3 + S12.4): warm-but-businesslike tone (no "Hey", no
   // filler greetings) + enumerate outstanding items by name (recipient shouldn't
@@ -3888,49 +3830,10 @@ Return only the HTML email body.`,
     }
   },
 
-  // Classify an image using Claude vision (for images that couldn't be classified by filename)
-  classifyImage: async (base64Content, contentType, fileName) => {
-    try {
-      const response = await callClaude({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 50,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: contentType, data: base64Content },
-            },
-            {
-              type: 'text',
-              text: `Classify this document image. Reply with ONLY one of these categories, nothing else:
-government_id, appraisal, property_tax, noa, mortgage_statement, mortgage_balance_statement, income_proof, credit_report, insurance, corporate_financials, tax_return, borrower_resume, loan_application, pnw_statement, other
+  // Exposed for deterministic-checklist verification (FRANCO Scenario-2 Round-9 Bug 2/3).
+  buildLenderPackageChecklist,
 
-File name: ${fileName}
-
-Classification guidance:
-- mortgage_statement: payout statement (includes payoff amount, prepayment penalty, interest to a date, validity window) OR discharge statement
-- mortgage_balance_statement: balance statement showing current outstanding balance only, no payoff/penalty/validity (insufficient for a payout request)`,
-            },
-          ],
-        }],
-      });
-
-      const result = response.content[0].text.trim().toLowerCase();
-      const validCategories = [
-        'government_id', 'appraisal', 'property_tax', 'noa', 'mortgage_statement',
-        'mortgage_balance_statement',
-        'income_proof', 'credit_report', 'insurance', 'corporate_financials',
-        'tax_return', 'borrower_resume', 'loan_application', 'pnw_statement', 'other',
-      ];
-      return validCategories.includes(result) ? result : 'other';
-    } catch (error) {
-      console.error('Claude image classification error:', error.message);
-      return 'other';
-    }
-  },
-
-  // Map classification keys to readable names
+  // Generate comprehensive lead summary for Franco — reads all documents + deal data
   DOC_DISPLAY_NAMES: {
     government_id: 'Government-Issued ID',
     appraisal: 'Property Appraisal',
@@ -3959,11 +3862,6 @@ Classification guidance:
     exit_strategy: 'Exit Strategy',
     other: 'Other',
   },
-
-  // Exposed for deterministic-checklist verification (FRANCO Scenario-2 Round-9 Bug 2/3).
-  buildLenderPackageChecklist,
-
-  // Generate comprehensive lead summary for Franco — reads all documents + deal data
   generateLeadSummary: async (dealSummary, ownershipType, documents, missingDocs, messages = [], opts = {}) => {
     // Cluster B Commit 2b opts:
     //   noSnapshot: true → JS will prepend the canonical Deal Snapshot block; Vienna's
@@ -4921,152 +4819,6 @@ Return only the HTML email body.`,
       return stripHtmlFence(response.content[0].text);
     } catch (error) {
       console.error('Claude admin response email error:', error);
-      throw error;
-    }
-  },
-
-  // UNUSED — DO NOT CALL WITHOUT AUDITING AGAINST CURRENT RULE SET.
-  // No webhook or cron consumer as of 2026-05-05; superseded by generateBrokerResponse
-  // TASK 2 (which returns updated_summary alongside the response email). If you wire
-  // this back up, ensure it cannot drift from generateBrokerResponse's analysis schema.
-  updateDealSummary: async (emailBody, attachments = [], existingSummary, savedDocs = []) => {
-    try {
-      // Compliance docs (AML/PEP) excluded from the substantive-analysis LLM context
-      // (their field labels were mis-read as deal-intent values — Sandra Whitfield).
-      const content = await buildContentBlocks(...excludeComplianceForSubstantive(attachments, savedDocs));
-
-      // Compliance docs (AML/PEP) excluded from the filename list too (see the
-      // processInitialEmail attachmentNote — filename metadata triggers LLM
-      // confabulation even with content removed; Sandra Whitfield).
-      const [_subAttForNote] = excludeComplianceForSubstantive(attachments, savedDocs);
-      const attachmentNames = _subAttForNote.map(a => a.Name).join(', ');
-      const attachmentNote = _subAttForNote.length > 0
-        ? `\nAttached files: ${attachmentNames}`
-        : '';
-
-      content.push({
-        type: 'text',
-        text: `You are a deal analyst for Private Mortgage Link, a private mortgage lender.
-
-Analyze the follow-up email and any attachments below, then UPDATE the existing deal summary with any new information.
-
-EXISTING DEAL SUMMARY:
-${JSON.stringify(existingSummary, null, 2)}
-
-NEW EMAIL CONTENT:
----
-${emailBody}
----${attachmentNote}
-
-Return ONLY valid JSON with this structure (use null for unknown fields, do not guess):
-{
-  "borrower_name": "string",
-  "broker_name": "string or null",
-  "broker_company": "string or null",
-  "property_address": "string or null",
-  "property_type": "string or null",
-  "property_value": number or null,
-  "loan_amount_requested": number or null,
-  "existing_mortgage_balance": number or null,
-  "total_debt": number or null,
-  "ltv_percent": number or null,
-  "loan_type": "first mortgage | second mortgage | refinance | construction | other",
-  "purpose": "string describing why they need the loan",
-  "exit_strategy": "string or null",
-  "income_details": "string or null",
-  "documents_received": ["list of document names received"],
-  "documents_still_needed": ["list of documents still missing"],
-  "key_risks_or_notes": "string - any red flags, urgency, or notable details",
-  "summary": "9-10 sentence plain English summary of the deal so far"
-}
-
-IMPORTANT:
-- MERGE new information into the existing data — do not lose previously known details
-- Calculate LTV if enough info is provided: (existing mortgage + requested loan) / property value * 100
-- Be specific about documents received vs still needed
-- The summary field should read like a brief to a lender — include all key facts`,
-      });
-
-      const response = await callClaude({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
-        messages: [{ role: 'user', content }],
-      });
-
-      let text = response.content[0].text.trim();
-      if (text.startsWith('```')) {
-        text = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
-      }
-      return JSON.parse(text);
-    } catch (error) {
-      console.error('Claude deal summary update error:', error);
-      throw error;
-    }
-  },
-
-  // UNUSED — DO NOT CALL WITHOUT AUDITING AGAINST CURRENT RULE SET.
-  // No webhook or cron consumer as of 2026-05-05; superseded by generateLeadSummary
-  // (which has fuller Section 1-10 structure + Group Q parameterized labels). If you
-  // wire this back up, mirror generateLeadSummary's ATTRIBUTION RULE block.
-  generateDocReviewNotification: async (dealSummary, messages, documents, missingDocs) => {
-    try {
-      // Group Q: parameterize message labels with broker name (Bug 9.6 fix). Same
-      // shape as generateLeadSummary / generateEscalationNotification — admin-facing
-      // conversation log must attribute INBOUND to the broker, never to Franco.
-      const inboundSenderLabel = dealSummary?.broker_name || dealSummary?.sender_name || 'Broker';
-      const response = await callClaude({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
-        messages: [{
-          role: 'user',
-          content: `Generate an internal document review email for Franco Maione, a private mortgage lender.
-
-A broker has submitted documents for a deal but some are still missing. Franco needs to review what's been received and decide how to proceed.
-
-IMPORTANT: Do NOT include \`\`\`html, <html>, <head>, <body>, or <!DOCTYPE> tags. Start directly with content.
-
-Sections to include:
-1. Heading: "Document Review Required — ${dealSummary?.borrower_name || 'Unknown'}"
-2. Deal details: borrower, broker, LTV, loan type
-3. Documents received so far (${documents.length} documents attached as zip)
-4. Documents still missing: ${missingDocs.join(', ')}
-5. Full email conversation for context
-
-At the bottom, include this action section:
-<hr>
-<h3>Action Required</h3>
-<p>Reply to this email with one of the following:</p>
-<ul>
-<li><strong>APPROVED</strong> — deal will be marked as complete even with missing documents</li>
-<li><strong>DECLINE</strong> — file rejected, Vienna will send a polite rejection to the broker</li>
-</ul>
-
-DEAL SUMMARY:
-${JSON.stringify(dealSummary, null, 2)}
-
-EMAIL CONVERSATION:
-${messages.map(m => `[${m.direction === 'inbound' ? `INBOUND from ${inboundSenderLabel}` : 'OUTBOUND from Vienna'}] ${m.created_at}\nSubject: ${m.subject}\n${m.body}`).join('\n\n---\n\n')}
-
-ATTRIBUTION RULE (CRITICAL for the EMAIL CONVERSATION above):
-- INBOUND messages are FROM the broker (named in the labels: "INBOUND from ${inboundSenderLabel}"). NEVER attribute INBOUND content to "Franco" or anyone else, even if the body opens with "Hi Franco" — that's the broker addressing Franco, not Franco speaking. The broker is the SENDER.
-- OUTBOUND messages are FROM Vienna. Franco is the RECIPIENT of this email — he is not a sender in this conversation.
-- Preserve the "INBOUND from ${inboundSenderLabel}" / "OUTBOUND from Vienna" attribution exactly when rendering.
-
-DOCUMENTS ON FILE:
-${documents.map(d => `- ${d.file_name} (${d.classification || 'unclassified'})`).join('\n') || 'None yet'}
-
-MISSING DOCUMENTS:
-${missingDocs.join(', ')}
-
-Return only the inner HTML content.`,
-        }],
-      });
-
-      let html = response.content[0].text.trim();
-      html = html.replace(/^```html?\n?/i, '').replace(/\n?```$/i, '');
-      return html.trim();
-    } catch (error) {
-      console.error('Claude doc review notification error:', error);
       throw error;
     }
   },
