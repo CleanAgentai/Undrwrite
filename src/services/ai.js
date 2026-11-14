@@ -3031,7 +3031,9 @@ ${existingSummary?.identity_clash ? `IDENTITY CLASH PENDING (Group HHH) — the 
 - Cite the conflicting names again from the deal summary's key_risks_or_notes or borrower_name field. Be patient and clear — the broker may not have understood the question.
 - Do NOT acknowledge or reference the attached documents as belonging to this file. They may belong to a different borrower's deal.
 
-` : ''}HIGH LTV (over 80%) — when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:
+` : ''}${existingSummary?.ltv_admin_cleared ? `LTV ALREADY CLEARED BY UNDERWRITING — our underwriting team has already reviewed and accepted this deal's LTV (approval or collateral override). Do NOT mention the LTV threshold, do NOT ask about additional collateral, and do NOT hold back the document request on LTV grounds. Proceed with normal document collection.
+
+` : ''}HIGH LTV (over 80%) — ${existingSummary?.ltv_admin_cleared ? 'NOT APPLICABLE on this deal (see LTV ALREADY CLEARED above); ignore this block.' : "when the deal summary's ltv_percent is above 80, OR the broker has stated an LTV above 80%:"}
 - Acknowledge directly that the LTV is outside our usual 80% threshold. Be honest about it.
 ${existingSummary?.collateral_offered
   ? `- COLLATERAL ALREADY OFFERED ON A PRIOR TURN — do NOT re-ask the collateral question. Acknowledge the collateral the broker mentioned (it's in the conversation history), confirm it's noted, and proceed with the normal intake flow: ask for the standard document package (appraisal, NOA / proof of income, current mortgage payout statement, government ID, property tax assessment, etc., per the STANDARD DOCUMENT CHECKLIST below). Note on AML/PEP: do NOT ask for AML/PEP at intake — JJJ moved them out of the initial-contact email. POST-APPROVAL, when intake docs are complete and AML/PEP are the only remaining items (per KKKK gating), ask for them in your normal conversational doc-list — they ARE legitimate broker compliance asks once intake is in. The full doc-request email also requests them once intake completes (KKKK).`

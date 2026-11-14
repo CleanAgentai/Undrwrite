@@ -2133,6 +2133,28 @@ const decideReviewDispatch = (deal, reviewSummary, reviewClassifications, hasNew
 };
 
 // POST /webhook/inbound - receives incoming emails from Postmark
+// Is the admin's reply answering a pending draft preview (SEND / edits / replacement)?
+// draft_action is cleared whenever a draft executes, so non-null means a preview is out.
+//   - ltv_escalated / under_review: prelim-review drafts (approval, rejection, conditions)
+//   - awaiting_collateral: Q9 rejection/conditions drafts (deal stays on hold) — F2
+//   - active + approval_completed: the close-out draft (R5)
+//   - active + collateral_override_at: the Q9 override's approval_doc_request draft — F2.
+//     Scoped to override deals so a stale draft_action on an ordinary active deal can't match.
+const isDraftAwaitingAdmin = (deal) => {
+  if (!deal?.draft_action) return false;
+  if (['ltv_escalated', 'under_review', 'awaiting_collateral'].includes(deal.status)) return true;
+  if (deal.status !== 'active') return false;
+  return deal.draft_action === 'approval_completed' || !!deal.extracted_data?.collateral_override_at;
+};
+
+// Active-branch collateral hold. F1: once the admin has approved the deal
+// (prelim_approved_at) or overridden the hold (Q9 collateral_override_at), a follow-up
+// must not put it back in awaiting_collateral — the admin already made the LTV call.
+const shouldHoldForCollateral = ({ ltvShouldEscalate, deal, collateralOffered, identityClashUnresolved }) => {
+  const adminCleared = !!deal?.prelim_approved_at || !!deal?.extracted_data?.collateral_override_at;
+  return !!ltvShouldEscalate && deal?.status === 'active' && !collateralOffered && !identityClashUnresolved && !adminCleared;
+};
+
 const handleInbound = async (req, res) => {
   // Respond immediately so Postmark doesn't retry
   res.status(200).json({ received: true });
@@ -2408,12 +2430,7 @@ ${draftEmail}
       // path through sendCompletionHandoff). Defends against legacy/race-condition
       // stale draft_action on active deals via a code path that doesn't exist
       // today but might in future. NNNN/Case-5/scope-lock-protective form.
-      const _r5IsPrelimReviewDraft = existingDeal.draft_action && (
-        existingDeal.status === 'ltv_escalated' ||
-        existingDeal.status === 'under_review'
-      );
-      const _r5IsClosingDraft = existingDeal.draft_action === 'approval_completed' && existingDeal.status === 'active';
-      if (_r5IsPrelimReviewDraft || _r5IsClosingDraft) {
+      if (isDraftAwaitingAdmin(existingDeal)) {
         console.log('Draft pending — checking if Franco wants to send, edit, or replace');
         const { action, editInstructions, replacementText } = await aiService.parseDraftReply(email.textBody);
 
@@ -4226,7 +4243,12 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         }
 
         // Bug B Layer A: defensively normalize stored extraction before feeding it back to Claude.
-        const summaryIn = normalizeSenderName(existingDeal.extracted_data, email.fromName);
+        // F1: tell the reply prompt the LTV has already been cleared by underwriting, so it
+        // doesn't re-flag the threshold or ask for collateral on an approved/overridden deal.
+        const summaryIn = {
+          ...normalizeSenderName(existingDeal.extracted_data, email.fromName),
+          ltv_admin_cleared: !!existingDeal.prelim_approved_at || !!existingDeal.extracted_data?.collateral_override_at,
+        };
         // Group DDDD (S6.2): pre-label admin replies for the active-branch
         // conversation history too. Symmetric with under_review branch.
         const activeBrokerName = summaryIn?.broker_name || summaryIn?.sender_name || existingDeal.borrower_name;
@@ -4480,7 +4502,10 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           standaloneLtv: _r1ActiveStandaloneLtv,
           combinedLtv: _r1ActiveCombinedLtv,
         });
-        const willGoToCollateralCheck = _r1ActiveLtvShouldEscalate && existingDeal.status === 'active' && !collateralAlreadyOffered && !identityClashUnresolved;
+        const willGoToCollateralCheck = shouldHoldForCollateral({
+          ltvShouldEscalate: _r1ActiveLtvShouldEscalate, deal: existingDeal,
+          collateralOffered: collateralAlreadyOffered, identityClashUnresolved,
+        });
         // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
         // Mirrors the initial-branch gate at line 1041. Pre-BBBB prelim fired with
         // exit_strategy: null → admin saw [MISSING] Exit Strategy → broker provided
@@ -4781,4 +4806,8 @@ module.exports.__test__ = {
   isPostApprovalAmlPepPending,
   // R9-F (2026-05-26): pre-create intake classification — non-deal-entry filter
   classifyIntakeBorrower,
+  // F2 (2026-11-14): pending-draft detection incl. Q9 override drafts
+  isDraftAwaitingAdmin,
+  // F1 (2026-11-14): collateral hold skipped once admin cleared the LTV
+  shouldHoldForCollateral,
 };
