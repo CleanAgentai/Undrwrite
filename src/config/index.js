@@ -12,8 +12,11 @@ module.exports = {
   email: {
     provider: emailProvider,
     from: emailFrom,
+    // Where broker replies should go when the sending domain can't receive
+    // (e.g. send from a verified domain, receive on Resend's <id>.resend.app).
+    replyTo: process.env.EMAIL_REPLY_TO || null,
     // Domain of the Message-IDs Vienna's outbound mail carries (threading).
-    messageIdDomain: process.env.MESSAGE_ID_DOMAIN || (emailProvider === 'resend' ? (emailFrom || '').split('@')[1] : 'mtasv.net'),
+    messageIdDomain: process.env.MESSAGE_ID_DOMAIN || (emailProvider === 'resend' ? (emailFrom || '').replace(/^.*<|>.*$/g, '').split('@')[1] : 'mtasv.net'),
   },
   postmark: {
     apiToken: process.env.POSTMARK_API_TOKEN,

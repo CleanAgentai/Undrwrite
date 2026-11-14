@@ -35,6 +35,7 @@ const sendViaResend = async ({ From, To, Cc, Subject, TextBody, HtmlBody, Attach
     attachments: (Attachments || []).map(a => ({ filename: a.Name, content: a.Content, content_type: a.ContentType })),
   };
   if (Cc) body.cc = split(Cc);
+  if (config.email.replyTo) body.reply_to = config.email.replyTo;
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.resend.apiKey}`, 'Content-Type': 'application/json' },
