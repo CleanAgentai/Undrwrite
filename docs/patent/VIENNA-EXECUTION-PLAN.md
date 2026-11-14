@@ -27,6 +27,9 @@ I checked every item below against the code at HEAD `edae488` and give the file:
 | F10 | The lender-package checklist counts a balance statement as the payout statement, but the completion gate doesn't | `ai.js:95-118` vs `dealType.js:93-100` |
 | F11 | Four AI functions are never called, and several comments are wrong | `classifyImage`, `updateDealSummary`, `generateInfoRequestEmail`, `generateDocReviewNotification`; comments at `2398`, `2472`, `1906` |
 | F12 | A branch can never run: the collateral re-ask checks `awaiting_collateral` inside the `active` branch | `webhook.js:4364`, `4620` |
+| F13 | The sender denylist matches substrings, not domains. An Anthropic marketing email from `@email.anthropic.com` became a deal and got a reply. Found in live data during Phase 0. | `webhook.js:2182-2197`; live deal `0283bf88` |
+| F14 | The "Ready to Close" lender package skips the Q3/Q4 roster, Q5 corporate and Q11 owner logic, and the AI writes its Deal Snapshot. Found in Phase 0. | `buildCompletionLenderPackage` `webhook.js:1777` vs the prelim at `1374-1426` |
+| T1 | 14 of the 41 existing harnesses fail on HEAD, and all of them are stale tests (see PHASE-0-REPORT.md) | `docs/patent/baseline/` |
 
 **Product improvements, all built on logic we already have:**
 
@@ -57,7 +60,7 @@ Vienna has a single deployment, `undrwrite.onrender.com`, with one Render servic
 
 ## 3. Phases
 
-### Phase 0: Setup (½ day)
+### Phase 0: Setup (DONE, see PHASE-0-REPORT.md)
 
 1. Move this session into `~/Undrwrite` and create the branch `vienna-hardening-2026-11`.
 2. Commit the work already sitting there: the modified `IP-SUBMISSION-ENGINEERING-AND-OSS.md` and three untracked replay scripts.
@@ -66,7 +69,7 @@ Vienna has a single deployment, `undrwrite.onrender.com`, with one Render servic
 5. Profile traffic, read-only: deals created since June, statuses, and real senders vs Franco's test addresses. Find any deals currently sitting in the states F1/F2/F3 affect, because they will need to be corrected after the deploy.
 6. Run all 41 existing harnesses on HEAD and record the baseline, so any later failure is clearly new.
 
-### Phase 1: Fixes and improvements (about 4–5 working days)
+### Phase 1: Fixes and improvements
 
 Every item follows the repo's established pattern:
 1. Write a deterministic harness in `scripts/` that reproduces the problem, and confirm it **fails**.
@@ -76,6 +79,7 @@ Every item follows the repo's established pattern:
 
 | Order | Item | Approach | Harness |
 |---|---|---|---|
+| 0 | **T1** Stale harnesses | Rewrite source-grep checks as behaviour checks, move deleted-deal checks onto saved fixtures, retire checks for removed features with a note | `run-harnesses.js` passes 41/41 |
 | 1 | **P4** Thresholds | Extract the constants first, so every later fix uses them | Existing LTV harnesses pass unchanged |
 | 2 | **F2** Q9 SEND | Include a pending Q9 draft (an `active` deal with `draft_action` set and `collateral_override_at` set) in the draft check. Audit every place `draft_action` is set or cleared, so a stale draft can never match. | Override → preview → SEND sends the email; REJECT and CONDITIONS drafts do the same |
 | 3 | **F1** Approval loop | Add the `prelim_approved_at` / `collateral_override_at` check to `willGoToCollateralCheck`, following the same pattern as `computeWillReview` | An approved deal receiving a broker document stays `active` and keeps collecting documents |
@@ -90,9 +94,11 @@ Every item follows the repo's established pattern:
 | 12 | **P2** Show the LTV fallback | When the canonical LTV is null and the AI's figure is used, flag it in the Snapshot callout and the log | Fallback deal shows the callout; canonical deal shows none |
 | 13 | **P3** Stalled alert | One `[Stalled]` email to the admin when a deal hits `MAX_REMINDERS`, saved with its ID and sent only once | Cap reached: one alert, never repeated |
 | 14 | **F10** Checklist | The lender-package checklist uses the `dealType.js` satisfaction rules | A balance statement alone shows "Not on file" for payout |
+| 15a | **F13** Denylist by domain | Parse the sender's domain and match listed domains exactly or as a parent domain; keep per-address entries | `@email.anthropic.com`, `@fyi.postmarkapp.com` and `noreply@` are blocked; `franco@vimarealty.com` and normal brokers pass |
+| 15b | **F14** Lender package parity | Build the same roster, corporate and Q11 inputs as the prelim, and replace the AI-written Snapshot with `renderDealSnapshot` (prepend it like the prelim does) | Lender package for a joint/corporate fixture contains the code-built Snapshot rows and roster |
 | 15 | **F11 / F12** Hygiene | Remove the 4 dead AI functions and the unreachable branches, and correct the wrong comments | `node --check` + full harness sweep |
 
-### Phase 2: Verification and deploy (about 2 days)
+### Phase 2: Verification and deploy
 
 1. **Deterministic:** all 41 existing harnesses plus about 15 new ones must pass, compared against the Phase 0 baseline.
 2. **Deploy:** take a backup, deploy in the evening window, then watch the Render logs through the first live inbound emails.
@@ -101,7 +107,7 @@ Every item follows the repo's established pattern:
 5. **Regression subset:** about 30 scenarios from the 125-scenario suite, covering the touched areas (A-series corrections, B07/C06/F14 collateral, E05 decline, Q9/Q10). Run the full 125 (about $31 of API usage, about 3.4 hours) only if the subset shows anything unexpected.
 6. **Freeze:** tag the commit `vienna-patent-baseline`. The attorney document describes exactly this commit.
 
-### Phase 3: Attorney document (about 3–4 days)
+### Phase 3: Attorney document
 
 1. **Regenerate the real outputs** from the frozen commit: a preliminary review and a "[File Complete] — Ready to Close" lender package, from a replayed scenario (Ethan Broussard or Sandra Whitfield).
 2. **Refresh the research files** in `research/` against the frozen commit, covering line numbers and the "how it works" for every area changed.
@@ -124,12 +130,8 @@ Every item follows the repo's established pattern:
 
 ---
 
-## 4. Timeline
+## 4. How we work
 
-| Week | Work |
-|---|---|
-| 1 | Phase 0, Phase 1 items 1–9 |
-| 2 | Phase 1 items 10–15, Phase 2 deploy + verify + freeze |
-| 3 | Phase 3 document, internal review, send |
+Each phase, then each item in it, goes through the same loop: **plan the implementation → implement → verify live → check it off → next item.**
 
 The main risk is a regression on the live system. It's controlled by the backup and rollback, one revertible commit per item, harnesses that fail before each fix and pass after it, and the deployed replay of all 15 scenarios.

@@ -1,0 +1,42 @@
+rc=0 0s scripts/batch11-phase3-suppression-harness.js :: [batch11-phase3-harness] 7 pass / 0 fail
+rc=0 0s scripts/batch12-broker-correction-surface-harness.js :: [batch12-broker-correction-surface] 6 pass / 0 fail
+rc=0 0s scripts/bug1-ltv-gate-harness.js :: [bug1-harness] 14 pass / 0 fail
+rc=0 0s scripts/bug2-admin-name-leak-harness.js :: BUG-2 harness: 11 pass, 0 fail
+rc=0 0s scripts/bug2-money-suffix-harness.js :: [bug2-harness] 33 pass / 0 fail
+rc=0 0s scripts/bug3-ext2-harness.js :: BUG-3-EXT-2 harness: 21 pass, 0 fail
+rc=0 0s scripts/bug3-loan-amount-widening-harness.js :: [bug3-loan-amount-widening] 33 pass / 0 fail
+rc=0 0s scripts/bug4-canonical-incompleteness-guard-harness.js :: [bug4-canonical-incompleteness-guard] 14 pass / 0 fail
+rc=1 0s scripts/bug5-existing-balance-deterministic-row-harness.js :: [bug5-existing-balance-deterministic-row] 6 pass / 1 fail
+rc=0 0s scripts/bug7-correction-from-awaiting-collateral-harness.js :: BUG-7 harness: 12 pass, 0 fail
+rc=0 0s scripts/franco-c01-admin-intake-harness.js :: [franco-c01-admin-intake] 6 pass / 0 fail
+rc=0 0s scripts/franco-q1-payout-carveout-harness.js :: [franco-q1-harness] 22 pass / 0 fail
+rc=0 0s scripts/franco-q1-rule-refinement-harness.js :: [franco-q1-rule-refinement] 11 pass / 0 fail
+rc=0 0s scripts/franco-q10-material-renotify-harness.js :: [franco-q10-harness] 21 pass / 0 fail
+rc=0 0s scripts/franco-q11-registered-owner-harness.js :: [franco-q11-registered-owner] 12 pass / 0 fail
+rc=0 0s scripts/franco-q2-autodecline-harness.js :: [franco-q2-harness] 21 pass / 0 fail
+rc=0 0s scripts/franco-q3-joint-aggregation-harness.js :: [franco-q3-harness] 22 pass / 0 fail
+rc=0 0s scripts/franco-q4-cosigner-gating-harness.js :: [franco-q4-harness] 22 pass / 0 fail
+rc=0 0s scripts/franco-q5-corporate-docask-harness.js :: [franco-q5-harness] 28 pass / 0 fail
+rc=1 0s scripts/franco-q5-doc-ask-second-surface-harness.js :: [franco-q5-doc-ask-second-surface] 10 pass / 1 fail
+rc=1 0s scripts/franco-q5-render-plumbing-harness.js :: [franco-q5-render-plumbing] 8 pass / 1 fail
+rc=0 0s scripts/franco-q6-chase-cadence-harness.js :: [franco-q6-harness] 11 pass / 0 fail
+rc=0 0s scripts/franco-q7-noncanadian-property-harness.js :: [franco-q7-harness] 13 pass / 0 fail
+rc=0 0s scripts/franco-q8-detection-broadening-harness.js :: [franco-q8-detection-broadening] 16 pass / 0 fail
+rc=0 0s scripts/franco-q8-joint-snapshot-harness.js :: [franco-q8-harness] 14 pass / 0 fail
+rc=0 0s scripts/franco-q9-admin-override-harness.js :: [franco-q9-harness] 12 pass / 0 fail
+rc=1 0s scripts/r10a-mini-harness.js :: R10-A HARNESS FAILED: Error: FAIL [(b) helper signature unchanged: (emailBody) → string|null]
+rc=1 1s scripts/r10b-mini-harness.js :: R10-B HARNESS FAILED: Error: FAIL [(Donna deal 45bd01df) parseBrokerFirstName → "Donna"] — got "null"
+rc=1 1s scripts/r10c-mini-harness.js :: HARNESS ERROR: Error: FAIL [(d) parseCollateralReply at L3092 unchanged (path 3 of 4 — not touched)]
+rc=1 1s scripts/r10d-mini-harness.js :: R10-D HARNESS FAILED: Error: FAIL [Patricia (S5): subject_property_province[0].value = "AB"] — got tuple=undefined
+rc=1 1s scripts/r10e-mini-harness.js :: R10-E HARNESS FAILED: Error: FAIL [(a) PROD raw map: mortgage_position has loan_application OR derived-signal tuple] — tuples: []
+rc=1 1s scripts/r10f-mini-harness.js :: HARNESS ERROR: Error: FAIL [(a) renderDiscrepancySection produces non-empty broker-facing clarification]
+rc=1 1s scripts/r10g-mini-harness.js :: R10-G HARNESS FAILED: Error: FAIL [(a) Pulled Ethan inbound messages from production]
+rc=1 1s scripts/r10h-mini-harness.js :: HARNESS ERROR: Error: FAIL [(e) docRequestEmail swept at 2 call sites (ltv_escalated + under_review branches)] — actual: 3
+rc=1 0s scripts/r10i-mini-harness.js :: HARNESS ERROR: Error: FAIL [(a) sendCompletionHandoff invokes composeBrokerLenderPackageEmail]
+rc=0 1s scripts/r11a-mini-harness.js :: PASS: 42 | FAIL: 0
+rc=1 1s scripts/r11b-mini-harness.js :: PASS: 50 | FAIL: 1
+rc=1 1s scripts/r11c-mini-harness.js :: PASS: 36 | FAIL: 1
+rc=0 1s scripts/r9e-mini-harness.js :: ========== R9-E mini-harness: ALL GROUPS PASS ==========
+rc=0 0s scripts/r9fprime-mini-harness.js :: ========== R9-F' mini-harness: 78/78 PASS ==========
+rc=0 0s scripts/round9-missing-docs-honesty-harness.js :: 
+27/41 exited 0
