@@ -25,7 +25,11 @@ const buildRunTag = (scenarioId) => `bulletproof-${scenarioId}-${Date.now()}`;
 const postToWebhook = async (payload, fetchImpl = global.fetch) => {
   const res = await fetchImpl(STAGING_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // F7: deployed inbound route requires Basic auth when INBOUND_WEBHOOK_AUTH is set.
+      ...(process.env.INBOUND_WEBHOOK_AUTH ? { Authorization: `Basic ${Buffer.from(process.env.INBOUND_WEBHOOK_AUTH).toString('base64')}` } : {}),
+    },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {

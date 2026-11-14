@@ -332,6 +332,19 @@ module.exports = {
   },
 
   // Find deal by outbound message ID (for thread matching via In-Reply-To)
+  // F7: has this inbound email (provider Message-ID / Resend email id) already been stored?
+  inboundAlreadyProcessed: async (messageId) => {
+    if (!messageId) return false;
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id')
+      .eq('direction', 'inbound')
+      .eq('external_message_id', messageId)
+      .limit(1);
+    if (error) { console.error('inboundAlreadyProcessed lookup failed (continuing):', error.message); return false; }
+    return (data || []).length > 0;
+  },
+
   findByMessageId: async (messageId) => {
     if (!messageId) return null;
 

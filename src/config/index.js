@@ -9,6 +9,8 @@ module.exports = {
   port: process.env.PORT || 3000,
   nodeEnv: process.env.NODE_ENV || 'development',
   adminEmail: process.env.ADMIN_EMAIL,
+  // F7: "user:pass" required as Basic auth on POST /webhook/inbound when set.
+  inboundWebhookAuth: process.env.INBOUND_WEBHOOK_AUTH || null,
   email: {
     provider: emailProvider,
     from: emailFrom,

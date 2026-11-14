@@ -2277,6 +2277,12 @@ const handleInbound = async (req, res) => {
     }
 
     // Deduplicate — skip if we already processed this exact message
+    // F7: durable dedup — the in-memory set below is per-process and lost on restart;
+    // inbound Message-IDs are now stored on messages.external_message_id.
+    if (email.messageId && await dealsService.inboundAlreadyProcessed(email.messageId)) {
+      console.log('Duplicate message (already stored), skipping:', email.messageId);
+      return;
+    }
     if (email.messageId && processedMessages.has(email.messageId)) {
       console.log('Duplicate message detected, skipping:', email.messageId);
       return;
@@ -2389,7 +2395,7 @@ const handleInbound = async (req, res) => {
       console.log(`Admin-controlled gate: broker inbound on deal ${existingDeal.id} — saving + notifying admin; Vienna paused on this deal.`);
       // Persist broker's message to the deal thread (pure INSERT, no
       // automation downstream — verified by saveMessage source-grep).
-      await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody);
+      await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody, email.messageId); // F7: inbound id kept for DB dedup
       // Forward to admin so they see the broker's reply in their inbox.
       const _ahcBorrowerName = existingDeal.extracted_data?.borrower_name || existingDeal.borrower_name || '(unknown borrower)';
       const _ahcSubject = `[Admin-controlled deal] Broker reply — ${_ahcBorrowerName}`;
@@ -2415,7 +2421,7 @@ const handleInbound = async (req, res) => {
 
     if (isAdmin && existingDeal) {
       console.log('Admin reply detected for deal:', existingDeal.id, 'Status:', existingDeal.status);
-      await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody);
+      await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody, email.messageId); // F7: inbound id kept for DB dedup
 
       const borrowerSubject = `Re: ${existingDeal.extracted_data?.borrower_name || 'Your Loan Inquiry'}`;
 
@@ -3062,7 +3068,7 @@ No deal record was created. If this was a legitimate referral, please reply with
         console.log('Referral deal created:', deal.id);
 
         // Save Franco's referral email as the first message
-        await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
+        await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody, email.messageId); // F7: inbound id kept for DB dedup
 
         // Save any attachments Franco included
         let savedDocs = [];
@@ -3283,7 +3289,7 @@ No deal record was created. If this was a legitimate broker submission, please r
         createdDeal = deal;
 
         // Save inbound message
-        await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody);
+        await dealsService.saveMessage(deal.id, 'inbound', email.subject, email.textBody, email.messageId); // F7: inbound id kept for DB dedup
 
         // ──────────────────────────────────────────────────────────────────
         // ADMIN-HANDOFF LINK-SUBMISSION 4-step branch (zero attachments + file-hosting link)
@@ -3802,7 +3808,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
       console.log('Existing deal found:', existingDeal.id, 'Status:', existingDeal.status);
 
       // Save inbound message and reset reminder count (broker replied)
-      await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody);
+      await dealsService.saveMessage(existingDeal.id, 'inbound', email.subject, email.textBody, email.messageId); // F7: inbound id kept for DB dedup
       if (existingDeal.reminder_count > 0) {
         await dealsService.update(existingDeal.id, { reminder_count: 0 });
       }
@@ -4889,7 +4895,20 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
     console.error('Webhook error:', error);
   }
 };
-router.post('/inbound', handleInbound);
+// F7: shared-secret Basic auth for the Postmark-style inbound route. Off when
+// INBOUND_WEBHOOK_AUTH is unset; set it to "user:pass" and give Postmark the URL
+// https://user:pass@host/webhook/inbound. Constant-time compare.
+const requireInboundAuth = (req, res, next) => {
+  const expected = config.inboundWebhookAuth;
+  if (!expected) return next();
+  const header = String(req.headers.authorization || '');
+  const given = header.startsWith('Basic ') ? Buffer.from(header.slice(6), 'base64').toString('utf8') : '';
+  const a = Buffer.from(given), b = Buffer.from(expected);
+  if (a.length === b.length && require('crypto').timingSafeEqual(a, b)) return next();
+  console.warn('Inbound webhook: rejected unauthenticated request');
+  return res.status(401).json({ error: 'unauthorized' });
+};
+router.post('/inbound', requireInboundAuth, handleInbound);
 
 // Resend inbound (EMAIL_PROVIDER=resend). Resend posts an `email.received` event;
 // resendInbound fetches body, attachments and threading headers and rebuilds the
@@ -4962,4 +4981,6 @@ module.exports.__test__ = {
   isReplyToSystemAlert,
   // F13 (2026-11-14): domain-aware sender denylist
   isIgnoredSender,
+  // F7 (2026-11-14)
+  requireInboundAuth,
 };
