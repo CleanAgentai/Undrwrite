@@ -1379,61 +1379,12 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // generateLeadSummary aggregation directive below.
   // FRANCO-Q4: textSources = broker message bodies + doc text, scoped for role
   // signals (co-applicant / guarantor / cosigner) near each party's name.
-  const _q4TextSources = [
-    ..._bInboundMessages.map(m => m.body || ''),
-    ...dealDocs.map(d => d?.extracted_data?.text || ''),
-  ].join('\n');
-  // FRANCO-Q11 (BATCH 14): registered-property-owner detection — owners must be on the
-  // application; on a single-registered-owner deal a non-owner applicant is a guarantor.
-  const _q11Candidates = [dealSummary?.borrower_name || deal.borrower_name, ...(_bDetectAdmin.joint_multi_borrower || [])].filter(Boolean);
-  const _q11Owners = ro.detectRegisteredOwners(_q4TextSources, _q11Candidates);
-  const _q3Roster = bq.buildQualificationRoster({
-    detectedBorrowers: _bDetectAdmin.joint_multi_borrower,
-    // Q5-DOC-ASK-SECOND-SURFACE audit (BATCH 14): borrower IDENTITY, not leadSummaryBrokerName
-    // (broker-first) — same shadow class as the Q5 Snapshot bug; the roster's primary applicant
-    // is the borrower, not the broker.
-    primaryName: dealSummary?.borrower_name || deal.borrower_name || null,
-    textSources: _q4TextSources,
-    resolvedRoles: {}, // FRANCO-Q4: broker-reply → resolvedRoles wiring is the deferred deepening (see commit note)
-    registeredOwners: _q11Owners.owners, // FRANCO-Q11
-    registeredOwnerSignal: _q11Owners.signalPresent, // FRANCO-Q11
+  // F14: roster / corporate / Q11 / code-built Snapshot shared with the lender package.
+  const { roster: _q3Roster, corporate: _q5Corporate, snapshotHtml: _bSnapshotHtml } = buildReviewSnapshotParts({
+    deal, dealSummary, dealDocs, inboundMessages: _bInboundMessages, detect: _bDetectAdmin,
+    filteredMap: _bFilteredCanonicalMap, ownershipType,
   });
-  if (_q3Roster.clarificationPending) {
-    console.log(`FRANCO-Q4: cosigner role ambiguous (${_q3Roster.clarificationMessage}) — defaulted to guarantor-only (not counted); surfaced on admin Snapshot.`);
-  }
-  // FRANCO-Q5: corporate-entity detection (primary + best-effort multi-entity)
-  // for the Snapshot flag. textSources includes doc text (better multi-entity).
-  // FRANCO-Q5 RENDER-PLUMBING FIX (BATCH 12): key detection on the BORROWER identity
-  // — the SAME source the prelim subject uses (borrowerName @ :1514 =
-  // dealSummary.borrower_name || deal.borrower_name) — NOT leadSummaryBrokerName,
-  // which is broker-name-FIRST. For a corporate deal the broker name ("Jason Mercer")
-  // shadowed the corporate borrower ("Webb Holdings Ltd."), so detectCorporateEntities
-  // (L1 keys solely on the borrower-name suffix) saw a non-corporate name → the
-  // Snapshot corporate row + accountant-ask never rendered (F03 BATCH-12 live-fire gap).
-  const _q5Corporate = ce.detectCorporateEntities({
-    borrowerName: dealSummary?.borrower_name || deal.borrower_name || '',
-    textSources: _q4TextSources,
-  });
-  if (_q5Corporate.isCorporate) {
-    console.log(`FRANCO-Q5: corporate borrower (${_q5Corporate.entityCount} entit${_q5Corporate.entityCount === 1 ? 'y' : 'ies'}) — accountant-prepared financials required${_q5Corporate.clarificationPending ? '; multi-entity clarification pending' : ''}.`);
-  }
-  const _bSnapshotHtml = dEngine.renderDealSnapshot(
-    _bFilteredCanonicalMap,
-    {
-      ownershipType,
-      isCommercial: !!_bDetectAdmin.commercial,
-      jointBorrowers: _bDetectAdmin.joint_multi_borrower, // FRANCO-PREDICTED-Q8
-      qualificationRoster: _q3Roster,                     // FRANCO-Q3/Q4
-      corporateEntities: _q5Corporate,                    // FRANCO-Q5
-    }
-  );
 
-  // R9-B (2026-05-26): canonical LTV for subject-line override + prompt
-  // override block. Combined LTV preferred (Q2-(a)); standalone fallback
-  // when combined null (1st-mortgage clean deal). When BOTH null
-  // (incomplete extraction defensive case), the subject falls back to the
-  // LLM-derived `ltv` arg per pre-R9-B behavior (defense-in-depth — never
-  // emit a blank LTV in the subject; out-of-scope shapes preserved).
   const _r9bCanonicalLtv = computeCanonicalLtvForReview(_bFilteredCanonicalMap);
 
   // R9-D (2026-05-26): canonical existing-mortgage lender for Exit Strategy
@@ -1784,6 +1735,71 @@ const sendAdminMaterialCorrectionNotice = async (deal, changes, summary) => {
 // complete canonical dealSummary with the LTV/lender override blocks constraining
 // the figures. If a multi-party/corporate completion package later needs the full
 // Snapshot roster, lift this to a shared helper with the prelim.
+// F14 (2026-11-14): the qualification roster (Q3/Q4/Q11), corporate detection (Q5) and
+// the code-built Deal Snapshot, computed identically for the admin prelim and the
+// "Ready to Close" lender package. Before F14 the lender package skipped all of it and
+// let the model write its Snapshot.
+const buildReviewSnapshotParts = ({ deal, dealSummary, dealDocs, inboundMessages, detect, filteredMap, ownershipType }) => {
+  const _bInboundMessages = inboundMessages || [];
+  const _bDetectAdmin = detect || {};
+  const _q4TextSources = [
+    ..._bInboundMessages.map(m => m.body || ''),
+    ...dealDocs.map(d => d?.extracted_data?.text || ''),
+  ].join('\n');
+  // FRANCO-Q11 (BATCH 14): registered-property-owner detection — owners must be on the
+  // application; on a single-registered-owner deal a non-owner applicant is a guarantor.
+  const _q11Candidates = [dealSummary?.borrower_name || deal.borrower_name, ...(_bDetectAdmin.joint_multi_borrower || [])].filter(Boolean);
+  const _q11Owners = ro.detectRegisteredOwners(_q4TextSources, _q11Candidates);
+  const _q3Roster = bq.buildQualificationRoster({
+    detectedBorrowers: _bDetectAdmin.joint_multi_borrower,
+    // Q5-DOC-ASK-SECOND-SURFACE audit (BATCH 14): borrower IDENTITY, not leadSummaryBrokerName
+    // (broker-first) — same shadow class as the Q5 Snapshot bug; the roster's primary applicant
+    // is the borrower, not the broker.
+    primaryName: dealSummary?.borrower_name || deal.borrower_name || null,
+    textSources: _q4TextSources,
+    resolvedRoles: {}, // FRANCO-Q4: broker-reply → resolvedRoles wiring is the deferred deepening (see commit note)
+    registeredOwners: _q11Owners.owners, // FRANCO-Q11
+    registeredOwnerSignal: _q11Owners.signalPresent, // FRANCO-Q11
+  });
+  if (_q3Roster.clarificationPending) {
+    console.log(`FRANCO-Q4: cosigner role ambiguous (${_q3Roster.clarificationMessage}) — defaulted to guarantor-only (not counted); surfaced on admin Snapshot.`);
+  }
+  // FRANCO-Q5: corporate-entity detection (primary + best-effort multi-entity)
+  // for the Snapshot flag. textSources includes doc text (better multi-entity).
+  // FRANCO-Q5 RENDER-PLUMBING FIX (BATCH 12): key detection on the BORROWER identity
+  // — the SAME source the prelim subject uses (borrowerName @ :1514 =
+  // dealSummary.borrower_name || deal.borrower_name) — NOT leadSummaryBrokerName,
+  // which is broker-name-FIRST. For a corporate deal the broker name ("Jason Mercer")
+  // shadowed the corporate borrower ("Webb Holdings Ltd."), so detectCorporateEntities
+  // (L1 keys solely on the borrower-name suffix) saw a non-corporate name → the
+  // Snapshot corporate row + accountant-ask never rendered (F03 BATCH-12 live-fire gap).
+  const _q5Corporate = ce.detectCorporateEntities({
+    borrowerName: dealSummary?.borrower_name || deal.borrower_name || '',
+    textSources: _q4TextSources,
+  });
+  if (_q5Corporate.isCorporate) {
+    console.log(`FRANCO-Q5: corporate borrower (${_q5Corporate.entityCount} entit${_q5Corporate.entityCount === 1 ? 'y' : 'ies'}) — accountant-prepared financials required${_q5Corporate.clarificationPending ? '; multi-entity clarification pending' : ''}.`);
+  }
+  const _bSnapshotHtml = dEngine.renderDealSnapshot(
+    filteredMap,
+    {
+      ownershipType,
+      isCommercial: !!_bDetectAdmin.commercial,
+      jointBorrowers: _bDetectAdmin.joint_multi_borrower, // FRANCO-PREDICTED-Q8
+      qualificationRoster: _q3Roster,                     // FRANCO-Q3/Q4
+      corporateEntities: _q5Corporate,                    // FRANCO-Q5
+    }
+  );
+
+  // R9-B (2026-05-26): canonical LTV for subject-line override + prompt
+  // override block. Combined LTV preferred (Q2-(a)); standalone fallback
+  // when combined null (1st-mortgage clean deal). When BOTH null
+  // (incomplete extraction defensive case), the subject falls back to the
+  // LLM-derived `ltv` arg per pre-R9-B behavior (defense-in-depth — never
+  // emit a blank LTV in the subject; out-of-scope shapes preserved).
+  return { roster: _q3Roster, corporate: _q5Corporate, snapshotHtml: _bSnapshotHtml };
+};
+
 const buildCompletionLenderPackage = async (deal, dealSummary, dealDocs, dealMessages) => {
   const brokerName = dealSummary?.broker_name || dealSummary?.sender_name || deal.borrower_name;
   const labeledMessages = labelMessagesForLeadSummary(dealMessages || [], brokerName);
@@ -1815,6 +1831,12 @@ const buildCompletionLenderPackage = async (deal, dealSummary, dealDocs, dealMes
     : null;
   const _sanitizedDocs = cFields.sanitizeLoanAppDocTextForLLM(dealDocs || [], _detect.canonical_map);
 
+  // F14: same roster / corporate / code-built Snapshot as the prelim; the model no longer
+  // writes the Snapshot (noSnapshot) and code prepends the deterministic one.
+  const _f14 = buildReviewSnapshotParts({
+    deal, dealSummary, dealDocs: dealDocs || [], inboundMessages: _inbound, detect: _detect,
+    filteredMap: _filteredMap, ownershipType,
+  });
   let pkg = await aiService.generateLeadSummary(
     dealSummary,
     ownershipType,
@@ -1823,11 +1845,14 @@ const buildCompletionLenderPackage = async (deal, dealSummary, dealDocs, dealMes
     labeledMessages,
     {
       lenderPackage: true,
+      noSnapshot: true,
       canonicalLtvOverride: _ltvOverride,
       canonicalLenderOverride: _lenderOverride,
       canonicalCorrectionsOverride: _corrections,
+      multiPartyQualificationOverride: _f14.roster.aggregationDirective, // FRANCO-Q3/Q4
     }
   );
+  pkg = aiService.prependDealSnapshot(aiService.stripVienna_DealSnapshot(pkg).stripped, _f14.snapshotHtml);
   // Strip any broker-style closing the LLM may append (mirrors the prelim's
   // THOMAS-BERGQVIST Bug 3 sweep) — this package is forwardable, not a broker email.
   const _sweep = aiService.stripAdminClosing(pkg);
@@ -5057,4 +5082,6 @@ module.exports.__test__ = {
   // P1/F9 (2026-11-14)
   buildThreadFacts,
   q10DetectMaterialChanges,
+  // F14 (2026-11-14)
+  buildReviewSnapshotParts,
 };

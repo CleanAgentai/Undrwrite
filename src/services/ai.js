@@ -92,7 +92,10 @@ const labelIncomeDocument = (doc) => {
 // is ALWAYS rendered with an accurate received/not-on-file status derived from
 // document classifications. Mirrors the prior section-9 required set so the
 // package is unchanged except for these two correctness fixes.
-const buildLenderPackageChecklist = (documents = []) => {
+// F10 (2026-11-14): rows follow the completion gate's rules (dealType.js). A mortgage
+// balance statement does NOT satisfy the payout-statement requirement (the gate already
+// said so; the checklist used to tick it). Purchases list the purchase contract instead.
+const buildLenderPackageChecklist = (documents = [], { isPurchase = false } = {}) => {
   const docs = Array.isArray(documents) ? documents : [];
   const find = (classes) => docs.find((d) => classes.includes(d && d.classification));
   // Income row: prefer a T4 when one is on file, else any income proof, else NOA.
@@ -105,14 +108,22 @@ const buildLenderPackageChecklist = (documents = []) => {
     [labelIncomeDocument(incomeDoc), incomeDoc],
     ['Appraisal', find(['appraisal'])],
     ['PNW Statement', find(['pnw_statement'])],
-    ['Mortgage Payout Statement', find(['mortgage_statement', 'mortgage_balance_statement'])],
+    isPurchase
+      ? ['Purchase Contract', find(['purchase_contract'])]
+      : ['Mortgage Payout Statement', find(['mortgage_statement'])],
     ['Property Tax Assessment', find(['property_tax'])],
     ['Government ID', find(['government_id'])],
     ['AML Form', find(['aml'])],
     ['PEP Form', find(['pep'])],
   ];
+  const balanceOnly = !isPurchase && !find(['mortgage_statement']) && find(['mortgage_balance_statement']);
   const items = rows
-    .map(([label, doc]) => `  <li>${label} — ${doc ? `✓ Received (${doc.file_name})` : '✗ Not on file'}</li>`)
+    .map(([label, doc]) => {
+      if (!doc && label === 'Mortgage Payout Statement' && balanceOnly) {
+        return `  <li>${label} — ✗ Not on file (balance statement received: ${balanceOnly.file_name}; a payout statement is still required)</li>`;
+      }
+      return `  <li>${label} — ${doc ? `✓ Received (${doc.file_name})` : '✗ Not on file'}</li>`;
+    })
     .join('\n');
   return `<h3>Document Checklist</h3>\n<ul>\n${items}\n</ul>\n<p>All documents are attached to this email as a zip file.</p>`;
 };
@@ -3521,7 +3532,7 @@ Return only the HTML email body.`;
       const body = stripHtmlFence(response.content[0].text);
       // Completion mode: append the deterministic document checklist (Bug 2/3) so
       // every required row is present and the income row reflects the actual doc.
-      return isCompletion ? `${body}\n${buildLenderPackageChecklist(documents)}` : body;
+      return isCompletion ? `${body}\n${buildLenderPackageChecklist(documents, { isPurchase: isPurchaseFromSummary(dealSummary) })}` : body;
     } catch (error) {
       console.error(`Claude ${mode} notification error:`, error);
       throw error;
@@ -4289,7 +4300,7 @@ ${messages.length > 0 ? messages.map(m => `[${m.senderLabel || (m.direction === 
 - Use underwriting language, not marketing language
 - Be thorough but scannable — a lender should understand the deal from this summary alone
 - This is an ADMIN-INTERNAL underwriting document for Franco, NOT a broker-facing email. Do NOT include any closing sign-off, "Looking forward to hearing from you" (or similar) language, or a "Vienna / Private Mortgage Link" signature. The document ends after the Email Conversation / Action Required sections — there is NO sign-off.
-- ${lenderPackage ? 'Start the summary with: "FILE STATUS: COMPLETE — Ready to Close". This is a lender-forwardable submission package — produce Sections 1 through 8 (Deal Snapshot through Deal Rating), then a final "Submitting Broker" section (heading "<h2>Submitting Broker</h2>") listing, one <p> per field with the label in <strong>: Broker Name, Brokerage, Licence Number, and Phone. Pull the Brokerage / Licence Number / Phone from the broker\'s email signature in the EMAIL CONVERSATION below; use the broker name exactly as it appears in the deal summary\'s broker_name. Omit any of those four rows you cannot find — do NOT invent a licence number or phone. Do NOT write a "Documents Included" / document checklist section, any "internal — do not forward" separator, an Email Conversation section, or an Action Required / APPROVED / DECLINE block — those are appended or omitted automatically. End your output after the Submitting Broker section.' : (!isComplete ? 'Start the summary with a clear banner: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"' : 'Start the summary with: "FILE STATUS: COMPLETE — Ready for Review"')}
+- ${lenderPackage ? 'Start the summary with: "FILE STATUS: COMPLETE — Ready to Close". This is a lender-forwardable submission package — produce ' + (noSnapshot ? 'Sections 2 through 8 (the Deal Snapshot is inserted by code — do not write one)' : 'Sections 1 through 8 (Deal Snapshot through Deal Rating)') + ', then a final "Submitting Broker" section (heading "<h2>Submitting Broker</h2>") listing, one <p> per field with the label in <strong>: Broker Name, Brokerage, Licence Number, and Phone. Pull the Brokerage / Licence Number / Phone from the broker\'s email signature in the EMAIL CONVERSATION below; use the broker name exactly as it appears in the deal summary\'s broker_name. Omit any of those four rows you cannot find — do NOT invent a licence number or phone. Do NOT write a "Documents Included" / document checklist section, any "internal — do not forward" separator, an Email Conversation section, or an Action Required / APPROVED / DECLINE block — those are appended or omitted automatically. End your output after the Submitting Broker section.' : (!isComplete ? 'Start the summary with a clear banner: "FILE STATUS: PRELIMINARY REVIEW — AWAITING APPROVAL"' : 'Start the summary with: "FILE STATUS: COMPLETE — Ready for Review"')}
 
 Return only the HTML. Do not include a subject line.`,
         }],
@@ -4299,7 +4310,7 @@ Return only the HTML. Do not include a subject line.`,
       // lenderPackage: append the deterministic Document Checklist (Bug 2/3) so the
       // ready-to-close package lists every required doc with its true status and the
       // income row labeled by the actual doc — same guarantee as the prior package.
-      return lenderPackage ? `${summary}\n${buildLenderPackageChecklist(documents)}` : summary;
+      return lenderPackage ? `${summary}\n${buildLenderPackageChecklist(documents, { isPurchase: isPurchaseFromSummary(dealSummary) })}` : summary;
     } catch (error) {
       console.error('Claude lead summary error:', error);
       throw error;
