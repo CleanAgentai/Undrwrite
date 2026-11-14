@@ -49,6 +49,27 @@ const formatAdminDate = (date) => date.toLocaleDateString('en-US', {
 });
 
 // Send follow-up reminders to brokers who haven't replied
+// P3 (2026-11-14): FRANCO-Q6 says the admin is escalated to once the chase cadence is
+// exhausted; before this the deal only appeared in the daily summary. One [Stalled] alert
+// per deal, saved with its Message-ID so the admin can reply on the deal's thread.
+const sendStalledAlertOnce = async (deal, reminderCount) => {
+  try {
+    const msgs = await dealsService.getMessages(deal.id);
+    if ((msgs || []).some(m => m.direction === 'outbound' && /^\[Stalled\]/.test(m.subject || ''))) return false;
+    const lastInbound = [...(msgs || [])].reverse().find(m => m.direction === 'inbound');
+    const borrower = deal.extracted_data?.borrower_name || deal.borrower_name || 'borrower';
+    const subject = `[Stalled] ${borrower} — no broker reply after ${reminderCount} reminders`;
+    const body = `Vienna has sent ${reminderCount} reminders on this deal with no reply from the broker and has stopped chasing.\n\nBorrower: ${borrower}\nBroker: ${deal.email}\nStatus: ${deal.status}\nLast broker message: ${lastInbound ? lastInbound.created_at : 'none'}\n\nReply on this thread or contact the broker directly if the deal is still live.\n\nDeal ${deal.id}`;
+    const r = await emailService.sendEmail(config.adminEmail, subject, body, null, [], []);
+    await dealsService.saveMessage(deal.id, 'outbound', subject, body, r?.MessageID);
+    console.log(`P3: [Stalled] alert sent for deal ${deal.id}`);
+    return true;
+  } catch (err) {
+    console.error(`P3: stalled alert failed for deal ${deal.id} (continuing):`, err.message);
+    return false;
+  }
+};
+
 const runFollowUpReminders = async () => {
   console.log('\n--- Checking for stale deals needing follow-up ---');
 
@@ -71,6 +92,7 @@ const runFollowUpReminders = async () => {
     const reminderCount = deal.reminder_count || 0;
     if (reminderCount >= MAX_REMINDERS) {
       console.log(`Deal ${deal.id} (${deal.borrower_name}) — max reminders reached (${reminderCount}), skipping`);
+      await sendStalledAlertOnce(deal, reminderCount);
       continue;
     }
 
@@ -620,6 +642,7 @@ const startCron = () => {
 // Export for manual triggering/testing. formatAdminDate is exposed for the
 // harness to pin Bug 13.1 (timezone wrap on date header).
 module.exports = {
+  sendStalledAlertOnce, // P3
   runDailySummary,
   runFollowUpReminders,
   formatAdminDate,

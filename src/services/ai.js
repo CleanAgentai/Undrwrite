@@ -949,6 +949,21 @@ const ELEVATED_LTV_BAND_CALLOUT_PATTERN = new RegExp(
   `<p[^>]*data-marker="${ELEVATED_LTV_BAND_CALLOUT_MARKER}"[^>]*>[\\s\\S]*?<\\/p>\\s*`,
   'gi',
 );
+// P2 (2026-11-14): when neither the combined nor the standalone LTV could be computed
+// from the deal's facts, the gates and the subject fall back to the model's ltv_percent.
+// That fallback stays, but the admin is told the figure is an estimate.
+const LTV_ESTIMATE_CALLOUT_MARKER = 'p2-ltv-estimate';
+const LTV_ESTIMATE_CALLOUT_PATTERN = new RegExp(`<p data-marker="${LTV_ESTIMATE_CALLOUT_MARKER}">[\\s\\S]*?<\\/p>\\s*`, 'g');
+const injectLtvEstimateCallout = (html, ltvValue) => {
+  if (!html || typeof html !== 'string') return html;
+  const out = html.replace(LTV_ESTIMATE_CALLOUT_PATTERN, '');
+  const label = Number.isFinite(Number(ltvValue)) ? `~${ltvValue}%` : 'the LTV shown';
+  const callout = `<p data-marker="${LTV_ESTIMATE_CALLOUT_MARKER}"><strong>LTV is an estimate:</strong> Vienna could not compute the LTV from the deal's figures (loan amount and property value not both confirmed in the email or documents). ${label} is the AI's reading of the submission — verify before relying on it.</p>`;
+  const snap = out.match(/<h2[^>]*>\s*Deal Snapshot\s*<\/h2>[\s\S]*?(?=<h2|<hr|$)/i);
+  if (snap) { const at = snap.index + snap[0].length; return out.slice(0, at) + '\n' + callout + '\n' + out.slice(at); }
+  return callout + '\n\n' + out;
+};
+
 const injectElevatedLtvBandCallout = (html, ltvBand, ltvValue) => {
   if (!html || typeof html !== 'string') return html;
   if (ltvBand !== 'elevated_75_80') return html;
@@ -5310,6 +5325,8 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // (both generateDocumentRequestEmail + generateBrokerResponse call this
   // helper; closed-set assertion in harness pins invocation count = 2).
   buildForbiddenOpenersBlock,
+  // P2 (2026-11-14): AI-estimated LTV callout on the admin prelim
+  injectLtvEstimateCallout,
   // Display-only borrower label for the high-LTV code-built summary (2026-11-14)
   extractBorrowerLabelFallback,
 };

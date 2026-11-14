@@ -26,6 +26,10 @@ ok('FP guard: payout total sentence is not a balance correction', val('The payou
 const m = cf.extractCanonicalFields('Current first mortgage balance is $222,500 not $225,000.', [{ file_name: 'MortgageStatement.pdf', classification: 'mortgage_statement', text: 'Outstanding Principal Balance: $225,000.00\nLender: RBC' }], {});
 ok('balance correction outranks the statement in the map', m.existing_first_mortgage_balance?.[0]?.value === 222500 && m.existing_first_mortgage_balance[0].classification === 'broker_correction', JSON.stringify(m.existing_first_mortgage_balance?.slice(0, 2)));
 
+const filtered = de.filterCanonicalLenderForPayoutOnly(m);
+ok('balance correction survives the statement-only filter (live A34 gap)', filtered.existing_first_mortgage_balance?.[0]?.value === 222500 && filtered.existing_first_mortgage_balance.some(t => t.classification === 'mortgage_statement'), JSON.stringify(filtered.existing_first_mortgage_balance?.map(t => [t.value, t.classification])));
+ok('non-statement, non-correction balances are still dropped when a statement exists', !de.filterCanonicalLenderForPayoutOnly({ existing_first_mortgage_balance: [{ value: 1, classification: 'email_body' }, { value: 2, classification: 'mortgage_statement' }] }).existing_first_mortgage_balance.some(t => t.classification === 'email_body'));
+
 // Decline eligibility: broker-only balance blocks combinedResolved; doc balance doesn't.
 const tt = [{ value: '2nd_mortgage', source: 'x' }];
 ok('2nd mortgage + document balance → combined decline-eligible (unchanged)', de.isCombinedLtvResolved({ transaction_type: tt, existing_first_mortgage_balance: [{ value: 400000, classification: 'mortgage_statement' }] }) === true);

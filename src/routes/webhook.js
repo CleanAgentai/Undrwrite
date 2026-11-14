@@ -1531,6 +1531,10 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
     standaloneLtv: _r10cPrelimStandaloneLtv,
     combinedLtv: _r10cPrelimCombinedLtv,
   });
+  if (!computeCanonicalLtvForReview(_bFilteredCanonicalMap) && ltv != null) {
+    leadSummary = aiService.injectLtvEstimateCallout(leadSummary, ltv);
+    console.log(`P2: prelim LTV ${ltv}% is the model's estimate (canonical LTV not computable) — estimate callout injected`);
+  }
   if (_r10cPrelimBand === 'elevated_75_80') {
     const _r10cPrelimEffectiveLtv = (_r10cPrelimCombinedLtv != null) ? _r10cPrelimCombinedLtv : _r10cPrelimStandaloneLtv;
     leadSummary = aiService.injectElevatedLtvBandCallout(leadSummary, _r10cPrelimBand, _r10cPrelimEffectiveLtv);
@@ -1633,7 +1637,9 @@ const sendPreliminaryReviewToAdmin = async (deal, dealSummary, ownershipType, lt
   // canonical null (incomplete extraction — defense-in-depth preserves
   // pre-R9-B behavior on out-of-scope shapes; never emits blank LTV).
   const _r9bSubjectLtv = _r9bCanonicalLtv ? _r9bCanonicalLtv.value : ltv;
-  const subject = `${subjectPrefix}ACTION REQUIRED: ${subjectStatus} Review — ${borrowerName} — ${_r9bSubjectLtv}% LTV`;
+  // P2: a subject LTV that isn't code-computed is labelled as an estimate.
+  const _p2LtvIsEstimate = !_r9bCanonicalLtv && ltv != null;
+  const subject = `${subjectPrefix}ACTION REQUIRED: ${subjectStatus} Review — ${borrowerName} — ${_p2LtvIsEstimate ? `~${_r9bSubjectLtv}% LTV (est.)` : `${_r9bSubjectLtv}% LTV`}`;
   const reviewResult = await emailService.sendEmail(
     config.adminEmail,
     subject,
@@ -3723,6 +3729,7 @@ No deal record was created. If this was a legitimate broker submission, please r
         // value only when canonical_map lacks loan/value tuples (no regression
         // on shapes where canonical can't compute).
         const _r1InitialStandaloneLtv = dEngine.computeStandaloneLtv(_r1InitialCanonicalMap) ?? initialLtv;
+        if (dEngine.computeStandaloneLtv(_r1InitialCanonicalMap) == null && _r1InitialStandaloneLtv != null) console.log(`P2: initial gate using the model's LTV estimate (${_r1InitialStandaloneLtv}%) — canonical standalone not computable`);
         const _r1InitialShouldEscalate = dEngine.shouldEscalateOnAnyLtv({
           standaloneLtv: _r1InitialStandaloneLtv,
           combinedLtv: _r1InitialCombinedLtv,
@@ -4679,6 +4686,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // Bug 1 (2026-05-28): canonical standalone LTV for the active-branch
         // escalation gate (was LLM `ltv`). Same rationale as the initial branch.
         const _r1ActiveStandaloneLtv = dEngine.computeStandaloneLtv(_r1ActiveCanonicalMap) ?? ltv;
+        if (dEngine.computeStandaloneLtv(_r1ActiveCanonicalMap) == null && _r1ActiveStandaloneLtv != null) console.log(`P2: active gate using the model's LTV estimate (${_r1ActiveStandaloneLtv}%) — canonical standalone not computable`);
         const _r1ActiveLtvShouldEscalate = dEngine.shouldEscalateOnAnyLtv({
           standaloneLtv: _r1ActiveStandaloneLtv,
           combinedLtv: _r1ActiveCombinedLtv,

@@ -1006,8 +1006,10 @@ const filterCanonicalLenderForPayoutOnly = (canonicalMap) => {
     ...canonicalMap,
     existing_first_mortgage_lender: (canonicalMap.existing_first_mortgage_lender || []).filter(isPayoutSource),
     existing_first_mortgage_balance: hasMortgageStatementBalance
-      // R11-B-2: mortgage_statement source present → strip non-payout balance tuples entirely
-      ? balanceTuples.filter(isPayoutSource)
+      // R11-B-2: mortgage_statement source present → strip non-payout balance tuples entirely.
+      // F8: except an explicit broker correction, which outranks the statement for display,
+      // discrepancy and escalation (never decline-eligible alone — see isCombinedLtvResolved).
+      ? balanceTuples.filter(t => isPayoutSource(t) || t?.classification === 'broker_correction')
       // R6-γ legacy: clean first-mortgage edge case (no mortgage_statement) → keep balance, null lender
       : balanceTuples.map((t) => ({ ...t, lender_canonical: null })),
   };
