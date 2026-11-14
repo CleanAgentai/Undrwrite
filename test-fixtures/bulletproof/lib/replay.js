@@ -97,7 +97,9 @@ const tagBrokerEmail = (email, runTag) => {
   // Resend test sink. KEEP_FIXTURE_DOMAINS=1 restores the fixture domain.
   // Admin-authored fixture events (…@privatemortgagelink.com) are sent as the deployed admin
   // address so Vienna treats them as the admin (testing: the Resend test sink).
-  if (/privatemortgagelink\.com$/i.test(domain)) return process.env.LIVE_ADMIN_EMAIL || 'delivered+admin@resend.dev';
+  // Only franco@ was the admin when these fixtures were authored (ADMIN_EMAIL=franco@…);
+  // other @privatemortgagelink.com senders (admin@ in C01) were ordinary non-admin senders.
+  if (/privatemortgagelink\.com$/i.test(domain) && cleanLocal.toLowerCase() === 'franco') return process.env.LIVE_ADMIN_EMAIL || 'delivered+admin@resend.dev';
   if (!process.env.KEEP_FIXTURE_DOMAINS) {
     return `delivered+${cleanLocal}-${runTag}@resend.dev`;
   }
@@ -198,8 +200,10 @@ const rewriteEventMessageIds = (events, runTag) => events.map((ev, i) => {
 // + correction-as-second-deal). Returns the captured outbound array.
 const pollForStableOutbound = async (supabase, dealId, opts = {}) => {
   const { verbose = false, scenarioId = '', label = 'final' } = opts;
-  const stabilityWindowMs = Number(process.env.BULLETPROOF_STABILITY_WINDOW_MS || 40000);
-  const maxWaitMs = Number(process.env.BULLETPROOF_MAX_WAIT_MS || 150000);
+  // 120s: since the Sonnet 4.6 migration (5a94efb) the admin prelim lands ~70-85s after the
+  // welcome; the old 40s window captured before it fired.
+  const stabilityWindowMs = Number(process.env.BULLETPROOF_STABILITY_WINDOW_MS || 120000);
+  const maxWaitMs = Number(process.env.BULLETPROOF_MAX_WAIT_MS || 300000);
   const zeroFloorMs = Number(process.env.BULLETPROOF_ZERO_OUTBOUND_FLOOR_MS || 90000);
   const pollMs = 5000;
   const start = Date.now();
