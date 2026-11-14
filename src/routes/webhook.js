@@ -3251,6 +3251,9 @@ The referred person did NOT receive a welcome email. Please retry by re-sending 
       // FFFF tears down the scaffold (so retry doesn't shadow-match via
       // findActiveByEmail) and alerts Franco with the Postmark MessageID.
       let createdDeal = null;
+      // Set once the broker's welcome is on its way: after that the deal is real to the broker
+      // and a later failure must not tear it down (see the FFFF catch below).
+      let welcomeQueued = false;
       try {
         console.log('New client detected, creating deal...');
 
@@ -3661,17 +3664,20 @@ No deal record was created. If this was a legitimate broker submission, please r
         // Send the AI-generated response with forms attached (HTML formatted)
         if (_f4WillAutoDecline) {
           console.log('F4: first email is over the auto-decline line — welcome suppressed, decline only');
-        } else emailService.sendEmailDelayed(
-          email.from,
-          `Re: ${email.subject}`,
-          welcomeEmail.replace(/<[^>]*>/g, ''),
-          welcomeEmail,
-          formAttachments,
-          [],
-          async (result) => {
-            await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject}`, welcomeEmail, result.MessageID);
-          }
-        );
+        } else {
+          welcomeQueued = true;
+          emailService.sendEmailDelayed(
+            email.from,
+            `Re: ${email.subject}`,
+            welcomeEmail.replace(/<[^>]*>/g, ''),
+            welcomeEmail,
+            formAttachments,
+            [],
+            async (result) => {
+              await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject}`, welcomeEmail, result.MessageID);
+            }
+          );
+        }
 
         // Save summary and update status
         await dealsService.update(deal.id, {
@@ -3862,7 +3868,13 @@ No deal record was created. If this was a legitimate broker submission, please r
         // route to the existing-deal active branch and skip processInitialEmail
         // entirely — different silent failure on retry).
         console.error('FFFF Layer 1 — new-client INITIAL dispatch failed:', err);
-        if (createdDeal) {
+        // Once the welcome has gone out, the broker believes the file was received. Tearing
+        // the deal down then (e.g. on a transient send failure of the admin prelim) lost the
+        // deal and orphaned the broker's next reply — found live 2026-11-14 when the email
+        // provider's daily quota ran out mid-intake. Keep the deal and alert instead.
+        if (createdDeal && welcomeQueued) {
+          console.log(`FFFF: welcome already sent — keeping deal ${createdDeal.id} (no teardown)`);
+        } else if (createdDeal) {
           try {
             await dealsService.deleteDeal(createdDeal.id);
             console.log(`FFFF: cleaned up orphan scaffold deal ${createdDeal.id}`);
@@ -3879,7 +3891,9 @@ From: ${email.fromName} <${email.from}>
 Postmark MessageID: ${email.messageId}
 Time: ${new Date().toISOString()}
 
-The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal ? createdDeal.id : '(not created)'} has been cleaned up — sender can retry by re-sending the email.
+${welcomeQueued
+  ? `The broker HAS received the welcome email. Deal ${createdDeal ? createdDeal.id : '(unknown)'} was kept; the step after the welcome failed (above) — review the deal and re-trigger or contact the broker as needed.`
+  : `The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal ? createdDeal.id : '(not created)'} has been cleaned up — sender can retry by re-sending the email.`}
 
 (This alert is automatic — Group FFFF defensive bundle.)`;
         try {
