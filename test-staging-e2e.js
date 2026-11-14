@@ -9,7 +9,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
-const STAGING_URL = 'https://undrwrite.onrender.com/webhook/inbound';
+const STAGING_URL = 'https://vienna-undrwrite.fly.dev/webhook/inbound';
 const POSTMARK_API_TOKEN = process.env.POSTMARK_API_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -221,7 +221,7 @@ async function checkSupabase() {
     console.log('  ✓ Bug A new-client gate fired sendPreliminaryReviewToAdmin');
     console.log('  ✓ Postmark outbound API confirms PRELIMINARY Review email to Franco');
     console.log('  ✓ Supabase deal record exists with status=under_review');
-    console.log('\nDeploy is live. The 21 commits are running on https://undrwrite.onrender.com');
+    console.log('\nDeploy is live. The 21 commits are running on https://vienna-undrwrite.fly.dev');
     process.exit(0);
   } catch (err) {
     console.error(`\n${'─'.repeat(50)}`);

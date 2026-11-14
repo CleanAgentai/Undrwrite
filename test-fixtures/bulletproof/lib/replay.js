@@ -12,7 +12,7 @@ const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { resolveAttachmentRefs } = require('./emailSynth');
 
-const STAGING_URL = process.env.STAGING_URL || 'https://undrwrite.onrender.com/webhook/inbound';
+const STAGING_URL = process.env.STAGING_URL || 'https://vienna-undrwrite.fly.dev/webhook/inbound';
 const POSTMARK_API_TOKEN = process.env.POSTMARK_API_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;

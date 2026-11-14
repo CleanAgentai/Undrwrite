@@ -1,0 +1,16 @@
+node_modules
+.env
+.git
+backups
+docs
+scripts
+test-fixtures
+test-scenarios
+sbom
+*.json
+!package.json
+!package-lock.json
+*.pdf
+!forms/*.pdf
+*.md
+test-*.js
