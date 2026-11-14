@@ -616,7 +616,11 @@ const isCombinedLtvResolved = (canonicalMap) => {
   const explicit2nd = tt.some(t => t && t.value === '2nd_mortgage');
   const pos2nd = ((canonicalMap && canonicalMap.mortgage_position) || [])
     .some(t => t && t.classification === 'broker_correction' && /2nd|second/i.test(String(t.value)));
-  return payoutResolved || explicit2nd || pos2nd;
+  // F8: a combined LTV whose existing-balance input is only broker-asserted (a broker
+  // correction outranking the documents) is never decline-eligible on its own — it can
+  // still drive escalation via shouldEscalateOnAnyLtv.
+  const balanceBrokerOnly = ((canonicalMap && canonicalMap.existing_first_mortgage_balance) || [])[0]?.classification === 'broker_correction';
+  return (payoutResolved || explicit2nd || pos2nd) && !balanceBrokerOnly;
 };
 
 const shouldAutoDeclineOver90 = ({ standaloneLtv = null, combinedLtv = null, combinedResolved = false } = {}) => {

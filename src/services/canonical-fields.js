@@ -1112,6 +1112,13 @@ const parseBrokerCorrections = (messageBody) => {
     /\byes,?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s+is\s+correct/i,
     // Reconsideration patterns ("looking at it again, $X sounds right")
     /\b(?:looking\s+at\s+it\s+again|on\s+second\s+look|after\s+checking),?\s*\$?\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)\s+(?:sounds\s+right|is\s+correct|works)/i,
+    // F8 (2026-11-14): phrasings seen in replayed broker corrections that the list above
+    // missed — "Updating loan amount: $345,000" (A06), "actual loan amount is $290,000"
+    // (A08), "revised amount", "loan amount is now / changed to". $-anchored to the cue.
+    /\b(?:updating|updated|revised|new)\s+(?:the\s+)?loan\s+amount(?:\s+to)?\s*[:=]?\s*\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\brevised\s+(?:loan\s+)?amount\s*[:=]?\s*\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\b(?:the\s+)?actual\s+loan\s+amount\s+(?:is|should\s+be)\s*\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\bloan\s+amount\s+(?:is\s+now|has\s+changed\s+to|changed\s+to|is\s+changing\s+to)\s*\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
   ];
   for (const re of amountPatterns) {
     const m = messageBody.match(re);
@@ -1130,6 +1137,27 @@ const parseBrokerCorrections = (messageBody) => {
   }
 
   // Purpose correction patterns
+  // F8: existing first-mortgage balance corrections ("Current first mortgage balance is
+  // $222,500 not $225,000" — A34). The corrected balance updates the record, the
+  // discrepancy check and the LTV, and may trigger an escalation; on its own it never
+  // makes the combined LTV decline-eligible (see isCombinedLtvResolved) — broker-asserted
+  // balances stay untrusted for a decision-driving auto-decline (Bug-3-EXT-2 conservatism).
+  const balancePatterns = [
+    /\b(?:current|existing|actual|correct|updated)\s+(?:first\s+|1st\s+)?mortgage\s+balance\s+(?:is|should\s+be|is\s+actually|is\s+now)\s*\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\b(?:the\s+)?(?:first\s+|1st\s+)?mortgage\s+balance\s+(?:is\s+actually|should\s+be|is\s+now)\s*\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+    /\b(?:correct|updated|actual)\s+balance\s*(?:is|:)\s*\$\s*([\d,]+(?:\.\d+)?(?:\s*(?:million|thousand|MM|[kKmM])(?![A-Za-z]))?)/i,
+  ];
+  for (const re of balancePatterns) {
+    const m = messageBody.match(re);
+    if (m) {
+      const value = normalizeMoney(m[1]);
+      if (value != null && value > 0 && value < 100_000_000) {
+        corrections.push({ field: 'existing_first_mortgage_balance', value, source: 'broker_correction', rawPhrase: m[0] });
+        break;
+      }
+    }
+  }
+
   const purposePatterns = [
     /\bthe\s+(?:correct|actual)\s+purpose\s+is[:\s]+["']?([^."'\n]{3,80})/i,
     /\b(?:correct|actual)\s+(?:loan\s+)?purpose\s*:\s*["']?([^."'\n]{3,80})/i,
