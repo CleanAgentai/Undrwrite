@@ -10,6 +10,12 @@ const once = ai.injectLtvEstimateCallout(html, 65);
 ok('callout injected after the Deal Snapshot', /Deal Snapshot<\/h2><p>LTV: TBD<\/p>\n<p data-marker="p2-ltv-estimate"><strong>LTV is an estimate/.test(once));
 ok('callout names the estimated value', /~65%/.test(once));
 ok('idempotent (re-injection keeps one callout)', (ai.injectLtvEstimateCallout(once, 65).match(/p2-ltv-estimate/g) || []).length === 1);
+// Banner enforcement must not eat the code-built Snapshot / callouts (found live: the old
+// banner regex ran from the first <p> to the model's FILE STATUS line).
+const withRows = '<h2>Deal Snapshot</h2>\n<p><strong>Loan:</strong> TBD</p>\n<p data-marker="p2-ltv-estimate"><strong>LTV is an estimate:</strong> x</p>\n<p><strong>FILE STATUS:</strong> PRELIMINARY</p>\n<h2>Section 2</h2>';
+const enforced = ai.enforceReviewBanner(withRows, 'PRELIMINARY REVIEW — AWAITING APPROVAL');
+ok('banner enforcement keeps Snapshot rows and the P2 callout', /Loan:<\/strong> TBD/.test(enforced) && /p2-ltv-estimate/.test(enforced));
+ok('banner enforcement leaves exactly one FILE STATUS', (enforced.match(/FILE STATUS/g) || []).length === 1);
 const wh = fs.readFileSync('src/routes/webhook.js', 'utf8');
 ok('prelim injects the callout only when canonical LTV is not computable', /if \(!computeCanonicalLtvForReview\(_bFilteredCanonicalMap\) && ltv != null\) \{\s*leadSummary = aiService\.injectLtvEstimateCallout/.test(wh));
 ok('subject marks a non-canonical LTV as "(est.)"', /_p2LtvIsEstimate \? `~\$\{_r9bSubjectLtv\}% LTV \(est\.\)`/.test(wh));

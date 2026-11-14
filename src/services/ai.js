@@ -2366,7 +2366,11 @@ const stripAdminClosing = (html) => {
 // isComplete=true, but the gate may have flipped the conclusion).
 // Same trust profile as Cluster E's post-gen sweep — JS owns the rule,
 // not Claude.
-const REVIEW_BANNER_PARAGRAPH_RE = /<p>[\s\S]*?FILE STATUS[\s\S]*?<\/p>/i;
+// One paragraph only. The old /<p>[\s\S]*?FILE STATUS[\s\S]*?<\/p>/ started at the FIRST <p> in
+// the summary and ran to the model's FILE STATUS line, so when that line came after the
+// code-built Deal Snapshot it deleted every Snapshot row and callout in between (found live
+// 2026-11-14: prelim with an empty "Deal Snapshot" heading).
+const REVIEW_BANNER_PARAGRAPH_RE = /<p>(?:(?!<\/?p[\s>])[\s\S])*?FILE STATUS[\s\S]*?<\/p>/i;
 const REVIEW_COMPLETE_TRAILING_RE = /<p>\s*This file is COMPLETE\s*[—–\-]\s*all required documents have been received\.\s*<\/p>\s*/i;
 
 const enforceReviewBanner = (leadSummaryHtml, bannerText) => {
