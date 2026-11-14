@@ -87,7 +87,8 @@ const check = (name, cond, detail) => { if (cond) console.log(`  ✓ ${name}`); 
 
 (async () => {
   const ts = Date.now();
-  const from = `loretta.sinclair+scn1-${ts}@aspenridgemortgage.ca`;
+  // Resend test sink: Vienna replies to the sender (KEEP_SCENARIO_DOMAINS=1 restores the original).
+  const from = process.env.KEEP_SCENARIO_DOMAINS ? `loretta.sinclair+scn1-${ts}@aspenridgemortgage.ca` : `delivered+loretta-scn1-${ts}@resend.dev`;
   const to = 'info@privatemortgagelink.com';
   const subject = 'New Mortgage Submission — Katherine Morrison — 142 Sage Meadows Circle NW, Calgary';
   console.log(`=== Scenario-1 deployed replay | from=${from} ===\n`);
