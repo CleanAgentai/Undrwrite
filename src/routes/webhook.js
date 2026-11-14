@@ -4731,6 +4731,8 @@ router.post('/resend', async (req, res) => {
   if (req.body?.type !== 'email.received') return;
   try {
     const payload = await resendInbound.toPostmarkPayload(req.body);
+    const irt = (payload.Headers || []).find(h => h.Name === 'In-Reply-To');
+    console.log(`Resend inbound ${req.body.data?.email_id}: to=${payload.To} attachments=${payload.Attachments.length} in-reply-to=${irt ? irt.Value : 'none'}`);
     await handleInbound({ body: payload }, { status: () => ({ json: () => {} }) });
   } catch (err) {
     console.error('Resend inbound failed:', err);

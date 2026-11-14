@@ -47,5 +47,15 @@ ok('stale timestamp rejected', !ri.verifySignature(body, { 'svix-id': id, 'svix-
 ok('bare id gets domain', /^<abc@.+>$/.test(mailer.messageIdHeader('abc')));
 ok('full id passes through', mailer.messageIdHeader('x@gmail.com') === '<x@gmail.com>');
 
+// Reply-To thread token round trip (Resend overwrites Message-ID, so threading rides here).
+const u = '3f2b8c1e-9a4d-4e7b-8c2f-0123456789ab';
+const rt = mailer.replyToWithToken('vienna@istoitenii.resend.app', u);
+ok('token added to reply-to', rt === `vienna+${u}@istoitenii.resend.app`, rt);
+ok('existing +tag replaced, not stacked', mailer.replyToWithToken(`vienna+old@x.app`, u) === `vienna+${u}@x.app`);
+ok('token read back from To list', mailer.threadTokenFrom(['someone@else.com', rt]) === u);
+ok('token read back case-insensitively', mailer.threadTokenFrom([rt.toUpperCase()]) === u);
+ok('no token on a fresh email', mailer.threadTokenFrom(['vienna@istoitenii.resend.app']) === null);
+ok('non-uuid +tag ignored', mailer.threadTokenFrom(['vienna+hello@istoitenii.resend.app']) === null);
+
 console.log(`\n[resend-adapter-harness] ${pass} pass / ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);

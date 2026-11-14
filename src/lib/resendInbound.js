@@ -8,6 +8,7 @@
 // guaranteed to include them.
 const crypto = require('crypto');
 const config = require('../config');
+const mailer = require('./mailer');
 
 const API = 'https://api.resend.com';
 
@@ -67,10 +68,15 @@ const toPostmarkPayload = async (event) => {
     const raw = await fetch(email.raw.download_url).then(r => r.text()).catch(() => '');
     rawHeaders = parseRawHeaders(raw);
   }
+  // A reply to Vienna arrives at vienna+<uuid>@… (see mailer.replyToWithToken). That
+  // uuid is the stored external_message_id of the Vienna email being answered, so it
+  // becomes In-Reply-To — the exact signal the Postmark path threads on.
+  const token = mailer.threadTokenFrom([...[].concat(email.to || meta.to || []), ...[].concat(meta.received_for || []), ...[].concat(email.cc || [])]);
   const headerList = [];
+  if (token) headerList.push({ Name: 'In-Reply-To', Value: `<${token}@${config.email.messageIdDomain}>` });
   for (const name of ['In-Reply-To', 'References', 'Message-ID']) {
     const v = rawHeaders[name.toLowerCase()];
-    if (v) headerList.push({ Name: name, Value: v });
+    if (v && !(token && name === 'In-Reply-To')) headerList.push({ Name: name, Value: v });
   }
 
   const attachments = [];
