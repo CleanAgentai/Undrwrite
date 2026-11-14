@@ -1,0 +1,171 @@
+
+================ EVENT 0 (broker_intake (CONSTRUCTED email; real PDF)) ================
+docs on file: LoanApplication_David_Chen.pdf=>loan_application
+parseBrokerCorrections(this body): []
+
+### PER-TURN canonical_map (extractCanonicalFields on THIS email only + all docs)
+  subject_property_address:
+     {"value":"9820 165 street nw","source":"email_body"}
+  subject_property_postal_code:
+     {"value":"T5P3S7","source":"email_body"}
+  subject_property_city:
+     {"value":"Edmonton","source":"email_body"}
+  subject_property_province:
+     {"value":"AB","source":"email_body"}
+  subject_property_market_value:
+     {"value":380000,"source":"email_body"}
+  requested_loan_amount:
+     {"value":80000,"source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+     {"value":80000,"source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  mortgage_position:
+     {"value":"2nd","source":"email_subject_or_body","classification":"email_subject_or_body"}
+     {"value":"2nd","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage"}
+  purpose:
+     {"value":"debt consolidation and home renovations","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+     {"value":"Debt consolidation and home renovations","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":false}
+  subject_property_occupancy:
+     {"value":"Owner Occupied","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+
+### PER-TURN discrepancy_set
+  {"field":"purpose","groups":[{"value":"debt consolidation and home renovations","sources":["broker_initial_intent"],"raws":[],"lender":null},{"value":"Debt consolidation and home renovations","sources":["LoanApplication_David_Chen.pdf"],"raws":[],"lender":null}]}
+
+### PER-TURN broker-facing (filterBrokerFacing)
+  {"field":"purpose","groups":[{"value":"debt consolidation and home renovations","sources":["broker_initial_intent"],"raws":[],"lender":null},{"value":"Debt consolidation and home renovations","sources":["LoanApplication_David_Chen.pdf"],"raws":[],"lender":null}]}
+PER-TURN gate LTVs: standalone= 21.1  combined= null
+
+### AGGREGATED canonical_map (all inbounds, quote-stripped)
+  subject_property_address:
+     {"value":"9820 165 street nw","source":"email_body"}
+  subject_property_postal_code:
+     {"value":"T5P3S7","source":"email_body"}
+  subject_property_city:
+     {"value":"Edmonton","source":"email_body"}
+  subject_property_province:
+     {"value":"AB","source":"email_body"}
+  subject_property_market_value:
+     {"value":380000,"source":"email_body"}
+  requested_loan_amount:
+     {"value":80000,"source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+     {"value":80000,"source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  mortgage_position:
+     {"value":"2nd","source":"email_subject_or_body","classification":"email_subject_or_body"}
+     {"value":"2nd","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage"}
+  purpose:
+     {"value":"debt consolidation and home renovations","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+     {"value":"Debt consolidation and home renovations","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":false}
+  subject_property_occupancy:
+     {"value":"Owner Occupied","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+
+### AGGREGATED discrepancy_set
+  {"field":"purpose","groups":[{"value":"debt consolidation and home renovations","sources":["broker_initial_intent"],"raws":[],"lender":null},{"value":"Debt consolidation and home renovations","sources":["LoanApplication_David_Chen.pdf"],"raws":[],"lender":null}]}
+
+### AGGREGATED after filter chain (what Snapshot/prelim read)
+  subject_property_address:
+     {"value":"9820 165 street nw","source":"email_body"}
+  subject_property_postal_code:
+     {"value":"T5P3S7","source":"email_body"}
+  subject_property_city:
+     {"value":"Edmonton","source":"email_body"}
+  subject_property_province:
+     {"value":"AB","source":"email_body"}
+  subject_property_market_value:
+     {"value":380000,"source":"email_body"}
+  requested_loan_amount:
+     {"value":80000,"source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+  mortgage_position:
+     {"value":"2nd","source":"email_subject_or_body","classification":"email_subject_or_body"}
+     {"value":"2nd","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage"}
+  purpose:
+     {"value":"debt consolidation and home renovations","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":false}
+  subject_property_occupancy:
+     {"value":"Owner Occupied","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+AGG prelim LTVs (filtered): standalone= 21.1  combined= null
+resolveCanonicalIntentValue(loan)= {"value":80000,"source":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+
+================ EVENT 1 (broker_correction (CONSTRUCTED)) ================
+docs on file: LoanApplication_David_Chen.pdf=>loan_application
+parseBrokerCorrections(this body): [{"field":"requested_loan_amount","value":85000,"source":"broker_correction","rawPhrase":"the correct loan amount is $85,000"}]
+
+### PER-TURN canonical_map (extractCanonicalFields on THIS email only + all docs)
+  subject_property_market_value:
+     {"value":999000,"source":"email_body"}
+  requested_loan_amount:
+     {"value":85000,"source":"broker_correction","classification":"broker_correction","rawPhrase":"the correct loan amount is $85,000"}
+     {"value":80000,"source":"email_body","classification":"email_body"}
+     {"value":80000,"source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  mortgage_position:
+     {"value":"2nd","source":"email_subject_or_body","classification":"email_subject_or_body"}
+  purpose:
+     {"value":"Debt consolidation and home renovations","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+  subject_property_occupancy:
+     {"value":"Owner Occupied","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+
+### PER-TURN discrepancy_set
+  {"field":"requested_loan_amount","groups":[{"value":85000,"sources":["broker_correction"],"raws":[],"lender":null},{"value":80000,"sources":["email_body","LoanApplication_David_Chen.pdf"],"raws":[],"lender":null}]}
+
+### PER-TURN broker-facing (filterBrokerFacing)
+  []
+PER-TURN gate LTVs: standalone= 8.5  combined= null
+
+### AGGREGATED canonical_map (all inbounds, quote-stripped)
+  subject_property_address:
+     {"value":"9820 165 street nw","source":"email_body"}
+  subject_property_postal_code:
+     {"value":"T5P3S7","source":"email_body"}
+  subject_property_city:
+     {"value":"Edmonton","source":"email_body"}
+  subject_property_province:
+     {"value":"AB","source":"email_body"}
+  subject_property_market_value:
+     {"value":380000,"source":"email_body"}
+  requested_loan_amount:
+     {"value":85000,"source":"broker_correction","classification":"broker_correction","rawPhrase":"the correct loan amount is $85,000"}
+     {"value":80000,"source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+     {"value":80000,"source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  mortgage_position:
+     {"value":"2nd","source":"email_subject_or_body","classification":"email_subject_or_body"}
+     {"value":"2nd","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage"}
+  purpose:
+     {"value":"debt consolidation and home renovations","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+     {"value":"Debt consolidation and home renovations","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":false}
+  subject_property_occupancy:
+     {"value":"Owner Occupied","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+
+### AGGREGATED discrepancy_set
+  {"field":"requested_loan_amount","groups":[{"value":85000,"sources":["broker_correction"],"raws":[],"lender":null},{"value":80000,"sources":["broker_initial_intent","LoanApplication_David_Chen.pdf"],"raws":[],"lender":null}]}
+  {"field":"purpose","groups":[{"value":"debt consolidation and home renovations","sources":["broker_initial_intent"],"raws":[],"lender":null},{"value":"Debt consolidation and home renovations","sources":["LoanApplication_David_Chen.pdf"],"raws":[],"lender":null}]}
+
+### AGGREGATED after filter chain (what Snapshot/prelim read)
+  subject_property_address:
+     {"value":"9820 165 street nw","source":"email_body"}
+  subject_property_postal_code:
+     {"value":"T5P3S7","source":"email_body"}
+  subject_property_city:
+     {"value":"Edmonton","source":"email_body"}
+  subject_property_province:
+     {"value":"AB","source":"email_body"}
+  subject_property_market_value:
+     {"value":380000,"source":"email_body"}
+  requested_loan_amount:
+     {"value":85000,"source":"broker_correction","classification":"broker_correction","rawPhrase":"the correct loan amount is $85,000"}
+  mortgage_position:
+     {"value":"2nd","source":"email_subject_or_body","classification":"email_subject_or_body"}
+     {"value":"2nd","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage"}
+  purpose:
+     {"value":"debt consolidation and home renovations","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"Loan Request: Second mortgage — $80,000 — debt consolidation and home renovations"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":false}
+  subject_property_occupancy:
+     {"value":"Owner Occupied","source":"LoanApplication_David_Chen.pdf","classification":"loan_application"}
+AGG prelim LTVs (filtered): standalone= 22.4  combined= null
+resolveCanonicalIntentValue(loan)= {"value":85000,"source":"broker_correction","rawPhrase":"the correct loan amount is $85,000"}

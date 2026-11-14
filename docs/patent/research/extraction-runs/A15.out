@@ -1,0 +1,84 @@
+
+================ EVENT 0 (broker_intake) ================
+docs on file: LoanApplication_Simmons.pdf=>loan_application, MortgageStatement_Simmons.pdf=>mortgage_statement, Appraisal_Simmons.pdf=>appraisal
+parseBrokerCorrections(this body): []
+
+### PER-TURN canonical_map (extractCanonicalFields on THIS email only + all docs)
+  subject_property_address:
+     {"value":"287 glencairn avenue","source":"MortgageStatement_Simmons.pdf"}
+     {"value":"287 glencairn avenue","source":"Appraisal_Simmons.pdf"}
+  subject_property_postal_code:
+     {"value":"M5N1V3","source":"MortgageStatement_Simmons.pdf"}
+     {"value":"M5N1V3","source":"Appraisal_Simmons.pdf"}
+  subject_property_province:
+     {"value":"ON","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":720000,"source":"Appraisal_Simmons.pdf"}
+  requested_loan_amount:
+     {"value":460000,"source":"email_body","classification":"email_body"}
+     {"value":460000,"source":"LoanApplication_Simmons.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"Scotiabank","source":"MortgageStatement_Simmons.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":380000,"source":"MortgageStatement_Simmons.pdf","lender_canonical":"Scotiabank","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":382000,"source":"MortgageStatement_Simmons.pdf","lender_canonical":"Scotiabank","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### PER-TURN discrepancy_set
+  []
+
+### PER-TURN broker-facing (filterBrokerFacing)
+  []
+PER-TURN gate LTVs: standalone= 63.9  combined= {"combined_ltv_percent":63.9,"components":{"existing":0,"requested":460000,"market":720000,"existing_source":"refinance-implicit-payout","existing_lender":null,"transaction_type":"refinance"}}
+
+### AGGREGATED canonical_map (all inbounds, quote-stripped)
+  subject_property_address:
+     {"value":"287 glencairn avenue","source":"MortgageStatement_Simmons.pdf"}
+     {"value":"287 glencairn avenue","source":"Appraisal_Simmons.pdf"}
+  subject_property_postal_code:
+     {"value":"M5N1V3","source":"MortgageStatement_Simmons.pdf"}
+     {"value":"M5N1V3","source":"Appraisal_Simmons.pdf"}
+  subject_property_province:
+     {"value":"ON","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":720000,"source":"Appraisal_Simmons.pdf"}
+  requested_loan_amount:
+     {"value":460000,"source":"email_body","classification":"email_body"}
+     {"value":460000,"source":"LoanApplication_Simmons.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"Scotiabank","source":"MortgageStatement_Simmons.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":380000,"source":"MortgageStatement_Simmons.pdf","lender_canonical":"Scotiabank","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":382000,"source":"MortgageStatement_Simmons.pdf","lender_canonical":"Scotiabank","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### AGGREGATED discrepancy_set
+  []
+
+### AGGREGATED after filter chain (what Snapshot/prelim read)
+  subject_property_address:
+     {"value":"287 glencairn avenue","source":"MortgageStatement_Simmons.pdf"}
+     {"value":"287 glencairn avenue","source":"Appraisal_Simmons.pdf"}
+  subject_property_postal_code:
+     {"value":"M5N1V3","source":"MortgageStatement_Simmons.pdf"}
+     {"value":"M5N1V3","source":"Appraisal_Simmons.pdf"}
+  subject_property_province:
+     {"value":"ON","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":720000,"source":"Appraisal_Simmons.pdf"}
+  requested_loan_amount:
+     {"value":460000,"source":"LoanApplication_Simmons.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"Scotiabank","source":"MortgageStatement_Simmons.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":380000,"source":"MortgageStatement_Simmons.pdf","lender_canonical":"Scotiabank","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":382000,"source":"MortgageStatement_Simmons.pdf","lender_canonical":"Scotiabank","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+AGG prelim LTVs (filtered): standalone= 63.9  combined= {"combined_ltv_percent":63.9,"components":{"existing":0,"requested":460000,"market":720000,"existing_source":"refinance-implicit-payout","existing_lender":null,"transaction_type":"refinance"}}
+resolveCanonicalIntentValue(loan)= {"value":460000,"source":"loan_application","rawPhrase":""}

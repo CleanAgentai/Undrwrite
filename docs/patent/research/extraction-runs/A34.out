@@ -1,0 +1,176 @@
+
+================ EVENT 0 (broker_intake) ================
+docs on file: LoanApplication_Webb.pdf=>loan_application, MortgageStatement_Webb.pdf=>mortgage_statement, Appraisal_Webb.pdf=>appraisal
+parseBrokerCorrections(this body): []
+
+### PER-TURN canonical_map (extractCanonicalFields on THIS email only + all docs)
+  subject_property_address:
+     {"value":"1142 tory road nw","source":"MortgageStatement_Webb.pdf"}
+     {"value":"1142 tory road nw","source":"Appraisal_Webb.pdf"}
+  subject_property_postal_code:
+     {"value":"T6R2K8","source":"MortgageStatement_Webb.pdf"}
+     {"value":"T6R2K8","source":"Appraisal_Webb.pdf"}
+  subject_property_province:
+     {"value":"AB","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":650000,"source":"Appraisal_Webb.pdf"}
+  requested_loan_amount:
+     {"value":280000,"source":"LoanApplication_Webb.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"RBC","source":"MortgageStatement_Webb.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":225000,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":226500,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  mortgage_position:
+     {"value":"1st","source":"email_subject_or_body","classification":"email_subject_or_body"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### PER-TURN discrepancy_set
+  []
+
+### PER-TURN broker-facing (filterBrokerFacing)
+  []
+PER-TURN gate LTVs: standalone= 43.1  combined= {"combined_ltv_percent":43.1,"components":{"existing":0,"requested":280000,"market":650000,"existing_source":"refinance-implicit-payout","existing_lender":null,"transaction_type":"refinance"}}
+
+### AGGREGATED canonical_map (all inbounds, quote-stripped)
+  subject_property_address:
+     {"value":"1142 tory road nw","source":"MortgageStatement_Webb.pdf"}
+     {"value":"1142 tory road nw","source":"Appraisal_Webb.pdf"}
+  subject_property_postal_code:
+     {"value":"T6R2K8","source":"MortgageStatement_Webb.pdf"}
+     {"value":"T6R2K8","source":"Appraisal_Webb.pdf"}
+  subject_property_province:
+     {"value":"AB","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":650000,"source":"Appraisal_Webb.pdf"}
+  requested_loan_amount:
+     {"value":280000,"source":"LoanApplication_Webb.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"RBC","source":"MortgageStatement_Webb.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":225000,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":226500,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  mortgage_position:
+     {"value":"1st","source":"email_subject_or_body","classification":"email_subject_or_body"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### AGGREGATED discrepancy_set
+  []
+
+### AGGREGATED after filter chain (what Snapshot/prelim read)
+  subject_property_address:
+     {"value":"1142 tory road nw","source":"MortgageStatement_Webb.pdf"}
+     {"value":"1142 tory road nw","source":"Appraisal_Webb.pdf"}
+  subject_property_postal_code:
+     {"value":"T6R2K8","source":"MortgageStatement_Webb.pdf"}
+     {"value":"T6R2K8","source":"Appraisal_Webb.pdf"}
+  subject_property_province:
+     {"value":"AB","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":650000,"source":"Appraisal_Webb.pdf"}
+  requested_loan_amount:
+     {"value":280000,"source":"LoanApplication_Webb.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"RBC","source":"MortgageStatement_Webb.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":225000,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":226500,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  mortgage_position:
+     {"value":"1st","source":"email_subject_or_body","classification":"email_subject_or_body"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+AGG prelim LTVs (filtered): standalone= 43.1  combined= {"combined_ltv_percent":43.1,"components":{"existing":0,"requested":280000,"market":650000,"existing_source":"refinance-implicit-payout","existing_lender":null,"transaction_type":"refinance"}}
+resolveCanonicalIntentValue(loan)= {"value":280000,"source":"loan_application","rawPhrase":""}
+
+================ EVENT 1 (broker_correction) ================
+docs on file: LoanApplication_Webb.pdf=>loan_application, MortgageStatement_Webb.pdf=>mortgage_statement, Appraisal_Webb.pdf=>appraisal
+parseBrokerCorrections(this body): []
+
+### PER-TURN canonical_map (extractCanonicalFields on THIS email only + all docs)
+  subject_property_address:
+     {"value":"1142 tory road nw","source":"MortgageStatement_Webb.pdf"}
+     {"value":"1142 tory road nw","source":"Appraisal_Webb.pdf"}
+  subject_property_postal_code:
+     {"value":"T6R2K8","source":"MortgageStatement_Webb.pdf"}
+     {"value":"T6R2K8","source":"Appraisal_Webb.pdf"}
+  subject_property_province:
+     {"value":"AB","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":650000,"source":"Appraisal_Webb.pdf"}
+  requested_loan_amount:
+     {"value":280000,"source":"LoanApplication_Webb.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"RBC","source":"MortgageStatement_Webb.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":225000,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":226500,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  mortgage_position:
+     {"value":"1st","source":"email_subject_or_body","classification":"email_subject_or_body"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### PER-TURN discrepancy_set
+  []
+
+### PER-TURN broker-facing (filterBrokerFacing)
+  []
+PER-TURN gate LTVs: standalone= 43.1  combined= {"combined_ltv_percent":43.1,"components":{"existing":0,"requested":280000,"market":650000,"existing_source":"refinance-implicit-payout","existing_lender":null,"transaction_type":"refinance"}}
+
+### AGGREGATED canonical_map (all inbounds, quote-stripped)
+  subject_property_address:
+     {"value":"1142 tory road nw","source":"MortgageStatement_Webb.pdf"}
+     {"value":"1142 tory road nw","source":"Appraisal_Webb.pdf"}
+  subject_property_postal_code:
+     {"value":"T6R2K8","source":"MortgageStatement_Webb.pdf"}
+     {"value":"T6R2K8","source":"Appraisal_Webb.pdf"}
+  subject_property_province:
+     {"value":"AB","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":650000,"source":"Appraisal_Webb.pdf"}
+  requested_loan_amount:
+     {"value":280000,"source":"LoanApplication_Webb.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"RBC","source":"MortgageStatement_Webb.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":225000,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":226500,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  mortgage_position:
+     {"value":"1st","source":"email_subject_or_body","classification":"email_subject_or_body"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### AGGREGATED discrepancy_set
+  []
+
+### AGGREGATED after filter chain (what Snapshot/prelim read)
+  subject_property_address:
+     {"value":"1142 tory road nw","source":"MortgageStatement_Webb.pdf"}
+     {"value":"1142 tory road nw","source":"Appraisal_Webb.pdf"}
+  subject_property_postal_code:
+     {"value":"T6R2K8","source":"MortgageStatement_Webb.pdf"}
+     {"value":"T6R2K8","source":"Appraisal_Webb.pdf"}
+  subject_property_province:
+     {"value":"AB","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":650000,"source":"Appraisal_Webb.pdf"}
+  requested_loan_amount:
+     {"value":280000,"source":"LoanApplication_Webb.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"RBC","source":"MortgageStatement_Webb.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":225000,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":226500,"source":"MortgageStatement_Webb.pdf","lender_canonical":"RBC","classification":"mortgage_statement"}
+  mortgage_position:
+     {"value":"1st","source":"email_subject_or_body","classification":"email_subject_or_body"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+AGG prelim LTVs (filtered): standalone= 43.1  combined= {"combined_ltv_percent":43.1,"components":{"existing":0,"requested":280000,"market":650000,"existing_source":"refinance-implicit-payout","existing_lender":null,"transaction_type":"refinance"}}
+resolveCanonicalIntentValue(loan)= {"value":280000,"source":"loan_application","rawPhrase":""}

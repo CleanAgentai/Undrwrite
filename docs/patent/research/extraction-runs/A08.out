@@ -1,0 +1,147 @@
+
+================ EVENT 0 (broker_intake) ================
+docs on file: LoanApplication_Chen.pdf=>loan_application, MortgageStatement_Chen.pdf=>mortgage_statement, Appraisal_Chen.pdf=>appraisal
+parseBrokerCorrections(this body): []
+
+### PER-TURN canonical_map (extractCanonicalFields on THIS email only + all docs)
+  subject_property_postal_code:
+     {"value":"V5R5T7","source":"MortgageStatement_Chen.pdf"}
+     {"value":"V5R5T7","source":"Appraisal_Chen.pdf"}
+  subject_property_province:
+     {"value":"BC","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":850000,"source":"Appraisal_Chen.pdf"}
+  requested_loan_amount:
+     {"value":115000,"source":"LoanApplication_Chen.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"BMO","source":"MortgageStatement_Chen.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":410000,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":411500,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### PER-TURN discrepancy_set
+  []
+
+### PER-TURN broker-facing (filterBrokerFacing)
+  []
+PER-TURN gate LTVs: standalone= 13.5  combined= {"combined_ltv_percent":61.8,"components":{"existing":410000,"requested":115000,"market":850000,"existing_source":"MortgageStatement_Chen.pdf","existing_lender":"BMO"}}
+
+### AGGREGATED canonical_map (all inbounds, quote-stripped)
+  subject_property_postal_code:
+     {"value":"V5R5T7","source":"MortgageStatement_Chen.pdf"}
+     {"value":"V5R5T7","source":"Appraisal_Chen.pdf"}
+  subject_property_province:
+     {"value":"BC","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":850000,"source":"Appraisal_Chen.pdf"}
+  requested_loan_amount:
+     {"value":115000,"source":"LoanApplication_Chen.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"BMO","source":"MortgageStatement_Chen.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":410000,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":411500,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+
+### AGGREGATED discrepancy_set
+  []
+
+### AGGREGATED after filter chain (what Snapshot/prelim read)
+  subject_property_postal_code:
+     {"value":"V5R5T7","source":"MortgageStatement_Chen.pdf"}
+     {"value":"V5R5T7","source":"Appraisal_Chen.pdf"}
+  subject_property_province:
+     {"value":"BC","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":850000,"source":"Appraisal_Chen.pdf"}
+  requested_loan_amount:
+     {"value":115000,"source":"LoanApplication_Chen.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"BMO","source":"MortgageStatement_Chen.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":410000,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":411500,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"defaulted_from_purchase_absence","classification":"defaulted_from_purchase_absence","rawPhrase":"","payoutConfirmed":false,"refinanceConfident":true}
+AGG prelim LTVs (filtered): standalone= 13.5  combined= {"combined_ltv_percent":61.8,"components":{"existing":410000,"requested":115000,"market":850000,"existing_source":"MortgageStatement_Chen.pdf","existing_lender":"BMO"}}
+resolveCanonicalIntentValue(loan)= {"value":115000,"source":"loan_application","rawPhrase":""}
+
+================ EVENT 1 (broker_correction) ================
+docs on file: LoanApplication_Chen.pdf=>loan_application, MortgageStatement_Chen.pdf=>mortgage_statement, Appraisal_Chen.pdf=>appraisal
+parseBrokerCorrections(this body): [{"field":"transaction_type","value":"refinance","source":"broker_correction","rawPhrase":"mortgage refinance"}]
+
+### PER-TURN canonical_map (extractCanonicalFields on THIS email only + all docs)
+  subject_property_postal_code:
+     {"value":"V5R5T7","source":"MortgageStatement_Chen.pdf"}
+     {"value":"V5R5T7","source":"Appraisal_Chen.pdf"}
+  subject_property_province:
+     {"value":"BC","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":850000,"source":"Appraisal_Chen.pdf"}
+  requested_loan_amount:
+     {"value":115000,"source":"LoanApplication_Chen.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"BMO","source":"MortgageStatement_Chen.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":410000,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":411500,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"broker_correction","classification":"broker_correction","rawPhrase":"mortgage refinance","payoutConfirmed":false,"refinanceConfident":true}
+     {"value":"refinance","source":"broker_initial_intent","classification":"broker_initial_intent","rawPhrase":"mortgage refinance","payoutConfirmed":false,"refinanceConfident":true}
+
+### PER-TURN discrepancy_set
+  []
+
+### PER-TURN broker-facing (filterBrokerFacing)
+  []
+PER-TURN gate LTVs: standalone= 13.5  combined= {"combined_ltv_percent":61.8,"components":{"existing":410000,"requested":115000,"market":850000,"existing_source":"MortgageStatement_Chen.pdf","existing_lender":"BMO"}}
+
+### AGGREGATED canonical_map (all inbounds, quote-stripped)
+  subject_property_postal_code:
+     {"value":"V5R5T7","source":"MortgageStatement_Chen.pdf"}
+     {"value":"V5R5T7","source":"Appraisal_Chen.pdf"}
+  subject_property_province:
+     {"value":"BC","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":850000,"source":"Appraisal_Chen.pdf"}
+  requested_loan_amount:
+     {"value":115000,"source":"LoanApplication_Chen.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"BMO","source":"MortgageStatement_Chen.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":410000,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":411500,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"broker_correction","classification":"broker_correction","rawPhrase":"mortgage refinance","payoutConfirmed":false,"refinanceConfident":true}
+
+### AGGREGATED discrepancy_set
+  []
+
+### AGGREGATED after filter chain (what Snapshot/prelim read)
+  subject_property_postal_code:
+     {"value":"V5R5T7","source":"MortgageStatement_Chen.pdf"}
+     {"value":"V5R5T7","source":"Appraisal_Chen.pdf"}
+  subject_property_province:
+     {"value":"BC","source":"province_inferred_from_postal","classification":"province_inferred_from_postal"}
+  subject_property_market_value:
+     {"value":850000,"source":"Appraisal_Chen.pdf"}
+  requested_loan_amount:
+     {"value":115000,"source":"LoanApplication_Chen.pdf","classification":"loan_application"}
+  existing_first_mortgage_lender:
+     {"value":"BMO","source":"MortgageStatement_Chen.pdf","classification":"mortgage_statement"}
+  existing_first_mortgage_balance:
+     {"value":410000,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  existing_first_mortgage_payout_total:
+     {"value":411500,"source":"MortgageStatement_Chen.pdf","lender_canonical":"BMO","classification":"mortgage_statement"}
+  transaction_type:
+     {"value":"refinance","source":"broker_correction","classification":"broker_correction","rawPhrase":"mortgage refinance","payoutConfirmed":false,"refinanceConfident":true}
+AGG prelim LTVs (filtered): standalone= 13.5  combined= {"combined_ltv_percent":61.8,"components":{"existing":410000,"requested":115000,"market":850000,"existing_source":"MortgageStatement_Chen.pdf","existing_lender":"BMO"}}
+resolveCanonicalIntentValue(loan)= {"value":115000,"source":"loan_application","rawPhrase":""}
