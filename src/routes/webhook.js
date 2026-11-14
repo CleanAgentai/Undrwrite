@@ -2133,6 +2133,83 @@ const decideReviewDispatch = (deal, reviewSummary, reviewClassifications, hasNew
 };
 
 // POST /webhook/inbound - receives incoming emails from Postmark
+// F2 (Q9 reachability): when a deal goes on collateral hold, the admin gets a short FYI
+// saved with its Message-ID. Without it the admin had no email about the deal to reply
+// to, so the FRANCO-Q9 override ("reply APPROVED") could never be reached.
+const sendCollateralHoldNotice = async (deal, summary, { standaloneLtv = null, combinedLtv = null, reason = '' } = {}) => {
+  const borrower = summary?.borrower_name || deal.borrower_name || 'borrower';
+  const ltvText = [standaloneLtv != null ? `standalone ${standaloneLtv}%` : null, combinedLtv != null ? `combined ${combinedLtv}%` : null].filter(Boolean).join(', ') || 'n/a';
+  // Once per deal: an ambiguous collateral reply re-enters the hold via the active branch,
+  // and the admin already has the thread to reply to.
+  const prior = await dealsService.getMessages(deal.id);
+  if ((prior || []).some(m => m.direction === 'outbound' && /^\[On hold — awaiting collateral\]/.test(m.subject || ''))) return;
+  const subject = `[On hold — awaiting collateral] ${borrower} — LTV ${ltvText}`;
+  const body = `FYI — no action needed.\n\nThis deal is over the ${TH.LTV_ESCALATION_PCT}% LTV threshold${reason ? ` (${reason})` : ''}. Vienna has asked the broker whether the borrower can add collateral, and will escalate to you if they can't.\n\nBorrower: ${borrower}\nBroker: ${deal.email}\nLTV: ${ltvText}\n\nTo approve the deal anyway (override the collateral hold), reply APPROVED to this email. To decline, reply DECLINE with a reason.\n\nDeal ${deal.id}`;
+  const r = await emailService.sendEmail(config.adminEmail, subject, body, null, [], []);
+  await dealsService.saveMessage(deal.id, 'outbound', subject, body, r?.MessageID);
+};
+
+// F3: LTV gates for a follow-up email on an active deal, on thread-aggregated facts.
+//   autoDecline       — FRANCO-Q2 >90% (standalone always; combined only once payout is resolved)
+//   incompleteEscalate — BUG-4: mortgage statement + loan on file but combined LTV can't compute
+//                        and payout isn't confirmed → hold, don't proceed silently.
+//   adminCleared      — the admin already approved / overrode, so the caller alerts instead of
+//                        declining, and BUG-4 no longer applies.
+const evaluateFollowUpLtvGates = ({ deal, canonicalMap, fallbackStandaloneLtv = null, classifications = [] }) => {
+  const adminCleared = !!deal?.prelim_approved_at || !!deal?.extracted_data?.collateral_override_at;
+  const combined = dEngine.computeCombinedLtv(canonicalMap);
+  const combinedLtv = combined ? combined.combined_ltv_percent : null;
+  const standaloneLtv = dEngine.computeStandaloneLtv(canonicalMap) ?? fallbackStandaloneLtv;
+  const combinedResolved = dEngine.isCombinedLtvResolved(canonicalMap);
+  const autoDecline = dEngine.shouldAutoDeclineOver90({ standaloneLtv, combinedLtv, combinedResolved });
+  const incompleteEscalate = !adminCleared && dEngine.shouldEscalateOnIncompleteCanonical({
+    hasMortgageStatement: (classifications || []).includes('mortgage_statement'),
+    combinedLtv,
+    payoutConfirmed: (canonicalMap.transaction_type || []).some(t => t && t.payoutConfirmed === true),
+    hasLoanAmount: (canonicalMap.requested_loan_amount || []).length > 0,
+  });
+  return { adminCleared, standaloneLtv, combinedLtv, combinedResolved, autoDecline, incompleteEscalate };
+};
+
+// Broker-facing cleanup applied to every model-written email before it goes out:
+// internal-routing phrasing and "Perfect"-style openers (Cluster E / R8-B).
+const sweepBrokerFacing = (html, label = 'email') => {
+  if (!html || typeof html !== 'string') return html;
+  const e = aiService.enforceNoRoutingLeak(html);
+  if (e.sweptAny) console.log(`routing-leak sweep substituted phrasing in ${label}`);
+  const p = aiService.stripPerfectOpener(e.swept);
+  if (p.sweptAny) console.log(`"Perfect"-opener sweep neutralized opener in ${label}`);
+  return p.swept;
+};
+
+// FRANCO-Q2 auto-decline: polite decline to the broker, status rejected, admin alert.
+// Used by the first-email gate and (F3) by follow-up emails before approval.
+//   F5: the model-written decline goes through the broker-facing sweep.
+//   F6: both the decline and the admin alert are saved with their Message-IDs, so a
+//       reply to either threads back to this deal.
+const sendAutoDecline = async ({ deal, dealSummary, emailBody, basis, standaloneLtv, combinedLtv, combinedResolved, turn }) => {
+  const greeting = aiService.parseBrokerFirstName(emailBody || '')
+    || selectGreetingFirstName({
+      broker_name: dealSummary?.broker_name,
+      sender_name: dealSummary?.sender_name,
+      borrower_name: dealSummary?.borrower_name,
+      sender_type: dealSummary?.sender_type,
+    });
+  const declineHtml = sweepBrokerFacing(await aiService.generateRejectionEmail(
+    dealSummary,
+    `the loan-to-value ratio exceeds our maximum threshold of ${TH.LTV_AUTO_DECLINE_PCT}%`,
+    { greetingFirstName: greeting }
+  ), `Q2 auto-decline (deal ${deal.id})`);
+  const subject = `Re: ${dealSummary?.borrower_name || 'Your mortgage inquiry'}`;
+  const sent = await emailService.sendEmail(deal.email, subject, declineHtml.replace(/<[^>]*>/g, ''), declineHtml, [], [], null);
+  await dealsService.saveMessage(deal.id, 'outbound', subject, declineHtml, sent?.MessageID);
+  await dealsService.update(deal.id, { status: 'rejected' });
+  const alertSubject = `[Auto-Decline] LTV over ${TH.LTV_AUTO_DECLINE_PCT}% — ${dealSummary?.borrower_name || 'unnamed'}`;
+  const alertBody = `Vienna auto-declined a submission${turn ? ` on a ${turn}` : ''}: ${basis} (canonical LTV; >${TH.LTV_AUTO_DECLINE_PCT}% threshold per Franco Q2).\n\nBorrower: ${dealSummary?.borrower_name || '(unknown)'}\nFrom: ${deal.email}\n\nStandalone LTV: ${standaloneLtv ?? 'n/a'}%\nCombined LTV: ${combinedLtv ?? 'n/a'}% (resolved=${combinedResolved})\n\nDeal ${deal.id} status set to rejected. If this LTV is incorrect, reply to the broker directly.\n\n(Automatic — FRANCO-Q2 >${TH.LTV_AUTO_DECLINE_PCT}% auto-decline gate.)`;
+  const alert = await emailService.sendEmail(config.adminEmail, alertSubject, alertBody, null, [], []);
+  await dealsService.saveMessage(deal.id, 'outbound', alertSubject, alertBody, alert?.MessageID);
+};
+
 // Is the admin's reply answering a pending draft preview (SEND / edits / replacement)?
 // draft_action is cleared whenever a draft executes, so non-null means a preview is out.
 //   - ltv_escalated / under_review: prelim-review drafts (approval, rejection, conditions)
@@ -3139,11 +3216,12 @@ No deal record was created. If this was a legitimate broker submission, please r
             sender_type: 'broker',
           };
           const _q7Greeting = aiService.parseBrokerFirstName(email.textBody);
-          const _q7DeclineEmail = await aiService.generateRejectionEmail(
+          // F5: model-written decline goes through the same broker-facing sweep as every other email.
+          const _q7DeclineEmail = sweepBrokerFacing(await aiService.generateRejectionEmail(
             _q7DealSummary,
             'our underwriting is currently limited to properties located in Canada',
             { greetingFirstName: _q7Greeting }
-          );
+          ), 'Q7 non-Canadian decline');
           await emailService.sendEmail(
             email.from,
             `Re: ${email.subject || 'Your mortgage inquiry'}`,
@@ -3434,8 +3512,22 @@ No deal record was created. If this was a legitimate broker submission, please r
           }
         }
 
+        // F4: a first email that the Q2 gate below will auto-decline gets ONLY the decline.
+        // Pre-F4 the broker received the collateral-question welcome and then, moments later,
+        // the decline. Same inputs as the gate (canonical map from this email + saved docs,
+        // model LTV only as fallback); identity clash still takes precedence over Q2.
+        const _f4Map = cFields.extractCanonicalFields(email.textBody, savedDocs.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })), { emailSubject: email.subject || '' });
+        const _f4Combined = dEngine.computeCombinedLtv(_f4Map);
+        const _f4WillAutoDecline = !dealSummary?.identity_clash && dEngine.shouldAutoDeclineOver90({
+          standaloneLtv: dEngine.computeStandaloneLtv(_f4Map) ?? dealSummary?.ltv_percent,
+          combinedLtv: _f4Combined ? _f4Combined.combined_ltv_percent : null,
+          combinedResolved: dEngine.isCombinedLtvResolved(_f4Map),
+        }).decline;
+
         // Send the AI-generated response with forms attached (HTML formatted)
-        emailService.sendEmailDelayed(
+        if (_f4WillAutoDecline) {
+          console.log('F4: first email is over the auto-decline line — welcome suppressed, decline only');
+        } else emailService.sendEmailDelayed(
           email.from,
           `Re: ${email.subject}`,
           welcomeEmail.replace(/<[^>]*>/g, ''),
@@ -3577,28 +3669,11 @@ No deal record was created. If this was a legitimate broker submission, please r
           // "Victoria Ashworth") is in the email body signature. Body preferred;
           // From-derived as fallback. Empirical: 5d1479ea declined with "Hi there!"
           // while the collateral-ask one message earlier correctly said "Hi Victoria!".
-          const _q2Greeting = aiService.parseBrokerFirstName(email.textBody)
-            || selectGreetingFirstName({
-              broker_name: dealSummary?.broker_name,
-              sender_name: dealSummary?.sender_name,
-              borrower_name: dealSummary?.borrower_name,
-              sender_type: dealSummary?.sender_type,
-            });
-          const _q2DeclineEmail = await aiService.generateRejectionEmail(
-            dealSummary,
-            `the loan-to-value ratio exceeds our maximum threshold of ${TH.LTV_AUTO_DECLINE_PCT}%`,
-            { greetingFirstName: _q2Greeting }
-          );
-          const _q2Subject = `Re: ${dealSummary?.borrower_name || 'Your mortgage inquiry'}`;
-          await emailService.sendEmail(deal.email, _q2Subject, _q2DeclineEmail.replace(/<[^>]*>/g, ''), _q2DeclineEmail, [], [], null);
-          await dealsService.saveMessage(deal.id, 'outbound', _q2Subject, _q2DeclineEmail);
-          await dealsService.update(deal.id, { status: 'rejected' });
-          await emailService.sendEmail(
-            config.adminEmail,
-            `[Auto-Decline] LTV over 90% — ${dealSummary?.borrower_name || 'unnamed'}`,
-            `Vienna auto-declined a submission: ${_q2AutoDecline.basis} (canonical LTV; >${TH.LTV_AUTO_DECLINE_PCT}% threshold per Franco Q2).\n\nBorrower: ${dealSummary?.borrower_name || '(unknown)'}\nFrom: ${deal.email}\n\nStandalone LTV: ${_r1InitialStandaloneLtv ?? 'n/a'}%\nCombined LTV: ${_r1InitialCombinedLtv ?? 'n/a'}% (resolved=${dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap)})\n\nDeal ${deal.id} status set to rejected. If this LTV is incorrect, reply to the broker directly.\n\n(Automatic — FRANCO-Q2 >90% auto-decline gate.)`,
-            null, [], []
-          );
+          await sendAutoDecline({
+            deal, dealSummary, emailBody: email.textBody, basis: _q2AutoDecline.basis,
+            standaloneLtv: _r1InitialStandaloneLtv, combinedLtv: _r1InitialCombinedLtv,
+            combinedResolved: dEngine.isCombinedLtvResolved(_r1InitialCanonicalMap),
+          });
         } else if (_r1InitialShouldEscalate || _bug4IncompleteCanonical) {
           // Fix 7 + R4-RESIDUAL-1: do NOT escalate immediately. Set status to
           // 'awaiting_collateral'. ADDITIVE escalation trigger — fires if
@@ -3613,6 +3688,7 @@ No deal record was created. If this was a legitimate broker submission, please r
               : `BUG-4 canonical-incompleteness guard (mortgage_statement on file + loan present + combined-LTV null + payout unconfirmed → suspect-incomplete state, escalating for clarification rather than silent active)`;
           console.log(`Initial submission escalation gate triggered (Fix 7 + R4-RESIDUAL-1${_bug4IncompleteCanonical && !_r1InitialShouldEscalate ? ' + BUG-4' : ''}): ${_r1Reason} — entering awaiting_collateral state`);
           await dealsService.update(deal.id, { status: 'awaiting_collateral' });
+          await sendCollateralHoldNotice(deal, dealSummary, { standaloneLtv: _r1InitialStandaloneLtv, combinedLtv: _r1InitialCombinedLtv, reason: _bug4IncompleteCanonical && !_r1InitialShouldEscalate ? 'combined LTV could not be computed from the documents' : '' });
         } else if (_r1InitialStandaloneLtv && _r1InitialStandaloneLtv <= TH.LTV_ESCALATION_PCT && initialHasReviewableDoc) {
           // R5-B-2 (2026-05-21): discrepancy-resolution gate at the initial-
           // submission trigger. Pre-B-2, Sandra Nathan (ffb4fa0c) + Sandra
@@ -4502,8 +4578,19 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           standaloneLtv: _r1ActiveStandaloneLtv,
           combinedLtv: _r1ActiveCombinedLtv,
         });
+        // F3: the >90% auto-decline (Q2) and the canonical-incompleteness guard (Bug-4) ran
+        // only on a deal's first email. Follow-ups now run them too, on the thread-aggregated
+        // facts (every inbound email, newest wins, plus all documents) so a correction or a
+        // late document is judged together with what came before.
+        const _f3Inbound = (await dealsService.getMessages(existingDeal.id)).filter(m => m.direction === 'inbound');
+        const _f3Map = dEngine.extractCanonicalFieldsAggregated(
+          _f3Inbound,
+          _r1ActiveDocsWithText.map(d => ({ file_name: d.file_name, classification: d.classification, text: d?.extracted_data?.text || '' })),
+          { emailSubject: _f3Inbound[0]?.subject || email.subject || '' }
+        );
+        const _f3Gates = evaluateFollowUpLtvGates({ deal: existingDeal, canonicalMap: _f3Map, fallbackStandaloneLtv: ltv, classifications: classificationsForGate });
         const willGoToCollateralCheck = shouldHoldForCollateral({
-          ltvShouldEscalate: _r1ActiveLtvShouldEscalate, deal: existingDeal,
+          ltvShouldEscalate: _r1ActiveLtvShouldEscalate || _f3Gates.incompleteEscalate, deal: existingDeal,
           collateralOffered: collateralAlreadyOffered, identityClashUnresolved,
         });
         // Group BBBB (S7.1/S9.1): require exit_strategy populated before firing prelim.
@@ -4590,6 +4677,27 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
         // the prelim review which fired ~49s later. willGoToCollateralCheck is NOT
         // suppressed — that path uses Vienna's reply to deliver the collateral question
         // to the broker (Fix 7).
+        // F3: a follow-up that pushes a not-yet-approved deal over the auto-decline line gets
+        // the decline instead of Vienna's conversational reply (one broker email, not two).
+        // After approval the admin already owns the LTV call, so it's an alert, not a decline.
+        if (_f3Gates.autoDecline.decline && !identityClashUnresolved) {
+          if (_f3Gates.adminCleared) {
+            const _f3Subject = `[LTV over ${TH.LTV_AUTO_DECLINE_PCT}% after approval] ${result.updatedSummary?.borrower_name || existingDeal.borrower_name || 'deal'}`;
+            const _f3Body = `A broker follow-up on a deal you already approved puts the canonical LTV over ${TH.LTV_AUTO_DECLINE_PCT}%: ${_f3Gates.autoDecline.basis}.\n\nStandalone LTV: ${_f3Gates.standaloneLtv ?? 'n/a'}%\nCombined LTV: ${_f3Gates.combinedLtv ?? 'n/a'}%\n\nVienna did NOT decline (the deal is approved) and kept the conversation going. Review the figures with the broker.\n\nDeal ${existingDeal.id}`;
+            const _f3Alert = await emailService.sendEmail(config.adminEmail, _f3Subject, _f3Body, null, [], []);
+            await dealsService.saveMessage(existingDeal.id, 'outbound', _f3Subject, _f3Body, _f3Alert?.MessageID);
+            console.log(`F3: post-approval follow-up over ${TH.LTV_AUTO_DECLINE_PCT}% — admin alerted, no auto-decline`);
+          } else {
+            console.log(`F3: follow-up auto-decline (FRANCO-Q2): ${_f3Gates.autoDecline.basis}`);
+            await sendAutoDecline({
+              deal: existingDeal, dealSummary: result.updatedSummary, emailBody: email.textBody,
+              basis: _f3Gates.autoDecline.basis, standaloneLtv: _f3Gates.standaloneLtv,
+              combinedLtv: _f3Gates.combinedLtv, combinedResolved: _f3Gates.combinedResolved, turn: 'follow-up email',
+            });
+            return;
+          }
+        }
+
         if (result.responseEmail && !willFireFinalReview && !willReview && !willFireCompletionHandoff && !willFirePreliminaryAllDocsIn) {
           emailService.sendEmailDelayed(
             email.from,
@@ -4626,6 +4734,7 @@ The sender did NOT receive a welcome email. Partial deal scaffold ${createdDeal 
           // no-collateral (silent escalation) or offers collateral (resume active flow).
           await dealsService.update(existingDeal.id, { status: 'awaiting_collateral' });
           console.log('Deal status: awaiting_collateral (Fix 7 — collateral question pending)');
+          await sendCollateralHoldNotice(existingDeal, result.updatedSummary, { standaloneLtv: _f3Gates.standaloneLtv, combinedLtv: _f3Gates.combinedLtv, reason: _f3Gates.incompleteEscalate && !_r1ActiveLtvShouldEscalate ? 'combined LTV could not be computed from the documents' : '' });
         } else if (willReview) {
           // Cluster D: pass result.responseEmail so the gate can detect a pending
           // broker clarification ask even when Vienna's reply is NNN-suppressed.
@@ -4810,4 +4919,6 @@ module.exports.__test__ = {
   isDraftAwaitingAdmin,
   // F1 (2026-11-14): collateral hold skipped once admin cleared the LTV
   shouldHoldForCollateral,
+  // F3 (2026-11-14): follow-up Q2 / Bug-4 gates
+  evaluateFollowUpLtvGates,
 };

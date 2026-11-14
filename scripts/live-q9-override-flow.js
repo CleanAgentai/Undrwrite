@@ -18,7 +18,9 @@ const L = require('./lib/live');
     L.check('intake >80% → awaiting_collateral', held.status === 'awaiting_collateral');
     await L.settle(deal.id, 45000);
 
-    await L.reply({ dealId: deal.id, from: L.ADMIN, fromName: 'Franco Maione', text: 'Approved. Override the collateral requirement on this one.' });
+    const notice = (await L.outbound(deal.id)).find(m => /^\[On hold — awaiting collateral\]/.test(m.subject || ''));
+    L.check('F2: admin gets an on-hold notice with a Message-ID (Q9 reachable)', !!notice && !!notice.external_message_id, notice?.subject || 'none');
+    await L.reply({ dealId: deal.id, from: L.ADMIN, fromName: 'Franco Maione', text: 'Approved', subjectMatch: /^\[On hold — awaiting collateral\]/ });
     const drafted = await L.waitFor('Q9 override draft', async () => { const d = await L.getDeal(deal.id); return d.draft_action && d; });
     L.check('Q9 override → status active', drafted.status === 'active', drafted.status);
     L.check('Q9 override → collateral_override_at recorded', !!drafted.extracted_data?.collateral_override_at);
