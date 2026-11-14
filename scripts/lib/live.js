@@ -1,6 +1,6 @@
 // Helpers for multi-step live flows against the deployed Vienna (Fly).
-// Broker mail comes from Postmark-blackhole addresses (accepted + discarded), admin mail
-// from ADMIN_EMAIL as deployed (admin@blackhole.postmarkapp.com during testing). Replies
+// Broker mail comes from Resend test-sink addresses (delivered+…@resend.dev) (accepted + discarded), admin mail
+// from ADMIN_EMAIL as deployed (delivered+admin@resend.dev during testing). Replies
 // thread the same way real ones do: In-Reply-To = a stored outbound external_message_id.
 require('dotenv').config({ quiet: true });
 const fs = require('fs');
@@ -9,12 +9,12 @@ const { createClient } = require('@supabase/supabase-js');
 const { postToWebhook } = require('../../test-fixtures/bulletproof/lib/replay');
 const { resolveAttachmentRefs } = require('../../test-fixtures/bulletproof/lib/emailSynth');
 
-const ADMIN = process.env.LIVE_ADMIN_EMAIL || 'admin@blackhole.postmarkapp.com';
+const ADMIN = process.env.LIVE_ADMIN_EMAIL || 'delivered+admin@resend.dev';
 const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const scenariosDir = path.join(__dirname, '..', '..', 'test-fixtures', 'bulletproof', 'scenarios');
 
-const newBroker = (tag) => `broker+${tag}${Date.now()}@blackhole.postmarkapp.com`;
+const newBroker = (tag) => `delivered+${tag}${Date.now()}@resend.dev`;
 
 // First broker_intake event of a bulletproof scenario, From rewritten to `broker`.
 const scenarioIntake = (scenarioId, broker) => {

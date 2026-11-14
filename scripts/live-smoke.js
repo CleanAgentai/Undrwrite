@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Live smoke test against the deployed Vienna (Fly). Replays one bulletproof
-// scenario's events with the broker From rewritten to a Postmark blackhole
+// scenario's events with the broker From rewritten to a Resend test sink
 // address (accepted + discarded, no bounce), then reads back what Vienna did:
 // the deal row and every outbound message (Supabase), plus Postmark's own
 // outbound log for the same recipients.
@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 (async () => {
   const runTag = `smoke${Date.now()}`;
-  const broker = `broker+${runTag}@blackhole.postmarkapp.com`;
+  const broker = `delivered+${runTag}@resend.dev`;
   const events = JSON.parse(fs.readFileSync(path.join(dir, 'events.json'), 'utf8'));
   let dealId = null;
   for (const ev of events) {
@@ -55,7 +55,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   // Delivery check at the provider: Resend (list recent sends) or Postmark (outbound search).
   if ((process.env.EMAIL_PROVIDER_CHECK || 'resend') === 'resend' && process.env.RESEND_API_KEY) {
     const list = await fetch('https://api.resend.com/emails?limit=100', { headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` } }).then(r => r.json());
-    const mine = (list.data || []).filter(e => [].concat(e.to || []).some(t => t.toLowerCase() === broker.toLowerCase() || /blackhole/.test(t)) && new Date(e.created_at) > new Date(Date.now() - 15 * 60000));
+    const mine = (list.data || []).filter(e => [].concat(e.to || []).some(t => t.toLowerCase() === broker.toLowerCase() || /@resend\.dev$/.test(t)) && new Date(e.created_at) > new Date(Date.now() - 15 * 60000));
     console.log(`\nResend sends (last 15 min, test addresses): ${mine.map(e => `${e.last_event}:${(e.subject || '').slice(0, 60)}`).join(' | ') || 'none'}`);
   }
 

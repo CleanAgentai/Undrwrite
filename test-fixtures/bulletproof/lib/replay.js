@@ -92,6 +92,15 @@ const tagBrokerEmail = (email, runTag) => {
   const [local, domain] = email.split('@');
   // Strip any existing +tag from local part to avoid double-tagging
   const cleanLocal = local.split('+')[0];
+  // Vienna replies to the broker. Fixture domains (*.example.com) hard-bounce, which is what
+  // drove the old Postmark server to a 40% bounce rate — so replays send from the Postmark
+  // Resend test sink. KEEP_FIXTURE_DOMAINS=1 restores the fixture domain.
+  // Admin-authored fixture events (…@privatemortgagelink.com) are sent as the deployed admin
+  // address so Vienna treats them as the admin (testing: the Resend test sink).
+  if (/privatemortgagelink\.com$/i.test(domain)) return process.env.LIVE_ADMIN_EMAIL || 'delivered+admin@resend.dev';
+  if (!process.env.KEEP_FIXTURE_DOMAINS) {
+    return `delivered+${cleanLocal}-${runTag}@resend.dev`;
+  }
   return `${cleanLocal}+${runTag}@${domain}`;
 };
 

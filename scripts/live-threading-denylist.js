@@ -16,7 +16,7 @@ const countByEmail = async (email) => ((await L.s.from('deals').select('id').eq(
     await L.sleep(30000);
     L.check('F13: email.anthropic.com marketing mail creates no deal', (await countByEmail(spam)) === 0);
 
-    const referred = `newbroker+${Date.now()}@blackhole.postmarkapp.com`;
+    const referred = `delivered+newbroker${Date.now()}@resend.dev`;
     await L.post(base(L.ADMIN, 'Re: [Intake Filter] New-client intake rejected — Acme Holdings', `Thanks — that one was spam. FYI ${referred} might reach out.`, { name: 'Franco Maione' }));
     await L.sleep(45000);
     L.check('F6a: admin reply to a no-deal system alert does not create a referral deal', (await countByEmail(referred)) === 0);

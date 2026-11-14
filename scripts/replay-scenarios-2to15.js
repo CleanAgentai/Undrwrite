@@ -9,7 +9,8 @@ const { createClient } = require('@supabase/supabase-js');
 const { postToWebhook, pollForDeal, fetchOutboundFromSupabase } = require('../test-fixtures/bulletproof/lib/replay');
 
 const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-const ADMIN = process.env.ADMIN_EMAIL || 'franco@privatemortgagelink.com';
+// Admin as deployed (testing: the Resend test sink). LIVE_ADMIN_EMAIL overrides.
+const ADMIN = process.env.LIVE_ADMIN_EMAIL || 'delivered+admin@resend.dev';
 const TO = 'info@privatemortgagelink.com';
 const ROOT = '/Users/porterstanley/Desktop/UndrWrite Testing';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -190,7 +191,11 @@ const SCENARIOS = {
   const cfg = SCENARIOS[id];
   if (!cfg) { console.error(`No config for scenario ${id}`); process.exit(1); }
   const ts = Date.now();
-  const from = cfg.email.replace('@', `-${ts}@`);
+  // Test brokers send from Resend test-sink addresses (delivered+…@resend.dev): Vienna replies to the sender, and the
+  // scenario domains (lakewoodmortgage.ca, …) may be real. KEEP_SCENARIO_DOMAINS=1 restores them.
+  const from = process.env.KEEP_SCENARIO_DOMAINS
+    ? cfg.email.replace('@', `-${ts}@`)
+    : `delivered+${cfg.email.split('@')[0].replace(/\+/g, '-')}-${ts}@resend.dev`;
   console.log(`=== Scenario ${id} deployed replay | ${cfg.fromName} <${from}> | expect=${cfg.expect} ===\n`);
   try {
     await postToWebhook({ From: from, FromName: cfg.fromName, FromFull: { Email: from, Name: cfg.fromName }, To: TO, Subject: cfg.subject, TextBody: cfg.body, HtmlBody: null, MessageID: `s${id}-${ts}-t0@test`, Date: new Date().toISOString(), Headers: [], Attachments: cfg.docs.map(d => att(cfg.dir, d)) });
