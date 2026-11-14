@@ -639,6 +639,18 @@ const BORROWER_SUBJECT_PATTERNS = [
   new RegExp(`New\\s+Private\\s+Mortgage\\s+Application\\s*[—–\\-]\\s*${_S15_NAME_CAPTURE}\\s*[—–\\-]`),
 ];
 
+// Display-only borrower name for the code-built high-LTV summary (R10-C-1 bypass), used
+// in subjects, the decline and the admin hold notice. Broader than BORROWER_*_PATTERNS on
+// purpose and NOT used for identity-clash detection, which needs those conservative
+// patterns. Covers "Refinance — Jennifer Tran (83% LTV)" / "Second mortgage request —
+// Laura Bennett" subjects and "refi for Jennifer Tran." / "New file for Laura Bennett." prose.
+const BORROWER_LABEL_SUBJECT_RE = new RegExp(`^(?:(?:[Rr][Ee]|[Ff][Ww][Dd]?):\\s*)*(?:[Rr]efinance|[Rr]efi|[Pp]urchase|[Ss]econd\\s+[Mm]ortgage(?:\\s+[Rr]equest)?|[Ff]irst\\s+[Mm]ortgage(?:\\s+[Rr]equest)?|[Mm]ortgage\\s+[Rr]equest|[Nn]ew\\s+[Ff]ile|[Dd]eal)\\s*[—–\\-]\\s*${_S15_NAME_CAPTURE}\\s*(?:[,(—–\\-]|$)`);
+const BORROWER_LABEL_BODY_RE = new RegExp(`\\b(?:[Rr]efi|[Rr]efinance|[Ff]ile|[Dd]eal|[Ss]ubmission|[Mm]ortgage)\\s+for\\s+${_S15_NAME_CAPTURE}[.,]`);
+const extractBorrowerLabelFallback = (subject, body) => {
+  const m = String(subject || '').match(BORROWER_LABEL_SUBJECT_RE) || String(body || '').match(BORROWER_LABEL_BODY_RE);
+  return m && m[1] ? m[1].trim() : null;
+};
+
 const extractBorrowerFromEmailSubject = (subject) => {
   if (!subject || typeof subject !== 'string') return null;
   for (const re of BORROWER_SUBJECT_PATTERNS) {
@@ -2553,6 +2565,7 @@ module.exports = {
       if (_r10cBand === 'over_80') {
         const _r10cBorrowerName = extractBorrowerFromEmailBody(emailBody)
           || extractBorrowerFromEmailSubject(emailSubject)
+          || extractBorrowerLabelFallback(emailSubject, emailBody)
           || 'the borrower';
         const _r10cEffectiveLtv = (_r10cCombinedLtv != null) ? _r10cCombinedLtv : _r10cStandaloneLtv;
         console.log(`R10-C-1: high-LTV (>80%) dedicated-generator bypass — combinedLtv=${_r10cCombinedLtv}, standaloneLtv=${_r10cStandaloneLtv}, effective=${_r10cEffectiveLtv}, band='${_r10cBand}'. Routing to generateHighLtvCollateralAsk.`);
@@ -5297,4 +5310,6 @@ ${JSON.stringify(summaryData, null, 2)}`,
   // (both generateDocumentRequestEmail + generateBrokerResponse call this
   // helper; closed-set assertion in harness pins invocation count = 2).
   buildForbiddenOpenersBlock,
+  // Display-only borrower label for the high-LTV code-built summary (2026-11-14)
+  extractBorrowerLabelFallback,
 };

@@ -24,5 +24,12 @@ const swept = ai.stripPerfectOpener(ai.enforceNoRoutingLeak(leaky).swept).swept;
 ok('sweep removes the admin-name routing leak', !/Franco reviewed/i.test(swept));
 ok('sweep neutralizes the "Perfect" opener', !/^<p>Perfect!/.test(swept));
 
+// High-LTV code-built summary names the borrower (decline subject, hold notice) — was "the borrower".
+const lab = ai.extractBorrowerLabelFallback;
+ok('label: "Refinance — Jennifer Tran (83% LTV)" subject', lab('Refinance — Jennifer Tran (83% LTV)', '') === 'Jennifer Tran');
+ok('label: "refi for Jennifer Tran." prose', lab('Hello', 'High-LTV refi for Jennifer Tran. $746k') === 'Jennifer Tran');
+ok('label: "New file for Laura Bennett." prose', lab('x', 'New file for Laura Bennett.') === 'Laura Bennett');
+ok('label: lowercase "the borrower" never captured', lab('Hello', 'this file for the borrower.') === null);
+
 console.log(`\n[f4-f5-decline] ${pass} pass / ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);

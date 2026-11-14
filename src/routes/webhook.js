@@ -2171,6 +2171,31 @@ const evaluateFollowUpLtvGates = ({ deal, canonicalMap, fallbackStandaloneLtv = 
   return { adminCleared, standaloneLtv, combinedLtv, combinedResolved, autoDecline, incompleteEscalate };
 };
 
+// F13: sender denylist match on the parsed address, not a substring of the From header.
+//   'x@y.com'   → exact address
+//   '@y.com'    → that domain or any subdomain of it (email.y.com) — pre-F13 a substring
+//                 check let '@email.anthropic.com' through '@anthropic.com' and a marketing
+//                 email became a deal that Vienna replied to
+//   'noreply@'  → local-part prefix match (noreply@anything)
+const isIgnoredSender = (from, entries) => {
+  const addr = String(from || '').toLowerCase().replace(/^.*<|>.*$/g, '').trim();
+  const at = addr.lastIndexOf('@');
+  if (at < 0) return false;
+  const local = addr.slice(0, at);
+  const domain = addr.slice(at + 1);
+  return (entries || []).some((raw) => {
+    const e = String(raw || '').toLowerCase().trim();
+    if (!e) return false;
+    if (e.startsWith('@')) { const d = e.slice(1); return domain === d || domain.endsWith(`.${d}`); }
+    if (e.endsWith('@')) return local === e.slice(0, -1);
+    return addr === e;
+  });
+};
+
+// F6: subjects of Vienna's own admin alerts (any number of Re:/Fwd: prefixes).
+const SYSTEM_ALERT_SUBJECT_RE = /^\s*((re|fwd?)\s*:\s*)*\[(Intake Filter|Out of Scope|Potential Duplicate|Auto-Decline|Admin-controlled deal|On hold — awaiting collateral|Stalled|LTV over \d+% after approval)\]/i;
+const isReplyToSystemAlert = (subject) => SYSTEM_ALERT_SUBJECT_RE.test(subject || '') || /^\s*((re|fwd?)\s*:\s*)*(New-client dispatch failed|Referral dispatch failed)\b/i.test(subject || '');
+
 // Broker-facing cleanup applied to every model-written email before it goes out:
 // internal-routing phrasing and "Perfect"-style openers (Cluster E / R8-B).
 const sweepBrokerFacing = (html, label = 'email') => {
@@ -2283,7 +2308,8 @@ const handleInbound = async (req, res) => {
     const senderEmail = config.postmark.senderEmail || '';
     const ignoredSenders = [
       'support@postmarkapp.com', 'noreply@', 'no-reply@',
-      '@anthropic.com', '@mail.anthropic.com',
+      '@anthropic.com', // F13: domain entries also cover subdomains (email.anthropic.com, mail.anthropic.com)
+      'mailer-daemon@', 'postmaster@', 'donotreply@', 'do-not-reply@',
       // R5-F4: Postmark marketing/system (production garbage source)
       '@fyi.postmarkapp.com',
       // R5-F4: internal team (Bradley, Porter, internal admin via domain)
@@ -2296,7 +2322,7 @@ const handleInbound = async (req, res) => {
     ];
     if (senderEmail) ignoredSenders.push(senderEmail.toLowerCase());
 
-    if (ignoredSenders.some(addr => email.from.toLowerCase().includes(addr))) {
+    if (isIgnoredSender(email.from, ignoredSenders)) {
       console.log('Skipping ignored/system email from:', email.from);
       return;
     }
@@ -2377,12 +2403,13 @@ const handleInbound = async (req, res) => {
 <div>${(email.textBody || '').replace(/\n/g, '<br>')}</div>
 <hr>
 <p><em>Vienna will NOT respond on this thread. Action manually.</em></p>`;
-      await emailService.sendEmail(
+      const _ahcSent = await emailService.sendEmail(
         config.adminEmail,
         _ahcSubject,
         _ahcBody.replace(/<[^>]*>/g, ''),
         _ahcBody
       );
+      await dealsService.saveMessage(existingDeal.id, 'outbound', _ahcSubject, _ahcBody, _ahcSent?.MessageID); // F6
       return;
     }
 
@@ -2920,6 +2947,15 @@ ${draftEmail}
     }
 
     // If admin sends a new email (no thread match), treat as a referral
+    // F6: an admin reply to one of Vienna's own system alerts that has no deal thread
+    // ([Intake Filter], [Out of Scope], [Potential Duplicate], [Auto-Decline], intake
+    // failure alerts) is not a referral. Pre-F6 the referral parser ran on it and could
+    // create a deal and email whatever address it extracted.
+    if (isAdmin && !existingDeal && isReplyToSystemAlert(email.subject)) {
+      console.log(`F6: admin reply to a Vienna system alert ("${email.subject}") — not a referral; ignored`);
+      return;
+    }
+
     if (isAdmin && !existingDeal) {
       // Group ZZZ (S11.1): wrap the referral branch in its own try/catch so
       // transient failures (Claude API errors, Supabase blips, email-send
@@ -3277,14 +3313,15 @@ No deal record was created. If this was a legitimate broker submission, please r
           const _ahHoldingBody = `<p>${_ahGreeting}</p>
 <p>Thanks for the submission — got your email. Someone from our team will review the file and be in touch shortly.</p>
 <p>Vienna<br>Private Mortgage Link</p>`;
-          await emailService.sendEmail(
+          const _ahHoldingSent = await emailService.sendEmail(
             email.from,
             `Re: ${email.subject || 'Mortgage submission'}`,
             _ahHoldingBody.replace(/<[^>]*>/g, ''),
             _ahHoldingBody
           );
-          // Save Vienna's outbound ack to the deal thread.
-          await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject || 'Mortgage submission'}`, _ahHoldingBody);
+          // Save Vienna's outbound ack to the deal thread. F6: with its Message-ID, so a broker
+          // reply to the holding email threads to this deal and honours admin_controlled.
+          await dealsService.saveMessage(deal.id, 'outbound', `Re: ${email.subject || 'Mortgage submission'}`, _ahHoldingBody, _ahHoldingSent?.MessageID);
           // (c) Send admin ADMIN_LINK_HANDOFF notification.
           const _ahAdminSubject = `ACTION REQUIRED: Link-only submission — ${email.fromName || email.from}`;
           const _ahAdminBody = `<p>Broker submitted a deal via <strong>${_ahLink.service}</strong> link (no attachments). Vienna has been paused on this deal — action manually.</p>
@@ -3298,13 +3335,13 @@ No deal record was created. If this was a legitimate broker submission, please r
 <div>${(email.textBody || '').replace(/\n/g, '<br>')}</div>
 <hr>
 <p><em>This deal is admin-controlled. Vienna will NOT respond to further broker emails on this thread — action manually and / or update the deal's admin_controlled flag once docs are attached.</em></p>`;
-          await emailService.sendEmail(
+          const _ahAdminSent = await emailService.sendEmail(
             config.adminEmail,
             _ahAdminSubject,
             _ahAdminBody.replace(/<[^>]*>/g, ''),
             _ahAdminBody
           );
-          await dealsService.saveMessage(deal.id, 'outbound', _ahAdminSubject, _ahAdminBody);
+          await dealsService.saveMessage(deal.id, 'outbound', _ahAdminSubject, _ahAdminBody, _ahAdminSent?.MessageID); // F6
           // (d) Return early — no processInitialEmail, no attachment
           //     processing, no downstream automation.
           console.log(`ADMIN-HANDOFF LINK-SUBMISSION complete for deal ${deal.id}: broker holding ack + admin handoff sent. Returning early.`);
@@ -4921,4 +4958,8 @@ module.exports.__test__ = {
   shouldHoldForCollateral,
   // F3 (2026-11-14): follow-up Q2 / Bug-4 gates
   evaluateFollowUpLtvGates,
+  // F6 (2026-11-14): admin replies to system alerts are not referrals
+  isReplyToSystemAlert,
+  // F13 (2026-11-14): domain-aware sender denylist
+  isIgnoredSender,
 };
